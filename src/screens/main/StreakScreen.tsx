@@ -12,6 +12,7 @@ import { Screen } from '../../components/ui/Screen';
 import { useToast } from '../../components/feedback/Toast';
 import { useCurrentUser } from '../../stores/authStore';
 import { useCoinBalance, useCoinsStore } from '../../stores/coinsStore';
+import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import {
   STREAK_RESTORE_COST,
   useCanRestore,
@@ -60,6 +61,7 @@ export const StreakScreen = () => {
   const longestStreak = useLongestStreak();
   const freezesAvailable = useFreezesAvailable();
   const canRestore = useCanRestore();
+  const hasUnreadNotifications = useHasUnreadNotifications();
   const freezeToday = useStreakStore(s => s.freezeToday);
   const restore = useStreakStore(s => s.restore);
 
@@ -169,14 +171,30 @@ export const StreakScreen = () => {
     }
   }, [balance, canRestore, currentStreak, restore, spend, toast]);
 
-  // Names the stack's first screen explicitly: from inside the Account
-  // stack, navigating to the bare tab would leave this screen where it is.
+  // A notification tap or a deep link can open the app straight onto this
+  // screen, and `goBack` with nothing behind it is silently a no-op — the
+  // chevron would look broken. Home is where the fallback lands.
+  const onPressBack = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate('Main', { screen: 'Home' });
+  }, [navigation]);
+
+  // Names the Account stack's first screen explicitly: the avatar means "my
+  // account", not "wherever I last was inside that tab".
   const onOpenAccount = useCallback(
     () =>
       navigation.navigate('Main', {
         screen: 'Account',
         params: { screen: 'AccountHome' },
       }),
+    [navigation],
+  );
+
+  const onOpenNotifications = useCallback(
+    () => navigation.navigate('Notifications'),
     [navigation],
   );
 
@@ -193,8 +211,9 @@ export const StreakScreen = () => {
         <StreakHeader
           name={user?.name}
           avatarUri={user?.avatarUrl}
-          hasUnreadNotifications
-          onPressNotifications={notImplemented}
+          hasUnreadNotifications={hasUnreadNotifications}
+          onPressBack={onPressBack}
+          onPressNotifications={onOpenNotifications}
           onPressAvatar={onOpenAccount}
         />
 

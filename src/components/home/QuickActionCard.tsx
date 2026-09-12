@@ -1,44 +1,55 @@
 import React, { memo } from 'react';
 import { StyleSheet } from 'react-native';
-import type { LucideIcon } from 'lucide-react-native';
 import { spacing } from '../../theme';
-import { moderateScale } from '../../theme/responsive';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
-import { Icon } from '../media/Icon';
+import { Emoji } from '../media/Emoji';
 import { VStack } from '../layout/Stack';
 import { Pressable } from '../form/Pressable';
 
-/**
- * Fixed width so every card in the row is the same size regardless of how long
- * its title is, and so the row scrolls in even steps.
- */
-export const QUICK_ACTION_WIDTH = moderateScale(132);
-
 interface Props {
-  icon: LucideIcon;
+  /** The glyph at the top of the tile, e.g. `🏆`. */
+  emoji: string;
+  /** Colour of the second line. Pass a theme token, not a literal. */
   tint: string;
   /** The first line, in the card's own colour. */
   title: string;
   /** The second line, in the tint — "achievements", "7 days". */
   detail?: string;
+  /**
+   * `false` keeps the detail's own casing. A value reads wrong shouted:
+   * "7 DAYS" looks like a heading, "7 Days" like the number it is.
+   */
+  uppercaseDetail?: boolean;
   onPress: () => void;
 }
 
 /**
- * One shortcut tile: an icon over two lines of label.
+ * Four cards share the width of the screen, so a label has roughly 70pt to sit
+ * in on a 375pt phone and less than 60pt on a small one. Shrinking the odd long
+ * word a fraction is better than truncating it: "achievements" is the word on
+ * the tile that says what the shortcut opens, and "ACHIEVEM…" does not.
+ */
+const FIT_LABEL = {
+  numberOfLines: 1,
+  // adjustsFontSizeToFit: true,
+  minimumFontScale: 0.8,
+} as const;
+
+/**
+ * One shortcut tile: an emoji over two lines of label.
  *
- * The tint is spent on the second line and the icon only. Colouring the whole
- * title would put four differently-coloured blocks of text in one row and
- * leave nothing for the eye to scan down; keeping the first line neutral means
- * the four titles read as one list and the colour reads as a category.
+ * The tint is spent on the second line only. Colouring the whole title would
+ * put four differently-coloured blocks of text in one row and leave nothing for
+ * the eye to scan down; keeping the first line neutral means the four titles
+ * read as one list and the colour reads as a category.
  *
- * The icon carries no disc behind it. At this size the badge's tinted circle
- * became the largest shape on the tile and four of them across a scrolling row
- * read as a row of buttons rather than a row of labels.
+ * An emoji rather than a tinted line icon: at this size a stroked glyph in a
+ * single colour is close to unreadable, while the emoji's own colours carry the
+ * shape — and it ships no asset.
  */
 export const QuickActionCard = memo(
-  ({ icon, tint, title, detail, onPress }: Props) => (
+  ({ emoji, tint, title, detail, uppercaseDetail = true, onPress }: Props) => (
     <Pressable
       onPress={onPress}
       feedback="scale"
@@ -46,20 +57,20 @@ export const QuickActionCard = memo(
       accessibilityLabel={detail ? `${title} ${detail}` : title}
     >
       <Card elevation="low" radius="xl" style={styles.card}>
-        <VStack align="center" gap="md">
-          <Icon as={icon} size="xl" tint={tint} />
+        <VStack align="center" gap="sm">
+          <Emoji size="md">{emoji}</Emoji>
 
           <VStack align="center" gap="xxs">
-            <AppText variant="micro" color="text" center numberOfLines={2}>
+            <AppText variant="miniMicro" color="text" center {...FIT_LABEL}>
               {title}
             </AppText>
 
             {detail ? (
               <AppText
-                variant="micro"
+                variant="miniMicro"
                 center
-                numberOfLines={1}
-                style={{ color: tint }}
+                style={[{ color: tint }, !uppercaseDetail && styles.asWritten]}
+                {...FIT_LABEL}
               >
                 {detail}
               </AppText>
@@ -73,10 +84,11 @@ export const QuickActionCard = memo(
 
 QuickActionCard.displayName = 'QuickActionCard';
 
-/**
- * The one thing the primitives cannot express: a tile that is as tall as it is
- * wide, which is what stops the four of them reading as a row of list rows.
- */
 const styles = StyleSheet.create({
-  card: { width: QUICK_ACTION_WIDTH, paddingVertical: spacing.lg },
+  /**
+   * The side padding is far tighter than a card's default: at a quarter of the
+   * screen, every point spent on padding comes straight out of the label.
+   */
+  card: { paddingVertical: spacing.md, paddingHorizontal: spacing.xs },
+  asWritten: { textTransform: 'none' },
 });

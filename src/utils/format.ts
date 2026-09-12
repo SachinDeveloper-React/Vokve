@@ -32,20 +32,28 @@ export function formatCompactNumber(value: number): string {
 }
 
 /**
- * Groups a coin figure into thousands — `1240` reads as `1,240`.
+ * Groups a whole number into thousands — `7543` reads as `7,543`.
  *
  * Grouped by hand rather than through `toLocaleString`: the separator would
- * then follow the device locale while the rest of the wallet's copy stays in
- * English, so a balance could come back as `1.240` on one phone and `1,240`
- * on the next. The sign is preserved so a ledger row can pass a debit
- * straight through.
+ * then follow the device locale while the rest of the app's copy stays in
+ * English, so a figure could come back as `1.240` on one phone and `1,240` on
+ * the next. The sign is preserved so a debit can be passed straight through.
  */
-export function formatCoins(value: number): string {
+export function formatGrouped(value: number): string {
   const rounded = Math.round(value);
   const digits = Math.abs(rounded)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return rounded < 0 ? `-${digits}` : digits;
+}
+
+/**
+ * A coin figure. The same grouping, under the name the wallet reads by — every
+ * coin figure in the app goes through this one call, so the currency's
+ * formatting can change in a single edit.
+ */
+export function formatCoins(value: number): string {
+  return formatGrouped(value);
 }
 
 /** Seconds to `m:ss`, or `h:mm:ss` once a session passes an hour. */
@@ -83,6 +91,28 @@ export function formatRelativeDay(isoDate: string): string {
     month: 'short',
     day: 'numeric',
   });
+}
+
+/**
+ * The clock time a timestamp lands on — `10:30 AM`, `6:45 PM`.
+ *
+ * Written out rather than handed to `toLocaleTimeString`, for the same reason
+ * `formatCoins` groups its own thousands: the device's locale would put a
+ * 24-hour clock on some phones and a 12-hour one on others, in the middle of a
+ * list whose headings ("Today", "Yesterday") are English either way.
+ */
+export function formatClockTime(isoDate: string): string {
+  const at = new Date(isoDate);
+  if (Number.isNaN(at.getTime())) {
+    return '';
+  }
+
+  const hours = at.getHours();
+  const suffix = hours < 12 ? 'AM' : 'PM';
+  // Midnight and noon are the 12s: `0 % 12` and `12 % 12` are both 0.
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+
+  return `${hour12}:${String(at.getMinutes()).padStart(2, '0')} ${suffix}`;
 }
 
 /**

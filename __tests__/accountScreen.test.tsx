@@ -161,17 +161,36 @@ describe('AccountScreen', () => {
     expect(text).toContain('kg / cm');
   });
 
-  test('the streak row opens the streak screen inside the Account tab', async () => {
+  test('the streak row opens the streak as a route of its own', async () => {
     const tree = await render();
 
     await press(tree, 'Streak Freeze & Restore. Manage, freeze or restore your streak');
 
-    // The nested path, not a bare route: the streak lives in the Account
-    // tab's own stack so the tab bar stays on screen behind it.
-    expect(mockNavigate).toHaveBeenCalledWith('Main', {
-      screen: 'Account',
-      params: { screen: 'Streak' },
-    });
+    // A bare root route: the streak is reached from Home as well as from here,
+    // so filing it under the Account tab would leave that tab showing it the
+    // next time the user tapped Account itself.
+    expect(mockNavigate).toHaveBeenCalledWith('Streak');
+  });
+
+  test('the bell opens the notification centre as a route of its own', async () => {
+    const tree = await render();
+
+    await press(tree, 'Notifications, unread');
+
+    // A bare root route, deliberately: the centre is reached from every
+    // header, and filing it under the Account tab would leave that tab
+    // showing it the next time the user tapped Account itself.
+    expect(mockNavigate).toHaveBeenCalledWith('Notifications');
+  });
+
+  test('the rewards row opens the leaderboard rewards, not the coin balance', async () => {
+    const tree = await render();
+
+    await press(tree, 'My Rewards. View and track your rewards');
+
+    // The row promises rewards; the Wallet tab it used to open is the coin
+    // balance, and the tab bar already leads there.
+    expect(mockNavigate).toHaveBeenCalledWith('LeaderboardRewards');
   });
 
   test('a profile that has not loaded still renders a whole screen', async () => {

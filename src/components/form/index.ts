@@ -7,6 +7,7 @@
  */
 export { Button } from '../ui/Button';
 
+export { CalendarSheet } from './CalendarSheet';
 export { Checkbox } from './Checkbox';
 export { DateField, formatDateField, parseIsoDate } from './DateField';
 export { FormControl } from './FormControl';

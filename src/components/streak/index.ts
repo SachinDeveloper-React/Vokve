@@ -1,5 +1,6 @@
 export { StreakHeader } from './StreakHeader';
 export { DateChip } from './DateChip';
+export type { DateChipSize } from './DateChip';
 export { StreakSummaryCard } from './StreakSummaryCard';
 export { StreakCalendarCard } from './StreakCalendarCard';
 export { CalendarGrid } from './CalendarGrid';

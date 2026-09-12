@@ -27,12 +27,17 @@ import { addDays, formatLongDate, todayIso } from '../src/utils/date';
 import type { User } from '../src/types/models';
 
 const mockNavigate = jest.fn();
+const mockGoBack = jest.fn();
 
 // Only `useNavigation` is replaced: the theme layer imports `DefaultTheme`
 // from this same module, and a blanket mock takes that down with it.
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
-  useNavigation: () => ({ navigate: mockNavigate }),
+  useNavigation: () => ({
+    navigate: mockNavigate,
+    goBack: mockGoBack,
+    canGoBack: () => true,
+  }),
 }));
 
 const metrics = {
@@ -187,6 +192,16 @@ describe('StreakScreen', () => {
 
     expect(useStreakStore.getState().protectedDays).toEqual([]);
     expect(allText(tree)).toContain('Not enough coins');
+  });
+
+  test('the chevron returns to whatever opened the streak', async () => {
+    seedStreak(run(3, 0));
+
+    await press(await render(), 'Back');
+
+    // A root screen now: it covers the tab bar, so the header carries the way
+    // back rather than leaving it to the platform's gesture.
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
   });
 
   test('the month can be paged back but not past today', async () => {

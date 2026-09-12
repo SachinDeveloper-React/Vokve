@@ -67,6 +67,48 @@ describe('hydration store', () => {
     expect(useHydrationStore.getState().todayMl()).toBe(250);
   });
 
+  test('adding logs a row as well as raising the total', () => {
+    useHydrationStore.getState().add(250);
+    useHydrationStore.getState().add(500);
+
+    const { consumedMl, entries } = useHydrationStore.getState();
+    expect(consumedMl).toBe(750);
+    // Newest first, so the log reads as a day being added to from the top.
+    expect(entries.map(entry => entry.ml)).toEqual([500, 250]);
+  });
+
+  test('removing a row takes exactly its millilitres off the total', () => {
+    useHydrationStore.getState().add(250);
+    useHydrationStore.getState().add(500);
+    const [newest] = useHydrationStore.getState().entries;
+
+    useHydrationStore.getState().remove(newest.id);
+
+    expect(useHydrationStore.getState().consumedMl).toBe(250);
+    expect(useHydrationStore.getState().entries).toHaveLength(1);
+  });
+
+  test('removing a row that has already gone changes nothing', () => {
+    useHydrationStore.getState().add(250);
+
+    useHydrationStore.getState().remove('not-a-row');
+
+    expect(useHydrationStore.getState().consumedMl).toBe(250);
+    expect(useHydrationStore.getState().entries).toHaveLength(1);
+  });
+
+  test('undo drops the newest drink of that size from the log', () => {
+    useHydrationStore.getState().add(250);
+    useHydrationStore.getState().add(500);
+
+    useHydrationStore.getState().undo(500);
+
+    expect(useHydrationStore.getState().consumedMl).toBe(250);
+    expect(
+      useHydrationStore.getState().entries.map(entry => entry.ml),
+    ).toEqual([250]);
+  });
+
   test('undo never takes the total below zero', () => {
     useHydrationStore.getState().add(200);
     useHydrationStore.getState().undo(500);
@@ -152,15 +194,17 @@ describe('QuickActionsRow', () => {
     const tree = await render(
       <QuickActionsRow streakDays={7} {...handlers} />,
     );
-    expect(allText(tree)).toContain('7 days');
+    // Title case, as the design sets it: the streak card's value is the one
+    // label in the row that is not upper-cased.
+    expect(allText(tree)).toContain('7 Days');
   });
 
   test('a one-day streak is singular', async () => {
     const tree = await render(
       <QuickActionsRow streakDays={1} {...handlers} />,
     );
-    expect(allText(tree)).toContain('1 day');
-    expect(allText(tree)).not.toContain('1 days');
+    expect(allText(tree)).toContain('1 Day');
+    expect(allText(tree)).not.toContain('1 Days');
   });
 
   test('each shortcut routes to its own handler', async () => {

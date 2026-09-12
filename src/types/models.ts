@@ -208,6 +208,154 @@ export const shopItemSchema = z.object({
 });
 export type ShopItem = z.infer<typeof shopItemSchema>;
 
+/**
+ * What a challenge is counted in.
+ *
+ * The metric picks the unit a progress line is written in and the colour the
+ * challenge is drawn with, here and on the achievement it pays out — an enum
+ * rather than a free unit string, so the same challenge cannot be green with a
+ * "Cal" suffix in one place and blue with "calories" in another.
+ */
+export const challengeMetricSchema = z.enum([
+  'steps',
+  'calories',
+  'minutes',
+  'days',
+  'workouts',
+]);
+export type ChallengeMetric = z.infer<typeof challengeMetricSchema>;
+
+/** How often a challenge resets, and the filter it answers to. */
+export const challengeCadenceSchema = z.enum(['daily', 'weekly', 'monthly']);
+export type ChallengeCadence = z.infer<typeof challengeCadenceSchema>;
+
+export const challengeSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().default(''),
+  /** Stands in for challenge art until the catalogue ships real images. */
+  emoji: z.string().default('🏅'),
+  metric: challengeMetricSchema,
+  cadence: challengeCadenceSchema,
+  /** What the challenge asks for, in the metric's own unit. */
+  goal: z.number().positive(),
+  /** How far the user has got. Zero for one that has not opened yet. */
+  progress: z.number().nonnegative().default(0),
+  rewardCoins: z.number().int().nonnegative(),
+  /** Some challenges pay a badge on top of the coins. */
+  rewardsBadge: z.boolean().default(false),
+  /**
+   * ISO date the challenge opens on, or null while it is running.
+   *
+   * One nullable date rather than an `active | upcoming` flag beside it: a
+   * status field could claim a challenge was running while its start date sat
+   * a week in the future, and the screen splits its two lists on exactly this.
+   */
+  startsAt: z.string().nullable().default(null),
+});
+export type Challenge = z.infer<typeof challengeSchema>;
+
+export const achievementSchema = z.object({
+  id: z.string(),
+  /** What the ring shows — "10K", "500", "30". Already abbreviated. */
+  value: z.string(),
+  /** What it was won for — "10K Steps", "Cal Burner". */
+  label: z.string(),
+  /** Borrowed from challenges: an achievement is what one pays out. */
+  metric: challengeMetricSchema,
+  /** ISO-8601, or null while the achievement is still locked. */
+  achievedAt: z.string().nullable().default(null),
+});
+export type Achievement = z.infer<typeof achievementSchema>;
+
+/**
+ * One drink, as the day's log lists it.
+ *
+ * Entries rather than a running total alone: the log has to be able to take a
+ * row back out again, and a total with no history behind it can only be
+ * corrected by guessing what was added.
+ */
+export const hydrationEntrySchema = z.object({
+  id: z.string(),
+  /** What was drunk, in millilitres. */
+  ml: z.number().int().positive(),
+  /** ISO-8601. The log shows the clock time it was logged at. */
+  at: z.string(),
+});
+export type HydrationEntry = z.infer<typeof hydrationEntrySchema>;
+
+/**
+ * One person on the leaderboard, as a row of it is drawn.
+ *
+ * The perk is the wording the board shows beside the coins — "T-Shirt +
+ * Bottle" — rather than a list of product ids: the prize catalogue is the
+ * shop's business, and a leaderboard row only ever states what was won.
+ */
+export const leaderboardEntrySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** "Delhi, India" — the city and country the rank was earned in. */
+  location: z.string(),
+  rank: z.number().int().positive(),
+  coins: z.number().int().nonnegative(),
+  /** Empty when the rank pays coins alone. */
+  perk: z.string().default(''),
+  avatarUrl: z.string().nullable().default(null),
+});
+export type LeaderboardEntry = z.infer<typeof leaderboardEntrySchema>;
+
+/**
+ * What a notification is about.
+ *
+ * The topic picks the glyph and the colour a row is drawn with, and the filter
+ * the row falls under, so it is an enum rather than free text: a topic the app
+ * has no entry for would otherwise reach the list as a blank disc nobody can
+ * filter to.
+ */
+export const notificationTopicSchema = z.enum([
+  'steps',
+  'workout',
+  'streak',
+  'hydration',
+  'coins',
+  'challenge',
+  'reward',
+  'health',
+  'system',
+]);
+export type NotificationTopic = z.infer<typeof notificationTopicSchema>;
+
+/**
+ * The three groups the notification filter offers, "All" aside.
+ *
+ * Derived from the topic rather than stored next to it — see
+ * `NOTIFICATION_CATEGORY` in the notifications store. A row free to claim it
+ * was a coin award filed under System would be unexplainable on screen and
+ * invisible in a fixture until someone read the counts.
+ */
+export const notificationCategorySchema = z.enum([
+  'activity',
+  'reward',
+  'system',
+]);
+export type NotificationCategory = z.infer<typeof notificationCategorySchema>;
+
+/**
+ * `AppNotification` rather than `Notification`: the DOM lib defines a type of
+ * that name, and a screen importing the wrong one would still compile.
+ */
+export const appNotificationSchema = z.object({
+  id: z.string(),
+  topic: notificationTopicSchema,
+  title: z.string(),
+  /** A sentence or two. The row gives it two lines and truncates past that. */
+  message: z.string(),
+  /** ISO-8601. Drives both the day heading and the clock time on the row. */
+  createdAt: z.string(),
+  read: z.boolean().default(false),
+});
+export type AppNotification = z.infer<typeof appNotificationSchema>;
+
 export const userSchema = z.object({
   id: z.string(),
   name: z.string(),

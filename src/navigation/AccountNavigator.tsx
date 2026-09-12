@@ -1,7 +1,6 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AccountScreen } from '../screens/main/AccountScreen';
-import { StreakScreen } from '../screens/main/StreakScreen';
 import type { AccountStackParamList } from '../types/navigation';
 
 const Stack = createNativeStackNavigator<AccountStackParamList>();
@@ -9,10 +8,10 @@ const Stack = createNativeStackNavigator<AccountStackParamList>();
 /**
  * The Account tab's own stack.
  *
- * Nested inside the tab rather than pushed on the root so the tab bar stays
- * on screen with Account lit: the streak is a page *of* the account, and a
- * user who taps the Account tab while looking at it expects to be taken back
- * to Account, which is exactly what a nested stack does with a tab press.
+ * A stack around a single screen, for now. The pages the account leads to are
+ * root routes — a screen reached from more than one tab cannot belong to any
+ * of them — and this is where a page that genuinely is part of the account
+ * would be pushed.
  */
 export const AccountNavigator = () => (
   <Stack.Navigator
@@ -24,6 +23,5 @@ export const AccountNavigator = () => (
     }}
   >
     <Stack.Screen name="AccountHome" component={AccountScreen} />
-    <Stack.Screen name="Streak" component={StreakScreen} />
   </Stack.Navigator>
 );

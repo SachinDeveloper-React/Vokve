@@ -29,6 +29,13 @@ interface Props {
   signed?: boolean;
   /** Overrides the coin gold — a spent row is deliberately muted. */
   tint?: string;
+  /**
+   * Writes the unit out — `200 Coins` rather than `200`. For the places a coin
+   * figure stands on its own, away from the wallet's own context: a reward
+   * chip on the challenge board has nothing else nearby to say what the
+   * number counts.
+   */
+  withUnit?: boolean;
 }
 
 /**
@@ -40,7 +47,7 @@ interface Props {
  * edit.
  */
 export const CoinAmount = memo(
-  ({ amount, size = 'md', signed = false, tint }: Props) => {
+  ({ amount, size = 'md', signed = false, tint, withUnit = false }: Props) => {
     const { colors } = useTheme();
     const color = tint ?? colors.gold;
     const { text, icon } = SIZES[size];
@@ -56,6 +63,7 @@ export const CoinAmount = memo(
         >
           {prefix}
           {formatCoins(amount)}
+          {withUnit ? ' Coins' : ''}
         </AppText>
       </HStack>
     );

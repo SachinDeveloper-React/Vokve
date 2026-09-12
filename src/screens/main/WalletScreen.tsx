@@ -10,6 +10,7 @@ import { WalletHeader } from '../../components/wallet/WalletHeader';
 import { Screen } from '../../components/ui/Screen';
 import { useThemedStyles, type ThemeShape } from '../../theme';
 import { useCurrentUser } from '../../stores/authStore';
+import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import {
   useCoinBalance,
   useCoinExpiryDaysLeft,
@@ -41,6 +42,7 @@ export const WalletScreen = () => {
   const transactions = useCoinTransactions();
   const summary = useMonthlyCoinSummary();
   const expiryDaysLeft = useCoinExpiryDaysLeft();
+  const hasUnreadNotifications = useHasUnreadNotifications();
 
   const onOpenShop = useCallback(
     () => navigation.navigate('Main', { screen: 'Shop' }),
@@ -49,6 +51,11 @@ export const WalletScreen = () => {
 
   const onOpenAccount = useCallback(
     () => navigation.navigate('Main', { screen: 'Account' }),
+    [navigation],
+  );
+
+  const onOpenNotifications = useCallback(
+    () => navigation.navigate('Notifications'),
     [navigation],
   );
 
@@ -66,8 +73,8 @@ export const WalletScreen = () => {
         <WalletHeader
           name={user?.name}
           avatarUri={user?.avatarUrl}
-          hasUnreadNotifications
-          onPressNotifications={notImplemented}
+          hasUnreadNotifications={hasUnreadNotifications}
+          onPressNotifications={onOpenNotifications}
           onPressAvatar={onOpenAccount}
         />
 

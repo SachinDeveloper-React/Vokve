@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Bell } from 'lucide-react-native';
+import { Bell, ChevronLeft } from 'lucide-react-native';
 import { HStack, VStack } from '../layout/Stack';
 import { Avatar } from '../media/Avatar';
 import { AppText } from '../ui/AppText';
@@ -12,6 +12,7 @@ interface Props {
   name?: string | null;
   avatarUri?: string | null;
   hasUnreadNotifications?: boolean;
+  onPressBack: () => void;
   onPressNotifications: () => void;
   onPressAvatar: () => void;
   title?: string;
@@ -22,16 +23,17 @@ interface Props {
  * The streak screen's masthead — the same shape as the account and shop
  * mastheads, so the four sit as one family when the user moves between them.
  *
- * No back button, on purpose: this screen sits inside the Account tab's own
- * stack, so the platform's swipe and hardware back both return to Account,
- * and a chevron in the wordmark's place would be the one header in the app
- * that looked different.
+ * The chevron is here for the same reason it is on the notification centre and
+ * the challenge board: this screen is pushed over the tab bar from whichever
+ * tab the user was on, so without it the only way back is the platform's own
+ * gesture. The wordmark keeps its place beside it.
  */
 export const StreakHeader = memo(
   ({
     name,
     avatarUri,
     hasUnreadNotifications = false,
+    onPressBack,
     onPressNotifications,
     onPressAvatar,
     title = 'Streaks',
@@ -39,7 +41,15 @@ export const StreakHeader = memo(
   }: Props) => (
     <VStack gap="base" pt="sm">
       <HStack align="center" justify="between">
-        <Wordmark size="md" />
+        <HStack align="center" gap="md">
+          <IconButton
+            icon={ChevronLeft}
+            onPress={onPressBack}
+            accessibilityLabel="Back"
+          />
+
+          <Wordmark size="md" />
+        </HStack>
 
         <HStack align="center" gap="md">
           <IconButton

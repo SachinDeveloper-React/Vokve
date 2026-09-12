@@ -120,6 +120,21 @@ export const typography = {
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
+  /**
+   * `label` for a tile that is only a quarter of the screen wide.
+   *
+   * Upper case buys legibility at small sizes but costs width, and a word like
+   * "achievements" at the 11pt `label` step is wider than a four-across card.
+   * The smaller step with tighter tracking is what lets all four shortcut
+   * labels be read at once instead of one of them ending in an ellipsis.
+   */
+  labelMicro: {
+    fontSize: moderateScale(9),
+    lineHeight: moderateScale(13),
+    fontWeight: fontWeight.bold,
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
 } satisfies Record<string, TextStyle>;
 
 export type TypographyVariant = keyof typeof typography;

@@ -1,7 +1,6 @@
 import React, { memo } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
-import { Flame, HeartPulse, Leaf, Trophy } from 'lucide-react-native';
-import { spacing, useTheme } from '../../theme';
+import { Grid } from '../layout/Grid';
+import { useTheme } from '../../theme';
 import { QuickActionCard } from './QuickActionCard';
 
 interface Props {
@@ -15,10 +14,11 @@ interface Props {
 /**
  * The shortcut row under the dashboard.
  *
- * It scrolls horizontally rather than squeezing four cards across the width:
- * at a quarter of a 375pt screen each card is under 80pt, which is too narrow
- * for two-line titles like "Challenges & achievements". Scrolling keeps the
- * cards legible and leaves room to add a fifth shortcut later.
+ * Four across rather than a scrolling strip: a shortcut only works if it is
+ * seen, and a card parked off the right edge is a card nobody taps. It costs
+ * the labels their width — which is why they are set in the smallest upper-case
+ * step — but the row stays scannable in one glance and lines up column for
+ * column with the metrics row above it.
  */
 export const QuickActionsRow = memo(
   ({
@@ -31,54 +31,39 @@ export const QuickActionsRow = memo(
     const { colors } = useTheme();
 
     return (
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.row}
-        // The row is inset from the screen's padding so the first and last
-        // cards can sit flush with the other sections' edges.
-        style={styles.bleed}
-      >
+      <Grid columns={4} gap="sm">
         <QuickActionCard
-          icon={Trophy}
-          tint={colors.gold}
+          emoji="🏆"
+          tint={colors.avatarOrange}
           title="Challenges &"
           detail="achievements"
           onPress={onPressChallenges}
         />
         <QuickActionCard
-          icon={Leaf}
+          emoji="🌱"
           tint={colors.success}
           title="Nutrition &"
           detail="goal"
           onPress={onPressNutrition}
         />
         <QuickActionCard
-          icon={HeartPulse}
+          emoji="❤️"
           tint={colors.destructive}
           title="Health"
           detail="check up"
           onPress={onPressHealth}
         />
         <QuickActionCard
-          icon={Flame}
+          emoji="🔥"
           tint={colors.avatarPurple}
           title="Streaks"
-          detail={`${streakDays} ${streakDays === 1 ? 'day' : 'days'}`}
+          detail={`${streakDays} ${streakDays === 1 ? 'Day' : 'Days'}`}
+          uppercaseDetail={false}
           onPress={onPressStreaks}
         />
-      </ScrollView>
+      </Grid>
     );
   },
 );
 
 QuickActionsRow.displayName = 'QuickActionsRow';
-
-const styles = StyleSheet.create({
-  bleed: { marginHorizontal: -spacing.base },
-  row: {
-    gap: spacing.md,
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.xs,
-  },
-});

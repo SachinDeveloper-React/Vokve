@@ -4,6 +4,11 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { config } from '../constants/config';
 import { ActiveWorkoutScreen } from '../screens/main/ActiveWorkoutScreen';
+import { ChallengesScreen } from '../screens/main/ChallengesScreen';
+import { HydrationScreen } from '../screens/main/HydrationScreen';
+import { LeaderboardRewardsScreen } from '../screens/main/LeaderboardRewardsScreen';
+import { NotificationsScreen } from '../screens/main/NotificationsScreen';
+import { StreakScreen } from '../screens/main/StreakScreen';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
@@ -70,6 +75,31 @@ export const RootNavigator = () => {
         ) : isSignedIn ? (
           <Stack.Group>
             <Stack.Screen name="Main" component={TabNavigator} />
+            <Stack.Screen
+              name="Hydration"
+              component={HydrationScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="LeaderboardRewards"
+              component={LeaderboardRewardsScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Streak"
+              component={StreakScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Challenges"
+              component={ChallengesScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Notifications"
+              component={NotificationsScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
             <Stack.Screen
               name="WorkoutDetail"
               component={WorkoutDetailScreen}

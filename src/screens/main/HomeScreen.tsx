@@ -10,6 +10,7 @@ import { WeeklyStepsChart } from '../../components/fitness/WeeklyStepsChart';
 import { Screen } from '../../components/ui/Screen';
 import { useThemedStyles, type ThemeShape } from '../../theme';
 import { useCurrentUser } from '../../stores/authStore';
+import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import { useCurrentStreak } from '../../stores/streakStore';
 import {
   useDailyStepGoal,
@@ -32,6 +33,7 @@ export const HomeScreen = () => {
   const navigation = useNavigation();
   const user = useCurrentUser();
   const currentStreak = useCurrentStreak();
+  const hasUnreadNotifications = useHasUnreadNotifications();
   const stepGoal = useDailyStepGoal();
   const waterGoalMl = useDailyWaterGoalMl();
   const consumedMl = useTodayHydration();
@@ -41,13 +43,27 @@ export const HomeScreen = () => {
     () => navigation.navigate('Main', { screen: 'Account' }),
     [navigation],
   );
-  const onOpenNotifications = useCallback(() => {}, []);
+
+  // A root route rather than one of the tab's: the bell is in every header, and
+  // a notification centre parked inside a tab would leave that tab showing it
+  // the next time the user tapped the tab itself.
+  const onOpenNotifications = useCallback(
+    () => navigation.navigate('Notifications'),
+    [navigation],
+  );
+
+  const onOpenHydration = useCallback(
+    () => navigation.navigate('Hydration'),
+    [navigation],
+  );
+
+  const onOpenChallenges = useCallback(
+    () => navigation.navigate('Challenges'),
+    [navigation],
+  );
+
   const onOpenStreak = useCallback(
-    () =>
-      navigation.navigate('Main', {
-        screen: 'Account',
-        params: { screen: 'Streak' },
-      }),
+    () => navigation.navigate('Streak'),
     [navigation],
   );
 
@@ -62,6 +78,7 @@ export const HomeScreen = () => {
         <HomeHeader
           name={user?.name}
           avatarUri={user?.avatarUrl}
+          hasUnreadNotifications={hasUnreadNotifications}
           onPressNotifications={onOpenNotifications}
           onPressAvatar={onOpenAccount}
         />
@@ -82,7 +99,7 @@ export const HomeScreen = () => {
 
         <QuickActionsRow
           streakDays={currentStreak}
-          onPressChallenges={notImplemented}
+          onPressChallenges={onOpenChallenges}
           onPressNutrition={notImplemented}
           onPressHealth={notImplemented}
           onPressStreaks={onOpenStreak}
@@ -92,7 +109,7 @@ export const HomeScreen = () => {
           consumedMl={consumedMl}
           goalMl={waterGoalMl}
           onAdd={addWater}
-          onPressDetails={notImplemented}
+          onPressDetails={onOpenHydration}
         />
 
         <MotivationCard quote="Small steps every day lead to big results." />

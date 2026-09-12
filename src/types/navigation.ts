@@ -24,13 +24,16 @@ export type OnboardingStackParamList = {
 };
 
 /**
- * The screens under the Account tab. A stack of its own rather than root
- * routes: the streak is reached *from* Account and belongs to it, and a
- * screen pushed onto the root would cover the tab bar the user navigates by.
+ * The screens under the Account tab.
+ *
+ * Only the tab's own landing screen is here. Everything the account leads to —
+ * the streak, the notification centre, the challenge board — is a root route,
+ * so tapping the Account tab always lands on the account itself rather than on
+ * whatever the user last opened from it. Kept as a stack rather than a bare
+ * screen so the tab has somewhere to push a page that genuinely belongs to it.
  */
 export type AccountStackParamList = {
   AccountHome: undefined;
-  Streak: undefined;
 };
 
 /**
@@ -55,6 +58,24 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList>;
   WorkoutDetail: { template: WorkoutTemplate };
   ActiveWorkout: undefined;
+  /**
+   * Reached from the bell in every screen's header, so it belongs to no tab.
+   * On the root stack it covers the bar and returns the user to exactly the
+   * tab they opened it from, and every tab keeps leading to its own screen.
+   */
+  Notifications: undefined;
+  /** Opened from Home's shortcut row, and later from the account's rewards. */
+  Challenges: undefined;
+  /** Opened from Home's shortcut row and from the account's menu. */
+  Streak: undefined;
+  /**
+   * `tab` picks which half opens — the prizes, or the rules that award them.
+   * Optional, so the plain `navigate('LeaderboardRewards')` still lands on the
+   * prizes, which is what the account's rewards row wants.
+   */
+  LeaderboardRewards: { tab?: 'rewards' | 'how' } | undefined;
+  /** Opened from the dashboard's hydration card. */
+  Hydration: undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

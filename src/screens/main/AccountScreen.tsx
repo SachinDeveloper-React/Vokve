@@ -13,6 +13,7 @@ import { config } from '../../constants/config';
 import { profileHighlights } from '../../constants/seedData';
 import { useAuthStore, useCurrentUser } from '../../stores/authStore';
 import { useCoinBalance } from '../../stores/coinsStore';
+import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import { useCurrentStreak } from '../../stores/streakStore';
 import { useThemedStyles, type ThemeShape } from '../../theme';
 import { logger } from '../../utils/logger';
@@ -43,6 +44,7 @@ export const AccountScreen = () => {
   const user = useCurrentUser();
   const balance = useCoinBalance();
   const currentStreak = useCurrentStreak();
+  const hasUnreadNotifications = useHasUnreadNotifications();
   const signOut = useAuthStore(s => s.signOut);
 
   const [isAppearanceOpen, setAppearanceOpen] = useState(false);
@@ -56,20 +58,22 @@ export const AccountScreen = () => {
     );
   }, [signOut]);
 
-  const onOpenWallet = useCallback(
-    () => navigation.navigate('Main', { screen: 'Wallet' }),
+  const onOpenStreak = useCallback(
+    () => navigation.navigate('Streak'),
     [navigation],
   );
 
-  // Through the full path rather than a bare `navigate('Streak')`: the hook
-  // is typed against the root list, and the nested form is what still works
-  // when this screen is reached from another tab.
-  const onOpenStreak = useCallback(
-    () =>
-      navigation.navigate('Main', {
-        screen: 'Account',
-        params: { screen: 'Streak' },
-      }),
+  // "My Rewards" used to open the Wallet tab, which is the coin balance rather
+  // than the rewards themselves — and the tab bar already leads there. It now
+  // opens the leaderboard's reward board, which is what the row's own subtitle
+  // promises.
+  const onOpenRewards = useCallback(
+    () => navigation.navigate('LeaderboardRewards'),
+    [navigation],
+  );
+
+  const onOpenNotifications = useCallback(
+    () => navigation.navigate('Notifications'),
     [navigation],
   );
 
@@ -87,8 +91,8 @@ export const AccountScreen = () => {
         <AccountHeader
           name={user?.name}
           avatarUri={user?.avatarUrl}
-          hasUnreadNotifications
-          onPressNotifications={notImplemented}
+          hasUnreadNotifications={hasUnreadNotifications}
+          onPressNotifications={onOpenNotifications}
           onPressAvatar={notImplemented}
         />
 
@@ -118,7 +122,7 @@ export const AccountScreen = () => {
         <AccountMenuList
           appVersion={config.appVersion}
           onPressOrders={notImplemented}
-          onPressRewards={onOpenWallet}
+          onPressRewards={onOpenRewards}
           onPressStreakFreeze={onOpenStreak}
           onPressHealthData={notImplemented}
           onPressHelp={notImplemented}
