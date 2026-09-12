@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "292040708519",
+    "project_id": "vokve-41530",
+    "storage_bucket": "vokve-41530.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:292040708519:android:c77480d8a9d22d77b3a682",
+        "android_client_info": {
+          "package_name": "com.vokve"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC8zOOG9n_MO67o2HB0t8vLBnH3gvjP6Ns"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -14,8 +14,44 @@ if linkage != nil
   use_frameworks! :linkage => linkage.to_sym
 end
 
+# Pods whose podspec relies on the app binary to pull in a system framework
+# implicitly. That works under static linking, but `use_frameworks!` makes every
+# pod a standalone dynamic framework that has to resolve its own symbols at its
+# own link step, so the missing declaration surfaces as "Undefined symbols".
+# Keyed by pod target name; see the note on each entry for what it fixes.
+MISSING_SYSTEM_FRAMEWORKS = {
+  # RNCClipboard.mm imports <MobileCoreServices/UTType.h> for UTTypeConformsTo,
+  # UTTypeCopyPreferredTagWithClass, kUTTypeImage and kUTTagClassMIMEType, but
+  # RNCClipboard.podspec declares no `s.ios.frameworks`.
+  'RNCClipboard' => ['MobileCoreServices'],
+}.freeze
+
+def link_missing_system_frameworks!(installer)
+  installer.pods_project.targets.each do |target|
+    frameworks = MISSING_SYSTEM_FRAMEWORKS[target.name]
+    next if frameworks.nil?
+
+    target.build_configurations.each do |config|
+      flags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+      flags = flags.split(/\s+/) if flags.is_a?(String)
+
+      frameworks.each do |framework|
+        next if flags.include?(framework)
+        flags += ['-framework', framework]
+      end
+
+      config.build_settings['OTHER_LDFLAGS'] = flags
+    end
+  end
+end
+
 target 'vokve' do
   config = use_native_modules!
+
+  # The Firebase iOS SDK is resolved through SPM by @react-native-firebase, and
+  # that integration requires the pods to be built as frameworks rather than
+  # static libraries.
+  use_frameworks! :linkage => :dynamic
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -30,5 +66,7 @@ target 'vokve' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    link_missing_system_frameworks!(installer)
   end
 end
