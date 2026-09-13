@@ -12,72 +12,64 @@ import { Pressable } from '../form/Pressable';
 const DISC = moderateScale(34);
 
 interface Props {
+  title: string;
+  message: string;
+  /** The vital's colour. Pass a theme colour. */
+  tint: string;
   onPress: () => void;
 }
 
 /**
- * The standing advice at the foot of the screen.
+ * The standing advice at the foot of a vital's screen.
  *
  * Deliberately general and deliberately last. A screen showing a clinical
  * figure should not follow it with advice that reads as a response to *this*
  * reading — the app has no business doing that — and putting it after the
  * history makes plain that it is the same line for everyone.
  */
-export const HeartHealthTipCard = memo(({ onPress }: Props) => {
-  const { colors, isDark } = useTheme();
+export const VitalTipCard = memo(({ title, message, tint, onPress }: Props) => {
+  const { isDark } = useTheme();
 
   return (
     <Pressable
       onPress={onPress}
       feedback="scale"
       accessibilityRole="button"
-      accessibilityLabel="Keep your heart healthy. Regular exercise, good sleep and balanced diet."
+      accessibilityLabel={`${title}. ${message}`}
     >
       <View
         style={[
           styles.card,
           {
-            backgroundColor: withAlpha(
-              colors.destructive,
-              isDark ? 0.12 : 0.07,
-            ),
-            borderColor: withAlpha(colors.destructive, isDark ? 0.28 : 0.18),
+            backgroundColor: withAlpha(tint, isDark ? 0.12 : 0.07),
+            borderColor: withAlpha(tint, isDark ? 0.28 : 0.18),
           },
         ]}
       >
         <HStack align="center" gap="md">
           <View
-            style={[
-              styles.disc,
-              { backgroundColor: withAlpha(colors.destructive, 0.24) },
-            ]}
+            style={[styles.disc, { backgroundColor: withAlpha(tint, 0.24) }]}
           >
-            <View
-              style={[styles.dot, { backgroundColor: colors.destructive }]}
-            />
+            <View style={[styles.dot, { backgroundColor: tint }]} />
           </View>
 
           <VStack flex={1} gap="xxs">
             <AppText variant="bodyStrong" numberOfLines={1}>
-              Keep Your Heart Healthy
+              {title}
             </AppText>
-            <AppText
-              variant="miniMicro"
-              color="textSecondary"
-              numberOfLines={2}
-            >
-              Regular exercise, good sleep and balanced diet
+            <AppText variant="miniMicro" color="textSecondary" numberOfLines={2}>
+              {message}
             </AppText>
           </VStack>
 
-          <Icon as={ChevronRight} size="sm" tint={colors.destructive} />
+          <Icon as={ChevronRight} size="sm" tint={tint} />
         </HStack>
       </View>
     </Pressable>
   );
 });
 
-HeartHealthTipCard.displayName = 'HeartHealthTipCard';
+VitalTipCard.displayName = 'VitalTipCard';
 
 const styles = StyleSheet.create({
   card: {

@@ -469,6 +469,28 @@ export const hydrationEntrySchema = z.object({
 export type HydrationEntry = z.infer<typeof hydrationEntrySchema>;
 
 /**
+ * Where a referral has got to.
+ *
+ * Two states rather than a boolean: a friend who has installed but not yet
+ * verified is neither a reward nor nothing, and the screen has to be able to
+ * say "pending" about them.
+ */
+export const referralStatusSchema = z.enum(['pending', 'rewarded']);
+export type ReferralStatus = z.infer<typeof referralStatusSchema>;
+
+export const referralSchema = z.object({
+  id: z.string(),
+  /** The friend, as they signed up. */
+  name: z.string(),
+  /** ISO date, `YYYY-MM-DD` — the day they joined. */
+  joinedAt: z.string(),
+  status: referralStatusSchema,
+  /** What the referral paid, or will pay once verified. */
+  rewardCoins: z.number().int().nonnegative(),
+});
+export type Referral = z.infer<typeof referralSchema>;
+
+/**
  * One person on the leaderboard, as a row of it is drawn.
  *
  * The perk is the wording the board shows beside the coins — "T-Shirt +

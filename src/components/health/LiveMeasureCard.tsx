@@ -10,6 +10,10 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
 interface Props {
+  /** "Live Heart Rate", "Live Blood Pressure". */
+  title: string;
+  /** What a connected device would do — "Real-time measurement using your device". */
+  connectedCopy: string;
   /** Whether a sensor is actually connected. Drives the pill and the button. */
   available: boolean;
   onPressMeasure: () => void;
@@ -24,8 +28,8 @@ interface Props {
  * claimed to be live and then asked the user to type a number would be the
  * one lie on a screen of medical figures.
  */
-export const LiveHeartRateCard = memo(
-  ({ available, onPressMeasure }: Props) => {
+export const LiveMeasureCard = memo(
+  ({ title, connectedCopy, available, onPressMeasure }: Props) => {
     const { colors, isDark } = useTheme();
     const tint = available ? colors.success : colors.textSecondary;
 
@@ -35,11 +39,11 @@ export const LiveHeartRateCard = memo(
           <HStack align="center" justify="between" gap="sm">
             <VStack flex={1} gap="xxs">
               <AppText variant="h3" numberOfLines={1}>
-                Live Heart Rate
+                {title}
               </AppText>
               <AppText variant="micro" color="textSecondary" numberOfLines={2}>
                 {available
-                  ? 'Real-time measurement using your device'
+                  ? connectedCopy
                   : 'No sensor connected yet — log a reading by hand'}
               </AppText>
             </VStack>
@@ -74,7 +78,7 @@ export const LiveHeartRateCard = memo(
   },
 );
 
-LiveHeartRateCard.displayName = 'LiveHeartRateCard';
+LiveMeasureCard.displayName = 'LiveMeasureCard';
 
 const styles = StyleSheet.create({
   pill: { borderRadius: radius.pill },

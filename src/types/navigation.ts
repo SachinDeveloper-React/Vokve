@@ -98,6 +98,10 @@ export type RootStackParamList = {
   NutritionHistory: undefined;
   /** Opened from the health checkup's heart rate tile. */
   HeartRate: undefined;
+  /** Opened from the health checkup's blood pressure tile. */
+  BloodPressure: undefined;
+  /** Opened from the wallet's "Earn Coins" action. */
+  Referral: undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

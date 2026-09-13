@@ -6,6 +6,7 @@ import { config } from '../constants/config';
 import { ActiveWorkoutScreen } from '../screens/main/ActiveWorkoutScreen';
 import { AddMealScreen } from '../screens/main/AddMealScreen';
 import { AnalyticsScreen } from '../screens/main/AnalyticsScreen';
+import { BloodPressureScreen } from '../screens/main/BloodPressureScreen';
 import { ChallengesScreen } from '../screens/main/ChallengesScreen';
 import { DietPlanScreen } from '../screens/main/DietPlanScreen';
 import { HealthCheckupScreen } from '../screens/main/HealthCheckupScreen';
@@ -17,6 +18,7 @@ import { NotificationSettingsScreen } from '../screens/main/NotificationSettings
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
 import { NutritionHistoryScreen } from '../screens/main/NutritionHistoryScreen';
 import { NutritionScreen } from '../screens/main/NutritionScreen';
+import { ReferralScreen } from '../screens/main/ReferralScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
@@ -102,6 +104,16 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="Nutrition"
               component={NutritionScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Referral"
+              component={ReferralScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="BloodPressure"
+              component={BloodPressureScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

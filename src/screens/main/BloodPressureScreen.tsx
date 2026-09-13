@@ -7,8 +7,8 @@ import { LiveMeasureCard } from '../../components/health/LiveMeasureCard';
 import { RecentVitalReadingsCard } from '../../components/health/RecentVitalReadingsCard';
 import { VitalHeader } from '../../components/health/VitalHeader';
 import { VitalTipCard } from '../../components/health/VitalTipCard';
-import { HeartRateHeroCard } from '../../components/heart/HeartRateHeroCard';
-import { HeartRateTrendCard } from '../../components/heart/HeartRateTrendCard';
+import { BloodPressureHeroCard } from '../../components/pressure/BloodPressureHeroCard';
+import { BloodPressureTrendCard } from '../../components/pressure/BloodPressureTrendCard';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
 import { useReadingsOfKind, useVitalsStore } from '../../stores/vitalsStore';
@@ -20,35 +20,29 @@ const makeStyles = ({ spacing }: ThemeShape) =>
   });
 
 /** How many readings the trend plots and the list shows. */
-const TREND_POINTS = 8;
+const TREND_POINTS = 7;
 const RECENT_ROWS = 4;
 
-/**
- * Whether a sensor can take the reading itself.
- *
- * A constant rather than a check, and deliberately so: this build has no
- * health integration, and the card above it says "not connected" instead of
- * promising a live measurement it cannot make. It becomes a real capability
- * check the day the native side lands.
- */
+/** See `HeartRateScreen`: no sensor in this build, and the card says so. */
 const HAS_SENSOR = false;
 
 /**
- * Heart rate on its own: the latest reading, where it sits clinically, and how
+ * Blood pressure on its own: the latest reading, both halves of it, and how
  * it has moved.
  *
- * Everything comes from the vitals store, the same list the checkup screen's
- * tile reads — so a reading logged here changes that tile in the same breath.
- * Whether a reading is normal is worked out from the number at render, never
- * stored beside it, which is what stops a figure and its verdict drifting
- * apart on the one screen where that would matter.
+ * The same shape as the heart rate screen and built from the same parts —
+ * header, live card, readings list, tip — with only the hero and the chart
+ * of its own. Everything comes from the vitals store, so a reading logged
+ * here changes the checkup's tile in the same breath, and its verdict comes
+ * off the same bands that tile uses.
  */
-export const HeartRateScreen = () => {
+export const BloodPressureScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
 
-  const readings = useReadingsOfKind('heart_rate', TREND_POINTS);
+  const readings = useReadingsOfKind('blood_pressure', TREND_POINTS);
+  const pulses = useReadingsOfKind('heart_rate', 1);
   const addReading = useVitalsStore(s => s.addReading);
 
   const [isLogOpen, setLogOpen] = useState(false);
@@ -56,6 +50,7 @@ export const HeartRateScreen = () => {
   const closeLog = useCallback(() => setLogOpen(false), []);
 
   const latest = readings[0];
+  const pulse = pulses[0]?.value ?? null;
 
   // The chart runs left to right in time; the store keeps its readings newest
   // first, which is the order the list below wants.
@@ -81,52 +76,56 @@ export const HeartRateScreen = () => {
         showsVerticalScrollIndicator={false}
       >
         <VitalHeader
-          title="Heart Rate"
+          title="Blood Pressure"
           onPressBack={onPressBack}
           onPressInfo={notImplemented}
         />
 
         {latest ? (
-          <HeartRateHeroCard bpm={latest.value} />
+          <BloodPressureHeroCard
+            systolic={latest.value}
+            diastolic={latest.secondary ?? 0}
+            pulse={pulse}
+          />
         ) : (
           <EmptyState
             title="No reading yet"
-            message="Log your first heart rate and this is where it will sit."
+            message="Log your first blood pressure and this is where it will sit."
             actionLabel="Log a reading"
             onAction={openLog}
           />
         )}
 
         <LiveMeasureCard
-          title="Live Heart Rate"
-          connectedCopy="Real-time measurement using your device"
+          title="Live Blood Pressure"
+          connectedCopy="Measure using your connected device"
           available={HAS_SENSOR}
           onPressMeasure={openLog}
         />
 
         {trend.length > 1 ? (
-          <HeartRateTrendCard readings={trend} periodLabel="7 Days" />
+          <BloodPressureTrendCard readings={trend} periodLabel="7 Days" />
         ) : null}
 
         <RecentVitalReadingsCard
           readings={readings.slice(0, RECENT_ROWS)}
           icon={Heart}
-          tint={colors.destructive}
-          viewAllLabel="View all heart rate readings"
+          tint={colors.primary}
+          viewAllLabel="View all blood pressure readings"
           onPressViewAll={notImplemented}
         />
 
         <VitalTipCard
-          title="Keep Your Heart Healthy"
-          message="Regular exercise, good sleep and balanced diet"
-          tint={colors.destructive}
+          title="Keep Your BP In Check"
+          message="Stay active, sleep well and monitor regularly"
+          tint={colors.primary}
           onPress={notImplemented}
         />
       </ScrollView>
 
       <AddReadingSheet
         visible={isLogOpen}
-        kind="heart_rate"
+        kind="blood_pressure"
         onSubmit={addReading}
         onClose={closeLog}
       />

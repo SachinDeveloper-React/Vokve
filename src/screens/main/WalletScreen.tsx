@@ -54,6 +54,13 @@ export const WalletScreen = () => {
     [navigation],
   );
 
+  // Referrals are the one way to earn coins that is not already on the
+  // dashboard, which is what "Earn Coins" is asking for.
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
+
   const onOpenNotifications = useCallback(
     () => navigation.navigate('Notifications'),
     [navigation],
@@ -86,7 +93,7 @@ export const WalletScreen = () => {
         />
 
         <WalletActionsRow
-          onPressEarn={notImplemented}
+          onPressEarn={onOpenReferral}
           onPressShop={onOpenShop}
           onPressHistory={notImplemented}
           onPressOrders={notImplemented}

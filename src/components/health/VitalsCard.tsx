@@ -15,8 +15,9 @@ interface Props {
   latest: Partial<Record<VitalKind, VitalReading>>;
   onPressAdd: () => void;
   onPressBmiInfo: () => void;
-  /** Heart rate is the one vital with a screen of its own today. */
+  /** Heart rate and blood pressure are the vitals with screens of their own. */
   onPressHeartRate: () => void;
+  onPressBloodPressure: () => void;
 }
 
 /**
@@ -30,9 +31,19 @@ interface Props {
  * A kind with no reading yet is left out rather than drawn empty. "Add New
  * Reading" is right there, and a tile showing a dash is a worse invitation
  * than the gap where it would sit.
+ *
+ * Two of the tiles open a screen and two do not, because two screens exist.
+ * The other two stay plain readouts rather than pressable tiles that lead
+ * nowhere.
  */
 export const VitalsCard = memo(
-  ({ latest, onPressAdd, onPressBmiInfo, onPressHeartRate }: Props) => {
+  ({
+    latest,
+    onPressAdd,
+    onPressBmiInfo,
+    onPressHeartRate,
+    onPressBloodPressure,
+  }: Props) => {
     const { colors } = useTheme();
 
     const { heart_rate: heartRate, blood_pressure: bloodPressure, bmi, weight } =
@@ -65,7 +76,12 @@ export const VitalsCard = memo(
             {heartRate ? (
               <VitalTile reading={heartRate} onPress={onPressHeartRate} />
             ) : null}
-            {bloodPressure ? <VitalTile reading={bloodPressure} /> : null}
+            {bloodPressure ? (
+              <VitalTile
+                reading={bloodPressure}
+                onPress={onPressBloodPressure}
+              />
+            ) : null}
             {bmi ? <VitalTile reading={bmi} /> : null}
           </HStack>
 

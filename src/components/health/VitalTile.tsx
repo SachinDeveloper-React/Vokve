@@ -17,9 +17,8 @@ interface Props {
   reading: VitalReading;
   /**
    * Opens the vital's own screen. Left off, the tile is a readout — which is
-   * what three of the four are today: heart rate is the only vital with a
-   * screen behind it, and a tile that looked pressable and did nothing would
-   * be worse than one that plainly does not.
+   * what BMI and weight are today: a tile that looked pressable and did
+   * nothing would be worse than one that plainly does not.
    */
   onPress?: () => void;
 }

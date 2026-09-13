@@ -7,6 +7,7 @@ import type {
   FoodItem,
   LeaderboardEntry,
   PlannedMeal,
+  Referral,
   ShopItem,
   VitalReading,
   WorkoutTemplate,
@@ -758,6 +759,48 @@ export const seedVitals: VitalReading[] = [
     recordedAt: at(0, 9, 30),
   },
   {
+    id: 'v-bp-2',
+    kind: 'blood_pressure',
+    value: 122,
+    secondary: 78,
+    recordedAt: at(1, 21, 15),
+  },
+  {
+    id: 'v-bp-3',
+    kind: 'blood_pressure',
+    value: 116,
+    secondary: 74,
+    recordedAt: at(2, 10, 20),
+  },
+  {
+    id: 'v-bp-4',
+    kind: 'blood_pressure',
+    value: 126,
+    secondary: 82,
+    recordedAt: at(3, 18, 45),
+  },
+  {
+    id: 'v-bp-5',
+    kind: 'blood_pressure',
+    value: 119,
+    secondary: 77,
+    recordedAt: at(4, 8, 40),
+  },
+  {
+    id: 'v-bp-6',
+    kind: 'blood_pressure',
+    value: 114,
+    secondary: 72,
+    recordedAt: at(5, 9, 10),
+  },
+  {
+    id: 'v-bp-7',
+    kind: 'blood_pressure',
+    value: 121,
+    secondary: 79,
+    recordedAt: at(6, 20, 5),
+  },
+  {
     id: 'v-bmi-1',
     kind: 'bmi',
     value: 22.4,
@@ -1095,4 +1138,54 @@ export const quickAddFoodIds = [
   'fl-banana',
   'fl-egg',
   'fl-peanut-butter',
+];
+
+/** The user's own code. Per user, so it lives with the other placeholders. */
+export const referralCode = 'VOKVE123';
+
+/** What one verified referral pays each side. */
+export const REFERRAL_REWARD_COINS = 20;
+
+const referral = (
+  id: string,
+  name: string,
+  joinedDaysAgo: number,
+  status: Referral['status'] = 'rewarded',
+): Referral => ({
+  id,
+  name,
+  joinedAt: dateDaysAgo(joinedDaysAgo),
+  status,
+  rewardCoins: REFERRAL_REWARD_COINS,
+});
+
+/**
+ * Who has joined on the user's code, newest first.
+ *
+ * Twenty rows so the figures at the top of the screen are counts rather than
+ * numbers typed in: eighteen rewarded and two still verifying, which at twenty
+ * coins each is the 360 the coins figure has to show. The three the design
+ * lists are the three most recent.
+ */
+export const seedReferrals: Referral[] = [
+  referral('r-1', 'Arjun Mehta', 0, 'pending'),
+  referral('r-2', 'Rohit Sharma', 1),
+  referral('r-3', 'Neha Verma', 3),
+  referral('r-4', 'Priya Nair', 5, 'pending'),
+  referral('r-5', 'Karan Singh', 8),
+  referral('r-6', 'Sneha Iyer', 11),
+  referral('r-7', 'Vikram Yadav', 14),
+  referral('r-8', 'Aisha Khan', 17),
+  referral('r-9', 'Dev Patel', 20),
+  referral('r-10', 'Meera Joshi', 24),
+  referral('r-11', 'Rahul Gupta', 27),
+  referral('r-12', 'Tanvi Rao', 31),
+  referral('r-13', 'Sameer Ali', 35),
+  referral('r-14', 'Pooja Desai', 39),
+  referral('r-15', 'Nikhil Bose', 43),
+  referral('r-16', 'Ananya Sen', 48),
+  referral('r-17', 'Harsh Vora', 52),
+  referral('r-18', 'Ritika Jain', 57),
+  referral('r-19', 'Aman Chaudhary', 62),
+  referral('r-20', 'Divya Menon', 68),
 ];

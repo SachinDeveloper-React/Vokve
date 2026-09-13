@@ -66,6 +66,11 @@ export const HealthCheckupScreen = () => {
     [navigation],
   );
 
+  const onOpenBloodPressure = useCallback(
+    () => navigation.navigate('BloodPressure'),
+    [navigation],
+  );
+
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -106,6 +111,7 @@ export const HealthCheckupScreen = () => {
           onPressAdd={openAdd}
           onPressBmiInfo={notImplemented}
           onPressHeartRate={onOpenHeartRate}
+          onPressBloodPressure={onOpenBloodPressure}
         />
 
         <TrackProgressCard onPressTrends={notImplemented} />

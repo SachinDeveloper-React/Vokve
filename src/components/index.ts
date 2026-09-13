@@ -28,6 +28,8 @@ export * from './meal';
 export * from './settings';
 export * from './history';
 export * from './heart';
+export * from './pressure';
+export * from './referral';
 export { default as ErrorBoundary } from './common/ErrorBoundary';
 export { Wordmark } from './brand/Wordmark';
 export type { WordmarkSize } from './brand/Wordmark';

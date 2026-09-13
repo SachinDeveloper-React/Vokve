@@ -195,6 +195,14 @@ describe('WalletScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('Main', { screen: 'Shop' });
   });
 
+  test('the earn action opens Referral & Earn', async () => {
+    seed([tx('a', 100, daysAgo(0))]);
+
+    press(await render(), 'Earn Coins. More ways to earn');
+
+    expect(mockNavigate).toHaveBeenCalledWith('Referral');
+  });
+
   test('an empty ledger says so instead of rendering a bare card', async () => {
     seed([]);
 

@@ -22,6 +22,11 @@ jest.mock('react-native-keychain', () => ({
 
 jest.mock('react-native-linear-gradient', () => 'LinearGradient');
 
+// The clipboard ships a mock object but does not register it either.
+jest.mock('@react-native-clipboard/clipboard', () =>
+  require('@react-native-clipboard/clipboard/jest/clipboard-mock.js'),
+);
+
 jest.mock('@react-native-community/netinfo', () => ({
   __esModule: true,
   default: {

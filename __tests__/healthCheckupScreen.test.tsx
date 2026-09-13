@@ -123,6 +123,8 @@ describe('vital ranges', () => {
     // that only checked the first number would call this normal.
     expect(statusOf(reading('blood_pressure', 118, 84))).toBe('high');
     expect(statusOf(reading('blood_pressure', 134, 76))).toBe('high');
+    // The top number alone in the 120s is the step between the two.
+    expect(statusOf(reading('blood_pressure', 124, 76))).toBe('elevated');
   });
 
   test('BMI follows the same bands the guide draws', () => {
@@ -187,6 +189,12 @@ describe('HealthCheckupScreen', () => {
     press(await render(), 'Heart Rate, 72 bpm');
 
     expect(mockNavigate).toHaveBeenCalledWith('HeartRate');
+  });
+
+  test('the blood pressure tile opens its own screen', async () => {
+    press(await render(), 'Blood Pressure, 118 / 76');
+
+    expect(mockNavigate).toHaveBeenCalledWith('BloodPressure');
   });
 
   test('the chevron returns to whatever opened the screen', async () => {

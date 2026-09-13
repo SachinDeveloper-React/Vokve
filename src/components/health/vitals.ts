@@ -10,6 +10,8 @@ interface VitalPresentation {
   label: string;
   /** Written after the figure — "bpm", "kg". Empty where the number stands alone. */
   unit: string;
+  /** The unit as a screen reader should say it — "beats per minute". */
+  spokenUnit: string;
   tint: VitalTint;
   emoji: string;
 }
@@ -24,17 +26,31 @@ export const VITAL_STYLE: Record<VitalKind, VitalPresentation> = {
   heart_rate: {
     label: 'Heart Rate',
     unit: 'bpm',
+    spokenUnit: 'beats per minute',
     tint: 'destructive',
     emoji: '❤️',
   },
   blood_pressure: {
     label: 'Blood Pressure',
     unit: 'mmHg',
+    spokenUnit: 'millimetres of mercury',
     tint: 'brandAccent',
     emoji: '🩸',
   },
-  bmi: { label: 'BMI', unit: '', tint: 'avatarPurple', emoji: '📊' },
-  weight: { label: 'Weight', unit: 'kg', tint: 'success', emoji: '⚖️' },
+  bmi: {
+    label: 'BMI',
+    unit: '',
+    spokenUnit: '',
+    tint: 'avatarPurple',
+    emoji: '📊',
+  },
+  weight: {
+    label: 'Weight',
+    unit: 'kg',
+    spokenUnit: 'kilograms',
+    tint: 'success',
+    emoji: '⚖️',
+  },
 };
 
 /** The order the tiles are laid out in, which the history follows too. */
@@ -109,6 +125,54 @@ export const HEART_BANDS: readonly HeartBand[] = [
   },
 ];
 
+export interface PressureBand {
+  label: string;
+  tint: HeartBandTint;
+  status: VitalStatus;
+}
+
+/**
+ * Which blood pressure band a reading falls in.
+ *
+ * The standard adult categories: normal under 120 over 80, elevated when the
+ * top number alone creeps into the 120s, high once either number reaches 130
+ * or 80. Either half can push a reading up a band — a diastolic of 82 is high
+ * however ordinary the systolic beside it — which is the case a check on the
+ * first number alone gets wrong.
+ */
+export function pressureBandFor(
+  systolic: number,
+  diastolic: number,
+): PressureBand {
+  if (systolic >= 130 || diastolic >= 80) {
+    return { label: 'High', tint: 'destructive', status: 'high' };
+  }
+  if (systolic < 90 || diastolic < 60) {
+    return { label: 'Low', tint: 'primary', status: 'low' };
+  }
+  if (systolic >= 120) {
+    return { label: 'Elevated', tint: 'warning', status: 'elevated' };
+  }
+  return { label: 'Normal', tint: 'success', status: 'normal' };
+}
+
+/** The sentence under a blood pressure figure, which follows its band. */
+export function pressureMessageFor(
+  systolic: number,
+  diastolic: number,
+): string {
+  switch (pressureBandFor(systolic, diastolic).status) {
+    case 'low':
+      return 'Lower than the usual range. Fine if you feel fine; worth a check if you feel faint.';
+    case 'elevated':
+      return 'The top number is creeping up. Worth keeping an eye on.';
+    case 'high':
+      return 'Above the healthy range. If it stays there, speak to a doctor.';
+    default:
+      return 'Your blood pressure is in a healthy range';
+  }
+}
+
 /** Which band a reading falls in. Never undefined: the first starts at zero. */
 export function bandFor(bpm: number): HeartBand {
   return (
@@ -149,12 +213,10 @@ export function statusOf(reading: VitalReading): VitalStatus {
       // Straight off the bands the heart rate screen draws, so the tile and
       // that screen cannot put two different words on one reading.
       return bandFor(reading.value).status;
-    case 'blood_pressure': {
-      const diastolic = reading.secondary ?? 0;
-      if (reading.value >= 130 || diastolic >= 80) return 'high';
-      if (reading.value < 90 || diastolic < 60) return 'low';
-      return 'normal';
-    }
+    case 'blood_pressure':
+      // Off the same bands the blood pressure screen draws, for the same
+      // reason as the heart rate above.
+      return pressureBandFor(reading.value, reading.secondary ?? 0).status;
     case 'bmi':
       if (reading.value < 18.5) return 'low';
       return reading.value >= 25 ? 'high' : 'normal';
