@@ -193,6 +193,14 @@ describe('AccountScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('LeaderboardRewards');
   });
 
+  test('the notification shortcut opens the notification settings', async () => {
+    const tree = await render();
+
+    await press(tree, 'Notification Settings');
+
+    expect(mockNavigate).toHaveBeenCalledWith('NotificationSettings');
+  });
+
   test('a profile that has not loaded still renders a whole screen', async () => {
     useAuthStore.setState({ user: null });
 

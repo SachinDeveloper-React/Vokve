@@ -116,6 +116,33 @@ export function formatClockTime(isoDate: string): string {
 }
 
 /**
+ * A 24-hour `HH:mm` as the app writes clock times — `07:00` to `07:00 AM`.
+ *
+ * The sibling of `formatClockTime`, which takes a timestamp. A reminder has no
+ * date to attach to: it is a time of day that recurs, so it is stored and
+ * formatted as one. Anything unparseable is returned untouched rather than
+ * rendered as `NaN:NaN AM`.
+ */
+export function formatTimeOfDay(hhmm: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  if (!match) {
+    return hhmm;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) {
+    return hhmm;
+  }
+
+  const suffix = hours < 12 ? 'AM' : 'PM';
+  // Midnight and noon are the 12s: `0 % 12` and `12 % 12` are both 0.
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+
+  return `${String(hour12).padStart(2, '0')}:${match[2]} ${suffix}`;
+}
+
+/**
  * Seconds to `mm:ss`, minutes padded — `01:45`, `00:27`.
  *
  * Distinct from `formatDuration`, which drops the leading zero because a

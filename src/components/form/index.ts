@@ -36,6 +36,7 @@ export { Select } from './Select';
 export type { SelectOption } from './Select';
 export { Switch } from './Switch';
 export { TextArea } from './TextArea';
+export { TimePickerSheet } from './TimePickerSheet';
 
 export {
   FormCheckbox,

@@ -51,6 +51,11 @@ export const HydrationScreen = () => {
   const openCustom = useCallback(() => setCustomOpen(true), []);
   const closeCustom = useCallback(() => setCustomOpen(false), []);
 
+  const onOpenReminders = useCallback(
+    () => navigation.navigate('HydrationReminder'),
+    [navigation],
+  );
+
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -70,7 +75,10 @@ export const HydrationScreen = () => {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <HydrationHeader onPressBack={onPressBack} />
+        <HydrationHeader
+          onPressBack={onPressBack}
+          onPressReminders={onOpenReminders}
+        />
 
         <HydrationProgressCard consumedMl={consumedMl} goalMl={goalMl} />
 

@@ -83,6 +83,24 @@ describe('HomeScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('Hydration');
   });
 
+  test('the analysis tile opens the steps analytics', async () => {
+    press(await render(), 'Analysis');
+
+    expect(mockNavigate).toHaveBeenCalledWith('Analytics');
+  });
+
+  test('the health shortcut opens the checkup', async () => {
+    press(await render(), 'Health check up');
+
+    expect(mockNavigate).toHaveBeenCalledWith('HealthCheckup');
+  });
+
+  test('the nutrition shortcut opens the nutrition screen', async () => {
+    press(await render(), 'Nutrition &');
+
+    expect(mockNavigate).toHaveBeenCalledWith('Nutrition');
+  });
+
   test('the bell opens the notification centre', async () => {
     press(await render(), 'Notifications');
 

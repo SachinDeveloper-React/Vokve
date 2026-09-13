@@ -147,6 +147,12 @@ describe('HydrationScreen', () => {
     expect(useHydrationStore.getState().consumedMl).toBe(0);
   });
 
+  test('the clock in the header opens the reminder plan', async () => {
+    press(await render(), 'Hydration reminders');
+
+    expect(mockNavigate).toHaveBeenCalledWith('HydrationReminder');
+  });
+
   test('the chevron returns to whatever opened the screen', async () => {
     press(await render(), 'Back');
 

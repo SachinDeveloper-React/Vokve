@@ -79,10 +79,10 @@ export const NotificationsScreen = () => {
     [navigation],
   );
 
-  // Notification preferences have no screen yet. Wired as a no-op rather than
-  // left off, so the header action and the footer row keep the shape they will
-  // ship with and only the handler changes.
-  const notImplemented = useCallback(() => {}, []);
+  const onOpenSettings = useCallback(
+    () => navigation.navigate('NotificationSettings'),
+    [navigation],
+  );
 
   return (
     <Screen edges={['top']}>
@@ -94,7 +94,7 @@ export const NotificationsScreen = () => {
           name={user?.name}
           avatarUri={user?.avatarUrl}
           onPressBack={onPressBack}
-          onPressSettings={notImplemented}
+          onPressSettings={onOpenSettings}
           onPressAvatar={onOpenAccount}
         />
 
@@ -128,7 +128,7 @@ export const NotificationsScreen = () => {
             tint={colors.primary}
             title="Notification Settings"
             subtitle="Manage your notification preferences"
-            onPress={notImplemented}
+            onPress={onOpenSettings}
           />
         </Card>
       </ScrollView>

@@ -4,10 +4,19 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { config } from '../constants/config';
 import { ActiveWorkoutScreen } from '../screens/main/ActiveWorkoutScreen';
+import { AddMealScreen } from '../screens/main/AddMealScreen';
+import { AnalyticsScreen } from '../screens/main/AnalyticsScreen';
 import { ChallengesScreen } from '../screens/main/ChallengesScreen';
+import { DietPlanScreen } from '../screens/main/DietPlanScreen';
+import { HealthCheckupScreen } from '../screens/main/HealthCheckupScreen';
+import { HeartRateScreen } from '../screens/main/HeartRateScreen';
+import { HydrationReminderScreen } from '../screens/main/HydrationReminderScreen';
 import { HydrationScreen } from '../screens/main/HydrationScreen';
 import { LeaderboardRewardsScreen } from '../screens/main/LeaderboardRewardsScreen';
+import { NotificationSettingsScreen } from '../screens/main/NotificationSettingsScreen';
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
+import { NutritionHistoryScreen } from '../screens/main/NutritionHistoryScreen';
+import { NutritionScreen } from '../screens/main/NutritionScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
@@ -76,6 +85,46 @@ export const RootNavigator = () => {
           <Stack.Group>
             <Stack.Screen name="Main" component={TabNavigator} />
             <Stack.Screen
+              name="AddMeal"
+              component={AddMealScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="DietPlan"
+              component={DietPlanScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="NutritionHistory"
+              component={NutritionHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Nutrition"
+              component={NutritionScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="HeartRate"
+              component={HeartRateScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="HealthCheckup"
+              component={HealthCheckupScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Analytics"
+              component={AnalyticsScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="HydrationReminder"
+              component={HydrationReminderScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="Hydration"
               component={HydrationScreen}
               options={{ animation: 'slide_from_right' }}
@@ -93,6 +142,11 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="Challenges"
               component={ChallengesScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="NotificationSettings"
+              component={NotificationSettingsScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

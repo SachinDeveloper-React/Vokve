@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { spacing, useTheme } from '../../theme';
 import { AppText } from '../ui/AppText';
 
@@ -11,6 +11,14 @@ export interface FormControlProps {
   error?: string;
   required?: boolean;
   disabled?: boolean;
+  /**
+   * Layout for the whole control — its share of a row, usually.
+   *
+   * Distinct from a field's own `containerStyle`, which dresses the bordered
+   * box: a `flex` on that box is measured inside this wrapper, so a field told
+   * to fill a row through the inner style collapses to its content instead.
+   */
+  style?: StyleProp<ViewStyle>;
 }
 
 /**
@@ -28,12 +36,13 @@ export const FormControl = memo(
     error,
     required = false,
     disabled = false,
+    style,
   }: FormControlProps) => {
     const { colors } = useTheme();
     const message = error ?? helper;
 
     return (
-      <View style={[styles.container, disabled && styles.disabled]}>
+      <View style={[styles.container, disabled && styles.disabled, style]}>
         {label ? (
           <View style={styles.labelRow}>
             <AppText variant="caption" color="textSecondary">

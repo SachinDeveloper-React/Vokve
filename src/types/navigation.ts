@@ -1,7 +1,7 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { WorkoutTemplate } from './models';
+import type { MealSlot, WorkoutTemplate } from './models';
 
 export type AuthStackParamList = {
   Welcome: undefined;
@@ -76,6 +76,28 @@ export type RootStackParamList = {
   LeaderboardRewards: { tab?: 'rewards' | 'how' } | undefined;
   /** Opened from the dashboard's hydration card. */
   Hydration: undefined;
+  /** Opened from the hydration screen's own header. */
+  HydrationReminder: undefined;
+  /** Opened from the dashboard's "Analysis" metric tile. */
+  Analytics: undefined;
+  /** Opened from the dashboard's "Health check up" shortcut. */
+  HealthCheckup: undefined;
+  /** Opened from the dashboard's "Nutrition & goal" shortcut. */
+  Nutrition: undefined;
+  /** Opened from the nutrition screen's meal plan preferences. */
+  DietPlan: undefined;
+  /**
+   * `slot` is the meal whose "+" was pressed and `date` the day being looked
+   * at. Both optional, so a plain `navigate('AddMeal')` opens on breakfast,
+   * today.
+   */
+  AddMeal: { slot?: MealSlot; date?: string } | undefined;
+  /** Reached from the notification centre and from the account's shortcuts. */
+  NotificationSettings: undefined;
+  /** Opened from the nutrition screen's "View All" meals link. */
+  NutritionHistory: undefined;
+  /** Opened from the health checkup's heart rate tile. */
+  HeartRate: undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

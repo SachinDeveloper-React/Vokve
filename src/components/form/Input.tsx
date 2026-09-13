@@ -6,6 +6,7 @@ import {
   TextStyle,
   View,
   ViewStyle,
+  type StyleProp,
 } from 'react-native';
 import { radius, spacing, typography, useTheme } from '../../theme';
 import { FormControl, type FormControlProps } from './FormControl';
@@ -18,7 +19,14 @@ export interface InputProps
   /** Rendered inside the field, after the text — a clear or reveal button. */
   trailing?: React.ReactNode;
   disabled?: boolean;
+  /** Dresses the bordered box itself — its height, radius, background. */
   containerStyle?: ViewStyle;
+  /**
+   * Layout for the field *and* its label and helper — what a row shares out.
+   * `containerStyle` cannot do this: a flex on the inner box is measured
+   * inside this wrapper, so the field collapses to its content instead.
+   */
+  style?: StyleProp<ViewStyle>;
 }
 
 /** The smallest field height that stays comfortable to hit one-handed. */
@@ -64,6 +72,7 @@ export const Input = forwardRef<TextInputRef, InputProps>(
       leading,
       trailing,
       containerStyle,
+      style,
       multiline,
       onFocus,
       onBlur,
@@ -103,6 +112,7 @@ export const Input = forwardRef<TextInputRef, InputProps>(
         error={error}
         required={required}
         disabled={disabled}
+        style={style}
       >
         <View
           style={[

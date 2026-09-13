@@ -268,6 +268,190 @@ export const achievementSchema = z.object({
 });
 export type Achievement = z.infer<typeof achievementSchema>;
 
+/** Which meal of the day a food entry belongs to. */
+export const mealSlotSchema = z.enum([
+  'breakfast',
+  'lunch',
+  'snack',
+  'dinner',
+]);
+export type MealSlot = z.infer<typeof mealSlotSchema>;
+
+/**
+ * One line of a planned meal — what to eat and how much of it.
+ *
+ * The quantity is text rather than a number and a unit: a plan says "1 bowl
+ * (200g)" and "2 eggs", and forcing those through a numeric field would turn
+ * a readable instruction into a data-entry exercise nobody finishes.
+ */
+export const plannedItemSchema = z.object({
+  name: z.string(),
+  quantity: z.string(),
+});
+export type PlannedItem = z.infer<typeof plannedItemSchema>;
+
+/**
+ * A meal as the diet plan prescribes it, rather than as it was eaten.
+ *
+ * Deliberately separate from `FoodEntry`: one is the plan and the other is the
+ * log, and a model that served both would leave the app unable to say whether
+ * a user actually ate what they were meant to.
+ */
+export const plannedMealSchema = z.object({
+  id: z.string(),
+  slot: mealSlotSchema,
+  /** 24-hour `HH:mm`, in the device's own local time. */
+  time: z.string(),
+  calories: z.number().nonnegative(),
+  proteinG: z.number().nonnegative().default(0),
+  carbsG: z.number().nonnegative().default(0),
+  fatsG: z.number().nonnegative().default(0),
+  items: z.array(plannedItemSchema).default([]),
+});
+export type PlannedMeal = z.infer<typeof plannedMealSchema>;
+
+/**
+ * One thing eaten, with the macros that came with it.
+ *
+ * Macros live on the entry rather than on the meal: a meal's figures are the
+ * sum of what is in it, and storing both would let a meal claim 650 calories
+ * while the four items under it added up to something else.
+ */
+export const foodEntrySchema = z.object({
+  id: z.string(),
+  slot: mealSlotSchema,
+  name: z.string(),
+  /** How much of it — "1 Cup (150 g)". Empty when the amount is in the name. */
+  portion: z.string().default(''),
+  calories: z.number().nonnegative(),
+  proteinG: z.number().nonnegative().default(0),
+  carbsG: z.number().nonnegative().default(0),
+  fatsG: z.number().nonnegative().default(0),
+  fiberG: z.number().nonnegative().default(0),
+  /** ISO-8601. The meal row shows the time its first item was logged. */
+  loggedAt: z.string(),
+});
+export type FoodEntry = z.infer<typeof foodEntrySchema>;
+
+/**
+ * An item in the food library the add-meal screen searches.
+ *
+ * The catalogue rather than the diary: a library item is a thing that exists,
+ * where a `FoodEntry` is a thing that was eaten at a time. Logging one copies
+ * its figures into an entry, so editing the catalogue later cannot rewrite
+ * what somebody ate last Tuesday.
+ */
+export const foodItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** The serving its figures describe — "1 Medium (118 g)". */
+  portion: z.string(),
+  emoji: z.string().default('🍽️'),
+  calories: z.number().nonnegative(),
+  proteinG: z.number().nonnegative().default(0),
+  carbsG: z.number().nonnegative().default(0),
+  fatsG: z.number().nonnegative().default(0),
+  fiberG: z.number().nonnegative().default(0),
+});
+export type FoodItem = z.infer<typeof foodItemSchema>;
+
+/** What the user will and will not eat, which the meal plan is built from. */
+export const dietTypeSchema = z.enum([
+  'vegetarian',
+  'vegan',
+  'eggetarian',
+  'non_vegetarian',
+]);
+export type DietType = z.infer<typeof dietTypeSchema>;
+
+export const mealPlanSchema = z.enum([
+  'balanced',
+  'high_protein',
+  'low_carb',
+  'keto',
+]);
+export type MealPlan = z.infer<typeof mealPlanSchema>;
+
+/**
+ * What the eating is *for*.
+ *
+ * Distinct from `fitnessGoal`, which is about training: a user can be building
+ * strength while eating to maintain, and one enum covering both would make
+ * those two answers contradict each other.
+ */
+export const nutritionGoalSchema = z.enum([
+  'lose_weight',
+  'maintain',
+  'gain_weight',
+  'build_muscle',
+]);
+export type NutritionGoal = z.infer<typeof nutritionGoalSchema>;
+
+/**
+ * A vital sign the checkup screen tracks.
+ *
+ * An enum rather than a free label: each kind carries its own unit, its own
+ * normal range and its own colour, so a reading that arrived as "heartrate"
+ * would render with no unit and no way to say whether it was healthy.
+ */
+export const vitalKindSchema = z.enum([
+  'heart_rate',
+  'blood_pressure',
+  'bmi',
+  'weight',
+]);
+export type VitalKind = z.infer<typeof vitalKindSchema>;
+
+export const vitalReadingSchema = z.object({
+  id: z.string(),
+  kind: vitalKindSchema,
+  /**
+   * The reading, in its kind's own unit — beats per minute, kilograms, the
+   * systolic half of a blood pressure.
+   *
+   * A number rather than the text the tile shows, so a range check is a
+   * comparison rather than a parse: whether a reading is normal is derived at
+   * render and never stored beside it, and the two therefore cannot disagree.
+   */
+  value: z.number(),
+  /** The diastolic half of a blood pressure. Null for every other kind. */
+  secondary: z.number().nullable().default(null),
+  /** ISO-8601. */
+  recordedAt: z.string(),
+});
+export type VitalReading = z.infer<typeof vitalReadingSchema>;
+
+/**
+ * Which part of the day a reminder belongs to.
+ *
+ * The three preset blocks are drawn as blocks of chips; `custom` is a time the
+ * user set themselves and is drawn as a row it can be switched off or deleted
+ * from. One enum rather than two lists, so "how many reminders are on" is a
+ * filter rather than a sum of two things that can drift apart.
+ */
+export const reminderSlotSchema = z.enum([
+  'morning',
+  'afternoon',
+  'evening',
+  'custom',
+]);
+export type ReminderSlot = z.infer<typeof reminderSlotSchema>;
+
+export const hydrationReminderSchema = z.object({
+  id: z.string(),
+  /**
+   * 24-hour `HH:mm`, in the device's own local time.
+   *
+   * Text rather than minutes-since-midnight because that is what the row
+   * shows and what a notification is scheduled from; and local rather than
+   * UTC because "remind me at 11" means eleven wherever the user wakes up.
+   */
+  time: z.string(),
+  slot: reminderSlotSchema,
+  enabled: z.boolean().default(true),
+});
+export type HydrationReminder = z.infer<typeof hydrationReminderSchema>;
+
 /**
  * One drink, as the day's log lists it.
  *

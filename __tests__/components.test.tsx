@@ -11,6 +11,7 @@ import { Avatar } from '../src/components/media/Avatar';
 import { Grid } from '../src/components/layout/Grid';
 import { HStack } from '../src/components/layout/Stack';
 import { Accordion } from '../src/components/disclosure/Accordion';
+import { Input } from '../src/components/form/Input';
 import { ToastProvider, useToast } from '../src/components/feedback/Toast';
 import { ThemeProvider } from '../src/theme';
 import { spacing } from '../src/theme';
@@ -100,6 +101,31 @@ describe('HStack', () => {
 
     expect(row?.gap).toBe(spacing.lg);
     expect(row?.alignItems).toBe('center');
+  });
+});
+
+describe('Input', () => {
+  test('takes its share of a row through the wrapper, not the box', async () => {
+    // The bordered box sits inside the label/helper wrapper, so a flex given
+    // to the box is measured inside a view that hugs its content — which is
+    // how a search field ends up the width of its own magnifier.
+    const tree = await render(<Input style={{ flex: 1 }} placeholder="Search" />);
+
+    const wrapper = tree.root.findAllByType(View)[0];
+    expect(flatten(wrapper.props.style).flex).toBe(1);
+  });
+
+  test('containerStyle still dresses the box itself', async () => {
+    const tree = await render(
+      <Input containerStyle={{ minHeight: 56 }} placeholder="Search" />,
+    );
+
+    const box = tree.root
+      .findAllByType(View)
+      .map(node => flatten(node.props.style))
+      .find(style => style.minHeight === 56);
+
+    expect(box).toBeDefined();
   });
 });
 

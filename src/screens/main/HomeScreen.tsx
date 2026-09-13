@@ -52,6 +52,21 @@ export const HomeScreen = () => {
     [navigation],
   );
 
+  const onOpenNutrition = useCallback(
+    () => navigation.navigate('Nutrition'),
+    [navigation],
+  );
+
+  const onOpenHealth = useCallback(
+    () => navigation.navigate('HealthCheckup'),
+    [navigation],
+  );
+
+  const onOpenAnalytics = useCallback(
+    () => navigation.navigate('Analytics'),
+    [navigation],
+  );
+
   const onOpenHydration = useCallback(
     () => navigation.navigate('Hydration'),
     [navigation],
@@ -66,8 +81,6 @@ export const HomeScreen = () => {
     () => navigation.navigate('Streak'),
     [navigation],
   );
-
-  const notImplemented = useCallback(() => {}, []);
 
   return (
     <Screen edges={['top']}>
@@ -93,6 +106,7 @@ export const HomeScreen = () => {
           distanceKm={todayActivity.distanceKm}
           activeMinutes={todayActivity.activeMinutes}
           caloriesBurned={todayActivity.caloriesBurned}
+          onPressAnalysis={onOpenAnalytics}
         />
 
         <WeeklyStepsChart data={weeklySteps} goal={stepGoal} />
@@ -100,8 +114,8 @@ export const HomeScreen = () => {
         <QuickActionsRow
           streakDays={currentStreak}
           onPressChallenges={onOpenChallenges}
-          onPressNutrition={notImplemented}
-          onPressHealth={notImplemented}
+          onPressNutrition={onOpenNutrition}
+          onPressHealth={onOpenHealth}
           onPressStreaks={onOpenStreak}
         />
 

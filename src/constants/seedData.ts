@@ -3,8 +3,12 @@ import type {
   AppNotification,
   Challenge,
   CoinTransaction,
+  FoodEntry,
+  FoodItem,
   LeaderboardEntry,
+  PlannedMeal,
   ShopItem,
+  VitalReading,
   WorkoutTemplate,
 } from '../types/models';
 
@@ -684,3 +688,411 @@ export const hydrationHighlights = {
 /** The line at the foot of the hydration screen. */
 export const hydrationTip =
   "Drink water regularly; don't wait until thirsty.";
+
+/**
+ * Today's steps, hour by hour, midnight first.
+ *
+ * The twenty-four figures add up to `todayActivity.steps` exactly, which is
+ * the point of seeding them rather than generating them: the analytics screen
+ * draws this series under a total taken from `todayActivity`, and a chart that
+ * did not add up to the number above it is the first thing a user would spot.
+ */
+export const todayHourlySteps: number[] = [
+  0, 0, 0, 0, 0, 12,
+  120, 380, 640, 410, 260, 300,
+  520, 340, 210, 260, 380, 620,
+  720, 540, 380, 90, 40, 23,
+];
+
+/**
+ * This month's steps in weekly buckets, and this year's by month.
+ *
+ * Buckets rather than raw days: a month of daily bars is thirty columns on a
+ * 375pt screen, which is a texture rather than a chart. The analytics range
+ * switches between these four series, so each one is already at the grain its
+ * own period can be read at.
+ */
+export const monthlyStepsByWeek = [
+  { label: 'W1', steps: 48_200 },
+  { label: 'W2', steps: 52_640 },
+  { label: 'W3', steps: 44_310 },
+  { label: 'W4', steps: 57_480 },
+  { label: 'W5', steps: 21_905 },
+];
+
+export const yearlyStepsByMonth = [
+  { label: 'Jan', steps: 186_400 },
+  { label: 'Feb', steps: 172_300 },
+  { label: 'Mar', steps: 201_850 },
+  { label: 'Apr', steps: 195_600 },
+  { label: 'May', steps: 224_535 },
+  { label: 'Jun', steps: 189_200 },
+  { label: 'Jul', steps: 176_900 },
+  { label: 'Aug', steps: 198_450 },
+  { label: 'Sep', steps: 207_310 },
+  { label: 'Oct', steps: 193_720 },
+  { label: 'Nov', steps: 181_640 },
+  { label: 'Dec', steps: 165_980 },
+];
+
+/**
+ * The vitals the checkup screen opens with, newest first.
+ *
+ * Only the numbers are seeded. Whether each one is normal is worked out at
+ * render from the reference ranges, so a fixture cannot claim a pulse of 140
+ * is fine — see `components/health/vitals.ts`.
+ */
+export const seedVitals: VitalReading[] = [
+  {
+    id: 'v-hr-1',
+    kind: 'heart_rate',
+    value: 72,
+    secondary: null,
+    recordedAt: at(0, 9, 30),
+  },
+  {
+    id: 'v-bp-1',
+    kind: 'blood_pressure',
+    value: 118,
+    secondary: 76,
+    recordedAt: at(0, 9, 30),
+  },
+  {
+    id: 'v-bmi-1',
+    kind: 'bmi',
+    value: 22.4,
+    secondary: null,
+    recordedAt: at(0, 9, 30),
+  },
+  {
+    id: 'v-wt-1',
+    kind: 'weight',
+    value: 65,
+    secondary: null,
+    recordedAt: at(0, 8, 15),
+  },
+  {
+    id: 'v-hr-1b',
+    kind: 'heart_rate',
+    value: 68,
+    secondary: null,
+    recordedAt: at(1, 21, 15),
+  },
+  {
+    id: 'v-hr-2',
+    kind: 'heart_rate',
+    value: 74,
+    secondary: null,
+    recordedAt: at(2, 9, 5),
+  },
+  {
+    id: 'v-hr-0',
+    kind: 'heart_rate',
+    value: 76,
+    secondary: null,
+    recordedAt: at(3, 10, 20),
+  },
+  {
+    id: 'v-hr-4',
+    kind: 'heart_rate',
+    value: 70,
+    secondary: null,
+    recordedAt: at(4, 18, 45),
+  },
+  {
+    id: 'v-hr-5',
+    kind: 'heart_rate',
+    value: 79,
+    secondary: null,
+    recordedAt: at(5, 7, 50),
+  },
+  {
+    id: 'v-hr-6',
+    kind: 'heart_rate',
+    value: 73,
+    secondary: null,
+    recordedAt: at(6, 8, 10),
+  },
+  {
+    id: 'v-hr-7',
+    kind: 'heart_rate',
+    value: 71,
+    secondary: null,
+    recordedAt: at(7, 9, 30),
+  },
+  {
+    id: 'v-wt-0',
+    kind: 'weight',
+    value: 65.6,
+    secondary: null,
+    recordedAt: at(7, 8, 10),
+  },
+];
+
+/**
+ * The health score, until a health service works one out.
+ *
+ * Seeded rather than derived from the vitals above: a number out of a hundred
+ * that claims to summarise somebody's health is a clinical judgement, not an
+ * average of four readings, and inventing the arithmetic here would put a
+ * figure on screen that nothing could justify. The band under it — "Good" — is
+ * presentation and is derived from the score.
+ */
+export const healthHighlights = {
+  score: 82,
+  outOf: 100,
+};
+
+/** The line at the foot of the checkup screen. */
+export const healthTip =
+  'Drink enough water, eat balanced meals and sleep well.';
+
+/**
+ * What the day's plate looks like when the app is opened cold.
+ *
+ * Eleven items across four meals. Seeded as the items themselves rather than
+ * as four meal totals, because the screen states both — "4 items · 650 kcal" —
+ * and a meal whose figure did not match the food under it would be wrong in
+ * the one place a user can check it.
+ */
+export const seedFoodEntries: FoodEntry[] = [
+  { id: 'f-b1', slot: 'breakfast', name: 'Oats with milk', portion: '', calories: 260, proteinG: 10, carbsG: 38, fiberG: 0, fatsG: 6, loggedAt: at(0, 8, 30) },
+  { id: 'f-b2', slot: 'breakfast', name: 'Banana', portion: '', calories: 90, proteinG: 1, carbsG: 18, fiberG: 0, fatsG: 0, loggedAt: at(0, 8, 35) },
+  { id: 'f-b3', slot: 'breakfast', name: 'Paneer cubes', portion: '', calories: 100, proteinG: 8, carbsG: 2, fiberG: 0, fatsG: 7, loggedAt: at(0, 8, 40) },
+
+  { id: 'f-l1', slot: 'lunch', name: 'Dal tadka', portion: '', calories: 180, proteinG: 10, carbsG: 22, fiberG: 0, fatsG: 5, loggedAt: at(0, 13, 30) },
+  { id: 'f-l2', slot: 'lunch', name: 'Brown rice', portion: '', calories: 220, proteinG: 5, carbsG: 42, fiberG: 0, fatsG: 2, loggedAt: at(0, 13, 32) },
+  { id: 'f-l3', slot: 'lunch', name: 'Mixed veg sabzi', portion: '', calories: 150, proteinG: 5, carbsG: 14, fiberG: 0, fatsG: 6, loggedAt: at(0, 13, 34) },
+  { id: 'f-l4', slot: 'lunch', name: 'Curd', portion: '', calories: 100, proteinG: 6, carbsG: 12, fiberG: 0, fatsG: 4, loggedAt: at(0, 13, 36) },
+
+  { id: 'f-s1', slot: 'snack', name: 'Protein shake', portion: '', calories: 200, proteinG: 25, carbsG: 12, fiberG: 0, fatsG: 3, loggedAt: at(0, 17, 0) },
+
+  { id: 'f-d1', slot: 'dinner', name: 'Roti', portion: '', calories: 160, proteinG: 6, carbsG: 32, fiberG: 0, fatsG: 2, loggedAt: at(0, 20, 0) },
+  { id: 'f-d2', slot: 'dinner', name: 'Paneer bhurji', portion: '', calories: 150, proteinG: 8, carbsG: 5, fiberG: 0, fatsG: 9, loggedAt: at(0, 20, 5) },
+  { id: 'f-d3', slot: 'dinner', name: 'Salad', portion: '', calories: 40, proteinG: 1, carbsG: 8, fiberG: 0, fatsG: 1, loggedAt: at(0, 20, 8) },
+];
+
+/** The nutrition line the AI strip shows, until a service writes one. */
+export const nutritionTip =
+  'Add more protein to your dinner for better muscle recovery.';
+
+/**
+ * The diet plan, as a three-day rotation.
+ *
+ * A rotation rather than a plan per date: that is how a dietitian actually
+ * writes one, and it means every day the user pages to — forwards or back —
+ * has a plan behind it without the seed having to invent a year of them.
+ * `dietPlanForDate` in the diet plan store is what maps a date onto a day of
+ * the cycle.
+ *
+ * Day one is the plan the screen was designed around; its four meals add up to
+ * 1,250 kcal, which is the figure the ring above them draws.
+ */
+export const dietPlanRotation: PlannedMeal[][] = [
+  [
+    {
+      id: 'p1-breakfast',
+      slot: 'breakfast',
+      time: '08:00',
+      calories: 320,
+      proteinG: 18,
+      carbsG: 42,
+      fatsG: 9,
+      items: [
+        { name: 'Oats with banana', quantity: '1 bowl (200g)' },
+        { name: 'Boiled eggs', quantity: '2 eggs' },
+        { name: 'Green tea', quantity: '1 cup' },
+      ],
+    },
+    {
+      id: 'p1-lunch',
+      slot: 'lunch',
+      time: '13:00',
+      calories: 450,
+      proteinG: 26,
+      carbsG: 58,
+      fatsG: 14,
+      items: [
+        { name: 'Brown rice', quantity: '1 cup (150g)' },
+        { name: 'Dal', quantity: '1 bowl (150g)' },
+        { name: 'Mixed salad', quantity: '1 bowl' },
+        { name: 'Paneer curry', quantity: '100g' },
+      ],
+    },
+    {
+      id: 'p1-snack',
+      slot: 'snack',
+      time: '17:00',
+      calories: 180,
+      proteinG: 6,
+      carbsG: 18,
+      fatsG: 11,
+      items: [
+        { name: 'Mixed nuts', quantity: '30g' },
+        { name: 'Apple', quantity: '1 medium' },
+        { name: 'Black coffee', quantity: '1 cup' },
+      ],
+    },
+    {
+      id: 'p1-dinner',
+      slot: 'dinner',
+      time: '20:00',
+      calories: 300,
+      proteinG: 32,
+      carbsG: 32,
+      fatsG: 11,
+      items: [
+        { name: 'Grilled chicken', quantity: '100g' },
+        { name: 'Steamed veggies', quantity: '1 bowl' },
+        { name: 'Quinoa', quantity: '1 cup (100g)' },
+      ],
+    },
+  ],
+  [
+    {
+      id: 'p2-breakfast',
+      slot: 'breakfast',
+      time: '08:00',
+      calories: 350,
+      proteinG: 20,
+      carbsG: 44,
+      fatsG: 10,
+      items: [
+        { name: 'Poha with peanuts', quantity: '1 plate (200g)' },
+        { name: 'Curd', quantity: '1 bowl' },
+        { name: 'Black coffee', quantity: '1 cup' },
+      ],
+    },
+    {
+      id: 'p2-lunch',
+      slot: 'lunch',
+      time: '13:00',
+      calories: 470,
+      proteinG: 28,
+      carbsG: 60,
+      fatsG: 13,
+      items: [
+        { name: 'Roti', quantity: '3' },
+        { name: 'Rajma', quantity: '1 bowl (150g)' },
+        { name: 'Cucumber salad', quantity: '1 bowl' },
+      ],
+    },
+    {
+      id: 'p2-snack',
+      slot: 'snack',
+      time: '17:00',
+      calories: 160,
+      proteinG: 12,
+      carbsG: 14,
+      fatsG: 5,
+      items: [
+        { name: 'Sprouts chaat', quantity: '1 bowl' },
+        { name: 'Green tea', quantity: '1 cup' },
+      ],
+    },
+    {
+      id: 'p2-dinner',
+      slot: 'dinner',
+      time: '20:00',
+      calories: 320,
+      proteinG: 30,
+      carbsG: 30,
+      fatsG: 12,
+      items: [
+        { name: 'Grilled fish', quantity: '120g' },
+        { name: 'Sautéed spinach', quantity: '1 bowl' },
+        { name: 'Millet khichdi', quantity: '1 cup' },
+      ],
+    },
+  ],
+  [
+    {
+      id: 'p3-breakfast',
+      slot: 'breakfast',
+      time: '08:00',
+      calories: 330,
+      proteinG: 22,
+      carbsG: 38,
+      fatsG: 10,
+      items: [
+        { name: 'Besan chilla', quantity: '2' },
+        { name: 'Mint chutney', quantity: '2 tbsp' },
+        { name: 'Buttermilk', quantity: '1 glass' },
+      ],
+    },
+    {
+      id: 'p3-lunch',
+      slot: 'lunch',
+      time: '13:00',
+      calories: 440,
+      proteinG: 25,
+      carbsG: 56,
+      fatsG: 12,
+      items: [
+        { name: 'Vegetable pulao', quantity: '1 bowl (180g)' },
+        { name: 'Soya chunk curry', quantity: '100g' },
+        { name: 'Raita', quantity: '1 bowl' },
+      ],
+    },
+    {
+      id: 'p3-snack',
+      slot: 'snack',
+      time: '17:00',
+      calories: 170,
+      proteinG: 8,
+      carbsG: 20,
+      fatsG: 7,
+      items: [
+        { name: 'Roasted chana', quantity: '40g' },
+        { name: 'Orange', quantity: '1 medium' },
+      ],
+    },
+    {
+      id: 'p3-dinner',
+      slot: 'dinner',
+      time: '20:00',
+      calories: 310,
+      proteinG: 28,
+      carbsG: 34,
+      fatsG: 10,
+      items: [
+        { name: 'Paneer tikka', quantity: '120g' },
+        { name: 'Stir-fried veggies', quantity: '1 bowl' },
+        { name: 'Jowar roti', quantity: '2' },
+      ],
+    },
+  ],
+];
+
+/**
+ * The food library the add-meal screen searches and quick-adds from.
+ *
+ * Short on purpose: it is a stand-in for a nutrition database of hundreds of
+ * thousands of items, and the screen's job is to show how logging works, not
+ * to be that database. Every figure is per the portion beside it.
+ */
+export const foodLibrary: FoodItem[] = [
+  { id: 'fl-oats', name: 'Oats (Cooked)', portion: '1 Cup (150 g)', emoji: '🥣', calories: 150, proteinG: 5, carbsG: 27, fatsG: 3, fiberG: 4 },
+  { id: 'fl-banana', name: 'Banana', portion: '1 Medium (118 g)', emoji: '🍌', calories: 89, proteinG: 1, carbsG: 23, fatsG: 0.3, fiberG: 2.6 },
+  { id: 'fl-egg', name: 'Boiled Egg', portion: '1 Large (50 g)', emoji: '🥚', calories: 78, proteinG: 6, carbsG: 0.6, fatsG: 5, fiberG: 0 },
+  { id: 'fl-peanut-butter', name: 'Peanut Butter', portion: '1 Tbsp (16 g)', emoji: '🥜', calories: 94, proteinG: 4, carbsG: 3, fatsG: 8, fiberG: 1 },
+  { id: 'fl-brown-rice', name: 'Brown Rice', portion: '1 Cup (150 g)', emoji: '🍚', calories: 215, proteinG: 5, carbsG: 45, fatsG: 1.8, fiberG: 3.5 },
+  { id: 'fl-dal', name: 'Dal', portion: '1 Bowl (150 g)', emoji: '🍲', calories: 180, proteinG: 10, carbsG: 22, fatsG: 5, fiberG: 6 },
+  { id: 'fl-paneer', name: 'Paneer', portion: '100 g', emoji: '🧀', calories: 265, proteinG: 18, carbsG: 6, fatsG: 20, fiberG: 0 },
+  { id: 'fl-curd', name: 'Curd', portion: '1 Bowl (150 g)', emoji: '🥛', calories: 98, proteinG: 6, carbsG: 8, fatsG: 4, fiberG: 0 },
+  { id: 'fl-roti', name: 'Roti', portion: '1 Piece (40 g)', emoji: '🫓', calories: 104, proteinG: 3, carbsG: 20, fatsG: 1.5, fiberG: 2 },
+  { id: 'fl-chicken', name: 'Grilled Chicken', portion: '100 g', emoji: '🍗', calories: 165, proteinG: 31, carbsG: 0, fatsG: 3.6, fiberG: 0 },
+  { id: 'fl-salad', name: 'Mixed Salad', portion: '1 Bowl (120 g)', emoji: '🥗', calories: 45, proteinG: 2, carbsG: 8, fatsG: 0.5, fiberG: 3 },
+  { id: 'fl-almonds', name: 'Almonds', portion: '10 pieces (12 g)', emoji: '🌰', calories: 70, proteinG: 3, carbsG: 2.5, fatsG: 6, fiberG: 1.5 },
+  { id: 'fl-apple', name: 'Apple', portion: '1 Medium (180 g)', emoji: '🍎', calories: 95, proteinG: 0.5, carbsG: 25, fatsG: 0.3, fiberG: 4.4 },
+  { id: 'fl-coffee', name: 'Black Coffee', portion: '1 Cup', emoji: '☕', calories: 5, proteinG: 0.3, carbsG: 0, fatsG: 0, fiberG: 0 },
+  { id: 'fl-protein-shake', name: 'Protein Shake', portion: '1 Scoop (30 g)', emoji: '🥤', calories: 120, proteinG: 24, carbsG: 3, fatsG: 1.5, fiberG: 0 },
+];
+
+/** What the quick-add row offers, in the order it draws them. */
+export const quickAddFoodIds = [
+  'fl-oats',
+  'fl-banana',
+  'fl-egg',
+  'fl-peanut-butter',
+];

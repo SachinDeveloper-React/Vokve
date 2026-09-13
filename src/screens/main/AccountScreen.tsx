@@ -67,6 +67,11 @@ export const AccountScreen = () => {
   // than the rewards themselves — and the tab bar already leads there. It now
   // opens the leaderboard's reward board, which is what the row's own subtitle
   // promises.
+  const onOpenNotificationSettings = useCallback(
+    () => navigation.navigate('NotificationSettings'),
+    [navigation],
+  );
+
   const onOpenRewards = useCallback(
     () => navigation.navigate('LeaderboardRewards'),
     [navigation],
@@ -112,7 +117,7 @@ export const AccountScreen = () => {
         <AccountShortcutsRow
           onPressEditProfile={notImplemented}
           onPressPrivacy={notImplemented}
-          onPressNotifications={notImplemented}
+          onPressNotifications={onOpenNotificationSettings}
           onPressAppearance={openAppearance}
           onPressSecurity={notImplemented}
         />

@@ -191,6 +191,18 @@ describe('NotificationsScreen', () => {
     ).toBe(false);
   });
 
+  test('both settings controls lead to the notification settings', async () => {
+    seed([note('a', 'steps', at(0, 10, 0))]);
+    const tree = await render();
+
+    press(tree, 'Notification settings');
+    expect(mockNavigate).toHaveBeenCalledWith('NotificationSettings');
+
+    mockNavigate.mockClear();
+    press(tree, 'Notification Settings. Manage your notification preferences');
+    expect(mockNavigate).toHaveBeenCalledWith('NotificationSettings');
+  });
+
   test('the chevron returns to whatever the centre was opened from', async () => {
     seed([note('a', 'steps', at(0, 10, 0))]);
 
