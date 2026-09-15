@@ -24,7 +24,10 @@ const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
   useNavigation: () => ({ navigate: mockNavigate }),
+  useRoute: () => ({ params: mockRouteParams }),
 }));
+
+let mockRouteParams: { notice?: string } | undefined;
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -34,6 +37,7 @@ const metrics = {
 const signIn = jest.fn().mockResolvedValue(true);
 
 beforeEach(() => {
+  mockRouteParams = undefined;
   mockNavigate.mockClear();
   signIn.mockClear();
   useAuthStore.setState({ signIn, isSubmitting: false, error: null });
@@ -151,17 +155,26 @@ describe('sign-in screen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('SignUp');
   });
 
-  test('says so rather than doing nothing for the flows that are not wired up', async () => {
+  test('says so rather than doing nothing for social sign-in, which is not wired up', async () => {
     const tree = await render();
-
-    await ReactTestRenderer.act(() => {
-      pressableFor(tree, 'Forgot password').props.onPress();
-    });
-    expect(textOf(tree, RNText)).toContain('Password reset is not available');
-
     await ReactTestRenderer.act(() => {
       pressableFor(tree, 'Continue with Google').props.onPress();
     });
     expect(textOf(tree, RNText)).toContain('Google sign-in is not connected');
+  });
+
+  test('forgot password leads to the reset flow rather than a dead-end notice', async () => {
+    const tree = await render();
+    await ReactTestRenderer.act(() => {
+      pressableFor(tree, 'Forgot password').props.onPress();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('ForgotPassword');
+    expect(textOf(tree, RNText)).not.toContain('not available');
+  });
+
+  test('shows the notice a finished reset arrives with', async () => {
+    mockRouteParams = { notice: 'Your password has been updated.' };
+    const tree = await render();
+    expect(textOf(tree, RNText)).toContain('Your password has been updated.');
   });
 });

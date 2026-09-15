@@ -23,8 +23,10 @@ import {
   mockActivityApi,
   mockAuthApi,
   mockUserApi,
+  mockWalletApi,
   mockWorkoutApi,
 } from '../src/services/api/mockApi';
+import { seedCoinTransactions } from '../src/constants/seedData';
 import type { SignUpPayload } from '../src/types/forms';
 
 const PAYLOAD: SignUpPayload = {
@@ -51,17 +53,18 @@ const expectApiError = async (
 };
 
 describe('the mock switch', () => {
-  test('is on while there is no backend', () => {
-    expect(shouldUseMockApi()).toBe(true);
+  // The backend exists now (vokve-backend/), so the default is the real API.
+  test('is off now that there is a backend', () => {
+    expect(shouldUseMockApi()).toBe(false);
   });
 
-  test('turns off from the config flag alone', () => {
+  test('turns on from the config flag alone', () => {
     const mutable = config as { useMockApi: boolean };
-    mutable.useMockApi = false;
+    mutable.useMockApi = true;
     try {
-      expect(shouldUseMockApi()).toBe(false);
+      expect(shouldUseMockApi()).toBe(true);
     } finally {
-      mutable.useMockApi = true;
+      mutable.useMockApi = false;
     }
   });
 });
@@ -70,7 +73,12 @@ describe('mock sign-up and verification', () => {
   test('returns a challenge rather than a session', async () => {
     const challenge = await mockAuthApi.signUp(PAYLOAD);
 
-    expect(challenge.phone).toBe(PAYLOAD.phone);
+    // The code goes to the email while there is no SMS provider, as on the
+    // server (`otp.signupChannel`), so the phone field is empty and the
+    // masked target is the address.
+    expect(challenge.channel).toBe('email');
+    expect(challenge.phone).toBe('');
+    expect(challenge.target).toMatch(/^.•••@/);
     expect(challenge.codeLength).toBe(MOCK_RULES.otp.length);
     expect(challenge.expiresInSeconds).toBeGreaterThan(0);
     expect(challenge.resendInSeconds).toBeGreaterThan(0);
@@ -216,7 +224,7 @@ describe('mock app data', () => {
   });
 
   test('starts a new account with no history, so the empty state is reachable', async () => {
-    await expect(mockWorkoutApi.history()).resolves.toEqual([]);
+    await expect(mockWorkoutApi.history()).resolves.toEqual({ data: [], nextCursor: null });
   });
 
   test('returns a full week of activity, dated and consistent', async () => {
@@ -230,5 +238,56 @@ describe('mock app data', () => {
     }
     // Last entry is today, which is what the Today screen assumes.
     expect(week[6].date).toBe(new Date().toISOString().slice(0, 10));
+  });
+});
+
+describe('the wallet ledger', () => {
+  test('pages with a cursor the way the server does', async () => {
+    const first = await mockWalletApi.transactions({ limit: 4 });
+    expect(first.data).toHaveLength(4);
+    expect(first.nextCursor).toBe(first.data[3].id);
+
+    const second = await mockWalletApi.transactions({
+      limit: 4,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.data[0].id).toBe(seedCoinTransactions[4].id);
+
+    // Walk to the end: the last page says there is no more.
+    const third = await mockWalletApi.transactions({
+      limit: 4,
+      cursor: second.nextCursor ?? undefined,
+    });
+    expect(third.nextCursor).toBeNull();
+    expect(first.data.length + second.data.length + third.data.length).toBe(
+      seedCoinTransactions.length,
+    );
+  });
+
+  test('filters to one source and pages inside it', async () => {
+    const page = await mockWalletApi.transactions({ source: 'workout', limit: 2 });
+    expect(page.data.every(row => row.source === 'workout')).toBe(true);
+    expect(page.data).toHaveLength(2);
+    expect(page.nextCursor).not.toBeNull();
+
+    const rest = await mockWalletApi.transactions({
+      source: 'workout',
+      cursor: page.nextCursor ?? undefined,
+    });
+    expect(rest.data.every(row => row.source === 'workout')).toBe(true);
+    expect(rest.nextCursor).toBeNull();
+  });
+
+  test("the month summary is this calendar month's rows, not the lifetime", async () => {
+    const wallet = await mockWalletApi.get();
+    const now = new Date();
+    const thisMonth = seedCoinTransactions.filter(row => {
+      const at = new Date(row.createdAt);
+      return at.getMonth() === now.getMonth() && at.getFullYear() === now.getFullYear();
+    });
+    const earned = thisMonth.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+    const spent = thisMonth.filter(r => r.amount < 0).reduce((s, r) => s - r.amount, 0);
+
+    expect(wallet.monthSummary).toEqual({ earned, spent, net: earned - spent });
   });
 });

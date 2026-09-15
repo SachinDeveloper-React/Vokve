@@ -53,7 +53,15 @@ export function formatGrouped(value: number): string {
  * formatting can change in a single edit.
  */
 export function formatCoins(value: number): string {
-  return formatGrouped(value);
+  // Coins are decimal to three places on the server (D-27); whole numbers
+  // stay whole, fractions show two places — "0.095" reads as "0.10".
+  if (Number.isInteger(value)) {
+    return formatGrouped(value);
+  }
+  const fixed = Math.abs(value).toFixed(2);
+  const [whole, fraction] = fixed.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${value < 0 ? '-' : ''}${grouped}.${fraction}`;
 }
 
 /** Seconds to `m:ss`, or `h:mm:ss` once a session passes an hour. */

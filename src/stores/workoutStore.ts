@@ -171,8 +171,8 @@ export const useWorkoutStore = create<WorkoutState>()(
       loadHistory: async () => {
         set({ isSyncing: true, error: null });
         try {
-          const history = await workoutApi.history();
-          set({ history, isSyncing: false });
+          const page = await workoutApi.history();
+          set({ history: page.data, isSyncing: false });
         } catch (error) {
           set({ error: toApiError(error), isSyncing: false });
         }

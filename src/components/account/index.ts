@@ -1,3 +1,4 @@
+export { EmailVerificationBanner } from './EmailVerificationBanner';
 export { AccountIdentityCard } from './AccountIdentityCard';
 export { SettingsSection } from './SettingsSection';
 export { AccountHeader } from './AccountHeader';

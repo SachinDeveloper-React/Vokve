@@ -1,6 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  useNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { config } from '../constants/config';
 import { ActiveWorkoutScreen } from '../screens/main/ActiveWorkoutScreen';
@@ -8,6 +11,7 @@ import { AddMealScreen } from '../screens/main/AddMealScreen';
 import { AnalyticsScreen } from '../screens/main/AnalyticsScreen';
 import { BloodPressureScreen } from '../screens/main/BloodPressureScreen';
 import { ChallengesScreen } from '../screens/main/ChallengesScreen';
+import { CoinHistoryScreen } from '../screens/main/CoinHistoryScreen';
 import { DietPlanScreen } from '../screens/main/DietPlanScreen';
 import { HealthCheckupScreen } from '../screens/main/HealthCheckupScreen';
 import { HeartRateScreen } from '../screens/main/HeartRateScreen';
@@ -20,11 +24,16 @@ import { NutritionHistoryScreen } from '../screens/main/NutritionHistoryScreen';
 import { NutritionScreen } from '../screens/main/NutritionScreen';
 import { ReferralScreen } from '../screens/main/ReferralScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
+import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
+import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
+import { UpgradeRequiredScreen } from '../screens/system/UpgradeRequiredScreen';
+import { useUpgradeRequired } from '../stores/appStatusStore';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
   useAuthStore,
   useIsProfileComplete,
+  usePendingContactVerification,
 } from '../stores/authStore';
 import { useTheme } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
@@ -56,10 +65,45 @@ export const RootNavigator = () => {
   const status = useAuthStatus();
   const isProfileComplete = useIsProfileComplete();
   const hydrate = useAuthStore(s => s.hydrate);
+  const pendingContact = usePendingContactVerification();
+  const upgradeRequired = useUpgradeRequired();
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const [isNavReady, setNavReady] = useState(false);
+  const onNavReady = useCallback(() => setNavReady(true), []);
+  const promptedFor = useRef<string | null>(null);
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // Once, per challenge: the moment the sign-up code passes, the server
+  // hands back the challenge for the other contact and the app is already
+  // on Main, so the verify screen is pushed over it. Skipping it goes back
+  // to Main; the banner can ask again later (D-20 — soft gate).
+  useEffect(() => {
+    if (!isNavReady || !pendingContact) {
+      return;
+    }
+    if (promptedFor.current === pendingContact.verificationId) {
+      return;
+    }
+    promptedFor.current = pendingContact.verificationId;
+    navigationRef.navigate('VerifyContact');
+  }, [isNavReady, navigationRef, pendingContact]);
+
+  // A retired build outranks everything: no session state matters when
+  // every request is refused.
+  if (upgradeRequired) {
+    return <UpgradeRequiredScreen />;
+  }
+
+  // A session that could not be confirmed keeps its own screen — with a
+  // retry — rather than being mistaken for no session at all. A retry keeps
+  // the status and shows its progress on the button, so this never flashes
+  // back to the splash.
+  if (status === 'unreachable') {
+    return <ConnectionErrorScreen />;
+  }
 
   if (status === 'idle' || status === 'hydrating') {
     return (
@@ -79,7 +123,11 @@ export const RootNavigator = () => {
     status === 'authenticated' && !isProfileComplete && !shouldBypassAuth();
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navigationTheme}
+      onReady={onNavReady}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {needsOnboarding ? (
           <Stack.Screen name="Onboarding" component={OnboardingNavigator} />
@@ -112,6 +160,11 @@ export const RootNavigator = () => {
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen
+              name="CoinHistory"
+              component={CoinHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="BloodPressure"
               component={BloodPressureScreen}
               options={{ animation: 'slide_from_right' }}
@@ -140,6 +193,11 @@ export const RootNavigator = () => {
               name="Hydration"
               component={HydrationScreen}
               options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="VerifyContact"
+              component={VerifyOtpScreen}
+              options={{ animation: 'slide_from_bottom' }}
             />
             <Stack.Screen
               name="LeaderboardRewards"

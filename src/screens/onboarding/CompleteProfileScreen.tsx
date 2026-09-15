@@ -29,6 +29,7 @@ import {
 } from '../../components';
 import { useTheme } from '../../theme';
 import { useAuthStore } from '../../stores/authStore';
+import { describeAuthError } from '../../utils/authErrors';
 import type { UnitSystem } from '../../types/models';
 import {
   completeProfileSchema,
@@ -177,8 +178,8 @@ export const CompleteProfileScreen = () => {
           {serverError ? (
             <Alert
               tone="error"
-              title="Could not save your profile"
-              message={serverError.message}
+              title={describeAuthError(serverError, 'Could not save your profile').title}
+              message={describeAuthError(serverError, 'Could not save your profile').message}
               onDismiss={clearError}
             />
           ) : null}

@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
 import { DailyOffersCard } from '../../components/shop/DailyOffersCard';
 import { FeaturedRewardsRow } from '../../components/shop/FeaturedRewardsRow';
 import { ShopAssuranceStrip } from '../../components/shop/ShopAssuranceStrip';
@@ -123,6 +124,7 @@ export const ShopScreen = () => {
           onPressAvatar={onOpenAccount}
         />
 
+        <EmailVerificationBanner reason="redeem rewards" />
         <ShopCoinsBanner balance={balance} onPressBestRewards={showAll} />
 
         <ShopCategoryFilter value={filter} onChange={setFilter} />

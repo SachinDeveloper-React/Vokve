@@ -118,13 +118,25 @@ export const workoutTemplateSchema = z.object({
 });
 export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 
+export const activitySourceSchema = z.enum([
+  'health_connect',
+  'healthkit',
+  'manual',
+]);
+export type ActivitySource = z.infer<typeof activitySourceSchema>;
+
 export const dailyActivitySchema = z.object({
   /** ISO date, `YYYY-MM-DD`. */
   date: z.string(),
   steps: z.number().int().nonnegative().default(0),
+  /** Steps that passed provenance + plausibility and may earn coins. */
+  verifiedSteps: z.number().int().nonnegative().default(0),
+  distanceKm: z.number().nonnegative().default(0),
   activeMinutes: z.number().int().nonnegative().default(0),
   caloriesBurned: z.number().nonnegative().default(0),
   workoutsCompleted: z.number().int().nonnegative().default(0),
+  source: activitySourceSchema.nullable().default(null),
+  verified: z.boolean().default(false),
 });
 export type DailyActivity = z.infer<typeof dailyActivitySchema>;
 
@@ -162,8 +174,11 @@ export const coinTransactionSchema = z.object({
    * Signed: positive when coins were earned, negative when they were spent.
    * One signed number rather than an amount plus a direction flag, so a row
    * cannot claim to be a purchase worth +250.
+   *
+   * Decimal to three places (D-27): the server stores integer milli-coins and
+   * exposes coins, so 0.095 per 100 steps is exact.
    */
-  amount: z.number().int(),
+  amount: z.number(),
   /** ISO-8601. */
   createdAt: z.string(),
 });
@@ -503,10 +518,11 @@ export const leaderboardEntrySchema = z.object({
   /** "Delhi, India" — the city and country the rank was earned in. */
   location: z.string(),
   rank: z.number().int().positive(),
-  coins: z.number().int().nonnegative(),
+  coins: z.number().nonnegative(),
   /** Empty when the rank pays coins alone. */
   perk: z.string().default(''),
   avatarUrl: z.string().nullable().default(null),
+  isCurrentUser: z.boolean().default(false),
 });
 export type LeaderboardEntry = z.infer<typeof leaderboardEntrySchema>;
 
@@ -586,6 +602,16 @@ export const userSchema = z.object({
   /** Consecutive days with a completed workout. */
   streakDays: z.number().int().nonnegative().default(0),
   weeklyGoalWorkouts: z.number().int().positive().default(4),
+  /** ISO-8601. Set by the server on account creation. */
+  createdAt: z.string().nullable().default(null),
+  /** ISO-3166-1 alpha-2. Launch is India-only (D-29). */
+  country: z.string().nullable().default('IN'),
+  phoneVerifiedAt: z.string().nullable().default(null),
+  /** Null until the email OTP is passed. Gates spend and payout (D-20). */
+  emailVerifiedAt: z.string().nullable().default(null),
+  trustTier: z
+    .enum(['trusted', 'normal', 'watch', 'restricted', 'banned'])
+    .default('normal'),
 });
 export type User = z.infer<typeof userSchema>;
 
@@ -604,20 +630,92 @@ export type AuthTokens = z.infer<typeof authTokensSchema>;
  * the code alone is six digits and guessable, so it is never the only thing
  * identifying the attempt.
  */
+export const verificationChannelSchema = z.enum(['sms', 'email']);
+export type VerificationChannel = z.infer<typeof verificationChannelSchema>;
+
 export const verificationChallengeSchema = z.object({
   verificationId: z.string(),
   /** E.164, echoed back so the screen shows the number the server will text. */
   phone: z.string(),
+  /** Which channel the code went to. Email challenges follow phone ones. */
+  channel: verificationChannelSchema.default('sms'),
+  /** Masked destination — "+91••••••3210" or "a•••@example.com". */
+  target: z.string().default(''),
   codeLength: z.number().int().positive().default(6),
   /** How long the code stays valid. */
   expiresInSeconds: z.number().int().nonnegative(),
   /** How long before another code may be requested. */
   resendInSeconds: z.number().int().nonnegative(),
+  /**
+   * The code itself — development only, when the server runs with
+   * `OTP_DEV_ECHO`. Absent in production, always. The app shows it on the
+   * OTP screen in dev builds so the flow can be walked without a mailbox.
+   */
+  devCode: z.string().nullable().default(null),
 });
 export type VerificationChallenge = z.infer<typeof verificationChallengeSchema>;
 
 export const authResponseSchema = z.object({
   user: userSchema,
   tokens: authTokensSchema,
+  /**
+   * Present right after the sign-up code succeeds: the challenge for the
+   * *other* contact (phone after email, or email after phone), already sent
+   * so the app can ask for it without a second request. Null once both are
+   * verified — or when that channel cannot deliver yet, in which case the
+   * banner asks again later.
+   */
+  nextVerification: verificationChallengeSchema.nullable().default(null),
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
+
+
+// ─── Shapes that exist only on the server side of the contract ──────────────
+
+/** What `GET /wallet` returns. Coins are decimals (D-27). */
+export const walletSchema = z.object({
+  balance: z.number().nonnegative(),
+  /** Step coins held pending verification (escrow). Not spendable. */
+  pending: z.number().nonnegative().default(0),
+  lifetimeEarned: z.number().nonnegative(),
+  /** ISO-8601, or null when there is nothing to expire (RULES E11). */
+  expiresAt: z.string().nullable(),
+  expiryDaysLeft: z.number().int().nonnegative(),
+  /**
+   * The idle window itself (⚙ `coins.expiryDays`) and the days-before at
+   * which the user is warned (E10). Defaulted rather than required so a
+   * server from before they were sent still parses; the defaults are the
+   * rule card's own numbers.
+   */
+  expiryWindowDays: z.number().int().positive().default(90),
+  expiryWarnDays: z.array(z.number().int().nonnegative()).default([14, 3]),
+  monthSummary: z.object({
+    earned: z.number().nonnegative(),
+    spent: z.number().nonnegative(),
+    net: z.number(),
+  }),
+  /** The hard per-day ceiling and where the user stands against it. */
+  dailyCap: z.number().nonnegative(),
+  earnedToday: z.number().nonnegative(),
+  remainingToday: z.number().nonnegative(),
+});
+export type Wallet = z.infer<typeof walletSchema>;
+
+export const earnRuleSchema = z.object({
+  source: coinSourceSchema,
+  title: z.string(),
+  detail: z.string(),
+  reward: z.number().nonnegative(),
+});
+export type EarnRule = z.infer<typeof earnRuleSchema>;
+
+export const pageSchema = <T extends z.ZodTypeAny>(item: T) =>
+  z.object({ data: z.array(item), nextCursor: z.string().nullable() });
+
+export const deviceRegistrationSchema = z.object({
+  deviceId: z.string(),
+  trustTier: z.enum(['trusted', 'normal', 'watch', 'restricted', 'banned']),
+  mustUpgrade: z.boolean(),
+  minVersion: z.string(),
+});
+export type DeviceRegistration = z.infer<typeof deviceRegistrationSchema>;

@@ -28,6 +28,8 @@ import { useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import { useAuthStore } from '../../stores/authStore';
 import { formatCountdown, formatPhoneNumber } from '../../utils/format';
+import { describeOtpError } from '../../utils/authErrors';
+import { DevCodeHint } from '../../components/auth/DevCodeHint';
 import type { AuthStackParamList } from '../../types/navigation';
 
 /**
@@ -80,6 +82,11 @@ export const VerifyOtpScreen = () => {
 
   const codeLength = pending?.codeLength ?? 6;
   const isExpired = expiry.isFinished;
+  // The same screen verifies whichever contact the sign-up code went to
+  // and the other one right after (BACKEND.md §13.3); the challenge says
+  // which channel, the session says which step, and only the copy changes.
+  const isEmail = pending?.channel === 'email';
+  const isSecondary = useAuthStore(s => s.status === 'authenticated');
 
   /**
    * Nothing to verify — the store was cleared, or the screen was reached
@@ -134,10 +141,18 @@ export const VerifyOtpScreen = () => {
 
   const onResend = useCallback(async () => {
     setCode('');
-    await resendOtp();
+    const sent = await resendOtp();
+    // The new challenge usually carries the same figures as the old one, and
+    // a countdown only restarts when its input changes — so restart it here
+    // from the fresh challenge rather than trusting the numbers to differ.
+    const fresh = useAuthStore.getState().pendingVerification;
+    if (sent && fresh) {
+      expiry.restart(fresh.expiresInSeconds);
+      resend.restart(fresh.resendInSeconds);
+    }
     // The old code is dead either way, so the field is ready for the new one.
     refocus();
-  }, [refocus, resendOtp]);
+  }, [expiry, refocus, resend, resendOtp]);
 
   const goBack = useCallback(() => {
     cancelVerification();
@@ -189,7 +204,7 @@ export const VerifyOtpScreen = () => {
 
           <VStack align="center" gap="xs">
             <AppText variant="h1" center>
-              Verify Your Number
+              {isEmail ? 'Verify Your Email' : 'Verify Your Number'}
             </AppText>
             <AppText variant="body" color="textSecondary" center>
               {`Enter the ${codeLength}-digit OTP sent to`}
@@ -199,19 +214,23 @@ export const VerifyOtpScreen = () => {
                 variant="bodyStrong"
                 style={{ color: colors.brandAccent }}
               >
-                {formatPhoneNumber(pending.phone)}
+                {isEmail ? pending.target : formatPhoneNumber(pending.phone)}
               </AppText>
               <Pressable
                 onPress={goBack}
                 feedback="opacity"
                 accessibilityRole="button"
-                accessibilityLabel="Change phone number"
+                accessibilityLabel={
+                  isSecondary
+                    ? `Skip ${isEmail ? 'email' : 'phone'} verification for now`
+                    : `Change ${isEmail ? 'email address' : 'phone number'}`
+                }
               >
                 <AppText
                   variant="bodyStrong"
                   style={{ color: colors.brandAccent }}
                 >
-                  Change
+                  {isSecondary ? 'Skip for now' : 'Change'}
                 </AppText>
               </Pressable>
             </HStack>
@@ -220,8 +239,8 @@ export const VerifyOtpScreen = () => {
           {serverError ? (
             <Alert
               tone="error"
-              title="That code did not work"
-              message={serverError.message}
+              title={describeOtpError(serverError).title}
+              message={describeOtpError(serverError).message}
               onDismiss={clearError}
             />
           ) : null}
@@ -238,6 +257,7 @@ export const VerifyOtpScreen = () => {
           />
 
           <OtpSafetyNote />
+          <DevCodeHint code={pending.devCode} onUse={onChangeCode} />
 
           <HStack align="center" justify="center" gap="xs">
             <AppText variant="body" color="textSecondary">

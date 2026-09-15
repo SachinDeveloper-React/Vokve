@@ -1,11 +1,20 @@
+import { Platform } from 'react-native';
+
 /**
  * App-wide configuration. Values that differ per environment should be fed in
  * through a build-time mechanism (react-native-config / Gradle + xcconfig)
  * rather than branching on `__DEV__` beyond the defaults below.
  */
+/**
+ * Where the local backend answers from the simulator/emulator. The Android
+ * emulator reaches the host machine at 10.0.2.2, not localhost; a physical
+ * device needs the machine's LAN address instead (D-31: staging comes later).
+ */
+const LOCAL_API_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+
 export const config = {
   apiBaseUrl: __DEV__
-    ? 'https://api.staging.vokve.app/v1'
+    ? `http://${LOCAL_API_HOST}:3000/v1`
     : 'https://api.vokve.app/v1',
   /** Network calls that outlive this are almost always a dead connection. */
   requestTimeoutMs: 15000,
@@ -20,7 +29,7 @@ export const config = {
    * Callers must combine this with `__DEV__` (see RootNavigator) — the flag on
    * its own is not a safety boundary, and a release build must never honour it.
    */
-  bypassAuthInDev: true,
+  bypassAuthInDev: false,
 
   /**
    * Serves every API call from `services/api/mockApi.ts` instead of the
@@ -35,7 +44,7 @@ export const config = {
    * What the mock accepts is documented on `MOCK_RULES` in that file — the
    * short version is that the OTP is always `123456`.
    */
-  useMockApi: true,
+  useMockApi: false,
 
   /**
    * The version shown on the account screen's "About VOKVE" row.

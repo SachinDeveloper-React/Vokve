@@ -27,7 +27,22 @@ const mockNavigate = jest.fn();
 // from this same module, and a blanket mock takes that down with it.
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
-  useNavigation: () => ({ navigate: mockNavigate }),
+  useNavigation: () => ({
+    navigate: mockNavigate,
+    // The screen refreshes on focus; the subscription must exist to be torn down.
+    addListener: jest.fn(() => jest.fn()),
+  }),
+}));
+
+// The screen syncs with the wallet endpoints when signed in; none of these
+// tests are about the network, so a session is never started and the API is
+// stubbed to make any stray call visible.
+jest.mock('../src/services/api/endpoints', () => ({
+  walletApi: {
+    get: jest.fn(),
+    transactions: jest.fn(),
+    earnRules: jest.fn(),
+  },
 }));
 
 const metrics = {
@@ -51,7 +66,19 @@ const seed = (transactions: CoinTransaction[]) => {
     (sum, e) => (e.amount > 0 ? sum + e.amount : sum),
     0,
   );
-  useCoinsStore.setState({ balance, lifetimeEarned, transactions });
+  useCoinsStore.setState({
+    balance,
+    lifetimeEarned,
+    transactions,
+    pending: 0,
+    monthSummary: null,
+    expiryDaysLeft: null,
+    expiresAt: null,
+    expiryWindowDays: null,
+    expiryWarnDays: null,
+    syncedAt: null,
+    syncError: null,
+  });
 };
 
 /**
@@ -207,5 +234,185 @@ describe('WalletScreen', () => {
     seed([]);
 
     expect(allText(await render())).toContain('No coins yet');
+  });
+
+  test('the history tile and the ledger\'s "View All" both open the coin history', async () => {
+    seed([tx('a', 100, daysAgo(0))]);
+    const tree = await render();
+
+    press(tree, 'Coin History. All transactions');
+    expect(mockNavigate).toHaveBeenCalledWith('CoinHistory');
+
+    mockNavigate.mockClear();
+    press(tree, 'View all transactions');
+    expect(mockNavigate).toHaveBeenCalledWith('CoinHistory');
+  });
+
+  test("the server's month summary outranks the one added up on the device", async () => {
+    // The device only holds the newest fifty rows; the server's figure is the
+    // whole month. Once a sync has landed, that is the one on screen.
+    seed([tx('earned', 300, daysAgo(0))]);
+    useCoinsStore.setState({
+      monthSummary: { earned: 2_500, spent: 700, net: 1_800 },
+      syncedAt: new Date().toISOString(),
+    });
+
+    expect(summaryFigures(await render())).toEqual([
+      ['Earned', 2_500],
+      ['Spent', 700],
+      ['Balance', 1_800],
+    ]);
+  });
+
+  test("the server's countdown outranks the one derived from the ledger", async () => {
+    seed([tx('a', 500, daysAgo(10))]);
+    useCoinsStore.setState({ expiryDaysLeft: 7 });
+
+    const text = allText(await render());
+    expect(text).toContain('7');
+    expect(text).not.toContain(String(COIN_EXPIRY_WINDOW_DAYS - 10));
+  });
+
+  test('coins held for verification are shown next to the balance', async () => {
+    seed([tx('a', 100, daysAgo(0))]);
+    useCoinsStore.setState({ pending: 23.75 });
+
+    expect(allText(await render())).toContain('+23.75 pending verification');
+  });
+
+  test('nothing is said about pending coins when there are none', async () => {
+    seed([tx('a', 100, daysAgo(0))]);
+    useCoinsStore.setState({ pending: 0 });
+
+    expect(allText(await render())).not.toContain('pending verification');
+  });
+
+  test('a failed sync is admitted above the balance, and the figures stay', async () => {
+    seed([tx('a', 2_450, daysAgo(0))]);
+    useCoinsStore.setState({
+      syncError: 'No connection.',
+      syncedAt: new Date().toISOString(),
+    });
+
+    const text = allText(await render());
+    expect(text).toContain("Couldn't refresh");
+    expect(text).toContain('2,450');
+  });
+
+  test('the notice stays away while syncs are succeeding', async () => {
+    seed([tx('a', 100, daysAgo(0))]);
+    useCoinsStore.setState({ syncError: null });
+
+    expect(allText(await render())).not.toContain("Couldn't refresh");
+  });
+
+  describe('coin expiry', () => {
+    test('a comfortable window keeps the calm advice', async () => {
+      seed([tx('a', 500, daysAgo(0))]);
+
+      const text = allText(await render());
+      expect(text).toContain('Stay active to keep your coins secure.');
+    });
+
+    test('inside the outer warn threshold the panel asks for coins soon', async () => {
+      // 14 days before, like the server's first reminder (RULES E10).
+      seed([tx('a', 500, daysAgo(COIN_EXPIRY_WINDOW_DAYS - 14))]);
+
+      const text = allText(await render());
+      expect(text).toContain('Earn coins soon to keep them.');
+    });
+
+    test('inside the inner threshold it says today', async () => {
+      seed([tx('a', 500, daysAgo(COIN_EXPIRY_WINDOW_DAYS - 3))]);
+
+      expect(allText(await render())).toContain('Earn coins today or they expire.');
+    });
+
+    test('an empty wallet has nothing to expire, whatever the ledger says', async () => {
+      // Earned long ago, spent it all: no coins, so no urgency.
+      seed([
+        tx('a', 500, daysAgo(COIN_EXPIRY_WINDOW_DAYS - 2)),
+        tx('b', -500, daysAgo(1), 'purchase'),
+      ]);
+
+      expect(allText(await render())).toContain('Stay active to keep your coins secure.');
+    });
+
+    test("the server's warn thresholds outrank the built-in ones", async () => {
+      seed([tx('a', 500, daysAgo(0))]);
+      useCoinsStore.setState({
+        expiryDaysLeft: 20,
+        expiryWarnDays: [30, 7],
+        syncedAt: new Date().toISOString(),
+      });
+
+      expect(allText(await render())).toContain('Earn coins soon to keep them.');
+    });
+
+    test('"About Coin Expiry" opens the explainer with the user\'s own numbers', async () => {
+      seed([tx('a', 1_240, daysAgo(10))]);
+      const tree = await render();
+
+      expect(allText(tree)).not.toContain('How coin expiry works');
+      press(tree, 'About coin expiry');
+
+      const text = allText(tree);
+      expect(text).toContain('How coin expiry works');
+      expect(text).toContain(`${COIN_EXPIRY_WINDOW_DAYS - 10} days left`);
+      expect(text).toContain('Your 1,240 coins are safe until');
+      expect(text).toContain(`a fresh ${COIN_EXPIRY_WINDOW_DAYS} days`);
+      expect(text).toContain('14 days and 3 days before');
+    });
+
+    test('the "?" on the label opens the same explainer', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      const tree = await render();
+
+      press(tree, 'Coins Expiry, what is this?');
+
+      expect(allText(tree)).toContain('How coin expiry works');
+    });
+
+    test('the explainer is worded from the server\'s window when one has synced', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      useCoinsStore.setState({
+        expiryDaysLeft: 60,
+        expiresAt: new Date(Date.now() + 60 * 86_400_000).toISOString(),
+        expiryWindowDays: 60,
+        expiryWarnDays: [7],
+        syncedAt: new Date().toISOString(),
+      });
+      const tree = await render();
+
+      press(tree, 'About coin expiry');
+
+      const text = allText(tree);
+      expect(text).toContain('a fresh 60 days');
+      expect(text).toContain('7 days before');
+      expect(text).not.toContain('90');
+    });
+
+    test('an empty wallet is told there is nothing to expire yet', async () => {
+      seed([]);
+      const tree = await render();
+
+      press(tree, 'About coin expiry');
+
+      expect(allText(tree)).toContain('Nothing to expire yet');
+    });
+
+    test('"Earn coins" in the explainer closes it and opens Referral & Earn', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      const tree = await render();
+      press(tree, 'About coin expiry');
+
+      const earn = tree.root
+        .findAll(n => n.props?.label === 'Earn coins')
+        .find(n => typeof n.props.onPress === 'function');
+      if (!earn) throw new Error('No "Earn coins" button');
+      ReactTestRenderer.act(() => earn.props.onPress());
+
+      expect(mockNavigate).toHaveBeenCalledWith('Referral');
+    });
   });
 });

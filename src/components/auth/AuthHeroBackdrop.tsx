@@ -1,7 +1,6 @@
 import React, { memo } from 'react';
 import { StyleProp, View, ViewStyle } from 'react-native';
 import Svg, {
-  Circle,
   Defs,
   G,
   Path,

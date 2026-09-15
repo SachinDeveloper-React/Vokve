@@ -43,6 +43,7 @@ import {
 import { useTheme } from '../../theme';
 import { DEFAULT_COUNTRY_CODE } from '../../constants/countries';
 import { useAuthStore } from '../../stores/authStore';
+import { describeAuthError } from '../../utils/authErrors';
 import type { Gender } from '../../types/models';
 import {
   signUpSchema,
@@ -109,7 +110,7 @@ export const SignUpScreen = () => {
   const [isConfirmVisible, setConfirmVisible] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const { control, handleSubmit } = useForm<SignUpValues>({
+  const { control, handleSubmit, setError } = useForm<SignUpValues>({
     resolver: zodResolver(signUpSchema),
     defaultValues: {
       email: 'sachin@snva.com',
@@ -135,9 +136,18 @@ export const SignUpScreen = () => {
       // what lets the user fix the field it names.
       if (await signUp(toSignUpPayload(values))) {
         navigation.navigate('VerifyOtp');
+        return;
+      }
+      // A 422 names the fields it refused — "that email is already
+      // registered" — and the server uses the same paths the form does, so
+      // the message lands under the field rather than in a banner the user
+      // has to map back themselves.
+      const failure = useAuthStore.getState().error;
+      for (const [field, message] of Object.entries(failure?.fieldErrors ?? {})) {
+        setError(field as keyof SignUpValues | 'phone.number', { message });
       }
     },
-    [clearError, navigation, signUp],
+    [clearError, navigation, setError, signUp],
   );
 
   const submit = useCallback(() => {
@@ -209,8 +219,8 @@ export const SignUpScreen = () => {
           {serverError ? (
             <Alert
               tone="error"
-              title="Could not create your account"
-              message={serverError.message}
+              title={describeAuthError(serverError, 'Could not create your account').title}
+              message={describeAuthError(serverError, 'Could not create your account').message}
               onDismiss={clearError}
             />
           ) : null}

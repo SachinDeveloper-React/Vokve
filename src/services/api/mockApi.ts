@@ -1,5 +1,6 @@
 import { config } from '../../constants/config';
 import {
+  seedCoinTransactions,
   todayActivity,
   weeklySteps,
   workoutTemplates,
@@ -11,6 +12,7 @@ import {
   verificationChallengeSchema,
   workoutSchema,
   type AuthResponse,
+  type CoinTransaction,
   type DailyActivity,
   type User,
   type VerificationChallenge,
@@ -23,7 +25,7 @@ import type {
 } from '../../types/forms';
 import { logger } from '../../utils/logger';
 import { ApiError } from './errors';
-import type { ActivityApi, AuthApi, UserApi, WorkoutApi } from './contracts';
+import type { ActivityApi, AuthApi, DeviceApi, UserApi, WalletApi, WorkoutApi } from './contracts';
 
 /**
  * An in-memory stand-in for the backend, so the whole app can be built and
@@ -63,6 +65,8 @@ interface PendingSignUp {
   payload: SignUpPayload;
   expiresAt: number;
   resendAt: number;
+  /** Which code this is — the phone's, or the email's that follows it. */
+  channel?: 'sms' | 'email';
 }
 
 const pendingSignUps = new Map<string, PendingSignUp>();
@@ -79,9 +83,15 @@ const delay = () =>
 const secondsUntil = (timestamp: number) =>
   Math.max(0, Math.round((timestamp - Date.now()) / 1000));
 
-function makeUser(payload?: SignUpPayload): User {
+function makeUser(payload?: SignUpPayload, provenBy: 'email' | 'sms' = 'email'): User {
+  const now = new Date().toISOString();
   return userSchema.parse({
     id: nextId('usr'),
+    createdAt: now,
+    // A fresh sign-up has proven exactly the contact its code went to; a
+    // returning mock user has done both.
+    emailVerifiedAt: payload ? (provenBy === 'email' ? now : null) : now,
+    phoneVerifiedAt: payload ? (provenBy === 'sms' ? now : null) : now,
     // Sign-up has no name field, so one is derived from the email local part
     // rather than left blank — a greeting reading "Welcome, !" is the kind of
     // thing that ships.
@@ -116,12 +126,20 @@ function makeChallenge(
   verificationId: string,
   pending: PendingSignUp,
 ): VerificationChallenge {
+  const channel = pending.channel ?? 'sms';
   return verificationChallengeSchema.parse({
     verificationId,
-    phone: pending.payload.phone,
+    phone: channel === 'sms' ? pending.payload.phone : '',
+    channel,
+    target:
+      channel === 'email'
+        ? `${pending.payload.email.slice(0, 1)}•••@${pending.payload.email.split('@')[1] ?? ''}`
+        : `${pending.payload.phone.slice(0, 3)}••••••${pending.payload.phone.slice(-4)}`,
     codeLength: MOCK_RULES.otp.length,
     expiresInSeconds: secondsUntil(pending.expiresAt),
     resendInSeconds: secondsUntil(pending.resendAt),
+    // The mock's one code, surfaced the way the dev server surfaces its own.
+    devCode: MOCK_RULES.otp,
   });
 }
 
@@ -153,16 +171,19 @@ export const mockAuthApi: AuthApi = {
       );
     }
 
+    // Email first, as the server does while there is no SMS provider
+    // (`otp.signupChannel`); the phone is asked for later, once there is.
     const verificationId = nextId('ver');
     pendingSignUps.set(verificationId, {
       payload,
+      channel: 'email',
       expiresAt: Date.now() + OTP_LIFETIME_SECONDS * 1000,
       resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
     });
 
     logger.info(
       'mockApi',
-      `OTP for ${payload.phone} is ${MOCK_RULES.otp} (mock backend)`,
+      `OTP for ${payload.email} is ${MOCK_RULES.otp} (mock backend)`,
     );
 
     return makeChallenge(verificationId, pendingSignUps.get(verificationId)!);
@@ -197,8 +218,45 @@ export const mockAuthApi: AuthApi = {
     }
 
     pendingSignUps.delete(verificationId);
-    currentUser = makeUser(pending.payload);
+
+    // A verification on an account that already exists — the email asked
+    // for by the banner, or a phone once SMS exists — stamps that contact.
+    if (currentUser && pending.channel === 'email') {
+      currentUser = userSchema.parse({
+        ...currentUser,
+        emailVerifiedAt: new Date().toISOString(),
+      });
+      return makeAuthResponse(currentUser);
+    }
+
+    // The sign-up code: the account exists from here, with the contact the
+    // code went to proven. The server would now send the other contact its
+    // code if that channel could deliver; the mock has no SMS, so it does
+    // what the server does without one — nothing, and no `nextVerification`.
+    currentUser = makeUser(pending.payload, pending.channel ?? 'email');
     return makeAuthResponse(currentUser);
+  },
+
+  async sendEmailOtp() {
+    await delay();
+    if (!currentUser) {
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    }
+    const emailId = nextId('ver');
+    const pending: PendingSignUp = {
+      payload: {
+        email: currentUser.email,
+        phone: currentUser.phone ?? '',
+        password: '',
+        dateOfBirth: currentUser.dateOfBirth ?? '',
+        gender: currentUser.gender ?? 'other',
+      },
+      channel: 'email',
+      expiresAt: Date.now() + OTP_LIFETIME_SECONDS * 1000,
+      resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
+    };
+    pendingSignUps.set(emailId, pending);
+    return makeChallenge(emailId, pending);
   },
 
   async resendOtp(verificationId) {
@@ -228,6 +286,40 @@ export const mockAuthApi: AuthApi = {
     );
 
     return makeChallenge(verificationId, refreshed);
+  },
+
+  async forgotPassword(identifier) {
+    await delay();
+    const isEmail = identifier.includes('@');
+    const id = nextId('ver');
+    const pending: PendingSignUp = {
+      payload: {
+        email: isEmail ? identifier.toLowerCase() : 'sachin@example.com',
+        phone: isEmail ? '+919876543210' : identifier.replace(/[\s-]/g, ''),
+        password: '',
+        dateOfBirth: '',
+        gender: 'other',
+      },
+      channel: isEmail ? 'email' : 'sms',
+      expiresAt: Date.now() + OTP_LIFETIME_SECONDS * 1000,
+      resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
+    };
+    pendingSignUps.set(id, pending);
+    logger.info('mockApi', `Reset code for ${identifier} is ${MOCK_RULES.otp} (mock backend)`);
+    return makeChallenge(id, pending);
+  },
+
+  async resetPassword(verificationId, code) {
+    await delay();
+    const pending = pendingSignUps.get(verificationId);
+    if (!pending) {
+      throw new ApiError('not_found', 'This code is no longer valid. Request a new one.', 404);
+    }
+    if (code !== MOCK_RULES.otp) {
+      throw new ApiError('validation', 'That code is not right. Check it and try again.', 422);
+    }
+    pendingSignUps.delete(verificationId);
+    return { ok: true };
   },
 
   async signOut() {
@@ -288,11 +380,11 @@ export const mockWorkoutApi: WorkoutApi = {
     return workoutTemplates;
   },
 
-  async history(): Promise<Workout[]> {
+  async history() {
     await delay();
     // Nothing yet: a fresh account has no history, and inventing one makes the
     // empty state impossible to look at.
-    return [];
+    return { data: [] as Workout[], nextCursor: null };
   },
 
   async save(workout): Promise<Workout> {
@@ -303,7 +395,105 @@ export const mockWorkoutApi: WorkoutApi = {
   },
 };
 
+export const mockDeviceApi: DeviceApi = {
+  async register(profile) {
+    await delay();
+    return {
+      deviceId: `dev_mock_${profile.installId.slice(0, 8)}`,
+      trustTier: 'normal' as const,
+      mustUpgrade: false,
+      minVersion: '1.0.0',
+    };
+  },
+};
+
+/** The server's default page size, so the mock pages exactly where it would. */
+const TRANSACTION_PAGE_SIZE = 20;
+
+/**
+ * The same calendar-month rule the server applies (RULES E12), so the figure
+ * the mock hands back is the one the wallet would show against a backend —
+ * a lifetime total labelled "this month" is the kind of mock drift the
+ * contracts exist to catch.
+ */
+function monthSummaryOf(transactions: CoinTransaction[]) {
+  const now = new Date();
+  let earned = 0;
+  let spent = 0;
+  for (const entry of transactions) {
+    const at = new Date(entry.createdAt);
+    if (at.getMonth() !== now.getMonth() || at.getFullYear() !== now.getFullYear()) {
+      continue;
+    }
+    if (entry.amount > 0) earned += entry.amount;
+    else spent += -entry.amount;
+  }
+  return { earned, spent, net: earned - spent };
+}
+
+export const mockWalletApi: WalletApi = {
+  async get() {
+    await delay();
+    const balance = seedCoinTransactions.reduce((sum, t) => sum + t.amount, 0);
+    const earned = seedCoinTransactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    return {
+      balance,
+      pending: 0,
+      lifetimeEarned: earned,
+      expiresAt: new Date(Date.now() + 90 * 86_400_000).toISOString(),
+      expiryDaysLeft: 90,
+      expiryWindowDays: 90,
+      expiryWarnDays: [14, 3],
+      monthSummary: monthSummaryOf(seedCoinTransactions),
+      dailyCap: 300,
+      earnedToday: 60,
+      remainingToday: 240,
+    };
+  },
+  /**
+   * Pages the way the server does: the cursor is the id of the last row
+   * handed out, and the next page starts just after it. An unknown cursor
+   * starts from the top rather than failing — the real one would 400, but a
+   * mock that refuses stale cursors only ever gets in the way of a demo.
+   */
+  async transactions(query = {}) {
+    await delay();
+    const limit = Math.min(100, Math.max(1, query.limit ?? TRANSACTION_PAGE_SIZE));
+    const rows = query.source
+      ? seedCoinTransactions.filter(t => t.source === query.source)
+      : seedCoinTransactions;
+    const after = query.cursor ? rows.findIndex(t => t.id === query.cursor) : -1;
+    const data = rows.slice(after + 1, after + 1 + limit);
+    const last = data[data.length - 1];
+    const hasMore = last !== undefined && rows.indexOf(last) < rows.length - 1;
+    return { data, nextCursor: hasMore ? last.id : null };
+  },
+  async earnRules() {
+    await delay();
+    return [
+      { source: 'steps' as const, title: 'Walk', detail: 'Per 100 verified steps', reward: 0.095 },
+      { source: 'workout' as const, title: 'Finish a workout', detail: 'Any logged session', reward: 100 },
+      { source: 'streak' as const, title: 'Keep a streak', detail: '7 days in a row', reward: 50 },
+      { source: 'referral' as const, title: 'Invite a friend', detail: 'Once they verify their number and email', reward: 20 },
+    ];
+  },
+};
+
 export const mockActivityApi: ActivityApi = {
+  async today(): Promise<DailyActivity> {
+    await delay();
+    return dailyActivitySchema.parse({
+      date: new Date().toISOString().slice(0, 10),
+      steps: todayActivity.steps,
+      verifiedSteps: todayActivity.steps,
+      distanceKm: todayActivity.distanceKm,
+      activeMinutes: todayActivity.activeMinutes,
+      caloriesBurned: todayActivity.caloriesBurned,
+      source: 'manual',
+      verified: false,
+    });
+  },
+
   async weekly(): Promise<DailyActivity[]> {
     await delay();
 

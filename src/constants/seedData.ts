@@ -618,6 +618,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     coins: 5_000,
     perk: 'T-Shirt + Bottle',
     avatarUrl: null,
+    isCurrentUser: false,
   },
   {
     id: 'lb-2',
@@ -627,6 +628,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     coins: 3_000,
     perk: 'T-Shirt + Mat',
     avatarUrl: null,
+    isCurrentUser: false,
   },
   {
     id: 'lb-3',
@@ -636,6 +638,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     coins: 3_000,
     perk: 'T-Shirt + Mat',
     avatarUrl: null,
+    isCurrentUser: false,
   },
   {
     id: 'lb-4',
@@ -645,6 +648,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     coins: 1_000,
     perk: 'Fitness Mat',
     avatarUrl: null,
+    isCurrentUser: false,
   },
   {
     id: 'lb-5',
@@ -654,6 +658,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     coins: 1_000,
     perk: 'Fitness Mat',
     avatarUrl: null,
+    isCurrentUser: false,
   },
 ];
 

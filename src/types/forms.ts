@@ -91,6 +91,25 @@ export const signInSchema = z.object({
 });
 export type SignInValues = z.infer<typeof signInSchema>;
 
+/** The one field forgot-password asks for: the same email-or-phone as sign-in. */
+export const forgotPasswordSchema = z.object({ identifier });
+export type ForgotPasswordValues = z.infer<typeof forgotPasswordSchema>;
+
+/**
+ * The new password, with the same rules as sign-up's — a reset that accepted a
+ * weaker password than registration would be the easier way in.
+ */
+export const resetPasswordSchema = z
+  .object({
+    password,
+    confirmPassword: z.string().min(1, 'Confirm your new password'),
+  })
+  .refine(values => values.password === values.confirmPassword, {
+    path: ['confirmPassword'],
+    message: 'Passwords do not match',
+  });
+export type ResetPasswordValues = z.infer<typeof resetPasswordSchema>;
+
 export const signUpSchema = z
   .object({
     email,

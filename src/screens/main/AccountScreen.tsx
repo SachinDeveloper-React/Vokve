@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { AccountHeader } from '../../components/account/AccountHeader';
+import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
 import { AccountMenuList } from '../../components/account/AccountMenuList';
 import { AccountShortcutsRow } from '../../components/account/AccountShortcutsRow';
 import { AppearanceSheet } from '../../components/account/AppearanceSheet';
@@ -100,6 +101,8 @@ export const AccountScreen = () => {
           onPressNotifications={onOpenNotifications}
           onPressAvatar={notImplemented}
         />
+
+        <EmailVerificationBanner reason="redeem rewards and receive payouts" />
 
         <ProfileSummaryCard
           name={user?.name}

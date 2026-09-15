@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { StyleSheet } from 'react-native';
 import { useTheme } from '../../theme';
+import type { CoinExpiryUrgency } from '../../stores/coinsStore';
 import { withAlpha } from '../../utils/color';
 import { formatCoins } from '../../utils/format';
 import { Divider } from '../layout/Divider';
@@ -15,10 +16,18 @@ import { RewardPill } from './RewardPill';
 
 interface Props {
   balance: number;
+  /**
+   * Step coins the server is still verifying (RULES E15). Not in `balance`
+   * and not spendable; shown so a walk that has not paid out yet reads as
+   * "on its way" rather than "ignored". Omitted or zero draws nothing.
+   */
+  pending?: number;
   /** Every coin ever credited, spent or not. */
   lifetimeEarned: number;
   /** Days until the coins in hand lapse. */
   expiryDaysLeft: number;
+  /** How loudly the countdown speaks; see `CoinExpiryPanel`. */
+  expiryUrgency?: CoinExpiryUrgency;
   onPressAboutExpiry: () => void;
   onPressBalanceInfo?: () => void;
   onPressExpiryInfo?: () => void;
@@ -36,8 +45,10 @@ interface Props {
 export const CoinBalanceCard = memo(
   ({
     balance,
+    pending = 0,
     lifetimeEarned,
     expiryDaysLeft,
+    expiryUrgency,
     onPressAboutExpiry,
     onPressBalanceInfo,
     onPressExpiryInfo,
@@ -74,6 +85,17 @@ export const CoinBalanceCard = memo(
               </AppText>
             </HStack>
 
+            {pending > 0 ? (
+              <AppText
+                variant="micro"
+                color="textSecondary"
+                numberOfLines={1}
+                accessibilityLabel={`${formatCoins(pending)} coins pending verification`}
+              >
+                {`+${formatCoins(pending)} pending verification`}
+              </AppText>
+            ) : null}
+
             <RewardPill />
 
             <HStack gap="sm">
@@ -87,6 +109,7 @@ export const CoinBalanceCard = memo(
           <VStack flex={2}>
             <CoinExpiryPanel
               daysLeft={expiryDaysLeft}
+              urgency={expiryUrgency}
               onPressAbout={onPressAboutExpiry}
               onPressInfo={onPressExpiryInfo}
             />

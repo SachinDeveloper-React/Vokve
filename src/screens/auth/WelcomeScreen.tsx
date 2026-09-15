@@ -49,6 +49,7 @@ export const WelcomeScreen = () => {
       <VStack flex={1} justify="between" pb="xl">
         <VStack flex={1} justify="center" gap="md">
           <VStack gap="xs" mb="base">
+            <AuthHeroBackdrop style={styles.heroArt} />
             <Wordmark size="lg" />
             <AppText
               variant="label"

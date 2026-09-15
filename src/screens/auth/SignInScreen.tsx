@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   ArrowRight,
@@ -30,8 +30,12 @@ import {
 } from '../../components/auth/SocialAuthRow';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { useAuthStore } from '../../stores/authStore';
+import { describeAuthError } from '../../utils/authErrors';
 import { signInSchema, type SignInValues } from '../../types/forms';
-import type { AuthStackParamList } from '../../types/navigation';
+import type {
+  AuthStackParamList,
+  AuthStackScreenProps,
+} from '../../types/navigation';
 import { HStack } from '../../components';
 
 /** The value strip along the bottom — why an account is worth having. */
@@ -108,9 +112,16 @@ export const SignInScreen = () => {
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
+  // Why the user is here without asking — the session expired, a device was
+  // revoked, the sign-up code ran out. Set by the store, shown once.
+  const storeNotice = useAuthStore(s => s.notice);
+  const setStoreNotice = useAuthStore(s => s.setNotice);
 
+  const { params } = useRoute<AuthStackScreenProps<'SignIn'>['route']>();
   const [isPasswordVisible, setPasswordVisible] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  // A reset that just finished lands here with a line to show; the local
+  // state takes it over so dismissing it does not need a navigation call.
+  const [notice, setNotice] = useState<string | null>(params?.notice ?? null);
 
   const { control, handleSubmit, formState } = useForm<SignInValues>({
     resolver: zodResolver(signInSchema),
@@ -141,14 +152,18 @@ export const SignInScreen = () => {
   }, [navigation]);
 
   const onForgotPassword = useCallback(() => {
-    setNotice('Password reset is not available in the app yet.');
-  }, []);
+    navigation.navigate('ForgotPassword');
+  }, [navigation]);
 
   const onSocialSelect = useCallback((provider: SocialProvider) => {
     setNotice(`${PROVIDER_NAMES[provider]} sign-in is not connected yet.`);
   }, []);
 
-  const dismissNotice = useCallback(() => setNotice(null), []);
+  const dismissNotice = useCallback(() => {
+    setNotice(null);
+    setStoreNotice(null);
+  }, [setStoreNotice]);
+  const visibleNotice = notice ?? storeNotice;
 
   return (
     <Screen edges={['top', 'bottom']}>
@@ -176,14 +191,14 @@ export const SignInScreen = () => {
         {serverError ? (
           <Alert
             tone="error"
-            title="Could not sign you in"
-            message={serverError.message}
+            title={describeAuthError(serverError, 'Could not sign you in').title}
+            message={describeAuthError(serverError, 'Could not sign you in').message}
             onDismiss={clearError}
           />
         ) : null}
 
-        {notice ? (
-          <Alert tone="info" title={notice} onDismiss={dismissNotice} />
+        {visibleNotice ? (
+          <Alert tone="info" title={visibleNotice} onDismiss={dismissNotice} />
         ) : null}
 
         <Card radius="xl" padding="lg" style={styles.card}>

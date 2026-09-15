@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import {
   authResponseSchema,
+  coinTransactionSchema,
   dailyActivitySchema,
+  deviceRegistrationSchema,
+  earnRuleSchema,
+  pageSchema,
   verificationChallengeSchema,
   userSchema,
+  walletSchema,
   workoutSchema,
   workoutTemplateSchema,
   type AuthResponse,
@@ -20,12 +25,14 @@ import type {
 import { config } from '../../constants/config';
 import { logger } from '../../utils/logger';
 import { request } from './client';
-import type { ActivityApi, AuthApi, UserApi, WorkoutApi } from './contracts';
+import type { ActivityApi, AuthApi, DeviceApi, UserApi, WalletApi, WorkoutApi } from './contracts';
 import {
   MOCK_RULES,
   mockActivityApi,
   mockAuthApi,
+  mockDeviceApi,
   mockUserApi,
+  mockWalletApi,
   mockWorkoutApi,
 } from './mockApi';
 
@@ -78,10 +85,50 @@ const realAuthApi: AuthApi = {
       client.post('/auth/resend-otp', { verificationId }),
     ),
 
+  sendEmailOtp: (): Promise<VerificationChallenge> =>
+    request(verificationChallengeSchema, client =>
+      client.post('/auth/email/send-otp'),
+    ),
+
+  forgotPassword: (identifier: string): Promise<VerificationChallenge> =>
+    request(verificationChallengeSchema, client =>
+      client.post('/auth/forgot-password', { identifier }),
+    ),
+
+  resetPassword: (verificationId, code, password): Promise<{ ok: boolean }> =>
+    request(z.object({ ok: z.boolean() }), client =>
+      client.post('/auth/reset-password', { verificationId, code, password }),
+    ),
+
   signOut: (): Promise<{ ok: boolean }> =>
     request(z.object({ ok: z.boolean() }), client =>
       client.post('/auth/sign-out'),
     ),
+};
+
+const realDeviceApi: DeviceApi = {
+  register: (profile, refreshToken) =>
+    request(deviceRegistrationSchema, client =>
+      client.post('/devices/register', profile, {
+        // Lets the server bind the session that just started to this device.
+        headers: refreshToken ? { 'X-Vokve-Refresh-Token': refreshToken } : {},
+      }),
+    ),
+};
+
+const realWalletApi: WalletApi = {
+  get: () => request(walletSchema, client => client.get('/wallet')),
+  // axios drops undefined params, so an unset filter sends no `source=`.
+  transactions: (query = {}) =>
+    request(pageSchema(coinTransactionSchema), client =>
+      client.get('/wallet/transactions', {
+        params: { cursor: query.cursor, limit: query.limit, source: query.source },
+      }),
+    ),
+  earnRules: () =>
+    request(pageSchema(earnRuleSchema), client =>
+      client.get('/wallet/earn-rules'),
+    ).then(page => page.data),
 };
 
 const realUserApi: UserApi = {
@@ -101,8 +148,8 @@ const realWorkoutApi: WorkoutApi = {
       client.get('/workout-templates'),
     ),
 
-  history: (cursor?: string): Promise<Workout[]> =>
-    request(z.array(workoutSchema), client =>
+  history: cursor =>
+    request(pageSchema(workoutSchema), client =>
       client.get('/workouts', { params: { cursor } }),
     ),
 
@@ -115,6 +162,8 @@ const realActivityApi: ActivityApi = {
     request(z.array(dailyActivitySchema), client =>
       client.get('/activity/weekly'),
     ),
+  today: (): Promise<DailyActivity> =>
+    request(dailyActivitySchema, client => client.get('/activity/today')),
 };
 
 /**
@@ -155,7 +204,23 @@ export const authApi: AuthApi = {
     pick(mockAuthApi, realAuthApi).verifyOtp(verificationId, code),
   resendOtp: verificationId =>
     pick(mockAuthApi, realAuthApi).resendOtp(verificationId),
+  sendEmailOtp: () => pick(mockAuthApi, realAuthApi).sendEmailOtp(),
+  forgotPassword: identifier =>
+    pick(mockAuthApi, realAuthApi).forgotPassword(identifier),
+  resetPassword: (verificationId, code, password) =>
+    pick(mockAuthApi, realAuthApi).resetPassword(verificationId, code, password),
   signOut: () => pick(mockAuthApi, realAuthApi).signOut(),
+};
+
+export const deviceApi: DeviceApi = {
+  register: (profile, refreshToken) =>
+    pick(mockDeviceApi, realDeviceApi).register(profile, refreshToken),
+};
+
+export const walletApi: WalletApi = {
+  get: () => pick(mockWalletApi, realWalletApi).get(),
+  transactions: query => pick(mockWalletApi, realWalletApi).transactions(query),
+  earnRules: () => pick(mockWalletApi, realWalletApi).earnRules(),
 };
 
 export const userApi: UserApi = {
@@ -173,5 +238,6 @@ export const workoutApi: WorkoutApi = {
 
 export const activityApi: ActivityApi = {
   weekly: () => pick(mockActivityApi, realActivityApi).weekly(),
+  today: () => pick(mockActivityApi, realActivityApi).today(),
 };
 

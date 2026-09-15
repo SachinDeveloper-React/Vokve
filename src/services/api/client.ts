@@ -13,6 +13,7 @@ import { ApiError, toApiError } from './errors';
 interface RetryableConfig extends InternalAxiosRequestConfig {
   _retryCount?: number;
   _isRetryAfterRefresh?: boolean;
+  _isRetryAfterDeviceRegister?: boolean;
 }
 
 /**
@@ -25,6 +26,38 @@ export function setOnSessionExpired(handler: (() => void) | null): void {
   onSessionExpired = handler;
 }
 
+/**
+ * Called when the server retires this build (426). The app-status store
+ * registers itself here, for the same no-cycle reason as above.
+ */
+let onUpgradeRequired: ((error: ApiError) => void) | null = null;
+
+export function setOnUpgradeRequired(
+  handler: ((error: ApiError) => void) | null,
+): void {
+  onUpgradeRequired = handler;
+}
+
+/**
+ * The device module supplies these rather than being imported: it needs the
+ * endpoints, the endpoints need this client, and this client needing the
+ * device module would close the loop. Both are registered by `device.ts` at
+ * import, which happens before the first request because the auth store
+ * imports it.
+ */
+let requestHeadersProvider: () => Record<string, string> = () => ({});
+let deviceReregistrar: ((tokens: AuthTokens | null) => Promise<string | null>) | null = null;
+
+export function setRequestHeadersProvider(provider: () => Record<string, string>): void {
+  requestHeadersProvider = provider;
+}
+
+export function setDeviceReregistrar(
+  handler: ((tokens: AuthTokens | null) => Promise<string | null>) | null,
+): void {
+  deviceReregistrar = handler;
+}
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: config.apiBaseUrl,
   timeout: config.requestTimeoutMs,
@@ -35,6 +68,11 @@ apiClient.interceptors.request.use(async requestConfig => {
   const tokens = await secureStorage.readTokens();
   if (tokens) {
     requestConfig.headers.Authorization = `Bearer ${tokens.accessToken}`;
+  }
+  // Device, version and timezone on every call (BACKEND.md §3.8): fraud,
+  // support and the local-day boundary all start from these.
+  for (const [name, value] of Object.entries(requestHeadersProvider())) {
+    requestConfig.headers.set(name, value);
   }
   return requestConfig;
 });
@@ -87,6 +125,30 @@ apiClient.interceptors.response.use(
 
     if (!original) {
       throw apiError;
+    }
+
+    // A retired build: nothing will succeed until the app is updated, so
+    // hand it to the app-status store and let the root navigator take over.
+    if (apiError.kind === 'upgrade_required') {
+      onUpgradeRequired?.(apiError);
+      throw apiError;
+    }
+
+    // The server does not know this install — a reinstall, a cleared
+    // server, or a revoked device. Register once and replay; a second 428 is
+    // final, and the store's own handling decides what the user sees.
+    if (
+      apiError.kind === 'device_not_registered' &&
+      !original._isRetryAfterDeviceRegister
+    ) {
+      original._isRetryAfterDeviceRegister = true;
+      const tokens = await secureStorage.readTokens();
+      const deviceId = deviceReregistrar ? await deviceReregistrar(tokens) : null;
+      if (!deviceId) {
+        throw apiError;
+      }
+      original.headers['X-Vokve-Device-Id'] = deviceId;
+      return apiClient(original);
     }
 
     // Expired access token: refresh once, then replay the original request.

@@ -1,24 +1,49 @@
 # VOKVE — Backend Specification
 
-**Status:** Draft v1 · derived from the React Native client at commit `2e4170e`
+**Status:** v2.1 · derived from the React Native client at commit `fdbc4b0` · **Datastore: MongoDB**
 **Audience:** Backend engineers building the Vokve API from scratch
-**Client stack:** React Native 0.87.1 · React 19.2.3 · TypeScript · zod · zustand (MMKV persist) · axios · React Navigation
+**Companion docs:** [PRD](backend/PRD.md) · [Architecture](backend/ARCHITECTURE.md) · [Rules](backend/RULES.md) · [Phases](backend/PHASES.md) · [Memory](backend/MEMORY.md)
+**Client stack:** React Native 0.87.1 · React 19.2.3 · TypeScript · zod · zustand (MMKV persist) · axios · React Navigation 7
+
+---
+
+## 0. Table of contents
+
+1. What this document is
+2. Current state audit
+3. Transport contract
+4. Data model
+5. Screen-by-screen specification (all 30 screens)
+6. Endpoint catalogue
+7. Steps: sources, ingestion and fraud
+8. The coin economy, server-side
+9. Scheduled jobs
+10. Security and compliance
+11. Delivery order (summary — see PHASES.md)
+12. Open questions for product
+13. Devices, versions and email verification
+14. Advanced features
+15. Appendix — reference request/response pairs
 
 ---
 
 ## 1. What this document is
 
-The Vokve mobile client is **fully built and navigable, with no backend behind it**. Every screen renders, but roughly two thirds of what it renders comes from `src/constants/seedData.ts` or from client-only zustand stores persisted to MMKV.
+The Vokve mobile client is **fully built and navigable — 30 screens — with no backend behind it**. Every screen renders, but almost everything it renders comes from `src/constants/seedData.ts` (1,190 lines) or from thirteen client-only zustand stores persisted to MMKV.
 
-This document reverse-engineers the API the client already expects, specifies the endpoints it still needs, and defines the server-side rules for the parts of the product that **cannot safely stay on the device** — above all the coin economy and step counting.
+This document reverse-engineers the API the client already expects, specifies every endpoint it still needs, and defines the server-side rules for the parts of the product that **cannot safely stay on the device** — above all the coin economy and step counting.
 
 It is written to be implementable without reading the app, but every claim is anchored to a file so you can check it.
 
-### The one thing to read if you read nothing else
+### The three facts that shape the whole backend
 
-> **Coins are currently minted on the device.** `src/stores/coinsStore.ts` holds the balance, the lifetime total and the ledger in MMKV — which is **plain-text, unencrypted storage** (see the comment in `src/services/secureStorage.ts`). Coins buy physical goods (t-shirts, bottles, mats) through the shop and the leaderboard tiers. Anyone with a rooted or jailbroken device, or a file-system backup, can give themselves 500,000 coins today.
->
-> The client store must become a **read-through cache of a server-authoritative ledger**. Section 8 specifies that ledger; section 7 specifies the step verification that has to sit in front of it, because steps are the primary way coins are minted.
+1. **The client never mints coins.** No screen calls `coinsStore.earn()`. The only coin movements the client makes are *debits* — a shop redemption and a streak restore. The balance the wallet shows is the seeded ledger summed. This means **earning is 100% a server concern from day one**, and the client store becomes a read-through cache with no migration of "client-earned" history to reconcile.
+
+2. **The client never writes streak days either.** `streakStore.completeToday()` has no caller. Finishing a workout does not mark the day. The server derives streak days from verified workouts and steps; the client only reads.
+
+3. **Steps can only be read on-device.** Health Connect and HealthKit have no server API. The client uploads; the server verifies. Every fraud control in section 7 follows from this.
+
+The balance the client holds today is in **plain-text MMKV** (per the comment in `src/services/secureStorage.ts`). Coins buy physical goods. Until section 8 is built, anyone rooted can spend coins they were never issued — but because nothing is minted client-side, moving to a server ledger is a replacement, not a migration.
 
 ---
 
@@ -26,73 +51,91 @@ It is written to be implementable without reading the app, but every claim is an
 
 ### 2.1 What the client already calls
 
-Four API groups exist, declared as interfaces in `src/services/api/contracts.ts` and implemented twice — once against HTTP in `src/services/api/endpoints.ts`, once in-memory in `src/services/api/mockApi.ts`. Both implementations satisfy the same TypeScript interface, which is what keeps the mock honest.
+Four API groups exist, declared as interfaces in `src/services/api/contracts.ts` and implemented twice — against HTTP in `endpoints.ts`, and in-memory in `mockApi.ts`. Both satisfy the same TypeScript interface.
 
 | Group | Endpoints | Returns |
 |---|---|---|
-| `AuthApi` | `POST /auth/sign-in`, `POST /auth/sign-up`, `POST /auth/verify-otp`, `POST /auth/resend-otp`, `POST /auth/sign-out` | `AuthResponse`, `VerificationChallenge` |
+| `AuthApi` | `POST /auth/sign-in`, `/auth/sign-up`, `/auth/verify-otp`, `/auth/resend-otp`, `/auth/sign-out` | `AuthResponse`, `VerificationChallenge` |
 | `UserApi` | `GET /me`, `PATCH /me`, `POST /me/complete-profile` | `User` |
 | `WorkoutApi` | `GET /workout-templates`, `GET /workouts?cursor=`, `POST /workouts` | `WorkoutTemplate[]`, `Workout[]`, `Workout` |
 | `ActivityApi` | `GET /activity/weekly` | `DailyActivity[]` |
 
-Plus one endpoint called directly by the HTTP layer and not part of any interface:
+Plus `POST /auth/refresh` (`{ refreshToken }` → `AuthTokens`), called from `client.ts` with a bare axios instance so a failed refresh cannot recurse through the interceptors.
 
-| | |
-|---|---|
-| `POST /auth/refresh` | `{ refreshToken }` → `AuthTokens`. Called from `src/services/api/client.ts` with a bare axios instance, deliberately bypassing the app's own interceptors so a failed refresh cannot recurse. |
-
-**Everything else in the product has no endpoint at all.**
+**Everything else — 12 further domains — has no endpoint.**
 
 ### 2.2 What is faked, and where
 
-`src/constants/seedData.ts` (686 lines) is consumed directly by seven screens. Each export is a backend feature that does not exist:
+Every export of `seedData.ts` is a backend feature that does not exist:
 
-| Seed export | Screen | What it stands in for |
+| Seed export | Consumed by | Stands in for |
 |---|---|---|
-| `weeklySteps`, `todayActivity` | Home | Step, distance, active-minute and calorie history from a health data source |
+| `workoutTemplates` | Workouts | Template/exercise catalogue |
+| `weeklySteps`, `todayActivity`, `todayHourlySteps`, `monthlyStepsByWeek`, `yearlyStepsByMonth` | Home, Analytics, Nutrition | Step/activity history at four granularities |
 | `profileHighlights` | Account | Level, tier title, join date, achievement count, lifetime steps |
-| `seedCoinTransactions` | Wallet, Shop | The coin ledger |
-| `shopItems` | Shop | The reward catalogue |
-| `seedNotifications` | Notifications | The notification feed |
-| `seedChallenges`, `seedAchievements` | Challenges | The challenge engine |
-| `seedLeaderboard`, `leaderboardHighlights` | Leaderboard | Ranking and prize history |
-| `hydrationHighlights` | Hydration | Water history beyond today |
-| `seedStreak` | Streak (via store) | Training-day history |
-| `workoutTemplates` | Workouts | The exercise/template catalogue |
+| `seedStreak` | Streak store | Training-day history |
+| `seedCoinTransactions` | Wallet, Shop, every coin badge | The coin ledger |
+| `shopItems` | Shop | Reward catalogue |
+| `seedNotifications` | Notifications | Notification feed |
+| `seedChallenges`, `seedAchievements` | Challenges | Challenge engine |
+| `seedLeaderboard`, `leaderboardHighlights` | Leaderboard | Rankings and prize history |
+| `hydrationHighlights`, `hydrationTip` | Hydration | Water history beyond today |
+| `seedVitals`, `healthHighlights`, `healthTip` | Health Checkup, Heart Rate, Blood Pressure | Vitals history and health score |
+| `seedFoodEntries`, `foodLibrary`, `quickAddFoodIds`, `dietPlanRotation`, `nutritionTip` | Nutrition, Add Meal, Diet Plan, Nutrition History | Food diary, food database, meal plans |
+| `referralCode`, `REFERRAL_REWARD_COINS`, `seedReferrals` | Referral | Referral programme |
 
-Three more sets of product rules are hardcoded in components rather than seeded. These are arguably correct to keep client-side for instant render, but **the server must hold the same numbers and be the one that pays out**:
+Thirteen zustand stores persist to MMKV. Each one is a client-side cache of state the server must own:
 
-- `STREAK_MILESTONES` in `src/components/streak/StreakBenefitsCard.tsx` — 7d→50, 15d→150, 30d→300, 90d→1000, 180d→2000 coins
-- `REWARD_TIERS` in `src/components/leaderboard/RewardTiersCard.tsx` — rank 1 → 5,000 coins + t-shirt + bottle; ranks 2–3 → 3,000 + t-shirt + mat; ranks 4–10 → 1,000 + mat
-- The earn rate card in `src/components/wallet/EarnCoinsCard.tsx` — 10 coins per 1,000 steps, 100 per workout, 175 per 7-day streak, 300 per referral
+| Store | Key | Owns today | Should own after |
+|---|---|---|---|
+| `authStore` | — (Keychain) | Session, pending OTP | Same — already correct |
+| `settingsStore` | `vokve.settings` | Units, step goal, water goal, rest timer, haptics, reminders, keep-awake | Server-synced preferences |
+| `coinsStore` | `vokve.coins` | Balance, lifetime, 50-row ledger | **Cache only** |
+| `streakStore` | `vokve.streak` | Completed/protected days, freezes | **Cache only** |
+| `workoutStore` | `vokve.workouts` | Active session, history | Active session stays local; history is a cache |
+| `hydrationStore` | `vokve.hydration` | Today's log | Cache + offline queue |
+| `notificationsStore` | `vokve.notifications` | Feed + read state | Cache |
+| `notificationSettingsStore` | `vokve.notificationSettings` | 8 category switches, quiet hours, SMS/email | Server-synced consent |
+| `nutritionStore` | `vokve.nutrition` | Diary by date, goals, preferences | Cache + offline queue |
+| `dietPlanStore` | `vokve.dietPlan` | Per-date plan extras | Cache |
+| `vitalsStore` | `vokve.vitals` | 60 most recent readings | Cache + offline queue |
+| `remindersStore` | `vokve.reminders` | Hydration reminder schedule | Server-synced; server sends push |
 
-### 2.3 Native capability already provisioned but not wired
+### 2.3 Native capability provisioned but not wired
 
 | Capability | Provisioned | Wired in JS |
 |---|---|---|
-| Health Connect (Android) | Yes — `react-native-health-connect@4.1.3`, `HealthConnectPermissionDelegate` in `MainActivity.kt`, `PermissionRationaleActivity.kt`, and `READ_STEPS` / `WRITE_STEPS` / `READ_HEALTH_DATA_IN_BACKGROUND` in `AndroidManifest.xml` | **No** |
-| HealthKit (iOS) | **No** — no `NSHealthShareUsageDescription` or `NSMotionUsageDescription` in `Info.plist`, no HealthKit entitlement | No |
-| Firebase (auth, messaging, crashlytics, perf) | Yes — all four packages installed, `firebase.json` present | **No** — zero `firebase` imports anywhere under `src/` |
-| Google / Apple / Facebook sign-in | Partly — `react-native-nitro-google-signin`, `react-native-fbsdk-next` installed; `SocialAuthRow` renders all three buttons | **No** — handlers are no-ops |
-
-This matters for sequencing: Android step ingestion is the shortest path to a working steps feature, and iOS needs an entitlement request and an `Info.plist` change before it can read anything.
+| Health Connect (Android) | Yes — `react-native-health-connect@4.1.3`, permission delegate in `MainActivity.kt`, `PermissionRationaleActivity.kt`, `READ_STEPS` / `WRITE_STEPS` / `READ_HEALTH_DATA_IN_BACKGROUND` in the manifest | **No** |
+| HealthKit (iOS) | **No** — no usage strings in `Info.plist`, no entitlement | No |
+| Firebase (auth, messaging, crashlytics, perf) | All four packages installed, `firebase.json` present | **No** — zero `firebase` imports under `src/` |
+| Google / Apple / Facebook sign-in | `react-native-nitro-google-signin`, `react-native-fbsdk-next` installed; `SocialAuthRow` renders all three | **No** — handlers show "not connected yet" |
+| OS share sheet + clipboard | Wired in `ReferralScreen` | Yes |
+| Device info | `react-native-device-info@15.0.2` installed — model, OS, vendor id, `isEmulator()`, app version/build | **No** — zero imports; no device id exists anywhere in the client |
 
 ### 2.4 Contradictions the backend must resolve
 
-Found while auditing; each needs a product decision before the ledger is authoritative:
+Each needs a product decision before the ledger is authoritative. Tracked in [MEMORY.md](backend/MEMORY.md).
 
-1. **7-day streak pays two different amounts.** `EarnCoinsCard` advertises **175** coins for "every 7 days in a row"; `STREAK_MILESTONES` pays **50** at the 7-day mark. The seeded ledger row ("7 day streak bonus", +175) sides with the rate card. Decide whether milestones are one-off lifetime awards or a repeating 7-day bonus — they cannot be both at these numbers.
-2. **10K steps challenge pays two different amounts.** `seedChallenges.ch-10k-steps.rewardCoins` is **200**; the seeded ledger row for the same challenge is **+500**.
-3. **`GET /activity/weekly` cannot feed the Home screen.** `dailyActivitySchema` has `steps`, `activeMinutes`, `caloriesBurned`, `workoutsCompleted` — but **no `distanceKm`**, which `ActivityMetricsRow` requires. Section 6.1 adds it.
-4. **`User.streakDays` duplicates the client streak store.** The model comment already concedes this ("the user record's `streakDays` is the server's number for the same thing; this store is the client's"). Once streaks are server-side, one of the two must go — recommendation: keep the server's, delete the store's derivation.
-5. **Pre-formatted strings in place of data.** `profileHighlights.memberSince` is `"May 2025"`, `leaderboardHighlights.bestRankAchievedOn` is `"12 May 2025"`, and `Achievement.value` is `"10K"`. The API should send ISO dates and raw numbers; the client already has `src/utils/format.ts` to render them.
-6. **`Workout.startedAt` doc comment is stale.** It reads "Null while the session is still in progress" but the schema is non-nullable. Treat `startedAt` as required and `completedAt` as the in-progress signal.
+| # | Contradiction | Where |
+|---|---|---|
+| C1 | **7-day streak pays 175 or 50.** Rate card says 175 "every 7 days"; milestone table says 50 at day 7. Seeded ledger sides with 175. | `EarnCoinsCard.tsx` vs `StreakBenefitsCard.tsx` |
+| C2 | **Referral pays 300 or 20.** Rate card says 300 "once they log a workout"; referral screen says 20 to *each side* "after verification"; seeded ledger row is +300. | `EarnCoinsCard.tsx` vs `seedData.REFERRAL_REWARD_COINS` / `HowReferralWorksCard.tsx` |
+| C3 | **10K steps challenge pays 200 or 500.** | `seedChallenges` vs `seedCoinTransactions` |
+| C4 | **`GET /activity/weekly` cannot feed Home.** `DailyActivity` has no `distanceKm`; `ActivityMetricsRow` needs it. | `models.ts` vs `HomeScreen.tsx` |
+| C5 | **Leaderboard score is composite, not steps.** "Steps, workouts and completed challenges all count towards your score" — but no formula exists anywhere, and `LeaderboardEntry.coins` is the only number shown. | `LeaderboardHowItWorks.tsx` |
+| C6 | **Streak restore is debited as `source: 'purchase'`.** It is not a shop purchase; the wallet's order count filters on `'purchase'` and would count it as an order. | `StreakScreen.tsx` vs `ShopScreen.tsx` |
+| C7 | **`User.streakDays` duplicates the client streak derivation.** Model comment already concedes it. Server wins. | `models.ts` vs `streakStore.ts` |
+| C8 | **Pre-formatted strings where data belongs.** `memberSince: "May 2025"`, `bestRankAchievedOn: "12 May 2025"`, `Achievement.value: "10K"`. Send ISO dates and numbers. | `seedData.ts` |
+| C9 | **BMI is entered manually** as a vital, but height and weight are both on the profile. BMI should be derived. | `AddReadingSheet.tsx` |
+| C10 | **Weight lives in three places:** `User.weightKg`, `BodyMeasurement.weightKg`, and `VitalReading{kind:'weight'}`. One write path is needed. | `models.ts` |
+| C11 | **Health score has no formula.** Seeded as `82 / 100`. The ⓘ button is wired and will need something to say. | `healthHighlights` |
+| C12 | **`Workout.startedAt` doc comment says nullable; schema is not.** Treat as required. | `models.ts` |
 
 ---
 
 ## 3. Transport contract
 
-These are not proposals — they are what `src/services/api/client.ts` already does. The server has to fit them.
+Not proposals — this is what `src/services/api/client.ts` does today. The server fits it.
 
 ### 3.1 Base URL and versioning
 
@@ -101,547 +144,728 @@ dev / staging  https://api.staging.vokve.app/v1
 production     https://api.vokve.app/v1
 ```
 
-Version is in the path. Breaking a response shape requires `/v2`, because the client validates every response against a zod schema and **rejects anything that does not match** (see 3.5) — an additive field is safe, a renamed or removed one is a hard client-side failure.
+Version in the path. The client validates every response against zod and **rejects anything that does not match** — an added field is safe; a renamed, removed or retyped one is a client-side hard failure and needs `/v2`.
 
 ### 3.2 Authentication
 
-Bearer access token, attached by a request interceptor to every call:
+Bearer access token on every request. `AuthTokens = { accessToken, refreshToken, expiresAt }`, `expiresAt` in **epoch milliseconds**. Tokens live in Keychain/Keystore, never MMKV.
 
-```
-Authorization: Bearer <accessToken>
-```
+Refresh flow, exactly as implemented:
+1. Any **401** triggers one `POST /auth/refresh`.
+2. Concurrent 401s share one in-flight refresh — the client never fires two. **Rotate refresh tokens freely.**
+3. On success the original request replays once with the new token. A second 401 is final.
+4. On failure: Keychain cleared, session → `signed_out`.
 
-`AuthTokens` is `{ accessToken, refreshToken, expiresAt }` where `expiresAt` is **epoch milliseconds**. Tokens are stored in the iOS Keychain / Android Keystore via `react-native-keychain`, never in MMKV.
-
-**Refresh flow, exactly as implemented:**
-
-1. Any response with **401** triggers one refresh attempt (`POST /auth/refresh` with `{ refreshToken }`).
-2. Concurrent 401s share a single in-flight refresh promise — the client will never fire two refreshes at once. **You may therefore rotate refresh tokens**, but the response must always return a usable pair.
-3. On success the original request is replayed once with the new access token. A second 401 on the replay is final.
-4. On failure the client clears the Keychain and flips the session to `signed_out`.
-
-Recommended token lifetimes: access **15 minutes**, refresh **60 days**, rotated on every use with a short (~30s) grace window for replayed requests.
+Lifetimes: access **15 min**, refresh **60 days**, rotated on use, 30 s grace for in-flight replays.
 
 ### 3.3 Errors
 
-`src/services/api/errors.ts` maps status codes to a discriminated `ApiErrorKind` the UI branches on:
+`errors.ts` maps status → `ApiErrorKind`:
 
-| Status | `kind` | Retried? |
+| Status | `kind` | Retried |
 |---|---|---|
-| 401 | `unauthorized` | No — triggers refresh |
-| 403 | `forbidden` | No |
-| 404 | `not_found` | No |
-| 422 | `validation` | No |
-| ≥500 | `server` | No |
-| transport failure | `network` | **Yes** |
-| timeout | `timeout` | **Yes** |
+| 401 | `unauthorized` | no — triggers refresh |
+| 403 | `forbidden` | no |
+| 404 | `not_found` | no |
+| 422 | `validation` | no |
+| ≥500 | `server` | no |
+| transport | `network` | **yes** |
+| timeout | `timeout` | **yes** |
 
-Error body shape — the client reads `message` from the response when present, otherwise falls back to its own copy:
-
+Body:
 ```json
-{
-  "error": {
-    "code": "OTP_INVALID",
-    "message": "That code is not right. Check it and try again.",
-    "details": { "attemptsRemaining": 2 }
-  }
-}
+{ "error": { "code": "OTP_INVALID", "message": "That code is not right. Check it and try again.",
+             "details": { "attemptsRemaining": 2 } } }
 ```
-
-`message` must be **end-user readable** — it is rendered directly in the UI. Put developer detail in `code` and `details`.
-
-Use **422** for field-level validation failures, with `details` keyed by field name so forms can attach errors to inputs:
-
-```json
-{ "error": { "code": "VALIDATION_FAILED", "message": "Check the highlighted fields.",
-  "details": { "email": "That address is already registered." } } }
-```
+`message` is rendered verbatim to the user. `code` is stable and machine-readable. Use **422** with `details` keyed by field for form errors.
 
 ### 3.4 Timeouts and retries
 
-```
-requestTimeoutMs   15000
-maxRetries         2
-retryBaseDelayMs   400   (exponential: 400ms, 800ms)
-```
+`requestTimeoutMs 15000` · `maxRetries 2` · backoff `400ms, 800ms`. Only `network`/`timeout` retry. **Every mutating endpoint may therefore be called three times for one intent** → 3.6.
 
-Only `network` and `timeout` retry. **4xx is never retried.** Consequence for you: every mutating endpoint must tolerate being called up to three times for the same intent — see 3.6.
+### 3.5 Validation is strict
 
-### 3.5 Response validation is strict
-
-Every response is parsed through a zod schema in `src/services/api/endpoints.ts` before it reaches a store. A mismatch throws `ApiError('validation')` and the screen shows an error — it does **not** degrade gracefully.
-
-Practical rules:
-- Send `null` explicitly for absent nullable fields. Do not omit the key.
-- Never send `undefined`, and never send a string where a number is declared.
-- Dates are **ISO-8601 with timezone** (`2026-09-13T10:24:00Z`) for timestamps, and **`YYYY-MM-DD`** for calendar dates (`DailyActivity.date`, streak days, challenge `startsAt`).
-- Enums are closed. Adding a `CoinSource`, `NotificationTopic`, `ChallengeMetric`, `ShopBadge` or `ShopCategory` value **breaks every client in the field**. New enum values ship behind a client release, or as an `"other"` member added now.
+- Send `null` for absent nullable fields; never omit the key.
+- Timestamps: ISO-8601 with zone. Calendar days: `YYYY-MM-DD`.
+- Enums are closed. Adding a member to `CoinSource`, `NotificationTopic`, `ChallengeMetric`, `ShopBadge`, `ShopCategory`, `VitalKind`, `MealSlot`, `DietType`, `MealPlan`, `NutritionGoal`, `ReminderSlot` or `ReferralStatus` **breaks every installed client**. New members ship behind a client release.
 
 ### 3.6 Idempotency
 
-Required on every coin-moving or order-creating endpoint, because of the retry policy in 3.4:
-
-```
-Idempotency-Key: <client-generated uuid v4>
-```
-
-Store the key with the response for at least 24 hours and replay the stored response on a repeat. Applies to: workout save, activity ingest, shop redemption, challenge claim, streak freeze, streak restore, hydration log.
+`Idempotency-Key: <uuid v4>` on every write that moves coins, creates an order, or logs an entry. Store key + response 24 h; replay on repeat. Required on: workout save, activity ingest, redeem, challenge claim, freeze, restore, hydration/food/vital entries.
 
 ### 3.7 Pagination
 
-The one paginated endpoint that exists uses an opaque cursor (`GET /workouts?cursor=`). Keep that shape everywhere:
-
 ```json
-{ "data": [ ... ], "nextCursor": "eyJpZCI6..." }
+{ "data": [ ... ], "nextCursor": "eyJ..." | null }
 ```
+`GET /workouts` currently expects a bare array. **Wrap it now** while no production client exists.
 
-`nextCursor` is `null` on the last page. **Note:** `workoutApi.history()` currently expects a bare array, not an envelope — either wrap it and update the client schema, or keep `/workouts` bare and use the envelope for new endpoints only. Recommendation: **wrap it now**, while there is no production client to break.
-
-### 3.8 Required request headers
-
-The client should send these on every call (not yet implemented — add alongside the backend):
+### 3.8 Request headers the client should add
 
 ```
-X-Vokve-Platform: ios | android
-X-Vokve-App-Version: 1.0.0        // config.appVersion
-X-Vokve-Device-Id: <stable install id>
-X-Vokve-Timezone: Asia/Kolkata     // IANA; required for daily rollover, see 8.4
+X-Vokve-Device-Id:   <server device id from POST /devices/register>
+X-Vokve-Platform:    ios | android
+X-Vokve-App-Version: 1.0.0            // config.appVersion / DeviceInfo.getVersion()
+X-Vokve-Build:       42               // DeviceInfo.getBuildNumber()
+X-Vokve-OS-Version:  17.5             // DeviceInfo.getSystemVersion()
+X-Vokve-Timezone:    Asia/Kolkata     // IANA
+X-Vokve-Locale:      en-IN
 ```
+A request without `X-Vokve-Device-Id` on an authenticated route is `428 DEVICE_NOT_REGISTERED`; a blocked version is `426 UPGRADE_REQUIRED`. Full device profile is sent once via `POST /devices/register` (§13); the headers keep every later request attributable.
 
-Timezone matters more than it looks. Streaks, daily challenges, hydration rollover and step-day boundaries are all **local-midnight** concepts; the client already computes `today()` in local time (`src/stores/hydrationStore.ts`, `src/utils/date.ts`). The server must agree, which means it needs the zone.
+Timezone is load-bearing: streaks, daily challenges, hydration/nutrition day rollover and step-day boundaries are all **local-midnight** concepts, computed client-side with `todayIso()` in local time. The server must agree.
 
 ---
 
 ## 4. Data model
 
-### 4.1 Entities already defined by the client
+### 4.1 Entities the client already defines (`src/types/models.ts`)
 
-These zod schemas in `src/types/models.ts` are the contract. Treat them as frozen; the DB may hold more, the API must not hold less.
+Frozen contract. The DB may hold more; the API may not return less.
 
-**`User`** — `id`, `name`, `email`, `avatarUrl?`, `heightCm?`, `weightKg?`, `dateOfBirth?`, `phone?` (E.164), `profileCompletedAt?`, `gender?` (`male|female|other`), `goal` (`lose_weight|build_muscle|gain_strength|improve_endurance|stay_active`), `activityLevel` (`sedentary|light|moderate|active|athlete`), `units` (`metric|imperial`), `streakDays`, `weeklyGoalWorkouts`.
+**Identity**
+- `User` — `id, name, email, avatarUrl?, heightCm?, weightKg?, dateOfBirth?, phone? (E.164), profileCompletedAt?, gender? (male|female|other), goal (lose_weight|build_muscle|gain_strength|improve_endurance|stay_active), activityLevel (sedentary|light|moderate|active|athlete), units (metric|imperial), streakDays, weeklyGoalWorkouts`
+  > `profileCompletedAt` is **server-set and load-bearing**: `RootNavigator` routes to onboarding forever while it is null. Only `POST /me/complete-profile` sets it.
+- `AuthTokens` — `accessToken, refreshToken, expiresAt (epoch ms)`
+- `VerificationChallenge` — `verificationId, phone, codeLength, expiresInSeconds, resendInSeconds`
 
-> `profileCompletedAt` is **server-set and load-bearing**. `RootNavigator` gates the entire app on it: null means the user is routed to onboarding forever. Set it only in `POST /me/complete-profile`, never inferred from whether fields happen to be filled.
+**Training**
+- `Exercise` — `id, name, muscleGroup (10), equipment (8), isTimed, imageUrl?`
+- `WorkoutSet` — `id, reps, weightKg, rpe? (1–10), durationSeconds?, completed`
+- `WorkoutExercise` — `id, exercise, sets[], restSeconds, notes?`
+- `Workout` — `id, title, startedAt, completedAt?, exercises[], totalVolumeKg, caloriesBurned`
+- `WorkoutTemplate` — `id, title, description, estimatedMinutes, muscleGroups[], exercises[]`
+- `BodyMeasurement` — `id, recordedAt, weightKg, bodyFatPercent?`
 
-**`Exercise`** — `id`, `name`, `muscleGroup` (10 values), `equipment` (8 values), `isTimed`, `imageUrl?`
-**`WorkoutSet`** — `id`, `reps`, `weightKg`, `rpe?` (1–10), `durationSeconds?`, `completed`
-**`WorkoutExercise`** — `id`, `exercise`, `sets[]`, `restSeconds`, `notes?`
-**`Workout`** — `id`, `title`, `startedAt`, `completedAt?`, `exercises[]`, `totalVolumeKg`, `caloriesBurned`
-**`WorkoutTemplate`** — `id`, `title`, `description`, `estimatedMinutes`, `muscleGroups[]`, `exercises[]`
-**`DailyActivity`** — `date` (`YYYY-MM-DD`), `steps`, `activeMinutes`, `caloriesBurned`, `workoutsCompleted`
-**`BodyMeasurement`** — `id`, `recordedAt`, `weightKg`, `bodyFatPercent?`
-**`CoinTransaction`** — `id`, `title`, `source` (`steps|workout|streak|challenge|referral|purchase|refund`), `amount` (**signed** int), `createdAt`
-**`ShopItem`** — `id`, `title`, `description`, `priceCoins`, `category` (`apparel|accessories|gear|lifestyle`), `emoji`, `badge?` (`bestseller|popular|new_arrival|limited`), `isDeal`, `inStock`
-**`Challenge`** — `id`, `title`, `description`, `emoji`, `metric` (`steps|calories|minutes|days|workouts`), `cadence` (`daily|weekly|monthly`), `goal`, `progress`, `rewardCoins`, `rewardsBadge`, `startsAt?` (**null = currently running**, a date = upcoming)
-**`Achievement`** — `id`, `value` (string), `label`, `metric`, `achievedAt?` (null = locked)
-**`HydrationEntry`** — `id`, `ml`, `at`
-**`LeaderboardEntry`** — `id`, `name`, `location` (`"Delhi, India"`), `rank`, `coins`, `perk`, `avatarUrl?`
-**`AppNotification`** — `id`, `topic` (9 values), `title`, `message`, `createdAt`, `read`
-**`AuthTokens`** — `accessToken`, `refreshToken`, `expiresAt` (epoch ms)
-**`VerificationChallenge`** — `verificationId`, `phone`, `codeLength`, `expiresInSeconds`, `resendInSeconds`
+**Activity**
+- `DailyActivity` — `date, steps, activeMinutes, caloriesBurned, workoutsCompleted` (**needs `distanceKm`, `source`, `verified`** — 4.3)
 
-### 4.2 Entities the backend must add
+**Economy**
+- `CoinTransaction` — `id, title, source (steps|workout|streak|challenge|referral|purchase|refund), amount (signed int), createdAt`
+- `ShopItem` — `id, title, description, priceCoins, category (apparel|accessories|gear|lifestyle), emoji, badge? (bestseller|popular|new_arrival|limited), isDeal, inStock`
+- `Challenge` — `id, title, description, emoji, metric (steps|calories|minutes|days|workouts), cadence (daily|weekly|monthly), goal, progress, rewardCoins, rewardsBadge, startsAt? (null = running)`
+- `Achievement` — `id, value (string), label, metric, achievedAt?`
+- `LeaderboardEntry` — `id, name, location, rank, coins, perk, avatarUrl?`
+- `Referral` — `id, name, joinedAt, status (pending|rewarded), rewardCoins`
 
-Not in the client yet, but required for a server-authoritative economy:
+**Wellness**
+- `HydrationEntry` — `id, ml, at`
+- `HydrationReminder` — `id, time (HH:mm), slot (morning|afternoon|evening|custom), enabled`
+- `VitalReading` — `id, kind (heart_rate|blood_pressure|bmi|weight), value, secondary? (diastolic), recordedAt`
+- `FoodEntry` — `id, slot (breakfast|lunch|snack|dinner), name, portion, calories, proteinG, carbsG, fatsG, fiberG, loggedAt`
+- `FoodItem` — `id, name, portion, emoji, calories, proteinG, carbsG, fatsG, fiberG`
+- `PlannedMeal` — `id, slot, time, calories, proteinG, carbsG, fatsG, items[{name, quantity}]`
+- Enums: `DietType (vegetarian|vegan|eggetarian|non_vegetarian)`, `MealPlan (balanced|high_protein|low_carb|keto)`, `NutritionGoal (lose_weight|maintain|gain_weight|build_muscle)`
 
-| Table | Purpose |
-|---|---|
-| `coin_ledger` | Append-only, the single source of balance. See 8.1 |
-| `coin_balances` | Materialised `{user_id, balance, lifetime_earned, updated_at}` — a projection, never edited directly |
-| `activity_samples` | Raw step/distance/energy samples as submitted, with source + attestation verdict. See 7.4 |
-| `activity_daily` | Rolled-up per-user-per-local-day totals, the thing `GET /activity/*` reads |
-| `health_connections` | Per user per provider: `health_connect`, `healthkit`, `manual`; grant scopes, last sync cursor |
-| `device_attestations` | Play Integrity / App Attest verdicts, keyed by device |
-| `devices` | Push tokens, platform, app version, last seen |
-| `streak_days` | One row per user per local day: `earned` (workout) or `protected` (freeze/restore) |
-| `streak_freezes` | Grants and spends, so a balance is explainable |
-| `challenge_definitions` / `challenge_enrollments` | Catalogue vs. per-user progress and claims |
-| `leaderboard_periods` / `leaderboard_snapshots` | Frozen final standings per period, so history is immutable |
-| `orders` / `order_items` / `fulfilments` | Physical redemption — the shop ships real goods |
-| `shop_inventory` | Stock counts behind `inStock` |
-| `notifications` | Per-user feed rows |
-| `referrals` | Inviter, invitee, qualifying event, payout state |
-| `idempotency_keys` | See 3.6 |
-| `audit_log` | Every coin mutation, admin action and fraud verdict |
+**Messaging**
+- `AppNotification` — `id, topic (steps|workout|streak|hydration|coins|challenge|reward|health|system), title, message, createdAt, read`
 
-### 4.3 Money-shaped data rules
+### 4.2 Client-side shapes with no model yet (from stores)
 
-Coins are a currency. Apply currency discipline:
+These are TypeScript interfaces in stores, not zod models. The API should promote them:
 
-- **Integers only.** No floats anywhere in the coin path.
-- **Append-only ledger.** A correction is a new compensating row with `source: 'refund'`, never an `UPDATE` or `DELETE`.
-- **Balance is derived, then cached.** Recompute from the ledger nightly and alert on any drift from `coin_balances`.
-- **`SELECT … FOR UPDATE`** (or equivalent) on the balance row for every spend. A double-tap on Redeem must not oversell.
-- The client's own comment already documents why balance is stored rather than summed: the device ledger is trimmed to **50 rows** (`MAX_LEDGER_ENTRIES`). The server keeps everything.
+- `NutritionGoals` — `{ calories: 2200, proteinG: 120, carbsG: 300, fatsG: 70 }` defaults
+- `NutritionPreferences` — `{ dietType: 'vegetarian', mealPlan: 'balanced', goal: 'gain_weight' }` defaults
+- `QuietHours` — `{ enabled: true, start: '22:00', end: '07:00' }`
+- `CategorySwitches` — 8 keys: `activity, coins, challenges, orders, offers, announcements, referrals, health` (all `true` except `health: false`)
+- Reminder settings — `{ enabled, reminders[], sound: 'Default', vibration: true, repeatDays: [0..6] }`
+- `StreakRun` — `{ length, start, end }`
+- `MonthlyCoinSummary` — `{ earned, spent, net }`
 
----
-
-## 5. Endpoint catalogue
-
-Grouped by domain. **[E]** = already called by the client, build to match exactly. **[N]** = new, client work required.
-
-### 5.1 Auth and identity
-
-| | Endpoint | Notes |
-|---|---|---|
-**[E]**| `POST /auth/sign-in` | Body `{ email, password }`. → `AuthResponse`. **The client's sign-in field accepts an email *or* a phone number** (`identifier` in `src/types/forms.ts`) but the API method is named `email` — accept either string in that field and resolve server-side. |
-**[E]**| `POST /auth/sign-up` | Body `{ email, phone (E.164), password, dateOfBirth, gender }`. → **`VerificationChallenge`, not a session.** No tokens until the phone is proven. |
-**[E]**| `POST /auth/verify-otp` | Body `{ verificationId, code }`. → `AuthResponse`. A wrong code must leave the challenge alive — the client keeps the user on the screen and retries. |
-**[E]**| `POST /auth/resend-otp` | Body `{ verificationId }`. → a **fresh** `VerificationChallenge` with its own `expiresInSeconds` and `resendInSeconds`; the screen's two countdowns are driven entirely by these. |
-**[E]**| `POST /auth/sign-out` | → `{ ok: boolean }`. Revoke the refresh token. Client never blocks on this. |
-**[E]**| `POST /auth/refresh` | Body `{ refreshToken }` → `AuthTokens`. Must not require a valid access token. |
-**[N]**| `POST /auth/social` | `{ provider: 'google'\|'apple'\|'facebook', idToken, nonce? }` → `AuthResponse`. UI exists, handlers are no-ops. Verify the token server-side against the provider; never trust a client-decoded profile. |
-**[N]**| `POST /auth/forgot-password` / `POST /auth/reset-password` | No UI yet, but sign-in has no recovery path at all today. |
-**[N]**| `DELETE /me` | Account deletion. **Store-mandated** on both platforms for an app with an account. Must cascade or anonymise health data. |
-
-Password policy the client enforces — mirror it, do not exceed it: 8–72 characters, at least one letter and one digit, no symbol or case requirement. The 72 ceiling is bcrypt's; do not silently truncate.
-
-OTP hardening (the mock accepts `123456` for everything — `MOCK_RULES` in `src/services/api/mockApi.ts`):
-- 6 digits, cryptographically random, **hashed at rest**
-- TTL 5 minutes, max 5 verify attempts per `verificationId`, then burn it
-- Resend cooldown 30s, max 3 resends per number per hour, max 10 per day
-- Per-IP and per-number rate limits — SMS is a direct cost and a known abuse target
-
-### 5.2 Profile
-
-| | Endpoint | Notes |
-|---|---|---|
-**[E]**| `GET /me` | → `User`. Called on every cold start by `authStore.hydrate()`. Keep it fast; it is on the launch critical path. |
-**[E]**| `PATCH /me` | Partial `User`. → full `User`. Must **not** set `profileCompletedAt`. |
-**[E]**| `POST /me/complete-profile` | `{ name, heightCm, weightKg, units }` → `User` **with `profileCompletedAt` stamped**. The only endpoint that may set it. Client validates 90–250 cm and 25–300 kg after unit conversion; re-validate server-side. |
-**[N]**| `GET /me/highlights` | Replaces `profileHighlights`. → `{ level, tierTitle, memberSince (ISO), achievementCount, lifetimeSteps }`. Define the level curve server-side. |
-**[N]**| `POST /me/avatar` | Multipart or pre-signed S3 PUT. `avatarUrl` exists on the model with nothing to fill it. |
-**[N]**| `GET /me/export` | Data export. Pairs with `DELETE /me` for GDPR/DPDP. |
-
-### 5.3 Activity and steps
-
-The heart of the product. Section 7 covers ingestion and fraud in depth; these are the shapes.
-
-| | Endpoint | Notes |
-|---|---|---|
-**[E]**| `GET /activity/weekly` | → `DailyActivity[]`, 7 entries, oldest→newest, **local** days. **Add `distanceKm`** to the schema (see 2.4 #3). |
-**[N]**| `GET /activity/today` | → `DailyActivity` + `distanceKm`. Feeds `StepGoalCard` and `ActivityMetricsRow`; currently `todayActivity` seed. |
-**[N]**| `POST /activity/ingest` | The write path. Batch of raw samples from Health Connect / HealthKit + attestation. Idempotent. See 7.4 |
-**[N]**| `GET /activity/range?from=&to=&granularity=day` | History for charts beyond seven days. |
-**[N]**| `GET /health/connections` / `POST /health/connections` / `DELETE /health/connections/:provider` | Which sources are linked, and consent state per source. |
-
-### 5.4 Workouts
-
-| | Endpoint | Notes |
-|---|---|---|
-**[E]**| `GET /workout-templates` | → `WorkoutTemplate[]`. Currently the `workoutTemplates` seed. |
-**[E]**| `GET /workouts?cursor=` | → `Workout[]` today; **recommend wrapping in `{data, nextCursor}`** now (3.7). |
-**[E]**| `POST /workouts` | Full `Workout` → saved `Workout`. **Must be idempotent on `Workout.id`** — the client generates the id locally, saves to MMKV first, and retries on failure (`workoutStore.finishWorkout`). Server recomputes `totalVolumeKg` and `caloriesBurned`; never trust the client's figures, they are coin-bearing. |
-**[N]**| `GET /exercises?muscleGroup=&equipment=` | The exercise library. `ActiveWorkoutScreen` has no picker source. |
-**[N]**| `PATCH /workouts/:id`, `DELETE /workouts/:id` | Editing history. Deleting a workout that paid coins must post a `refund` row, not silently rewrite the balance. |
-**[N]**| `GET /measurements`, `POST /measurements` | `BodyMeasurement` is modelled and entirely unused. |
-
-### 5.5 Hydration
-
-The store keeps **only today** and drops it at local midnight (`src/stores/hydrationStore.ts`). Everything on the Hydration screen's stats card is the `hydrationHighlights` seed.
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `POST /hydration/entries` | `{ ml, at }` → `HydrationEntry`. Idempotent. |
-**[N]**| `DELETE /hydration/entries/:id` | The log already supports row deletion locally. |
-**[N]**| `GET /hydration/today` | → `{ date, consumedMl, goalMl, entries[] }` |
-**[N]**| `GET /hydration/stats` | Replaces `hydrationHighlights`: `{ bestStreakDays, dailyAverageMl, goalHitRatePercent, reminderCount }` |
-**[N]**| `GET/PUT /hydration/reminders` | The seed advertises "3 daily reminders" with no scheduler behind it. |
-
-### 5.6 Streaks
-
-Currently **entirely client-side** in `src/stores/streakStore.ts`, seeded with two synthetic runs. The logic there is good and worth porting verbatim to the server:
-
-- A streak is **not broken until the day it needed is over** — `currentStreakOf` accepts today *or* yesterday as the anchor.
-- `completedDays` (earned) and `protectedDays` (freeze/restore) both count, but render differently. Keep the distinction: users should see which days they actually earned.
-- Restore bridges the gap from the last run to today, costs **50 coins** (`STREAK_RESTORE_COST`), and is refused beyond a **7-day** window (`RESTORE_WINDOW_DAYS`).
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET /streak` | `{ currentStreak, longestStreak: {length, start, end}, completedDays[], protectedDays[], freezesAvailable, canRestore, restoreCostCoins, restoreGap[] }` |
-**[N]**| `POST /streak/freeze` | Spends a freeze on today. Refuse if none left or today already covered — **without charging**. |
-**[N]**| `POST /streak/restore` | Atomic: debit 50 coins **and** write the protected days in one transaction, or neither. The client currently checks `canRestore` then spends coins in two separate steps — a race the server must close. |
-**[N]**| `GET /streak/milestones` | Milestone table + which are achieved. Note the milestone check is against **longest**, not current: a user who hit 30 days in March keeps that badge in April. |
-
-### 5.7 Coins and wallet
-
-**This is the section that must not stay on the device.** See section 8 for the economy rules.
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET /wallet` | `{ balance, lifetimeEarned, expiresAt, expiryDaysLeft, monthSummary: {earned, spent, net} }`. "Month" is the **calendar** month, matching the client. |
-**[N]**| `GET /wallet/transactions?cursor=&source=` | → `{data: CoinTransaction[], nextCursor}`. Signed amounts. The "View All" screen does not exist yet client-side. |
-**[N]**| `GET /wallet/earn-rules` | Serve the rate card so rates can change without an app release. |
-| | **No `POST /wallet/earn`.** | Coins are only ever minted by the server as a side effect of a verified event. There must be no client-callable credit endpoint. |
-
-### 5.8 Challenges and achievements
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET /challenges?cadence=&date=` | → `Challenge[]`. `startsAt: null` = running, a date = upcoming. The client splits its two lists on exactly this — do not add a status field beside it. |
-**[N]**| `POST /challenges/:id/join` | Explicit enrolment, if the product wants it; otherwise auto-enrol and drop this. |
-**[N]**| `POST /challenges/:id/claim` | Idempotent, server-verified progress ≥ goal, posts the coin credit. Never trust client `progress`. |
-**[N]**| `GET /achievements` | → `Achievement[]`. Recommend sending `{ value: number, metric, label, achievedAt }` and letting the client's `formatCompactNumber` produce `"10K"`. |
-
-`Challenge.progress` must be **recomputed server-side** from verified activity on every read. It is the number that unlocks a coin payout.
-
-### 5.9 Leaderboard and rewards
-
-Country-scoped, **weekly** reset (`LeaderboardHowItWorks`: "ranked against everyone in your country").
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET /leaderboard?period=weekly&scope=country&cursor=` | → `{period: {start, end, resetsAt}, entries: LeaderboardEntry[], me: {rank, coins, percentile}, nextCursor}`. **Add an `isCurrentUser` flag or the `me` block** — the board has no way to highlight the viewer today. |
-**[N]**| `GET /leaderboard/history` | Replaces `leaderboardHighlights`: `{ bestRank, bestRankAchievedOn (ISO), topTenFinishes, rewardCoinsEarned, rewardsWon }` |
-**[N]**| `GET /leaderboard/reward-tiers` | Serve `REWARD_TIERS` so prizes can change seasonally. |
-
-Ranking integrity: rank on **verified** steps only (section 7). Freeze the standings into `leaderboard_snapshots` at period close, then pay out — never pay from a live query. Tie-break deterministically (earlier achievement of the total, then user id) so two users cannot both be rank 2.
-
-### 5.10 Shop and orders
-
-The shop ships **physical goods**. That makes redemption an order pipeline, not a balance decrement.
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET /shop/items?category=&deals=&cursor=` | → `ShopItem[]`. `inStock` must reflect real inventory. |
-**[N]**| `GET /shop/items/:id` | Detail for the bottom sheet. |
-**[N]**| `POST /shop/redeem` | `{ itemId, quantity, shippingAddressId }` + `Idempotency-Key`. **One transaction:** lock balance → verify funds → decrement inventory → write `purchase` ledger row → create order. Any failure rolls all of it back. |
-**[N]**| `GET /orders?cursor=`, `GET /orders/:id` | The account menu already has an "Orders" row wired to a no-op. |
-**[N]**| `POST /orders/:id/cancel` | Refund posts a `refund` ledger row and restores inventory. |
-**[N]**| `GET/POST /me/addresses` | **Missing entirely from the client.** You cannot ship a t-shirt without one; this needs UI as well as API. |
-
-The client currently counts orders by filtering the ledger for `source === 'purchase'` (`ShopScreen`). That stops being correct the moment refunds or multi-item orders exist — orders need their own resource.
-
-### 5.11 Notifications
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET /notifications?category=&cursor=` | → `AppNotification[]`, newest first. Categories are **derived from topic** server-side using the same map as `NOTIFICATION_CATEGORY`: activity = steps/workout/streak/hydration, reward = coins/challenge/reward, system = health/system. |
-**[N]**| `GET /notifications/counts` | Per-category **totals** (not unread counts — the client deliberately shows totals so a filter never looks empty). |
-**[N]**| `POST /notifications/:id/read`, `POST /notifications/read-all` | |
-**[N]**| `POST /devices` / `DELETE /devices/:token` | FCM token registration. `@react-native-firebase/messaging` is installed and unused. |
-**[N]**| `GET/PUT /me/notification-preferences` | Per-topic opt-out. Required by both stores for push. |
-
-### 5.12 Settings, referrals, misc
-
-| | Endpoint | Notes |
-|---|---|---|
-**[N]**| `GET/PUT /me/settings` | Mirror `settingsStore` so goals follow the user across devices: `dailyStepGoal` (1,000–50,000, default 10,000), `dailyWaterGoalMl` (500–8,000, default 2,500), `restTimerSeconds` (15–600, default 90), `units`, `hapticsEnabled`, `workoutRemindersEnabled`, `keepAwakeDuringWorkout`. |
-**[N]**| `GET /me/referral-code`, `POST /referrals/redeem` | 300 coins "once they log a workout" — the qualifying event is a **verified** first workout, not sign-up. Cap payouts per inviter and screen for self-referral rings. |
-**[N]**| `GET /config` | Remote config: earn rates, feature flags, minimum supported app version, maintenance flag. Saves an app release every time a number changes. |
-**[N]**| `GET /health` (unauthenticated) | Liveness for monitoring. |
-**[N]**| `GET /content/motivation` | The `MotivationCard` quote is a hardcoded string. Low priority, trivially cheap. |
-
----
-
-## 6. Two schema changes needed on day one
-
-### 6.1 `DailyActivity` needs `distanceKm`
-
-`ActivityMetricsRow` on Home renders distance, active minutes and calories. `dailyActivitySchema` has the last two and not the first, so the screen reads the seed instead. Additive change, safe under the validation rules in 3.5:
+### 4.3 Schema additions needed on day one
 
 ```ts
-export const dailyActivitySchema = z.object({
-  date: z.string(),
-  steps: z.number().int().nonnegative().default(0),
-  distanceKm: z.number().nonnegative().default(0),   // add
-  activeMinutes: z.number().int().nonnegative().default(0),
-  caloriesBurned: z.number().nonnegative().default(0),
-  workoutsCompleted: z.number().int().nonnegative().default(0),
-  source: z.enum(['health_connect', 'healthkit', 'manual']).nullable().default(null), // add
-  verified: z.boolean().default(false),               // add
-});
+// DailyActivity — additive, safe under 3.5
+distanceKm: z.number().nonnegative().default(0),
+source: z.enum(['health_connect','healthkit','manual']).nullable().default(null),
+verified: z.boolean().default(false),
+
+// LeaderboardEntry — the board cannot highlight the viewer
+isCurrentUser: z.boolean().default(false),
+
+// Achievement — send data, not formatting (C8)
+value: z.number(),   // was string "10K"; client has formatCompactNumber()
+
+// User — the account screen needs these, and they are identity, not "highlights"
+createdAt: z.string(),
+country: z.string().nullable(),   // ISO-3166-1 alpha-2; drives leaderboard scope
+phoneVerifiedAt: z.string().nullable(),
+emailVerifiedAt: z.string().nullable(),   // §13.3 — gates spend/payout
+trustTier: z.enum(['trusted','normal','watch','restricted','banned']).default('normal'),
+
+// VerificationChallenge — one challenge type for both channels
+channel: z.enum(['sms','email']).default('sms'),
+target: z.string(),                       // masked: "+91••••••3210" / "a•••@example.com"
+
+// Wallet response — coins held pending verification (§7.6)
+pending: z.number().int().nonnegative().default(0),
 ```
 
-`source` and `verified` let the UI be honest about unverified days — see 7.6.
+### 4.4 Collections the backend adds (MongoDB)
 
-### 6.2 `LeaderboardEntry` cannot identify the viewer
+| Collection | Purpose |
+|---|---|
+| `coin_ledger`, `coin_balances`, `coin_holds` | Append-only ledger + materialised balance + escrow (§8) |
+| `activity_samples`, `activity_daily`, `motion_windows` | Raw health samples, per-local-day rollups, motion-signature features (§7) |
+| `devices`, `device_sessions`, `app_releases`, `version_stats` | Device registry, per-device sessions, known builds, adoption (§13) |
+| `health_connections`, `attestations`, `fraud_flags`, `trust_history`, `review_queue` | Provider grants, integrity verdicts, fraud layers, trust score (§7) |
+| `streak_days`, `streak_freezes` | Earned/protected days; freeze grants and spends |
+| `challenge_definitions`, `challenge_enrollments`, `achievements`, `user_achievements` | Catalogue vs per-user progress |
+| `leaderboard_periods`, `leaderboard_scores`, `leaderboard_snapshots` | Live scores + frozen final standings |
+| `shop_items`, `shop_inventory`, `orders`, `order_items`, `fulfilments`, `addresses` | Physical redemption pipeline |
+| `notifications`, `notification_preferences` | Feed + consent |
+| `hydration_entries`, `hydration_reminders` | Water log + schedule |
+| `food_items`, `food_entries`, `nutrition_goals`, `nutrition_preferences`, `diet_plans`, `planned_meals` | Nutrition |
+| `vital_readings` | HR, BP, weight (BMI derived) |
+| `referrals`, `referral_codes` | Programme |
+| `user_settings` | Mirror of `settingsStore` |
+| `idempotency_keys`, `audit_log`, `events`, `feature_flags`, `campaigns` | Integrity, analytics, remote config, push campaigns |
 
-Add either a flag on the row or a `me` block on the response (5.9). Without it the board cannot highlight "you", which is the single most-looked-at row on the screen.
+Full collection schemas and indexes in [ARCHITECTURE.md §6](backend/ARCHITECTURE.md). The two properties the economy needs — *one event pays once* and *balance never negative under concurrency* — are a unique compound index on `coin_ledger` and an atomic `findOneAndUpdate({ balance: { $gte: price } }, { $inc })` on `coin_balances`, wrapped in a session transaction with the order and inventory writes.
+
+---
+
+## 5. Screen-by-screen specification
+
+Every screen in the app, what it renders, where that data comes from today, what the user can do on it, and what the backend has to provide. Actions marked **[no-op]** are wired to empty handlers in the client and need both an endpoint and (usually) a screen.
+
+### 5.1 Auth stack
+
+#### Welcome
+- **Renders:** wordmark, tagline "Move • Earn • Achieve", two buttons.
+- **Backend:** none.
+
+#### Sign In
+- **Renders:** one identifier field (email **or** phone), password, "Forgot Password?", social row (Google/Apple/Facebook), perks strip ("Track Steps / Earn V-Coins / Redeem Rewards").
+- **Data:** `signInSchema` — identifier accepts email or `^\+?\d[\d\s-]{6,17}$`.
+- **Actions:** `signIn(identifier, password)` → `POST /auth/sign-in`. Forgot password **[no-op]** (shows "not available yet"). Social **[no-op]**.
+- **Backend:** `POST /auth/sign-in` must resolve email *or* phone from one field. `POST /auth/forgot-password`, `POST /auth/reset-password`, `POST /auth/social`.
+
+#### Sign Up
+- **Renders:** email, phone (country picker + national number), password, confirm, DOB (calendar sheet), gender (segmented: male/female/other), terms checkbox.
+- **Data:** `signUpSchema` → `SignUpPayload { email (lower-cased), phone (E.164), password, dateOfBirth, gender }`. Password: 8–72 chars, ≥1 letter, ≥1 digit.
+- **Actions:** `signUp(payload)` → `POST /auth/sign-up` → `VerificationChallenge` (no tokens).
+- **Backend:** email/phone uniqueness (422 with field details), consent recorded from request, phone OTP via SMS, then email OTP automatically after phone verification (§13.3). Device must already be registered (§13.1). **Referral code field is absent** — if referral-at-signup is wanted, the form needs it (C2).
+
+#### Verify OTP
+- **Renders:** 6-box code input, expiry countdown, resend countdown (both driven by `expiresInSeconds` / `resendInSeconds`), safety note.
+- **Actions:** `verifyOtp(code)` → `POST /auth/verify-otp` → `AuthResponse`; `resendOtp()` → `POST /auth/resend-otp` → fresh challenge; back → `cancelVerification()` (client-only).
+- **Backend:** attempt limits, resend cooldowns, challenge TTL. A wrong code must leave the challenge alive. **The same screen is reused for the email OTP** that follows phone verification (§13.3) — the challenge carries `channel` and a masked `target`, and `verify-otp` is polymorphic on purpose.
+
+### 5.2 Onboarding
+
+#### Complete Profile
+- **Renders:** name, height (cm, or ft/in picker in imperial), weight (kg/lb), unit toggle that converts typed values, "data is safe" note.
+- **Data:** `completeProfileSchema` → `CompleteProfilePayload { name, heightCm, weightKg, units }`, rounded to 0.1. Client pre-checks 90–250 cm, 25–300 kg.
+- **Actions:** `completeProfile()` → `POST /me/complete-profile` → `User` with `profileCompletedAt` set.
+- **Backend:** re-validate ranges; this is the only endpoint that stamps `profileCompletedAt`. Also seed `vital_readings{kind:'weight'}` and derive BMI (C9, C10).
+
+### 5.3 Main tabs
+
+#### Home
+- **Renders:** header (name, avatar, unread-bell dot), `StepGoalCard` (today's steps vs `dailyStepGoal`, edit goal **[no-op]**), `ActivityMetricsRow` (distance km, active min, calories), `WeeklyStepsChart` (7 days vs goal), `QuickActionsRow` (Analysis, Challenges, Nutrition, Health, Streaks + streak count), `HydrationCard` (today ml vs goal, quick-add), `MotivationCard` (hardcoded quote).
+- **Source today:** `todayActivity`, `weeklySteps` seeds; streak from store; hydration from store.
+- **Backend:** `GET /activity/today`, `GET /activity/weekly` (+`distanceKm`), `GET /streak`, `GET /hydration/today`, `POST /hydration/entries`. Optional `GET /content/motivation`. Consider one **`GET /home`** aggregate to make cold start a single round-trip.
+
+#### Wallet ("Coins" tab)
+- **Renders:** `WalletSyncNotice` (only after a failed sync: "Couldn't refresh", figures' age, Retry), `CoinBalanceCard` (balance, **pending** step coins when > 0, lifetime earned), `WalletActionsRow` (Shop, History → CoinHistory, Orders **[no-op]**, Invite → Referral), `CoinsSummaryCard` (this **calendar month** earned/spent/net), `KeepGoingCard`, `EarnCoinsCard` (rate card: 10/1,000 steps, 100/workout, 175/7-day streak, 300/referral), `CoinExpiryPanel` (days left of the idle window; amber/red inside the warn thresholds; "About Coin Expiry" and the label's "?" open `CoinExpirySheet` — the countdown, the exact date, four rules worded from the server's window/warn days, "Earn coins" → Referral), `RecentTransactionsCard` (4 rows + View All → CoinHistory).
+- **Source today:** `coinsStore` — a cache of the last `GET /wallet` + newest 50 rows of `GET /wallet/transactions`. Hydrated on sign-in, re-fetched on tab focus when older than 60 s (`WALLET_STALE_AFTER_MS`), and on pull-to-refresh. Month summary and expiry countdown are the server's once synced; the on-device ledger arithmetic is only the fallback for the seeded (never-synced) wallet.
+- **Backend:** `GET /wallet` (returns `monthSummary`, `expiresAt`, `expiryDaysLeft`, `pending`, `dailyCap`/`earnedToday`/`remainingToday`), `GET /wallet/transactions?cursor=&limit=&source=`, `GET /wallet/earn-rules`.
+
+#### Coin History (root route `CoinHistory`, from the wallet)
+- **Renders:** `HistoryHeader` (back chevron, balance), `CoinSourceFilters` (All + one chip per `CoinSource`), one `CoinDayGroupCard` per local day (heading + signed day net, rows with clock time), footer spinner / "Try again" for a failed page, empty state worded for the filter.
+- **Source today:** `useCoinHistory(source)` — pages `GET /wallet/transactions` 30 at a time by cursor; seeds from the store's cache when unfiltered; a stale response for a filter the user has left is discarded; after a failed page the end-reached hook stops asking and only "Try again" retries (otherwise a list re-measuring its footer becomes a request loop on a dead network).
+- **Backend:** `GET /wallet/transactions?cursor=&limit=&source=` — `source` is validated against `COIN_SOURCES` (422 otherwise); the cursor is scoped to the filter. Tested in `vokve-backend/test/economy.test.ts`.
+
+#### Shop
+- **Renders:** header with coin badge, `ShopCoinsBanner`, `ShopCategoryFilter` (All / Deals / 4 categories), `FeaturedRewardsRow` (filtered items), `DailyOffersCard` (static copy), `TopCategoriesGrid` (counts per category), `ShopAssuranceStrip`, `ShopItemDetailSheet` (price, shortfall "Need 260 more", Redeem).
+- **Source today:** `shopItems` seed; balance/orders from `coinsStore`. Order count = ledger rows with `source==='purchase'`.
+- **Actions:** `spend(price, title, 'purchase')` then toast.
+- **Backend:** `GET /shop/items`, `GET /shop/items/:id`, `POST /shop/redeem` (atomic — §8.5), `GET /orders`, `GET/POST /me/addresses`. **The client collects no shipping address** — physical redemption needs UI + API.
+
+#### Account
+- **Renders:** header, `ProfileSummaryCard` (name, avatar, level, tier title, member since, coins, streak, achievements, total steps), `AccountShortcutsRow` (Edit Profile **[no-op]**, Privacy **[no-op]**, Notifications → NotificationSettings, Appearance → local sheet, Security **[no-op]**), `PremiumUpsellCard` (Upgrade **[no-op]**), `AccountMenuList` (My Orders **[no-op]**, My Rewards → Leaderboard, Streak Freeze & Restore → Streak, Health Data **[no-op]**, Help & Support **[no-op]**, About v1.0.0 **[no-op]**, Log Out), `DataSafetyNote`.
+- **Source today:** `profileHighlights` seed; `user` from auth store.
+- **Backend:** `GET /me/highlights` (or fold into `/me`), `PATCH /me`, `POST /me/avatar`, `GET/PUT /me/settings`, `GET /health/connections`, `DELETE /me`, `GET /me/export`, `POST /auth/sign-out`. Premium needs IAP receipt validation (out of scope for v1 — §12).
+
+### 5.4 Activity and training
+
+#### Analytics
+- **Renders:** D/W/M/Y range control, date chip + calendar, `StepsSummaryCard` (today's steps vs goal, report **[no-op]**), `StepsOverviewCard` (chart by hour / day / week / month, insights **[no-op]**), two `AnalyticsHighlightCard`s (best day, streak), `WeeklyTrendCard`, `AnalyticsCheerCard`.
+- **Source today:** `todayHourlySteps` (24 values summing to `todayActivity.steps`), `weeklySteps`, `monthlyStepsByWeek` (W1–W5), `yearlyStepsByMonth` seeds.
+- **Backend:** `GET /activity/range?from=&to=&granularity=hour|day|week|month` returning `{ buckets: [{label, start, steps, distanceKm, activeMinutes, caloriesBurned, verified}], best: {...} }`.
+
+#### Workouts (present, not routed from any tab yet)
+- **Renders:** FlashList of `WorkoutTemplate` cards.
+- **Backend:** `GET /workout-templates`.
+
+#### Workout Detail
+- **Renders:** template title, description, minutes, muscle groups, exercise list, Start.
+- **Actions:** `startWorkout(title)` + `addExercise()` per template exercise → navigates to Active Workout. Client-only.
+
+#### Active Workout
+- **Renders:** exercises, sets (reps, weight in user's units, completed toggle), rest timer, Finish, Discard. Gesture-dismiss disabled. Active session persisted so a crash loses nothing.
+- **Actions:** `finishWorkout()` → local history first, then `POST /workouts`; retried later on failure.
+- **Backend:** `POST /workouts` idempotent on `Workout.id`; server recomputes `totalVolumeKg`, `caloriesBurned`; pays 100 coins (with plausibility minimums, §8.2); writes the streak day. `GET /exercises` for a picker that does not exist yet.
+
+#### Progress (present, not routed)
+- **Renders:** workout history list with volume and relative dates.
+- **Backend:** `GET /workouts?cursor=`.
+
+### 5.5 Streak
+
+#### Streak
+- **Renders:** `StreakSummaryCard` (current, longest with dates, freezes available), `StreakCalendarCard` (month grid: earned vs protected days, month nav), `StreakToolsCard` (Freeze Today, Restore for 50 coins), `StreakBenefitsCard` (milestones 7/15/30/90/180 days → 50/150/300/1,000/2,000 coins, achieved against **longest**), `StreakCheerCard`.
+- **Actions:** `freezeToday()` (refused if none left or today already covered, no charge); restore = `canRestore && balance >= 50 && spend(50,'Streak restored','purchase') && restore()`.
+- **Rules ported verbatim (RULES.md §S):** streak anchors on today *or yesterday*; restore bridges from the last run's end to yesterday, only if that end is within 7 days.
+- **Backend:** `GET /streak`, `POST /streak/freeze`, `POST /streak/restore` (atomic debit + protected days), `GET /streak/milestones`. Fix C6: debit with `source:'streak'`, not `'purchase'`.
+
+### 5.6 Challenges and rewards
+
+#### Challenges
+- **Renders:** header, `ChallengePeriodFilter` (daily/weekly/monthly) + date chip + calendar, `ActiveChallengesCard` (progress bars, reward chips, View All **[no-op]**), `ChallengeRewardStrip` (How it works → Leaderboard "how" tab), `UpcomingChallengesCard` (View All **[no-op]**), `AchievementsCard` (rings, View All **[no-op]**), `ChallengeCheerCard`.
+- **Source today:** `seedChallenges` split on `startsAt === null`; `seedAchievements`.
+- **Backend:** `GET /challenges?cadence=&date=`, `POST /challenges/:id/claim`, `GET /achievements`. Progress recomputed server-side from verified activity.
+
+#### Leaderboard & Rewards
+- **Renders:** two tabs. **Rewards:** `LeaderboardHeroBanner`, `RewardTiersCard` (rank 1 → 5,000 + tee + bottle; 2–3 → 3,000 + tee + mat; 4–10 → 1,000 + mat; "given every week"), `CurrentLeaderboardCard` (top 5, View Full **[no-op]**), `BestRankingsCard` (best rank + date, top-ten finishes, reward coins earned, rewards won). **How it works:** week runs Mon–Sun; steps + workouts + completed challenges count; country-scoped; rewards land Monday.
+- **Source today:** `seedLeaderboard`, `leaderboardHighlights`, `REWARD_TIERS` constant.
+- **Backend:** `GET /leaderboard?period=&cursor=` with `me` block, `GET /leaderboard/history`, `GET /leaderboard/reward-tiers`. **Needs a scoring formula (C5) — proposed in RULES.md §L.**
+
+### 5.7 Hydration
+
+#### Hydration
+- **Renders:** header (back, reminders → HydrationReminder), `HydrationProgressCard` (glass, ml vs goal), `QuickAddRow` (presets + custom sheet), `HydrationLogCard` (today's entries, delete), `HydrationStatsCard` (best streak, daily average, goal hit %, reminder count; History **[no-op]**), `HydrationTipCard`.
+- **Source today:** store for today; `hydrationHighlights` seed for stats.
+- **Backend:** `GET /hydration/today`, `POST /hydration/entries`, `DELETE /hydration/entries/:id`, `GET /hydration/stats`, `GET /hydration/days?from=&to=`.
+
+#### Hydration Reminder
+- **Renders:** `ReminderHeroCard` (enabled toggle, active count, next time), `ReminderPlanCard` (morning/afternoon/evening presets with add per slot), `CustomTimesCard` (custom times + remove menu), `ReminderSettingsCard` (sound **[no-op]**, vibration, repeat days M–S), `ReminderTipCard`.
+- **Source today:** `remindersStore` (presets 07:00/08:30/10:00, 13:00/15:30, 18:00/20:00, custom 11:00/21:30).
+- **Backend:** `GET/PUT /hydration/reminders`. Delivery can be **local notifications** scheduled on-device; the server copy exists for cross-device sync and for server-sent reminders when the app is dead. Must respect quiet hours and the `health` notification category (default **off**).
+
+### 5.8 Nutrition
+
+#### Nutrition
+- **Renders:** header, period/date chip + calendar, `CalorieSummaryCard` (eaten vs goal vs burned — burned reads `todayActivity.caloriesBurned`; Learn more **[no-op]**), `DailyGoalCard` (kcal/protein/carbs/fats vs goals, edit **[no-op]**), `MealsCard` (4 slots with item count, kcal, first-logged time; add per slot → AddMeal; View All → History; Tips **[no-op]**), `PreferencesCard` (diet type / meal plan / goal via action sheet; Manage → Diet Plan).
+- **Source today:** `nutritionStore` seeded with today's 11 items + 6 days of history generated from the plan rotation.
+- **Backend:** `GET /nutrition/day/:date`, `GET/PUT /nutrition/goals`, `GET/PUT /nutrition/preferences`, `GET /activity/today` (for burned).
+
+#### Add Meal
+- **Renders:** header with coin badge, slot selector, date + time pickers, `FoodSearchRow` (search library; add custom), `FoodQuickAddRow` (4 quick-add ids), `AddedFoodsCard`, `MealSummaryCard` (totals), Save.
+- **Actions:** `addEntries(drafts[])` — batched, one `loggedAt` from date + time.
+- **Backend:** `GET /foods?q=&limit=` (search), `GET /foods/quick-add`, `POST /foods/custom`, `POST /nutrition/entries` (batch, idempotent).
+
+#### Diet Plan
+- **Renders:** Today / Week tabs; day nav + calendar; `PlanCaloriesCard` (plan total vs goal); `PlannedMealCard` per meal (tap **[no-op]**); add meal → AddMeal; `PlanNutritionCard` (macros vs goals); week strip.
+- **Source today:** `dietPlanRotation` (seed plans cycled by day-of-epoch modulo cycle length) + per-date `extras` in store.
+- **Backend:** `GET /diet-plan?date=`, `GET /diet-plan/week?start=`, `POST /diet-plan/meals`, `DELETE /diet-plan/meals/:id`. Plan generation from `preferences` (diet type × meal plan × goal) is a server job — the rotation is a placeholder for it.
+
+#### Nutrition History
+- **Renders:** Daily / Weekly / Custom range; day nav; `DailySummaryCard` (insights **[no-op]**); `HistoryMealCard` per slot (tap → AddMeal for that slot/date); `DayTotalsCard` list (previous 6 days or range); `RangeSummaryCard`.
+- **Backend:** `GET /nutrition/days?from=&to=` → per-day totals + item counts; `GET /nutrition/day/:date` for detail.
+
+### 5.9 Health and vitals
+
+#### Health Checkup
+- **Renders:** header, date chip, `HealthScoreCard` (82/100 with band word; ⓘ **[no-op]**), `VitalsCard` (latest HR, BP, BMI, weight; add reading sheet; BMI guide; tap HR/BP → detail screens), `TrackProgressCard` (Trends **[no-op]**), `RecentHistoryCard` (last readings, View All **[no-op]**), `HealthTipCard`.
+- **Source today:** `vitalsStore` seeded; `healthHighlights.score` seed.
+- **Add reading bounds:** HR 30–220 bpm; BP systolic 60–250 / diastolic 30–150 mmHg; BMI 10–60; weight 20–350 kg.
+- **Backend:** `GET /vitals/latest`, `GET /vitals?kind=&limit=&cursor=`, `POST /vitals`, `DELETE /vitals/:id`, `GET /health/score`. BMI derived server-side from latest weight + profile height (C9). A `weight` vital also updates `User.weightKg` (C10). HealthKit/Health Connect can supply HR and weight — same ingest path as steps (§7).
+
+#### Heart Rate
+- **Renders:** `HeartRateHeroCard` (latest bpm + band: <60 low, 60–100 normal, 101–120 elevated, >120 high), `LiveMeasureCard` (opens log sheet — manual entry, no camera), `HeartRateTrendCard` (7 readings), `RecentVitalReadingsCard` (View All **[no-op]**), `VitalTipCard` (**[no-op]**), ⓘ **[no-op]**.
+- **Backend:** `GET /vitals?kind=heart_rate&limit=7`, `POST /vitals`.
+
+#### Blood Pressure
+- **Renders:** `BloodPressureHeroCard` (sys/dia + pulse from latest HR + band: high if sys≥130 **or** dia≥80; low if sys<90 or dia<60; elevated if sys 120–129; else normal), trend, recent, tip.
+- **Backend:** as Heart Rate with `kind=blood_pressure`.
+
+### 5.10 Social and messaging
+
+#### Referral
+- **Renders:** header, `ReferralCodeCard` (code `VOKVE123`, Copy → clipboard, Share → OS sheet), `ReferralStatsCard` (successful, pending, coins earned), `HowReferralWorksCard` (Share → Friend joins with code → Verification → both get coins, one-time), `ReferralsCard` (list with status pill, View All **[no-op]**).
+- **Source today:** `referralCode`, `seedReferrals` (20 rows, `REFERRAL_REWARD_COINS = 20`).
+- **Backend:** `GET /referrals/me` → `{ code, shareUrl, shareMessage, stats, referrals[] }`, `GET /referrals?cursor=`, `POST /referrals/apply { code }`. Resolve C2 (20 each side vs 300 to inviter).
+
+#### Notifications
+- **Renders:** header (back, settings → NotificationSettings), `NotificationFilters` (All / Activity / Reward / System with **total** counts), day-grouped list ("Today", "Yesterday", "3 days ago", "12 Sep"), tap → `markRead`, empty state per filter.
+- **Category map (server must match):** activity = steps/workout/streak/hydration; reward = coins/challenge/reward; system = health/system.
+- **Backend:** `GET /notifications?category=&cursor=`, `GET /notifications/counts`, `POST /notifications/:id/read`, `POST /notifications/read-all`, `POST /devices` (FCM token).
+
+#### Notification Settings
+- **Renders:** header with coin badge, `NotificationIntroCard`, `NotificationCategoriesCard` (8 switches + Enable All), `NotificationPreferencesCard` (quiet hours sheet 22:00–07:00 default on; SMS for orders default on; email default off), `PrivacyNoteCard` (**[no-op]**).
+- **Backend:** `GET/PUT /me/notification-preferences`. The **server enforces** these before any push/SMS/email: category off → do not send; quiet hours → defer non-critical to window end (OTP and order-security messages are exempt).
+
+---
+
+## 6. Endpoint catalogue
+
+**[E]** = already called by the client, build to match. **[N]** = new. All under `/v1`. All authenticated unless marked.
+
+### 6.1 Auth
+| | Method + path | Body → Response |
+|---|---|---|
+| E | `POST /auth/sign-in` | `{ email\|phone as "email", password }` → `AuthResponse` |
+| E | `POST /auth/sign-up` | `SignUpPayload` → `VerificationChallenge` |
+| E | `POST /auth/verify-otp` | `{ verificationId, code }` → `AuthResponse` |
+| E | `POST /auth/resend-otp` | `{ verificationId }` → `VerificationChallenge` |
+| E | `POST /auth/sign-out` | → `{ ok }`; revokes this device's refresh token |
+| N | `POST /auth/email/send-otp` | (auth'd) → `VerificationChallenge { channel:'email' }`. Auto-sent after phone verification; this is the resend |
+| N | `POST /auth/otp/request` (public) | `{ identifier, purpose:'login' }` → `VerificationChallenge` — passwordless login on either channel |
+| N | `POST /auth/step-up` | `{ purpose:'redeem' }` → challenge; `verify-otp` then returns a short-lived `stepUpToken` required by `/shop/redeem` above ⚙ 1,000 coins |
+| E | `POST /auth/refresh` (public) | `{ refreshToken }` → `AuthTokens` |
+| N | `POST /auth/social` | `{ provider, idToken, nonce? }` → `AuthResponse` |
+| N | `POST /auth/forgot-password` (public) | `{ identifier }` → `VerificationChallenge` — **a decoy for an unknown identifier** (stored, rate-limited, masked, never delivered, never echoed), so the shape and every later error are identical either way |
+| N | `POST /auth/change-phone` / `POST /auth/change-email` | `{ value }` → `VerificationChallenge` to the **new** target; `verify-otp` with purpose `change_*` swaps it in and stamps `…VerifiedAt` |
+| N | `POST /auth/reset-password` (public) | `{ verificationId, code, password }` → `{ ok }` — OTP-based on either channel |
+
+`POST /auth/verify-otp` is **polymorphic on the challenge's purpose** (`signup_phone`, `verify_email`, `login`, `reset_password`, `change_phone`, `change_email`, `step_up`) and always returns `AuthResponse` (fresh tokens) so the client has one screen and one call. See §13.3.
+
+### 6.2 Profile and settings
+| | Method + path | Notes |
+|---|---|---|
+| E | `GET /me` | On the launch critical path — keep < 100 ms p95 |
+| E | `PATCH /me` | Must not set `profileCompletedAt` |
+| E | `POST /me/complete-profile` | Only setter of `profileCompletedAt` |
+| N | `GET /me/highlights` | `{ level, tierTitle, memberSince, achievementCount, lifetimeSteps }` |
+| N | `POST /me/avatar` | Pre-signed upload → `{ avatarUrl }` |
+| N | `GET/PUT /me/settings` | Mirror of `settingsStore` |
+| N | `GET/PUT /me/notification-preferences` | Mirror of `notificationSettingsStore` |
+| N | `GET/POST/PATCH/DELETE /me/addresses` | Shipping |
+| N | `DELETE /me` | Store-mandated account deletion |
+| N | `GET /me/export` | Data export (async job → download link) |
+
+### 6.3 Activity and health data
+| | Method + path | Notes |
+|---|---|---|
+| E | `GET /activity/weekly` | 7 local days, oldest first, **+ distanceKm/source/verified** |
+| N | `GET /activity/today` | Same shape, one day |
+| N | `GET /activity/range` | `?from&to&granularity=hour\|day\|week\|month` |
+| N | `POST /activity/ingest` | Batch samples + attestation (§7.4) |
+| N | `GET/POST/DELETE /health/connections[/:provider]` | Provider consent + sync cursor |
+| N | `GET /home` | Optional aggregate: today + weekly + streak + hydration + unread count |
+
+### 6.4 Workouts
+| | Method + path | Notes |
+|---|---|---|
+| E | `GET /workout-templates` | |
+| E | `GET /workouts?cursor=` | Wrap in `{data,nextCursor}` |
+| E | `POST /workouts` | Idempotent on `id`; recompute volume/calories; mint 100 coins; write streak day |
+| N | `GET /exercises?muscleGroup=&equipment=&q=` | |
+| N | `PATCH /workouts/:id`, `DELETE /workouts/:id` | Delete of a paid workout posts a `refund` row |
+| N | `GET/POST /measurements` | `BodyMeasurement` — or fold into `/vitals` (C10) |
+
+### 6.5 Streak
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /streak` | `{ currentStreak, longestStreak, completedDays[], protectedDays[], freezesAvailable, canRestore, restoreCostCoins, restoreGap[] }` |
+| N | `POST /streak/freeze` | No charge on refusal |
+| N | `POST /streak/restore` | Atomic debit + protected days |
+| N | `GET /streak/milestones` | Table + achieved flags (vs longest) |
+
+### 6.6 Wallet
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /wallet` | `{ balance, pending, lifetimeEarned, expiresAt, expiryDaysLeft, monthSummary, dailyCap, earnedToday, remainingToday }` |
+| N | `GET /wallet/transactions?cursor=&source=` | Signed amounts, newest first |
+| N | `GET /wallet/earn-rules` | Serve the rate card |
+| — | **No `POST /wallet/earn`** | Coins are minted only by verified server events |
+
+### 6.7 Challenges and achievements
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /challenges?cadence=&date=` | `startsAt: null` = running |
+| N | `POST /challenges/:id/claim` | Idempotent; server-verified progress ≥ goal |
+| N | `GET /achievements` | `value` as number (C8) |
+
+### 6.8 Leaderboard
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /leaderboard?period=current\|<id>&cursor=` | `{ period:{id,start,end,resetsAt,scope}, entries[], me:{rank,score,coins,percentile}, nextCursor }` |
+| N | `GET /leaderboard/history` | `{ bestRank, bestRankAchievedOn, topTenFinishes, rewardCoinsEarned, rewardsWon, periods[] }` |
+| N | `GET /leaderboard/reward-tiers` | |
+
+### 6.9 Shop and orders
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /shop/items?category=&deals=&cursor=` | `inStock` from inventory |
+| N | `GET /shop/items/:id` | |
+| N | `POST /shop/redeem` | `{ itemId, quantity, addressId }` — one transaction (§8.5) |
+| N | `GET /orders?cursor=`, `GET /orders/:id` | |
+| N | `POST /orders/:id/cancel` | Refund row + inventory restore, only while `status ∈ {placed, confirmed}` |
+
+### 6.10 Hydration
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /hydration/today` | `{ date, consumedMl, goalMl, entries[] }` |
+| N | `POST /hydration/entries` | `{ ml, at }`, idempotent |
+| N | `DELETE /hydration/entries/:id` | |
+| N | `GET /hydration/stats` | `{ bestStreakDays, dailyAverageMl, goalHitRatePercent, reminderCount }` |
+| N | `GET /hydration/days?from=&to=` | |
+| N | `GET/PUT /hydration/reminders` | Whole schedule object |
+
+### 6.11 Nutrition
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /nutrition/day/:date` | `{ date, entries[], totals, meals[4], goals }` |
+| N | `GET /nutrition/days?from=&to=` | Per-day totals + item counts |
+| N | `POST /nutrition/entries` | `{ entries: FoodEntryDraft[] }`, batch, idempotent |
+| N | `DELETE /nutrition/entries/:id` | |
+| N | `GET/PUT /nutrition/goals` | |
+| N | `GET/PUT /nutrition/preferences` | Changing preferences triggers plan regeneration |
+| N | `GET /foods?q=&limit=` | Search; also `GET /foods/quick-add` |
+| N | `POST /foods/custom` | User-private food item |
+| N | `GET /diet-plan?date=`, `GET /diet-plan/week?start=` | |
+| N | `POST /diet-plan/meals`, `DELETE /diet-plan/meals/:id` | User additions to a generated plan |
+
+### 6.12 Vitals and health
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /vitals/latest` | One per kind |
+| N | `GET /vitals?kind=&limit=&cursor=` | |
+| N | `POST /vitals` | `{ kind, value, secondary?, recordedAt? }`; server bounds; `weight` also updates profile |
+| N | `DELETE /vitals/:id` | |
+| N | `GET /health/score` | `{ score, outOf, band, factors[] }` — formula in RULES.md §H |
+
+### 6.13 Referrals
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /referrals/me` | Code, share URL/message, stats, recent list |
+| N | `GET /referrals?cursor=` | |
+| N | `POST /referrals/apply` | `{ code }` — within 7 days of sign-up, once |
+
+### 6.14 Notifications and devices
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /notifications?category=&cursor=` | |
+| N | `GET /notifications/counts` | Totals per category, not unread |
+| N | `POST /notifications/:id/read`, `POST /notifications/read-all` | |
+| N | `POST /devices`, `DELETE /devices/:token` | FCM/APNs registration |
+
+### 6.15 Platform
+| | Method + path | Notes |
+|---|---|---|
+| N | `GET /config` (public) | Earn rates, tiers, milestones, feature flags, min app version, maintenance |
+| N | `GET /content/motivation` | Quote of the day |
+| N | `GET /health` (public, unauth) | Liveness |
+
+### 6.16 Devices and versions
+| | Method + path | Notes |
+|---|---|---|
+| N | `POST /devices/register` | `{ installId, vendorId, profile, integrity, pushToken? }` → `{ deviceId, trustTier, mustUpgrade, minVersion }`. Called on every launch; idempotent by `(user, installId)` |
+| N | `PATCH /devices/:deviceId` | Heartbeat: app version/build, OS, push token, timezone, locale |
+| N | `GET /me/devices` | All devices on the account with last seen, app version, current flag |
+| N | `DELETE /me/devices/:deviceId` | Revoke that device's refresh token(s) and push token ("sign out other device") |
+| N | `GET /releases?platform=` (public) | Known builds with status; `minSupported`, `current` |
+| N | `POST /events` | Product analytics batch `[{ name, props, at }]` — device/version attached server-side |
 
 ---
 
 ## 7. Steps: sources, ingestion and fraud
 
-You asked specifically about this, comparing Sweatcoin and Google Fit. Here is the honest landscape and a concrete recommendation.
+### 7.1 There is no server-side step API
 
-### 7.1 The constraint that shapes everything: there is no server-side step API
+Health Connect (Android) and HealthKit (iOS) are **on-device datastores** with no cloud endpoint. **Google Fit is not an option**: Google deprecated the Fit developer APIs and directed developers to Health Connect; the Android Fitness API stopped serving most developers during 2025 and the REST API is on a turn-down path. Verify current dates against Google's documentation, but do not build on it.
 
-Both platform health stores are **on-device only**.
+Consequence: the client is the only reader; the server can never fully trust what arrives. This is Sweatcoin's exact situation, and why their verification — not their pedometer — is the product.
 
-- **Health Connect** (Android) is an OS-level datastore. There is no cloud endpoint — your server cannot read a user's steps. The app reads locally and uploads.
-- **HealthKit** (iOS) is the same: on-device, no server API, and Apple's terms forbid using HealthKit data for advertising or selling it on.
+### 7.2 What to borrow from Sweatcoin
 
-**Google Fit is not the answer in 2026.** Google deprecated the Google Fit developer APIs — the Android Fitness API and the Fit REST API — and directed developers to Health Connect on Android. The Fitness API stopped serving most developers during 2025, and the REST API is on a turn-down path. *Verify the current dates against Google's developer documentation before you plan around them*, but the direction is settled: **do not build on Google Fit.** Health Connect is the Android surface, and the client already has it installed and its Android permission delegate wired.
-
-Consequence: **the client is the only thing that can read steps, so the server can never fully trust the numbers it receives.** Every architectural decision below follows from that single fact. This is exactly the problem Sweatcoin has, and it is why their verification is the interesting part of their product rather than their step counter.
-
-### 7.2 What Sweatcoin actually does, and what to borrow
-
-Sweatcoin converts step counts into a currency redeemable for goods — structurally the same problem as Vokve. Their publicly described approach, and the parts worth copying:
-
-| Sweatcoin behaviour | Why | Borrow it? |
-|---|---|---|
-| Counts **outdoor** steps only (historically), corroborated by GPS/motion | A treadmill, a shaken phone and a dog's collar all produce steps; movement through space is much harder to fake | **Partly.** Full GPS corroboration costs battery and privacy. Use it as a *confidence signal*, not a gate — see 7.5 |
-| **Daily credited cap** on the free tier | Bounds the payout of any successful attack to a known number | **Yes, unconditionally.** Cheapest, most effective control you will ship |
-| Multi-sensor verification, on-device plus server-side | Single-signal checks are trivially defeated | **Yes** |
-| Conversion rate well under 1:1 (roughly 1,000 steps ≈ 0.95 coins) | Keeps unit economics survivable at scale | **Recheck your rate.** See 8.3 — Vokve's advertised rate is an order of magnitude more generous |
-| Retroactive clawback of fraudulent balances | Detection is always partly after the fact | **Yes.** The `refund` ledger source already exists for this |
-
-The lesson is not a specific algorithm. It is that **the payout ceiling, not the fraud detector, is what makes the economy safe.** A detector you can tune later; a cap protects you from day one.
-
-### 7.3 Recommended architecture
-
-```
-┌──────────────── Device ────────────────┐
-│  Health Connect (Android 9+)           │   steps, distance, active calories
-│  HealthKit (iOS 13+)                   │   + per-sample metadata:
-│                                        │     dataOrigin / sourceRevision
-│  read since last sync cursor           │     recordingMethod / wasUserEntered
-│         │                              │     device model, sample interval
-│         ▼                              │
-│  local pre-filter + batch (15 min /    │
-│  on foreground / on background task)   │
-│         │                              │
-│  Play Integrity (Android)              │   attestation token
-│  App Attest    (iOS)                   │
-└─────────┼──────────────────────────────┘
-          ▼  POST /activity/ingest   (Idempotency-Key)
-┌──────────────── Server ────────────────┐
-│ 1. verify attestation token            │  → reject emulator / tampered app
-│ 2. dedupe by (user, source, sample id) │  → idempotent replay
-│ 3. provenance filter (7.4)             │  → drop manual & untrusted origins
-│ 4. plausibility scoring (7.5)          │  → confidence 0–100
-│ 5. write activity_samples (raw, kept)  │
-│ 6. roll up into activity_daily         │  → verified vs. unverified totals
-│ 7. apply caps, then mint coins (8.2)   │  → ledger row, idempotent per day
-│ 8. recompute challenges + leaderboard  │
-└────────────────────────────────────────┘
-```
-
-Keep raw samples. When you later find a fraud pattern you did not anticipate, replaying raw samples is the difference between a targeted clawback and a guess.
-
-### 7.4 Provenance filtering — the highest-value, lowest-effort control
-
-Both platforms tell you **where a sample came from and how it was recorded**. Use it. This single filter eliminates the entire class of "user typed 50,000 steps into a health app".
-
-**Android / Health Connect** — each record carries `Metadata`:
-- `dataOrigin.packageName` — which app wrote it. Maintain an **allowlist** of trusted writers (the OS-level provider, Vokve itself, major OEM fitness apps and known-good wearables). Everything else is unverified.
-- `recordingMethod` — reject `MANUAL_ENTRY` outright. Accept `ACTIVELY_RECORDED` and `AUTOMATICALLY_RECORDED`; treat `UNKNOWN` as unverified.
-- `device` — model and type. A step record whose device is unknown deserves suspicion.
-
-**iOS / HealthKit** — each sample carries:
-- `HKMetadataKeyWasUserEntered` — reject `true`.
-- `sourceRevision.source.bundleIdentifier` — same allowlist logic. `com.apple.health` for the iPhone's own pedometer is the trusted baseline.
-- `device` — a paired Apple Watch is a stronger signal than the phone alone.
-
-Do this filtering **server-side on submitted metadata, not client-side**, so a patched client cannot skip it. The client submits metadata; the server decides.
-
-### 7.5 Plausibility scoring
-
-Score each daily rollup 0–100. Coins pay on verified steps only; unverified steps still show in the UI (7.6) but mint nothing.
-
-| Check | Reject / penalise when |
+| Their behaviour | Borrow? |
 |---|---|
-| **Cadence ceiling** | Sustained > 3.5 steps/sec over any 60s window. Elite sprinters peak near 5/sec for seconds, not minutes |
-| **Daily ceiling** | Above ~30,000 steps/day, credit is capped regardless (8.2). ~45,000+ is an outlier worth review |
-| **Stride coherence** | `distance / steps` outside 0.35–1.2 m. Shaking a phone produces steps with no distance; a car ride produces distance with no steps |
-| **Energy coherence** | Active calories wildly inconsistent with steps × the user's body mass |
-| **Burst shape** | A day's steps arriving in a handful of identical high-count blocks. Human days are ragged |
-| **Timestamp sanity** | Future timestamps, overlapping intervals, backfill older than 7 days, device clock skew > 5 min from server time |
-| **Duplicate samples** | Same interval from two sources — count once, prefer the higher-trust source |
-| **Impossible travel** | Samples from locations too far apart for the elapsed time (only if you collect coarse location; it is optional) |
-| **Device sharing** | One device id feeding several accounts — a strong referral-farm signal |
-| **Attestation** | Failed Play Integrity / App Attest, rooted or jailbroken device, emulator, or a repackaged app signature |
+| Outdoor-only, GPS-corroborated steps (historically) | Partly — as a confidence signal, not a gate |
+| **Daily credited cap** | **Yes, unconditionally.** Bounds any attack to a known number |
+| Multi-signal verification on-device + server | Yes |
+| Conversion ≈ 0.95 coins / 1,000 steps | Recheck Vokve's 10 / 1,000 — an order of magnitude more generous (§8.3) |
+| Retroactive clawback | Yes — `refund` source exists for it |
 
-Start **permissive and observing**: compute scores, log them, credit almost everything, and watch the distribution for two to four weeks. Then set thresholds from your own data. Thresholds guessed before launch will either punish honest users or wave through the obvious attacks.
+The lesson: **the payout ceiling makes the economy safe; the detector you tune later.**
 
-### 7.6 Be honest in the UI about unverified data
+### 7.3 Architecture
 
-Because `DailyActivity` gains `verified` and `source` (6.1), the app can show a full step count while making clear which part earns coins. This is much better than silently discarding steps — a user whose real walk is not credited and is not told why files a support ticket and a one-star review.
+```
+Device                                   Server
+──────                                   ──────
+Health Connect / HealthKit               1. verify Play Integrity / App Attest token (+ device signals)
+OS pedometer counter (cross-check)          and the registered device id
+accelerometer features (L4)
+  ↓ read since sync cursor               2. dedupe (user, source, sampleId)
+  ↓ sample + metadata                    3. provenance filter (7.4)
+  ↓ batch 15 min / foreground / bg task  4. plausibility score 0–100 (7.5)
+Play Integrity / App Attest              5. store raw activity_samples (keep forever*)
+  ↓                                      6. roll up activity_daily (verified vs not)
+POST /activity/ingest ──────────────────►7. trust tier → caps → HOLD coins (7.6), idempotent/day
+  Idempotency-Key                        8. recompute challenges, leaderboard, streak
+                                         9. releaseHolds job credits after the tier window
+```
+*Retention policy is an open question (§12).
 
-### 7.7 Offline, sync and the day boundary
+### 7.4 Provenance filtering — highest value, lowest effort
 
-- **Local buffering.** The app must queue samples while offline and flush on reconnect. `@react-native-community/netinfo` is already installed and `useNetworkStatus` already exists.
-- **Sync cursor per provider.** Store a "read up to" timestamp in `health_connections` so a reinstall does not re-upload a year of history — and so that re-uploading it is harmless anyway, because ingest is idempotent.
-- **Background sync.** Android has `READ_HEALTH_DATA_IN_BACKGROUND` in the manifest already. iOS needs `HKObserverQuery` plus background delivery. Without these, steps only sync when the app is opened, and the leaderboard is wrong for anyone who does not open it.
-- **Local midnight is the boundary.** Use `X-Vokve-Timezone` (3.8). A user who flies from Delhi to London must not lose or gain a day; recommendation is to pin each day to the zone the device reported *at the time of the sample*, and never retroactively re-bucket a day that has already paid out.
+Both platforms say **where a sample came from and how it was recorded**. Filter **server-side on submitted metadata**, so a patched client cannot skip it.
 
-### 7.8 Rollout for steps
+**Health Connect** `Metadata`: `dataOrigin.packageName` (allowlist trusted writers: OS provider, Vokve, major OEM apps, known wearables), `recordingMethod` (reject `MANUAL_ENTRY`; accept `ACTIVELY_RECORDED` / `AUTOMATICALLY_RECORDED`; `UNKNOWN` = unverified), `device`.
+**HealthKit**: `HKMetadataKeyWasUserEntered` (reject `true`), `sourceRevision.source.bundleIdentifier` (allowlist; `com.apple.health` is the trusted baseline), `device` (paired Watch = stronger).
 
-1. **Android first.** Health Connect is installed, permissions are declared, and the permission delegate is wired in `MainActivity.kt`. Only JS integration and the ingest endpoint are missing.
-2. **iOS second** — needs the HealthKit entitlement, `NSHealthShareUsageDescription` and `NSHealthUpdateUsageDescription` in `Info.plist`, and an App Store review note explaining the health data use.
-3. **Manual entry never mints coins.** Offer it for completeness, mark it `source: 'manual'`, `verified: false`.
-4. **Wearables later.** A paired watch is your highest-trust source; treat it as a confidence bonus, not a separate integration, since both platform stores already surface watch data.
+### 7.5 Identifying fake steps — eight layers
+
+No single check catches fake steps. Each layer below is cheap, independent, and produces a score contribution and zero or more `fraud_flags`. The layers run in order on every daily rollup; L0–L2 also run inline on ingest so an obviously bad batch is marked before it is stored.
+
+| Layer | Signal | Source | What it catches |
+|---|---|---|---|
+| **L0 Device integrity** | Play Integrity / App Attest verdict; `isEmulator()`; root/jailbreak indicators; debug build; hooking frameworks (Frida/Xposed); mock-location enabled; developer mode; app signature mismatch | `devices.signals`, `attestations` | Emulators, patched APKs, instrumented apps, sensor-injection tools |
+| **L1 Provenance** | `dataOrigin` / `sourceRevision` on allowlist or **denylist** (known step-hack packages); `recordingMethod` ≠ manual; `wasUserEntered` false; device model on sample matches registered device | sample metadata | Typed-in steps, third-party "step booster" apps writing to Health Connect |
+| **L2 Statistical plausibility** | cadence ≤ 3.5/s sustained; daily ≤ 45k; stride 0.35–1.2 m when distance exists; energy ∝ steps × mass; no future/overlapping/backfilled > 7 d timestamps; clock skew ≤ 5 min; burst shape (few identical blocks) | samples, rollup | Shaken phones, replayed batches, edited timestamps |
+| **L3 Cross-source corroboration** | OS pedometer counter (`CMPedometer` / `TYPE_STEP_COUNTER`) read by the app for the same window vs Health Connect/HealthKit total — ratio outside 0.7–1.3 flags; watch vs phone agreement; distance vs steps; optional coarse GPS displacement | `activity_daily.pedometerSteps`, samples | A health-store write the phone's own sensor never saw |
+| **L4 Motion signature** | Client samples the accelerometer for 10 s every 5 min while steps accrue and sends **features only** — dominant frequency, variance, zero-crossing rate, peak ratio. Walking: 1.4–2.5 Hz, moderate variance; shaking: > 3 Hz, high variance; vehicle: < 1 Hz with steps present; still: no periodicity with steps present | `motion_windows` | Phone on a dog, in a dryer, on a swing, in a car |
+| **L5 Temporal & behavioural** | Round-number totals; identical totals on consecutive days; > 20% of steps 01:00–05:00 local; high counts within 24 h of install; app used only to sync (no other actions); steps only on payout-relevant days | `activity_daily`, `events` | Bots and scripted uploads |
+| **L6 Graph & network** | Same `installId`/`vendorId`/attestation key across accounts; same push token; IP/ASN clusters with correlated step patterns; referral rings where invitees share devices | `devices`, `referrals`, request logs | Multi-accounting, referral farms |
+| **L7 Economic** | Earn→redeem velocity; redemption within minutes of first credit; address reuse across accounts; leaderboard rank jumps > 3σ week-over-week | `coin_ledger`, `orders`, `leaderboard_scores` | The payout side of every scheme above |
+
+**Scoring.** Each layer yields 0–100; the day's `plausibility` is a weighted mean (L0 25 · L1 20 · L2 20 · L3 15 · L4 10 · L5 5 · L6 5 — L7 feeds trust, not the day). Any **hard reject** (L0 failed attestation, L1 manual entry, L2 impossible timestamps) sets `verified=false` regardless of score.
+
+**Denylist beats allowlist for L1.** Maintain both in `app_config`: an allowlist of trusted origins (OS providers, Vokve, major OEM/wearable apps) and a denylist of packages known to fabricate steps. Unknown origins are `unverified`, not rejected — a new legitimate wearable app must not cost users their coins.
+
+**Motion features never leave the device as raw traces** — only the five summary numbers per window. That keeps the payload tiny and the privacy story clean.
+
+### 7.6 Trust score, tiers and coin escrow
+
+Per-user **trust score** 0–100 = EWMA (α = 0.3) of daily plausibility, minus open-flag penalties, plus tenure and corroboration bonuses (paired wearable, verified email + phone, address on file). Stored on `users.trust` and in `trust_history`.
+
+| Tier | Score | Step-coin hold window | Daily step cap | Effect |
+|---|---|---|---|---|
+| **Trusted** | ≥ 80 | 24 h | 30,000 | Full rates |
+| **Normal** | 50–79 | 72 h | 30,000 | Default for new accounts after first clean week |
+| **Watch** | 30–49 | 7 d | 15,000 | Review-queue entry; redemption needs step-up OTP |
+| **Restricted** | < 30 | Manual release | 5,000 | No redemption, no referral/leaderboard payout; user notified with appeal link |
+| **Banned** | admin | — | 0 | Balance frozen; ledger retained |
+
+**Escrow.** Step coins are not credited directly. The rollup creates a `coin_holds` row (`pending`), the wallet shows `pending`, and a `releaseHolds` job credits it to the ledger after the tier's window **if no new red flag appeared**. A flag during the window voids the hold (`voided`, reason recorded) — nothing to claw back, because nothing was paid. Workouts, streaks, challenges and referrals credit directly; they have their own guards.
+
+This is the Sweatcoin pattern ("coins pending verification") and it changes the economics of fraud: the attacker must sustain a clean signal for days, not seconds, and the platform's exposure is bounded by the window.
+
+**Actions available to the fraud reviewer** (admin API): confirm/dismiss flag, adjust tier, void holds, claw back (compensating `refund` row + audit), freeze, ban, and **appeal resolution** — every action audited with before/after.
+
+### 7.7 Honesty in the UI
+
+`DailyActivity.verified` / `source` and the wallet's `pending` let the app show the full count and say plainly what is pending and what earned. Silently discarding steps produces support tickets; a "pending 24 h" label produces patience.
+
+### 7.8 Offline, sync, day boundary
+
+- Queue samples offline; flush on reconnect (`useNetworkStatus` exists).
+- Sync cursor per provider in `health_connections`.
+- Background: Android permission is declared; iOS needs `HKObserverQuery` + background delivery.
+- Day = **local midnight** in the zone reported *at sample time*. Never re-bucket a day that already paid.
+
+### 7.9 Rollout
+
+1. Android first (everything but JS is wired). 2. iOS: entitlement + `NSHealthShareUsageDescription` / `NSHealthUpdateUsageDescription` + review note. 3. Manual entry never mints. 4. Wearables arrive through the same stores as a confidence bonus. 5. Layers L0–L2 at launch; L3–L4 need small client additions (pedometer read, accelerometer features) and ship in the same phase; L5–L7 are server-only and run from day one in shadow.
 
 ---
 
 ## 8. The coin economy, server-side
 
-### 8.1 Ledger design
+### 8.1 Ledger
 
-Append-only. Every row explains itself:
+```js
+coin_ledger {
+  _id, userId, amount: Int (≠ 0, signed), source, title,
+  referenceType, referenceId, idempotencyKey, holdId, actor, createdAt
+}
+index { userId, source, referenceType, referenceId } unique   // anti-double-pay: E11000 = already paid
+index { userId, createdAt: -1 }
 
+coin_balances { _id: userId, balance: Int (≥ 0), pending: Int, lifetimeEarned: Int, lastCreditAt }
+coin_holds    { _id, userId, amount, source, referenceType, referenceId, releaseAfter, status, reason }
 ```
-coin_ledger
-  id              uuid pk
-  user_id         uuid
-  amount          integer         -- signed: + earned, − spent
-  source          enum            -- steps|workout|streak|challenge|referral|purchase|refund
-  title           text            -- user-facing, e.g. "6,245 steps walked"
-  reference_type  text            -- workout|challenge|order|streak_day|activity_day|referral
-  reference_id    text            -- the thing that caused it
-  idempotency_key text unique     -- nullable for server-initiated rows
-  created_at      timestamptz
-  UNIQUE (user_id, source, reference_type, reference_id)   -- the anti-double-pay constraint
-```
+Append-only — the application DB role has no `update`/`remove` on `coin_ledger`. Corrections are compensating `refund` rows. `coin_balances` is a projection, reconciled nightly with `$group: { $sum: '$amount' }` over the ledger.
 
-That unique constraint is the real protection. It makes "pay the 10K challenge twice" a database error rather than a support ticket.
+### 8.2 Earn rules
 
-### 8.2 Earn rules (server-authoritative)
-
-From `EarnCoinsCard`, with the caps and mechanics the client has no way to express:
-
-| Event | Rate | Server mechanics |
+| Event | Rate | Mechanics |
 |---|---|---|
-| Steps | **10 coins / 1,000 verified steps** | Per local day, maintain a credited high-water mark: `owed = floor(verified_steps / 1000) * 10 − already_credited_today`. Credit only if `owed > 0`. Idempotent by `(user, 'steps', 'activity_day', date)`. **Cap at 30,000 steps/day = 300 coins.** |
-| Workout | **100 coins** | Once per workout id. Require a plausible minimum — duration, and at least one completed set — or "finish a workout" becomes a tap for 100 coins. **Cap 2/day.** |
-| Streak | **175 per 7 consecutive days** — *see 2.4 #1, this conflicts with the 50-coin 7-day milestone* | Idempotent by `(user, 'streak', 'streak_day', the 7th day)`. Resolve the conflict before launch |
-| Referral | **300 coins** | Paid when the invitee's **first verified workout** lands, not at sign-up. Cap per inviter per month; screen for device-sharing and self-referral |
-| Challenge | Per `rewardCoins` | Server-verified progress ≥ goal; one claim per enrolment |
-| Leaderboard | 5,000 / 3,000 / 1,000 | From the frozen snapshot at period close, never a live query |
+| Steps | **0.095 per 100 verified** ⚙ (`coins.steps.unitSteps`, `coins.steps.coinsPerUnit`) | Per local day high-water mark: `owed = floor(min(verified, tierCap)/unitSteps) × coinsPerUnit − (credited + held)_today`, then clipped by `sourceCaps.steps` and the daily cap (§8.2.1). Goes to **escrow** (`coin_holds`) and is released after the trust tier's window (§7.6). Stored as milli-coins (D-27) |
+| Workout | 100 | Once per workout id. Minimums: ≥ 10 min, ≥ 1 completed set. **Cap 2/day** |
+| Streak | Milestone table ⚙ (7 d = 50 default; C1 resolved → config) | Idempotent by milestone, judged against longest streak |
+| Referral | **20 / 20** both sides (C2 resolved) | On invitee's phone **and** email verification; voided by device-sharing (L6). Cap per inviter/month |
+| Challenge | `rewardCoins` | One claim per enrolment, server-verified |
+| Leaderboard | 5,000 / 3,000 / 1,000 | From frozen snapshot only |
 
-**Global cap:** set a per-user daily ceiling across all sources (600–800 coins is a reasonable starting point given the above). It bounds the damage from any bug or exploit you have not thought of, including the ones in this document.
+### 8.2.1 Daily coin cap — the hard ceiling
 
-### 8.3 Sanity-check the rate before launch
+**No user can earn more than `coins.dailyCap` coins in one local day, from all sources combined.** Default **300** ⚙ (product may set 250, 300, 500 — it is one config value, no deploy). This is the rule that bounds every bug, exploit and generous rate in this document to a known number per user per day.
 
-10 coins per 1,000 steps means a consistent 10,000-step-a-day user earns **100 coins/day, ~3,000/month**. The shop's mid-tier items sit around 250–450 coins. That is roughly **6–12 physical items per month, per active user**, before workouts, streaks, challenges, referrals or leaderboard prizes are counted.
+Mechanics, so it cannot be bypassed:
 
-For comparison, Sweatcoin's rate is around **0.95 coins per 1,000 steps** — roughly a tenth of Vokve's, for a product doing the same thing.
+```js
+// app_config
+coins: {
+  dailyCap: 300,                       // hard ceiling, all sources, per local day
+  monthlyCap: null,                    // optional second ceiling (e.g. 6000); null = off
+  sourceCaps: { steps: 200, workout: 100, streak: 300, challenge: 300, referral: 300 },
+  stepsPer1000: 10, workoutCoins: 100
+}
 
-This is not a backend decision, but the backend is where it becomes an invoice. Model the cost per active user per month before the economy goes live, and put the rates behind `GET /config` (5.12) so they can be tuned without an app release. That single endpoint is the cheapest insurance in this document.
+// coin_daily_caps — one doc per user per local day, atomic
+{ _id: { userId, localDay }, total: 0, bySource: { steps: 0, workout: 0, ... }, capped: 0 }
+
+// inside economy.credit()/hold(), before the ledger insert, same transaction:
+const remaining = cap.dailyCap - doc.total;                 // read
+const grant = Math.max(0, Math.min(amount, remaining, sourceCapRemaining));
+if (grant === 0) { record capped += amount; return { granted: 0, reason: 'DAILY_CAP_REACHED' }; }
+await coin_daily_caps.findOneAndUpdate(
+  { _id, total: { $lte: cap.dailyCap - grant } },           // conditional — two concurrent credits cannot both pass
+  { $inc: { total: grant, [`bySource.${source}`]: grant, capped: amount - grant } },
+  { upsert: true, session });
+// then coin_ledger.insertOne({ amount: grant, ... })
+```
+
+Rules:
+- The cap counts **credits and holds together** — a held step coin consumes cap the day it is earned, not the day it is released, so escrow cannot be used to stack days.
+- Partial grants are allowed: if 40 coins of cap remain and a workout is worth 100, the user gets 40 and the ledger title says "Push Day completed (daily limit reached)". The remaining 60 are **dropped, never carried over**.
+- Order is first-come: whichever event arrives first takes the cap. Steps accrue through the day, so with a 300 cap and a 200 step cap, a user still has 100 for a workout.
+- Per-source caps must each be ≤ `dailyCap`; the config validator rejects otherwise. The sum of source caps may exceed the total — that is the point of the total.
+- Reaching the cap is not a fraud signal by itself; it is logged (`capped` counter) and the wallet shows "Daily limit reached — resets at midnight".
+- Refunds and leaderboard payouts are **exempt** (a refund restores what was already counted; a weekly prize is a period reward, not daily earning). Everything else — steps, workout, streak, challenge, referral — is inside the cap.
+- `GET /wallet` returns `dailyCap`, `earnedToday`, `remainingToday` so the client can show the meter honestly.
+
+With the 300 default: a 20k-step day (200) + one workout (100) fills the cap; a streak bonus that day gets 0 and is dropped. If product wants streak/challenge bonuses to always pay, raise `dailyCap` or lower `sourceCaps.steps` — that is a product tuning question, answerable from one config screen.
+
+### 8.3 Sanity-check the rate
+
+Owner set steps to **0.095 per 100 = 0.95 / 1,000**, matching Sweatcoin. A 10k/day user now earns ~9.5 coins/day, ~285/month from steps. **That makes the inherited non-step rates look wrong** — one workout (100) is worth ten days of walking, and the shop's 250–450-coin items are a month of steps but three workouts. See D-32: rebalance `coins.workout`, `coins.streakMilestones`, shop prices and `coins.dailyCap` together, from one config screen.
 
 ### 8.4 Expiry
 
-The client implements a **90-day idle window** that resets on every credit (`COIN_EXPIRY_WINDOW_DAYS`), deliberately chosen over per-coin expiry because the rule a user can act on is "stay active and nothing expires".
+90-day idle window (⚙ `coins.expiryDays`), reset on any credit. **Implemented:**
 
-Server-side: a nightly job finds users whose newest credit is ≥ 90 days old, posts a single negative `refund` row zeroing the balance with title "Coins expired after 90 days of inactivity", and notifies. **Warn at 14 and 3 days** — silently voiding a balance is the fastest route to a chargeback-style complaint and an app-store report.
+- `GET /wallet` returns `expiresAt` (null when there is nothing to expire — never earned, or already swept: RULES E11), `expiryDaysLeft` (= window − whole days idle, so a credit a minute ago reads as the full window), `expiryWindowDays` and `expiryWarnDays` (⚙ `coins.expiryWarnDays`, default `[14, 3]`) — the client hardcodes none of them.
+- `expireIdleWallets(now)` in `economy/wallet.service.ts`: every wallet with `balanceMc > 0` and `lastCreditAt ≤ now − window` is zeroed inside a transaction with one compensating `refund` row (`referenceType: 'expiry'`, `referenceId: lastCreditAt`, title "Coins expired after 90 days of inactivity", actor `system:expiry`). Idempotent: the ledger's unique index refuses a second row for the same credit, and the balance is only zeroed when still equal to what was read, so a credit landing mid-sweep keeps its coins. `lastCreditAt` is left as evidence; `pending` is untouched.
+- `src/jobs/scheduler.ts`: an hourly tick inside the API process runs the daily jobs once per UTC day, claiming `jobs:<name>:<day>` in the KV first so two instances cannot both sweep. Started from `index.ts` and `dev:memory`.
+- Dev only: `POST /dev/jobs/coin-expiry { now?: ISO }` runs the sweep as of a chosen date.
+- **Warnings (E10) are in-app only for now:** the wallet's panel turns amber at the outer threshold and red at the inner one, with the advice line changing; the push reminder needs the notifications module (§5 Notifications) and is not built.
 
-### 8.5 Spending is a transaction
+### 8.5 Spending is one transaction
 
-Every debit — a redemption, a streak restore — is one atomic unit:
-
+```js
+preconditions (outside txn): emailVerifiedAt && phoneVerifiedAt && address && trust.tier ≥ 'normal'
+                             && (price < 1000 || valid stepUpToken)
+await session.withTransaction(async () => {
+  const bal = await coin_balances.findOneAndUpdate(
+    { _id: userId, balance: { $gte: price } },
+    { $inc: { balance: -price } }, { session, returnDocument: 'after' });
+  if (!bal) throw new ApiError(422, 'INSUFFICIENT_COINS', { required: price, balance });
+  const inv = await shop_inventory.findOneAndUpdate(
+    { _id: itemId, onHand: { $gte: qty } }, { $inc: { onHand: -qty } }, { session });
+  if (!inv) throw new ApiError(409, 'OUT_OF_STOCK');
+  const order = await orders.insertOne({ userId, status: 'placed', items, totalCoins: price, addressSnapshot }, { session });
+  await coin_ledger.insertOne({ userId, amount: -price, source: 'purchase',
+    referenceType: 'order', referenceId: order.insertedId, idempotencyKey }, { session });
+  await audit_log.insertOne({ ... }, { session });
+});
 ```
-BEGIN
-  SELECT balance FROM coin_balances WHERE user_id = ? FOR UPDATE
-  IF balance < price THEN ROLLBACK, 422 INSUFFICIENT_COINS
-  decrement inventory (and check it)
-  INSERT coin_ledger (negative amount)
-  UPDATE coin_balances
-  INSERT order
-COMMIT
-```
-
-The client checks the balance twice already (the sheet, then the store) and it is still not enough — both checks run on a possibly stale render. The `FOR UPDATE` is what actually prevents overspend.
+The conditional `$gte` filter is the overspend guard; the transaction makes the four writes all-or-nothing; the ledger's unique index makes a retried request a no-op.
 
 ---
 
@@ -649,199 +873,213 @@ The client checks the balance twice already (the sheet, then the store) and it i
 
 | Job | Cadence | Purpose |
 |---|---|---|
-| Daily activity rollup | Hourly + at each local midnight | Recompute `activity_daily`, mint step coins |
-| Streak evaluation | At each local midnight | Close yesterday: earned, protected, or broken |
-| Challenge progress | Every 15 min | Recompute progress; mark completions claimable |
-| Challenge rollover | Daily / weekly / monthly | Expire finished, open upcoming |
-| Leaderboard recompute | Every 15 min | Live standings |
-| Leaderboard close + payout | Weekly | Freeze snapshot, pay tiers, notify winners |
-| Coin expiry warnings | Daily | 14-day and 3-day notices |
-| Coin expiry sweep | Daily | Zero balances past 90 idle days |
-| Balance reconciliation | Nightly | Re-sum the ledger, alert on drift from `coin_balances` |
-| Fraud scoring sweep | Nightly | Re-score recent activity; flag accounts, queue clawbacks |
-| Hydration + workout reminders | Per user schedule | FCM push |
-| Streak-at-risk push | Evening, local | "Your 7-day streak ends at midnight" — the highest-value retention push this product has |
-| Inventory alerts | Daily | Low stock on shop items |
+| Activity rollup + step holds | Hourly + local midnight | `activity_daily`, `coin_holds` |
+| Trust score update | After each rollup; nightly | `users.trust`, `trust_history` |
+| Release holds | Every 15 min | Credit escrowed step coins past their window with no new flags |
+| Version stats / stale devices / push-token cleanup | Daily | `version_stats`, `devices` |
+| Streak evaluation | Local midnight | Earned / protected / broken |
+| Challenge progress | 15 min | Recompute; mark claimable |
+| Challenge rollover | Daily/weekly/monthly | Expire, open upcoming |
+| Leaderboard recompute | 15 min | Live scores |
+| Leaderboard close + payout | Monday 00:00 local-country | Snapshot, pay, notify |
+| Diet plan generation | On preference change + weekly | 7-day plan per user |
+| Health score | Daily | From vitals + activity + nutrition |
+| Coin expiry warn / sweep | Daily | 14d, 3d, then zero — **sweep built** (`jobs/scheduler.ts` → `expireIdleWallets`); warn push pending notifications module |
+| Reconciliation | Nightly | Ledger vs balances |
+| Fraud sweep | Nightly | Re-score, flag, queue clawbacks |
+| Hydration / workout / streak-at-risk push | Per user schedule | Respect quiet hours + categories |
+| Inventory alerts | Daily | Low stock |
 
-Every job must be idempotent and safe to re-run; they will be re-run.
+All idempotent and safe to re-run.
 
 ---
 
 ## 10. Security and compliance
 
-### 10.1 Health data is sensitive data
-
-Steps, weight, height, gender and date of birth together constitute health data under GDPR Article 9 and comparable regimes (India's DPDP Act, HIPAA where a covered entity is involved). Consequences:
-
-- **Explicit, granular, revocable consent** per data source. `DELETE /health/connections/:provider` must actually stop ingestion and be honoured immediately.
-- **Encrypt at rest**, and keep health tables in their own schema with separate access controls.
-- **Data minimisation.** Do not collect location unless you decide to use it for verification (7.5), and if you do, keep it coarse and short-lived.
-- **Apple's HealthKit terms** forbid using HealthKit data for advertising or similar use, and forbid disclosing it to third parties without consent. Read them before any analytics pipeline touches step data.
-- **Google Health Connect** requires a declared, reviewed data-use policy and the permission rationale screen — which the app already has in `PermissionRationaleActivity.kt`.
-- **Right to erasure and export**: `DELETE /me` and `GET /me/export` are compliance requirements, not features.
-
-### 10.2 API hardening checklist
-
-- TLS 1.2+ only; consider certificate pinning for the auth and ingest paths
-- Rate limits: per IP, per user, per endpoint. Tightest on `/auth/*` (OTP costs money) and `/activity/ingest` (mints coins)
-- Argon2id or bcrypt for passwords; never log credentials, OTPs or tokens
-- Authorisation on every resource read — a `GET /orders/:id` that does not check ownership is the classic IDOR
-- Validate and bound every numeric input server-side; the client's clamps (step goal 1,000–50,000, water 500–8,000 ml) are UX, not security
-- Attestation on ingest (7.5), plus a minimum-supported-app-version gate via `GET /config` so you can cut off a known-vulnerable client build
-- Audit log for every coin mutation, admin action and fraud verdict
-- Alert on: balance drift, ingest volume spikes, one device across many accounts, referral clusters, redemption rate anomalies
-
-### 10.3 Flags to remove before production
-
-`src/constants/config.ts` ships with two development switches:
-
-```ts
-bypassAuthInDev: true,   // skips the sign-in gate entirely
-useMockApi: true,        // serves every call from mockApi.ts
-```
-
-Both are guarded by `__DEV__` at their call sites (`shouldBypassAuth()` in `RootNavigator`, `shouldUseMockApi()` in `endpoints.ts`), which compiles to `false` in release. **That guard is correct and should stay.** But add a release-build CI assertion that both flags are `false` in source as well — defence in depth costs one test.
+- **Health data** (steps, weight, HR, BP, DOB, gender) is special-category data under GDPR Art. 9, India's DPDP Act, and comparable regimes. Granular revocable consent per provider; encrypted at rest; separate schema; minimisation (no location unless used for verification, then coarse and short-lived).
+- **Apple HealthKit terms** forbid advertising use and third-party disclosure without consent. **Health Connect** requires a reviewed data-use policy and the rationale screen (already present).
+- **Vitals are medical-adjacent.** The BP/HR band copy ("speak to a doctor") is fine as wellness guidance; do not add diagnosis language server-side. Keep a disclaimer in `GET /health/score`.
+- `DELETE /me` and `GET /me/export` are requirements, not features.
+- API: TLS 1.2+, pinning on auth + ingest; rate limits tightest on `/auth/*` (SMS costs money) and `/activity/ingest` (mints coins); Argon2id; ownership checks on every `:id`; server-side bounds on every numeric input; attestation on ingest; min-app-version gate; audit log on every coin mutation; alerts on drift, ingest spikes, device sharing, referral clusters.
+- **Devices:** refresh tokens are bound to a device; a refresh from another device revokes the token and notifies the user. New-device sign-in triggers a push/email ("New sign-in on Pixel 8"). Users can list and revoke devices. Max 5 active devices per account ⚙.
+- **Email + phone both OTP-verified** before any coin spend or payout; step-up OTP above 1,000 coins ⚙. OTP codes hashed, 5 attempts, 5-minute TTL, per-target/IP/device limits on both channels.
+- **Dev flags** `bypassAuthInDev` and `useMockApi` are `__DEV__`-guarded (correct). Add a CI assertion that both are `false` in source on release branches.
 
 ---
 
-## 11. Gap analysis by screen
+## 11. Delivery order
 
-| Screen | Data it shows | Source today | Endpoints needed |
+Six phases, detailed in [PHASES.md](backend/PHASES.md): **(1)** make the four existing contracts real → **(2)** step ingestion, observe only → **(3)** server ledger + minting → **(4)** streaks, challenges, notifications, hydration, nutrition, vitals → **(5)** leaderboard, shop, orders, fulfilment, referrals → **(6)** iOS HealthKit parity + hardening.
+
+---
+
+## 12. Open questions for product
+
+1. C1 — 7-day streak: 175 repeating or 50 one-off?
+2. C2 — referral: 300 to inviter on first workout, or 20 to each side on verification?
+3. C5 — leaderboard score formula (RULES.md §L proposes one).
+4. Coin rate — modelled cost per MAU at 10 / 1,000?
+5. Leaderboard country — signup, locale, or IP? Movers?
+6. Shipping — who fulfils, which countries, who pays duties?
+7. Premium — subscription or multiplier? Needs IAP + receipt validation.
+8. Manual step entry — offer at all?
+9. Health score — which factors, what weights? (RULES.md §H proposes)
+10. Diet plan — server-generated from preferences, or curated rotations per (dietType × mealPlan)?
+11. Food database — licence one (e.g. a regional nutrition DB) or seed and grow from user entries?
+12. Vitals from wearables — ingest HR/weight from HealthKit/Health Connect in v1, or manual only?
+13. Raw sample retention — months (minimisation) or years (fraud)?
+14. Email OTP gating — soft gate (session after phone; email required before spend/payout — the default) or hard gate (both OTPs at sign-up)?
+15. Motion-signature sampling (L4) — acceptable battery cost? Proposed 10 s every 5 min only while steps accrue.
+16. Escrow windows — 24 h / 72 h / 7 d per tier acceptable to product, and how is "pending" worded in the wallet?
+
+---
+
+## 13. Devices, versions and email verification
+
+### 13.1 Device identity
+
+The client has **no device id today**; `react-native-device-info` is installed and unused. Three ids are collected, each for a different job:
+
+| Id | Source | Stable across | Used for |
 |---|---|---|---|
-| Sign in / up / OTP | Session | **mockApi** (OTP `123456`) | 5.1 — exists, needs implementing |
-| Complete profile | Height, weight, units | mockApi | `POST /me/complete-profile` |
-| **Home** | Today's steps, distance, active min, calories; weekly chart; streak; hydration | `todayActivity`, `weeklySteps` seeds | `GET /activity/today`, `/activity/weekly` (+`distanceKm`), `GET /streak`, `GET /hydration/today` |
-| **Wallet** | Balance, lifetime, month summary, expiry, ledger | **client-only MMKV store** | `GET /wallet`, `/wallet/transactions`, `/wallet/earn-rules` |
-| **Shop** | Catalogue, categories, deals, redemption, order count | `shopItems` seed + client store | `GET /shop/items`, `POST /shop/redeem`, `GET /orders`, addresses |
-| **Account** | Level, tier, member since, achievements, lifetime steps | `profileHighlights` seed | `GET /me/highlights`, `GET /me/settings` |
-| **Challenges** | Active + upcoming challenges, achievements | `seedChallenges`, `seedAchievements` | `GET /challenges`, `POST /challenges/:id/claim`, `GET /achievements` |
-| **Streak** | Calendar, current, longest, freezes, restore | client-only store, seeded | `GET /streak`, `POST /streak/freeze`, `POST /streak/restore` |
-| **Leaderboard / Rewards** | Standings, own history, tiers | `seedLeaderboard`, `leaderboardHighlights` | `GET /leaderboard`, `/leaderboard/history`, `/leaderboard/reward-tiers` |
-| **Hydration** | Today's log, stats, reminders | store (today) + `hydrationHighlights` | `POST/DELETE /hydration/entries`, `GET /hydration/today`, `/hydration/stats` |
-| **Notifications** | Feed, filters, counts, read state | `seedNotifications` | `GET /notifications`, `/counts`, read endpoints, `POST /devices` |
-| **Workouts** | Templates | `workoutTemplates` seed | `GET /workout-templates` |
-| **Active workout** | Exercise picker | **no source at all** | `GET /exercises` |
-| **Progress** | Workout history | store (local only) | `GET /workouts` |
+| `installId` | UUIDv4 generated on first launch, stored in Keychain (iOS) / Keystore-backed storage (Android) | Reinstall on iOS; app updates on both | **Canonical.** Becomes `X-Vokve-Device-Id` after registration |
+| `vendorId` | `DeviceInfo.getUniqueId()` — `identifierForVendor` / `ANDROID_ID` | Reinstall (Android factory reset excepted) | Re-install correlation, device-sharing detection |
+| attestation key | App Attest `keyId` / Play Integrity device verdict | Hardware | The one id a cheater cannot mint |
 
-Dead-ends already visible in the UI as no-op handlers, each needing an endpoint *and* a screen: coin history, orders, coin-expiry explainer, edit profile, privacy settings, notification preferences, security settings, premium upgrade, health data connections, help, about, shipping addresses.
+`POST /devices/register` upserts by `(userId, installId)`, links the other two, verifies attestation, records signals (`isEmulator`, rooted, debug, hooking, mock-location), and returns the server `deviceId`. Every later request carries it in the header. A device seen on ≥ 3 accounts is flagged (L6).
 
----
+### 13.2 Device information and version tracking
 
-## 12. Suggested delivery phases
+Registered per device and refreshed on heartbeat: brand, manufacturer, model, device name, OS version, emulator/tablet flags, memory, carrier, locale, timezone, screen, app version, build, bundle id, first-installed version, push token.
 
-**Phase 1 — Make the existing contracts real (2–3 weeks)**
-Auth (incl. real OTP + SMS provider), `/me`, `/me/complete-profile`, refresh/rotation, `/workout-templates`, `/workouts`, `/activity/weekly`. Then set `useMockApi: false` and the app runs on a real backend with no client changes — that is what the contract split in `contracts.ts` was built for. Add `GET /config` and `POST /devices` here; both are cheap and unblock later work.
+Every request logs `deviceId`, `platform`, `appVersion`, `build`, `osVersion`. `app_releases` lists known builds with a status; `GET /config` returns `minVersion` per platform; a blocked build gets `426 UPGRADE_REQUIRED` with a store link. `version_stats` materialises DAU/installs/crashes per version daily so adoption of a release — and whether a fraud pattern correlates with a build — is one query.
 
-**Phase 2 — Steps, honestly (3–4 weeks)**
-Health Connect JS integration on Android, `POST /activity/ingest`, provenance filtering, attestation, `/activity/today`, `/activity/range`, daily rollup job, `verified` surfaced in the UI. **No coin minting yet** — observe the data first.
+### 13.3 Email verified by OTP
 
-**Phase 3 — Move the economy to the server (3–4 weeks)**
-`coin_ledger`, `/wallet/*`, migrate the client store to a read-through cache, turn on step/workout minting with caps, expiry job, reconciliation, audit log. This is the phase that closes the vulnerability in section 1.
+Sign-up already proves the phone with an OTP. Email is now proven the same way:
 
-**Phase 4 — Engagement (3–4 weeks)**
-Server streaks (freeze/restore atomic), challenges engine, achievements, notification feed + push, hydration history and reminders.
+1. `POST /auth/verify-otp` (phone) succeeds → `phoneVerifiedAt` set, session issued, **and** an email challenge is created and sent automatically.
+2. The app shows the same OTP screen with `channel: 'email'` and the masked `target`. `POST /auth/email/send-otp` resends.
+3. `POST /auth/verify-otp { verificationId, code }` → `emailVerifiedAt` set → `AuthResponse`.
+4. Until `emailVerifiedAt` is set the user can use the app but **cannot redeem, receive referral or leaderboard payouts, or reset a password by email**. A banner on Wallet/Shop says so. (D-20 — product may choose a hard gate at sign-up instead; it is a one-flag change.)
 
-**Phase 5 — Rewards and fulfilment (3–4 weeks)**
-Leaderboard periods and snapshots, weekly payout, shop inventory, redemption transaction, orders, addresses, shipping integration, support tooling.
-
-**Phase 6 — iOS parity and hardening**
-HealthKit entitlement and ingestion, background delivery, fraud thresholds tuned from real data, clawback tooling, load testing.
-
-Phases 2 and 3 are deliberately separate. Shipping step minting before you have watched a few weeks of real step distributions means setting fraud thresholds by guesswork, on a system that pays out physical goods.
+One `otp_challenges` collection with `channel` and `purpose`; codes are 6 digits, hashed, 5-minute TTL, 5 attempts, 30 s resend cooldown, 3 resends/hour, per-target and per-IP limits on both channels. A code for one purpose can never verify another. The same mechanism serves passwordless login, password reset, phone/email change, and step-up before large redemptions.
 
 ---
 
-## 13. Open questions for product
+## 14. Advanced features
 
-1. **The 7-day streak conflict** (2.4 #1) — is 175 coins a repeating weekly bonus, or is 50 the one-off 7-day milestone? The answer changes the payout curve substantially.
-2. **Coin rate** (8.3) — has anyone modelled cost per active user per month at 10 coins/1,000 steps?
-3. **Leaderboard scope** — "country" is stated on screen. Which country: signup, device locale, or IP at period close? What about a user who moves?
-4. **Shipping** — who fulfils physical prizes, in which countries, and who pays duties? This determines whether addresses need validation and what the order state machine looks like.
-5. **Premium tier** — `PremiumUpsellCard` exists with a no-op. Subscription, or coin multiplier? Either way it needs IAP and a receipt-validation endpoint that is not in this document.
-6. **Manual step entry** — offer it at all, given it can never mint coins?
-7. **Referral qualification** — "once they log a workout" is generous and farmable. Add a minimum account age or a verified-steps threshold?
-8. **Challenge enrolment** — auto-enrol everyone, or explicit join? Affects whether `progress` is per-user rows or computed on read.
-9. **Data retention** — how long are raw `activity_samples` kept? Fraud investigation wants years; data minimisation wants months.
+Beyond the screens. Each is small on its own; together they are what make the product operable at scale. Phase tags refer to [PHASES.md](backend/PHASES.md).
+
+| # | Feature | What it is | Endpoints / collections | Phase |
+|---|---|---|---|---|
+| 1 | **Multi-device session management** | Devices listed on the account; revoke one; new-device alerts; refresh tokens bound to device | `GET/DELETE /me/devices`, `devices`, `refresh_tokens.deviceId` | P1 |
+| 2 | **Passwordless OTP login** | Sign in with a code to phone or email; no password needed | `POST /auth/otp/request`, `verify-otp` purpose `login` | P1 |
+| 3 | **Step-up verification** | OTP re-auth before redemptions ≥ 1,000 coins ⚙, address changes, device revocation | `POST /auth/step-up`, `stepUpToken` | P5 |
+| 4 | **Trust score & coin escrow** | Per-user tier; step coins held 24 h–7 d before release; voided on new flags | `coin_holds`, `users.trust`, `trust_history`, `releaseHolds` job | P3 |
+| 5 | **Fraud review queue** | Prioritised queue of flagged accounts with evidence, one-click actions, appeals | admin `GET /fraud/queue`, `POST /fraud/:id/{confirm,dismiss,void,clawback,ban}` | P3 |
+| 6 | **Offline-first sync** | One `POST /sync` with per-collection cursors; upsert by `clientId`, LWW by `updatedAt` | `POST /sync`; `clientId` unique indexes on hydration/food/vitals | P4 |
+| 7 | **Product analytics events** | Batched client events with device/version attached; exported nightly to a warehouse | `POST /events`, `events` (TTL 400 d) | P1 |
+| 8 | **Remote config, flags, cohorts** | Every ⚙ value; percentage rollouts; cohorts by tier/country/version; kill switches | `GET /config`, `app_config`, `feature_flags` | P0→ |
+| 9 | **Push campaigns & segmentation** | Offers/announcements to a segment (country, tier, inactivity, version) with quiet-hours respect and per-category consent | `campaigns`, admin `POST /campaigns` | P4 |
+| 10 | **Weekly insights digest** | Push/email: steps vs last week, health score trend, streak, nutrition adherence | `weeklyDigest` job | P4 |
+| 11 | **Referral deep links & attribution** | Universal/App Links `vokve.app/r/CODE` → server redirect page → store → deferred attribution by `installId`/`vendorId` on first register | `GET /r/:code`, `referrals.attribution` | P5 |
+| 12 | **KYC-lite before shipping** | Verified email + phone + address + trust ≥ Normal + step-up above threshold | precondition on `/shop/redeem` | P5 |
+| 13 | **Version gating & adoption** | `app_releases` statuses; `426` on blocked builds; adoption dashboard; fraud-by-build view | `GET /releases`, `version_stats` | P1 |
+| 14 | **Admin console API** | User 360 (devices, ledger, holds, flags, orders, samples), order ops, config editor, read-only impersonation for support | `apps/admin-api` | P3→P5 |
+| 15 | **Data lifecycle automation** | Retention jobs per collection, export bundles, deletion with legal hold, consent log | `retention` job, `users.flags.legalHold` | P1, P6 |
+| 16 | **Real-time updates (optional)** | SSE stream for wallet/leaderboard changes so the app does not poll | `GET /stream` | P6 |
+| 17 | **Motion-signature verification** | Client-side accelerometer features (L4) — the strongest cheap signal against shaken phones | `motion_windows` | P2 |
+| 18 | **Streak insurance (premium hook)** | Auto-freeze on missed day for subscribers; the first feature a premium tier would sell | `streak_freezes.reason='auto'` | later |
 
 ---
 
-## 14. Appendix — reference request/response pairs
+## 15. Appendix — reference pairs
 
 **Sign up → OTP**
 ```http
 POST /v1/auth/sign-up
-{ "email": "asha@example.com", "phone": "+919876543210",
-  "password": "walk1000steps", "dateOfBirth": "1994-03-21", "gender": "female" }
-
-200
-{ "verificationId": "vrf_01HZX...", "phone": "+919876543210",
-  "codeLength": 6, "expiresInSeconds": 300, "resendInSeconds": 30 }
+{ "email":"asha@example.com","phone":"+919876543210","password":"walk1000steps",
+  "dateOfBirth":"1994-03-21","gender":"female" }
+200 { "verificationId":"vrf_01HZX","phone":"+919876543210","codeLength":6,
+      "expiresInSeconds":300,"resendInSeconds":30 }
 ```
 
-**Verify → session**
+**Device registration**
 ```http
-POST /v1/auth/verify-otp
-{ "verificationId": "vrf_01HZX...", "code": "418205" }
+POST /v1/devices/register
+{ "installId":"9b2f…","vendorId":"A1B2…","platform":"android",
+  "profile":{ "brand":"Google","model":"Pixel 8","osVersion":"14","isEmulator":false,"isTablet":false,
+              "totalMemoryMb":8192,"locale":"en-IN","timezone":"Asia/Kolkata",
+              "app":{ "version":"1.0.0","build":"42","bundleId":"com.vokve" } },
+  "integrity":{ "provider":"play_integrity","token":"…" },
+  "pushToken":"fcm:…" }
+200 { "deviceId":"dev_01HZ…","trustTier":"normal","mustUpgrade":false,"minVersion":"1.0.0" }
+```
 
-200
-{ "user": { "id": "usr_01HZX...", "name": "", "email": "asha@example.com",
-            "avatarUrl": null, "heightCm": null, "weightKg": null,
-            "dateOfBirth": "1994-03-21", "phone": "+919876543210",
-            "profileCompletedAt": null, "gender": "female",
-            "goal": "stay_active", "activityLevel": "moderate", "units": "metric",
-            "streakDays": 0, "weeklyGoalWorkouts": 4 },
-  "tokens": { "accessToken": "eyJ...", "refreshToken": "rt_...",
-              "expiresAt": 1789200000000 } }
+**Email OTP (after phone verification)**
+```http
+POST /v1/auth/email/send-otp
+200 { "verificationId":"vrf_02AB…","channel":"email","target":"a•••@example.com",
+      "phone":"", "codeLength":6,"expiresInSeconds":300,"resendInSeconds":30 }
+
+POST /v1/auth/verify-otp
+{ "verificationId":"vrf_02AB…","code":"731904" }
+200 { "user":{ …, "phoneVerifiedAt":"…","emailVerifiedAt":"2026-09-13T10:31:00Z" }, "tokens":{ … } }
 ```
 
 **Activity ingest**
 ```http
 POST /v1/activity/ingest
-Idempotency-Key: 7f3c1e2a-...
-X-Vokve-Timezone: Asia/Kolkata
-{
-  "attestation": { "platform": "android", "token": "..." },
-  "samples": [
-    { "sampleId": "hc_9f21a", "type": "steps", "value": 842,
-      "startedAt": "2026-09-13T07:12:00+05:30",
-      "endedAt":   "2026-09-13T07:21:00+05:30",
-      "origin": "com.google.android.apps.fitness",
-      "recordingMethod": "automatically_recorded",
-      "device": { "manufacturer": "Google", "model": "Pixel 8" } }
-  ]
-}
-
-200
-{ "accepted": 1, "rejected": 0,
-  "day": { "date": "2026-09-13", "steps": 6245, "verifiedSteps": 6245,
-           "distanceKm": 4.2, "activeMinutes": 48, "caloriesBurned": 358,
-           "workoutsCompleted": 0, "source": "health_connect", "verified": true },
-  "coinsCredited": 10,
-  "rejections": [] }
+Idempotency-Key: 7f3c1e2a-…   X-Vokve-Timezone: Asia/Kolkata
+{ "attestation":{"platform":"android","token":"…"},
+  "pedometer":{ "windowStart":"2026-09-13T00:00:00+05:30","windowEnd":"2026-09-13T07:30:00+05:30","steps":6190 },
+  "motion":[{ "windowStart":"2026-09-13T07:10:00+05:30","dominantHz":1.9,"variance":0.42,"zeroCrossRate":3.8,"peakRatio":0.61 }],
+  "samples":[{ "sampleId":"hc_9f21a","type":"steps","value":842,
+    "startedAt":"2026-09-13T07:12:00+05:30","endedAt":"2026-09-13T07:21:00+05:30",
+    "origin":"com.google.android.apps.fitness","recordingMethod":"automatically_recorded",
+    "device":{"manufacturer":"Google","model":"Pixel 8"} }] }
+200 { "accepted":1,"rejected":0,
+      "day":{ "date":"2026-09-13","steps":6245,"verifiedSteps":6245,"distanceKm":4.2,
+              "activeMinutes":48,"caloriesBurned":358,"workoutsCompleted":0,
+              "source":"health_connect","verified":true },
+      "coinsHeld":10,"releaseAfter":"2026-09-16T07:30:00+05:30","trustTier":"normal","rejections":[] }
 ```
 
-**Wallet**
+**Nutrition batch**
 ```http
-GET /v1/wallet
+POST /v1/nutrition/entries
+Idempotency-Key: …
+{ "entries":[{ "slot":"breakfast","name":"Oats (Cooked)","portion":"1 Cup (150 g)",
+  "calories":150,"proteinG":5,"carbsG":27,"fatsG":3,"fiberG":4,
+  "loggedAt":"2026-09-13T08:05:00+05:30","foodItemId":"fl-oats" }] }
+200 { "data":[{ "id":"fe_01HZ…", … }], "day":{ "date":"2026-09-13","totals":{…} } }
+```
 
-200
-{ "balance": 1240, "lifetimeEarned": 2140,
-  "expiresAt": "2026-12-12T00:00:00Z", "expiryDaysLeft": 90,
-  "monthSummary": { "earned": 935, "spent": 700, "net": 235 } }
+**Vital**
+```http
+POST /v1/vitals
+{ "kind":"blood_pressure","value":118,"secondary":76 }
+200 { "id":"vt_01HZ…","kind":"blood_pressure","value":118,"secondary":76,
+      "recordedAt":"2026-09-13T09:30:00Z","band":"normal" }
 ```
 
 **Insufficient coins**
 ```http
 POST /v1/shop/redeem
-Idempotency-Key: c41e...
-{ "itemId": "band", "quantity": 1, "shippingAddressId": "adr_01HZ..." }
+{ "itemId":"band","quantity":1,"addressId":"adr_01HZ" }
+422 { "error":{ "code":"INSUFFICIENT_COINS","message":"You need 210 more coins for this reward.",
+                "details":{"required":450,"balance":240} } }
+```
 
-422
-{ "error": { "code": "INSUFFICIENT_COINS",
-             "message": "You need 210 more coins for this reward.",
-             "details": { "required": 450, "balance": 240 } } }
+**Wallet**
+```http
+GET /v1/wallet
+200 { "balance":1240,"pending":60,"lifetimeEarned":2140,"expiresAt":"2026-12-12T00:00:00Z",
+      "expiryDaysLeft":90,"monthSummary":{"earned":935,"spent":700,"net":235},
+      "dailyCap":300,"earnedToday":160,"remainingToday":140 }
 ```
 
 ---
 
-*Generated from a read-through of the client at `2e4170e`. Every "current state" claim above is traceable to a file named in the text; re-audit against the code before relying on this document after further frontend work.*
+*Derived from a full read of the client at `fdbc4b0` — 30 screens, 13 stores, 4 API groups. Every "current state" claim is traceable to a file named in the text.*

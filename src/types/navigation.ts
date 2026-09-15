@@ -1,12 +1,17 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { MealSlot, WorkoutTemplate } from './models';
+import type { CoinSource, MealSlot, WorkoutTemplate } from './models';
 
 export type AuthStackParamList = {
   Welcome: undefined;
-  SignIn: undefined;
+  /** `notice` is a one-line confirmation to show on arrival — "Password updated". */
+  SignIn: { notice?: string } | undefined;
   SignUp: undefined;
+  /** Asks for the email or phone; the challenge it produces lives in the auth store. */
+  ForgotPassword: undefined;
+  /** Code plus new password, in one step. Takes no params for the same reason as VerifyOtp. */
+  ResetPassword: undefined;
   /**
    * Takes no params: the challenge it verifies lives in the auth store, and
    * copying the verification id into a route would leave two places able to
@@ -76,6 +81,13 @@ export type RootStackParamList = {
   LeaderboardRewards: { tab?: 'rewards' | 'how' } | undefined;
   /** Opened from the dashboard's hydration card. */
   Hydration: undefined;
+  /**
+   * The code for the second contact detail — phone after an email sign-up,
+   * email after a phone one. A root route rather than an auth one: the user
+   * is signed in by then, and the step can be skipped (BACKEND.md §13.3,
+   * D-20) — so it is pushed over Main, not in place of it.
+   */
+  VerifyContact: undefined;
   /** Opened from the hydration screen's own header. */
   HydrationReminder: undefined;
   /** Opened from the dashboard's "Analysis" metric tile. */
@@ -102,6 +114,12 @@ export type RootStackParamList = {
   BloodPressure: undefined;
   /** Opened from the wallet's "Earn Coins" action. */
   Referral: undefined;
+  /**
+   * The full coin ledger, from the wallet's "Coin History" action and its
+   * "View All". `source` opens it already filtered; optional, so the plain
+   * `navigate('CoinHistory')` shows everything.
+   */
+  CoinHistory: { source?: CoinSource } | undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

@@ -17,6 +17,7 @@ import { textOf } from './helpers/text';
 import { VerifyOtpScreen } from '../src/screens/auth/VerifyOtpScreen';
 import { ThemeProvider } from '../src/theme';
 import { useAuthStore } from '../src/stores/authStore';
+import { ApiError } from '../src/services/api/errors';
 
 const mockGoBack = jest.fn();
 
@@ -35,9 +36,12 @@ const metrics = {
 const CHALLENGE = {
   verificationId: 'ver_123',
   phone: '+919876543210',
+  channel: 'sms' as const,
+  target: '+91••••••3210',
   codeLength: 6,
   expiresInSeconds: 105,
   resendInSeconds: 27,
+  devCode: null,
 };
 
 const verifyOtp = jest.fn().mockResolvedValue(true);
@@ -219,11 +223,13 @@ describe('verify OTP screen', () => {
     const clearError = jest.fn();
     useAuthStore.setState({
       clearError,
-      error: { message: 'That code is not right', kind: 'server' } as never,
+      error: new ApiError('validation', 'That code is not right.', 422, { attemptsRemaining: 3 }, 'OTP_INVALID'),
     });
     const tree = await render();
 
-    expect(textOf(tree, RNText)).toContain('That code did not work');
+    const text = textOf(tree, RNText);
+    expect(text).toContain('That code did not work');
+    expect(text).toContain('You have 3 attempts left');
 
     await typeCode(tree, '1');
     expect(clearError).toHaveBeenCalled();
@@ -244,5 +250,17 @@ describe('verify OTP screen', () => {
     await press(tree, 'Change phone number');
 
     expect(mockGoBack).toHaveBeenCalled();
+  });
+
+  test('an expired code is shown as expired, with the resend as the way forward', async () => {
+    useAuthStore.setState({
+      pendingVerification: { ...CHALLENGE, expiresInSeconds: 0 },
+      error: new ApiError('unknown', 'This code has expired.', 410, null, 'OTP_EXPIRED'),
+    });
+    const tree = await render();
+    const text = textOf(tree, RNText);
+    expect(text).toContain("can't be used any more");
+    expect(text).toContain('Request a new one below');
+    expect(text).toContain('This OTP has expired.');
   });
 });

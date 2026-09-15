@@ -108,3 +108,47 @@ test('a release build ignores the flag even when it is left on', async () => {
   expect(text).toContain('Train with intent.');
   expect(text).not.toContain(APP_MARKER);
 });
+
+// ─── The two gates that outrank the session ─────────────────────────────
+
+import { useAuthStore } from '../src/stores/authStore';
+import { useAppStatusStore } from '../src/stores/appStatusStore';
+import { ApiError } from '../src/services/api/errors';
+
+afterEach(() => {
+  useAppStatusStore.setState({ upgradeRequired: null });
+});
+
+test('a session the server could not confirm gets a retry screen, not the sign-in', async () => {
+  globals.__DEV__ = false;
+  const tree = await renderGate();
+  await ReactTestRenderer.act(() => {
+    useAuthStore.setState({
+      status: 'unreachable',
+      user: null,
+      error: new ApiError('network', 'No connection. Check your internet and try again.'),
+    });
+  });
+  const text = textOf(tree);
+  expect(text).toContain("Couldn't reach VOKVE");
+  expect(text).toContain('Try again');
+  expect(text).not.toContain('Train with intent.');
+  expect(text).not.toContain(APP_MARKER);
+});
+
+test('a retired build shows the upgrade screen over everything, including a live session', async () => {
+  globals.__DEV__ = true;
+  mockBypassAuthInDev = true;
+  const tree = await renderGate();
+  expect(textOf(tree)).toContain(APP_MARKER);
+
+  await ReactTestRenderer.act(() => {
+    useAppStatusStore.setState({
+      upgradeRequired: { storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve', minVersion: '1.1.0', message: 'Please update VOKVE to continue.' },
+    });
+  });
+  const text = textOf(tree);
+  expect(text).toContain('Update VOKVE to continue');
+  expect(text).toContain('needs 1.1.0 or newer');
+  expect(text).not.toContain(APP_MARKER);
+});
