@@ -1,3 +1,4 @@
+import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
 export interface PushMessage {
@@ -36,11 +37,37 @@ export function isPushConfigured(): boolean {
   return transport !== null;
 }
 
+/**
+ * Wires FCM when the service account is configured. Called once at boot;
+ * a failure to build the transport is logged and leaves the feed-only
+ * behaviour, never a crash on start.
+ */
+export async function configurePushFromEnv(): Promise<boolean> {
+  // Nothing configured: do not even load the SDK.
+  if (!env.FIREBASE_SERVICE_ACCOUNT) return false;
+  try {
+    const { createFcmTransport } = await import('./fcm.js');
+    const fcm = await createFcmTransport();
+    if (fcm) transport = fcm;
+    return fcm !== null;
+  } catch (err) {
+    logger.error({ err }, 'push.fcm_setup_failed');
+    return false;
+  }
+}
+
 export async function sendPush(tokens: string[], message: PushMessage): Promise<PushResult> {
   if (tokens.length === 0) return { sent: 0, invalid: [] };
   if (!transport) {
     logger.debug({ tokens: tokens.length, title: message.title }, 'push.no_provider');
     return { sent: 0, invalid: [] };
   }
-  return transport.send(tokens, message);
+  try {
+    return await transport.send(tokens, message);
+  } catch (err) {
+    // A provider outage is not the caller's problem to handle: the feed row
+    // is already written, and the tick will not retry a push that failed.
+    logger.error({ err, tokens: tokens.length }, 'push.send_failed');
+    return { sent: 0, invalid: [] };
+  }
 }

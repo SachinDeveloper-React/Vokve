@@ -11,6 +11,7 @@ import { AuditLogModel } from '../platform/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from './models.js';
 import { consumeChallenge, createChallenge, findLiveChallenge, isChannelDeliverable, isChannelUsable } from './otp.service.js';
 import { toUser } from './serialize.js';
+import { applyCodeAtSignUp, findCode } from '../social/service.js';
 
 // ─── Request shapes (mirror src/types/forms.ts on the client) ───────────────
 
@@ -25,6 +26,8 @@ export const signUpBody = z.object({
     .regex(/\d/, 'Include at least one number'),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Select your date of birth'),
   gender: genderSchema,
+  /** A friend's referral code, applied the moment the account exists (RULES F2). */
+  referralCode: z.string().trim().min(4).max(12).optional(),
 });
 export type SignUpBody = z.infer<typeof signUpBody>;
 
@@ -52,6 +55,10 @@ export async function signUp(body: SignUpBody, meta: Meta) {
   const details: Record<string, string> = {};
   if (byEmail) details.email = 'That email address is already registered.';
   if (byPhone) details['phone.number'] = 'That phone number is already registered.';
+  // A bad code is refused here, on its field, while the form is still on
+  // screen — not after the OTP, when the only thing left to do is shrug.
+  const referralCode = body.referralCode ? await findCode(body.referralCode) : null;
+  if (body.referralCode && !referralCode) details.referralCode = 'That code does not match anyone. Check it with your friend.';
   if (Object.keys(details).length) throw Errors.validation(details);
 
   // The account does not exist until one contact is proven; the payload
@@ -68,7 +75,7 @@ export async function signUp(body: SignUpBody, meta: Meta) {
     channel,
     purpose: 'signup',
     target: channel === 'email' ? body.email : body.phone,
-    payload: { email: body.email, phone: body.phone, passwordHash, dateOfBirth: body.dateOfBirth, gender: body.gender },
+    payload: { email: body.email, phone: body.phone, passwordHash, dateOfBirth: body.dateOfBirth, gender: body.gender, referralCode },
     deviceId: meta.deviceId,
     ip: meta.ip,
   });
@@ -97,7 +104,7 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
 
   switch (challenge.purpose) {
     case 'signup': {
-      const p = challenge.payload as { email: string; phone: string; passwordHash: string; dateOfBirth: string; gender: string };
+      const p = challenge.payload as { email: string; phone: string; passwordHash: string; dateOfBirth: string; gender: string; referralCode?: string | null };
       const config = await getConfig();
       const userId = newId('usr');
       const provenEmail = challenge.channel === 'email';
@@ -122,6 +129,11 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
         CoinBalanceModel.create({ _id: userId }),
         AuditLogModel.create({ actorType: 'user', actorId: userId, deviceId: meta.deviceId, action: 'user.signup', subjectType: 'user', subjectId: userId }),
       ]);
+      // The friend's code the form carried: the referral opens the moment
+      // the account does, so the inviter sees them join right away.
+      if (p.referralCode) {
+        await applyCodeAtSignUp(userId, p.referralCode, config.locale.timezone, meta.deviceId);
+      }
       const user = (await UserModel.findById(userId))!;
       const session = await issueSession(user, meta);
       // The other contact is proven the same way, right after (RULES O4) —

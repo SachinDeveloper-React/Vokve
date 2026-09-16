@@ -8,7 +8,11 @@ import type {
   DeviceRegistration,
   EarnRule,
   NotificationCategory,
+  NotificationCountsSummary,
+  NotificationPreferences,
   Order,
+  Referral,
+  ReferralProgram,
   ShopCategory,
   ShopItem,
   User,
@@ -70,6 +74,12 @@ export interface DeviceApi {
    * refresh token so the server can bind the session to the device.
    */
   register(profile: DeviceProfile, refreshToken: string | null): Promise<DeviceRegistration>;
+  /**
+   * The device's push token, as FCM hands it out — `null` withdraws it
+   * (permission revoked, signing out). Where a push for this user is
+   * actually sent to.
+   */
+  setPushToken(deviceId: string, pushToken: string | null): Promise<{ ok: boolean }>;
 }
 
 /**
@@ -123,6 +133,8 @@ export interface NotificationQuery {
 
 export interface NotificationApi {
   list(query?: NotificationQuery): Promise<Page<AppNotification>>;
+  /** Totals per chip plus unread — the server's, so a paged feed still counts right. */
+  counts(): Promise<NotificationCountsSummary>;
   /**
    * Both are idempotent on the server — a row already read, or one that has
    * gone, still answers ok — so the store can fire them after its own
@@ -183,4 +195,31 @@ export interface AddressApi {
   update(id: string, patch: Partial<AddressInput>): Promise<Address>;
   setDefault(id: string): Promise<Address>;
   remove(id: string): Promise<{ ok: boolean }>;
+}
+
+export interface ReferralApi {
+  /** Everything the Referral & Earn screen shows, in one call (RULES F6). */
+  me(): Promise<ReferralProgram>;
+  list(cursor?: string): Promise<Page<Referral>>;
+  /**
+   * Applies a friend's code (RULES F2) and answers with the refreshed
+   * programme. The errors the claim card words: `REFERRAL_CODE_INVALID`
+   * (404), `REFERRAL_SELF` (422), `REFERRAL_ALREADY_APPLIED` (409),
+   * `REFERRAL_WINDOW_CLOSED` (422).
+   */
+  apply(code: string): Promise<ReferralProgram>;
+}
+
+/** A partial write: only the switches that changed travel (BACKEND §5). */
+export type NotificationPreferencesPatch = {
+  categories?: Partial<NotificationPreferences['categories']>;
+  quietHours?: Partial<NotificationPreferences['quietHours']>;
+  sms?: boolean;
+  email?: boolean;
+};
+
+export interface NotificationPreferencesApi {
+  get(): Promise<NotificationPreferences>;
+  /** Merges the patch and answers with the whole record as the server now holds it. */
+  update(patch: NotificationPreferencesPatch): Promise<NotificationPreferences>;
 }

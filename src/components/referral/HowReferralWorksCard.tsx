@@ -23,35 +23,49 @@ interface Step {
   detail: string;
 }
 
+interface Props {
+  /** Coins to the inviter per qualifying friend — the server's figure (RULES F3). */
+  inviterCoins: number;
+  /** Coins to the friend. */
+  inviteeCoins: number;
+  /** What qualifies, in the user's words — "your friend's first workout". */
+  qualifier: string;
+}
+
 /**
- * The four steps, in the order they happen.
- *
- * Written out rather than fetched: they are how the product works, and a
- * user reads them before sharing anything — no time to be waiting on a
- * request.
+ * The four steps, in the order they happen. The shape is the product's and
+ * is written here; the amounts and the qualifying event are the server's,
+ * because the owner can change them and a card that said "300" after the
+ * rate became 20 would be the lie users screenshot.
  */
-const STEPS: readonly Step[] = [
-  {
-    icon: Send,
-    title: '1. Share Code',
-    detail: 'Share your referral code with friends.',
-  },
-  {
-    icon: UserPlus,
-    title: '2. Friend Joins',
-    detail: 'Your friend installs VOKVE and signs up using your code.',
-  },
-  {
-    icon: ShieldCheck,
-    title: '3. Verification',
-    detail: 'After verification, both you and your friend get coins.',
-  },
-  {
-    icon: Gift,
-    title: '4. Get Reward',
-    detail: 'You both earn coins as a one-time reward.',
-  },
-];
+function stepsFor({ inviterCoins, inviteeCoins, qualifier }: Props): Step[] {
+  return [
+    {
+      icon: Send,
+      title: '1. Share Code',
+      detail: 'Share your referral code with friends.',
+    },
+    {
+      icon: UserPlus,
+      title: '2. Friend Joins',
+      detail:
+        'Your friend creates an account with your code — or adds it in the app within a week.',
+    },
+    {
+      icon: ShieldCheck,
+      title: '3. First Workout',
+      detail: `The reward unlocks on ${qualifier}.`,
+    },
+    {
+      icon: Gift,
+      title: '4. Get Reward',
+      detail:
+        inviterCoins === inviteeCoins
+          ? `You both get ${inviterCoins} coins, once per friend.`
+          : `You get ${inviterCoins} coins and your friend gets ${inviteeCoins}, once per friend.`,
+    },
+  ];
+}
 
 /**
  * How a referral turns into coins, as four steps across.
@@ -63,8 +77,9 @@ const STEPS: readonly Step[] = [
  * The note underneath is the one rule people ask about: a referral pays once,
  * and the daily goal is not part of the deal.
  */
-export const HowReferralWorksCard = memo(() => {
+export const HowReferralWorksCard = memo((props: Props) => {
   const { colors, isDark } = useTheme();
+  const steps = stepsFor(props);
 
   return (
     <Card radius="xl" padding="base">
@@ -72,7 +87,7 @@ export const HowReferralWorksCard = memo(() => {
         <AppText variant="h3">How Referral Works</AppText>
 
         <HStack align="start" gap="xxs">
-          {STEPS.map((step, index) => (
+          {steps.map((step, index) => (
             <Fragment key={step.title}>
               {index > 0 ? (
                 <View style={styles.arrow}>

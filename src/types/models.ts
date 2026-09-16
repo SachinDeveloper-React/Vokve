@@ -573,6 +573,63 @@ export const referralSchema = z.object({
 export type Referral = z.infer<typeof referralSchema>;
 
 /**
+ * The code the user joined on, if any — the invitee's side of a referral.
+ * `rewardCoins` is what *they* get when they qualify, which is the number
+ * the claim section promises before they type anything.
+ */
+export const appliedReferralSchema = z.object({
+  code: z.string(),
+  /** The inviter's first name, for "You joined on Asha's code". */
+  inviterName: z.string(),
+  status: referralStatusSchema,
+  rewardCoins: z.number().int().nonnegative(),
+  /** ISO-8601 of the apply. */
+  appliedAt: z.string(),
+});
+export type AppliedReferral = z.infer<typeof appliedReferralSchema>;
+
+/**
+ * What `GET /referrals/me` returns: everything the Referral & Earn screen
+ * shows, from one call. The reward figures are the server's (RULES F3, ⚙
+ * `coins.referral`) — the screen never states an amount it did not receive —
+ * and so are the share URL and message (F6), which may carry a campaign.
+ */
+export const referralProgramSchema = z.object({
+  code: z.string(),
+  shareUrl: z.string(),
+  shareMessage: z.string(),
+  rewards: z.object({
+    /** Coins to the inviter when a friend qualifies. */
+    inviter: z.number().nonnegative(),
+    /** Coins to the friend when they qualify. */
+    invitee: z.number().nonnegative(),
+    /** What qualifies, in the user's words — "your friend's first workout". */
+    qualifier: z.string(),
+    /** Rewarded referrals the inviter is paid for per calendar month (F4). */
+    monthlyInviterCap: z.number().int().nonnegative(),
+  }),
+  stats: z.object({
+    successful: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    coinsEarned: z.number().nonnegative(),
+    /** How many of this month's cap are used. */
+    rewardedThisMonth: z.number().int().nonnegative(),
+  }),
+  /** Newest first; the first page. `GET /referrals` pages the rest. */
+  referrals: z.array(referralSchema),
+  /** The code this user joined on, or null. */
+  applied: appliedReferralSchema.nullable(),
+  /**
+   * Whether a code can still be applied: none applied yet and the window
+   * since sign-up (F2) still open. `applyBy` is when it closes, ISO-8601,
+   * null once it has — or once a code is applied.
+   */
+  canApply: z.boolean(),
+  applyBy: z.string().nullable(),
+});
+export type ReferralProgram = z.infer<typeof referralProgramSchema>;
+
+/**
  * One person on the leaderboard, as a row of it is drawn.
  *
  * The perk is the wording the board shows beside the coins — "T-Shirt +
@@ -633,6 +690,44 @@ export type NotificationCategory = z.infer<typeof notificationCategorySchema>;
  * `AppNotification` rather than `Notification`: the DOM lib defines a type of
  * that name, and a screen importing the wrong one would still compile.
  */
+/**
+ * What the user has agreed to be told about (BACKEND §5 Notification
+ * Settings): eight subject switches, the quiet window and the two other
+ * channels. The server enforces these before any push, SMS or email.
+ */
+export const notificationPreferencesSchema = z.object({
+  categories: z.object({
+    activity: z.boolean(),
+    coins: z.boolean(),
+    challenges: z.boolean(),
+    orders: z.boolean(),
+    offers: z.boolean(),
+    announcements: z.boolean(),
+    referrals: z.boolean(),
+    health: z.boolean(),
+  }),
+  quietHours: z.object({
+    enabled: z.boolean(),
+    /** 24-hour `HH:mm`, local. The window may run past midnight. */
+    start: z.string(),
+    end: z.string(),
+  }),
+  /** Order and delivery updates by text message. */
+  sms: z.boolean(),
+  email: z.boolean(),
+});
+export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
+
+/** `GET /notifications/counts`: totals per chip, and the unread figure the bell is drawn from. */
+export const notificationCountsSchema = z.object({
+  all: z.number().int().nonnegative(),
+  activity: z.number().int().nonnegative(),
+  reward: z.number().int().nonnegative(),
+  system: z.number().int().nonnegative(),
+  unread: z.number().int().nonnegative(),
+});
+export type NotificationCountsSummary = z.infer<typeof notificationCountsSchema>;
+
 export const appNotificationSchema = z.object({
   id: z.string(),
   topic: notificationTopicSchema,

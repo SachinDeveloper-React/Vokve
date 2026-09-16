@@ -1,6 +1,7 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useToast } from '../../components/feedback/Toast';
 import { NotificationCategoriesCard } from '../../components/settings/NotificationCategoriesCard';
 import { NotificationIntroCard } from '../../components/settings/NotificationIntroCard';
 import { NotificationPreferencesCard } from '../../components/settings/NotificationPreferencesCard';
@@ -8,11 +9,13 @@ import { NotificationSettingsHeader } from '../../components/settings/Notificati
 import { PrivacyNoteCard } from '../../components/settings/PrivacyNoteCard';
 import { QuietHoursSheet } from '../../components/settings/QuietHoursSheet';
 import { Screen } from '../../components/ui/Screen';
+import { useAuthStatus } from '../../stores/authStore';
 import { useCoinBalance } from '../../stores/coinsStore';
 import {
   useAllCategoriesEnabled,
   useEmailNotifications,
   useNotificationCategories,
+  useNotificationSaveError,
   useNotificationSettingsStore,
   useQuietHours,
   useSmsNotifications,
@@ -30,7 +33,9 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * Every switch writes straight to the settings store rather than being
  * collected behind a Save: these are consent, and a screen that made somebody
  * confirm turning a notification off would be arguing with them. There is
- * nothing to cancel, which is why the screen has no footer.
+ * nothing to cancel, which is why the screen has no footer. The store sends
+ * each flip to the server as it happens and puts the switch back if it is
+ * refused — which this screen reports, once, in a toast.
  *
  * Separate from the notification centre, which is the feed. This decides what
  * is ever sent; that shows what already was.
@@ -38,6 +43,8 @@ const makeStyles = ({ spacing }: ThemeShape) =>
 export const NotificationSettingsScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const navigation = useNavigation();
+  const toast = useToast();
+  const isSignedIn = useAuthStatus() === 'authenticated';
 
   const coins = useCoinBalance();
   const categories = useNotificationCategories();
@@ -51,6 +58,31 @@ export const NotificationSettingsScreen = () => {
   const setQuietHours = useNotificationSettingsStore(s => s.setQuietHours);
   const setSms = useNotificationSettingsStore(s => s.setSms);
   const setEmail = useNotificationSettingsStore(s => s.setEmail);
+  const hydrateFromServer = useNotificationSettingsStore(
+    s => s.hydrateFromServer,
+  );
+  const saveError = useNotificationSaveError();
+  const clearSaveError = useNotificationSettingsStore(s => s.clearSaveError);
+
+  // The server's copy is the one it enforces: read it on open so a change
+  // made on another device is what the switches show.
+  useEffect(() => {
+    if (isSignedIn) {
+      hydrateFromServer();
+    }
+  }, [hydrateFromServer, isSignedIn]);
+
+  // A refused write has already put the switch back; this says why.
+  useEffect(() => {
+    if (saveError) {
+      toast.show({
+        title: "Couldn't save that",
+        message: saveError,
+        tone: 'warning',
+      });
+      clearSaveError();
+    }
+  }, [clearSaveError, saveError, toast]);
 
   const [isQuietOpen, setQuietOpen] = useState(false);
   const openQuiet = useCallback(() => setQuietOpen(true), []);

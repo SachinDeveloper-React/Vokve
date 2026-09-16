@@ -26,12 +26,15 @@ import {
   mockAuthApi,
   mockNotificationApi,
   mockOrderApi,
+  mockReferralApi,
   mockShopApi,
   mockUserApi,
   mockWalletApi,
   mockWorkoutApi,
 } from '../src/services/api/mockApi';
 import {
+  REFERRAL_REWARD_COINS,
+  referralCode,
   seedCoinTransactions,
   seedNotifications,
 } from '../src/constants/seedData';
@@ -423,5 +426,47 @@ describe('the shop, orders and addresses', () => {
       () => mockShopApi.redeem({ itemId: 'tee', addressId: home.id, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k2' }),
       'forbidden',
     );
+  });
+});
+
+describe('the referral programme', () => {
+  test('serves the code, the share text with it, and the amounts', async () => {
+    const me = await mockReferralApi.me();
+    expect(me.code).toBe(referralCode);
+    expect(me.shareMessage).toContain(referralCode);
+    expect(me.shareUrl).toContain(referralCode);
+    expect(me.rewards).toMatchObject({ inviter: REFERRAL_REWARD_COINS, invitee: REFERRAL_REWARD_COINS });
+    expect(me.stats.successful + me.stats.pending).toBe(me.referrals.length);
+    expect(me).toMatchObject({ applied: null, canApply: true });
+  });
+
+  test("a code typed at sign-up is checked on the form and applied when the account is created", async () => {
+    await expectApiError(
+      () => mockAuthApi.signUp({ ...PAYLOAD, referralCode: 'NOPE999' }),
+      'validation',
+    );
+    await mockAuthApi.signUp({ ...PAYLOAD, referralCode: 'NOPE999' }).catch(error => {
+      expect((error as ApiError).fieldErrors).toHaveProperty('referralCode');
+    });
+
+    const challenge = await mockAuthApi.signUp({ ...PAYLOAD, referralCode: 'ASHA2K7' });
+    // Nothing applied until the code passes.
+    expect((await mockReferralApi.me()).applied).toBeNull();
+    await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
+    expect((await mockReferralApi.me()).applied).toMatchObject({ code: 'ASHA2K7', inviterName: 'Asha', status: 'pending' });
+  });
+
+  test('applying a friend\'s code once is accepted; your own, an unknown one, or a second is refused', async () => {
+    await expectApiError(() => mockReferralApi.apply(referralCode), 'validation');
+    await expectApiError(() => mockReferralApi.apply('NOPE123'), 'not_found');
+
+    const applied = await mockReferralApi.apply('asha 2k7');
+    expect(applied.applied).toMatchObject({ code: 'ASHA2K7', inviterName: 'Asha', status: 'pending' });
+    expect(applied.canApply).toBe(false);
+
+    await expectApiError(() => mockReferralApi.apply('RAVI9XB'), 'unknown');
+    // Sign-out forgets it, like the rest of the mock's state.
+    await mockAuthApi.signOut();
+    expect((await mockReferralApi.me()).applied).toBeNull();
   });
 });

@@ -4,3 +4,4 @@ export { ReferralCodeCard } from './ReferralCodeCard';
 export { ReferralStatsCard } from './ReferralStatsCard';
 export { HowReferralWorksCard } from './HowReferralWorksCard';
 export { ReferralsCard } from './ReferralsCard';
+export { ClaimReferralCard } from './ClaimReferralCard';

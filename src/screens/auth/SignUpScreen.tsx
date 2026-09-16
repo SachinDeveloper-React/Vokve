@@ -15,6 +15,7 @@ import {
   Mail,
   Mars,
   Phone,
+  Ticket,
   Transgender,
   Venus,
 } from 'lucide-react-native';
@@ -120,6 +121,7 @@ export const SignUpScreen = () => {
       dateOfBirth: '',
       gender: null,
       acceptedTerms: false,
+      referralCode: '',
     },
     mode: 'onBlur',
     reValidateMode: 'onChange',
@@ -143,7 +145,9 @@ export const SignUpScreen = () => {
       // the message lands under the field rather than in a banner the user
       // has to map back themselves.
       const failure = useAuthStore.getState().error;
-      for (const [field, message] of Object.entries(failure?.fieldErrors ?? {})) {
+      for (const [field, message] of Object.entries(
+        failure?.fieldErrors ?? {},
+      )) {
         setError(field as keyof SignUpValues | 'phone.number', { message });
       }
     },
@@ -219,8 +223,14 @@ export const SignUpScreen = () => {
           {serverError ? (
             <Alert
               tone="error"
-              title={describeAuthError(serverError, 'Could not create your account').title}
-              message={describeAuthError(serverError, 'Could not create your account').message}
+              title={
+                describeAuthError(serverError, 'Could not create your account')
+                  .title
+              }
+              message={
+                describeAuthError(serverError, 'Could not create your account')
+                  .message
+              }
               onDismiss={clearError}
             />
           ) : null}
@@ -335,6 +345,18 @@ export const SignUpScreen = () => {
               name="gender"
               label="Gender"
               segments={genders}
+            />
+
+            <FormInput
+              control={control}
+              name="referralCode"
+              placeholder="Referral code (optional)"
+              accessibilityLabel="Referral code, optional"
+              helper="Have a friend's code? Add it here and you both earn coins after your first workout."
+              leading={<Icon as={Ticket} size="md" color="textTertiary" />}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={12}
             />
 
             <FormCheckbox

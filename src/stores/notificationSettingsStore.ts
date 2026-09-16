@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { NotificationPreferencesPatch } from '../services/api/contracts';
+import { notificationPreferencesApi } from '../services/api/endpoints';
+import { toApiError } from '../services/api/errors';
+import type { NotificationPreferences } from '../types/models';
+import { logger } from '../utils/logger';
 import { mmkvStorage } from './index';
 
 /**
@@ -64,14 +69,40 @@ interface NotificationSettingsState {
   /** Order and delivery updates by text message. */
   sms: boolean;
   email: boolean;
+  /** When the server last confirmed these; null until the first sync. */
+  syncedAt: string | null;
+  isSyncing: boolean;
+  /**
+   * Why the last write was refused, for the screen to say so. The switch
+   * has already been put back to what the server holds by then.
+   */
+  saveError: string | null;
 
+  /**
+   * Replaces the local choices with the server's (`GET
+   * /me/notification-preferences`). The server enforces these before any
+   * push, so its copy is the one that counts; the device's is a cache so
+   * the screen opens on the right switches before the network answers.
+   */
+  hydrateFromServer: () => Promise<void>;
   setCategory: (key: NotificationCategoryKey, value: boolean) => void;
   /** Turns every category on — what the "Enable All" link does. */
   enableAll: () => void;
   setQuietHours: (quietHours: Partial<QuietHours>) => void;
   setSms: (value: boolean) => void;
   setEmail: (value: boolean) => void;
+  clearSaveError: () => void;
   reset: () => void;
+}
+
+/** The switches, as the server's record carries them. */
+function fromServer(prefs: NotificationPreferences) {
+  return {
+    categories: prefs.categories,
+    quietHours: prefs.quietHours,
+    sms: prefs.sms,
+    email: prefs.email,
+  };
 }
 
 /**
@@ -81,47 +112,141 @@ interface NotificationSettingsState {
  * consent: it decides what is ever sent, and it is the only part of the two
  * that has to survive a reinstall of the feed's contents.
  *
- * Nothing here registers with the OS yet. It is the set of choices a push
- * service will read when the native side lands, which is why it persists.
+ * Every switch flips on the device at once and is sent as a patch; a refused
+ * write puts the switch back and says why. Consent is a thing the server
+ * enforces, so a toggle the server never heard about would be a promise the
+ * app could not keep.
  */
 export const useNotificationSettingsStore = create<NotificationSettingsState>()(
   persist(
-    set => ({
-      categories: DEFAULT_CATEGORIES,
-      quietHours: DEFAULT_QUIET_HOURS,
-      sms: true,
-      email: false,
+    (set, get) => {
+      /**
+       * Applies the change locally, sends it, and on refusal restores the
+       * previous values. The server's answer is the whole record and
+       * replaces ours: a clamp or a default it applied is then what shows.
+       */
+      const write = (
+        local: Partial<
+          Pick<
+            NotificationSettingsState,
+            'categories' | 'quietHours' | 'sms' | 'email'
+          >
+        >,
+        patch: NotificationPreferencesPatch,
+      ) => {
+        const before = {
+          categories: get().categories,
+          quietHours: get().quietHours,
+          sms: get().sms,
+          email: get().email,
+        };
+        set({ ...local, saveError: null });
+        // Only a synced store has a server record to patch; before that the
+        // choice is local and the first sync brings the server's copy.
+        if (get().syncedAt === null) {
+          return;
+        }
+        notificationPreferencesApi
+          .update(patch)
+          .then(prefs =>
+            set({ ...fromServer(prefs), syncedAt: new Date().toISOString() }),
+          )
+          .catch(error => {
+            const apiError = toApiError(error);
+            logger.warn(
+              'notificationSettingsStore',
+              'Preference write refused',
+              apiError,
+            );
+            set({ ...before, saveError: apiError.message });
+          });
+      };
 
-      setCategory: (key, value) =>
-        set(state => ({ categories: { ...state.categories, [key]: value } })),
+      return {
+        categories: DEFAULT_CATEGORIES,
+        quietHours: DEFAULT_QUIET_HOURS,
+        sms: true,
+        email: false,
+        syncedAt: null,
+        isSyncing: false,
+        saveError: null,
 
-      enableAll: () =>
-        set(state => {
-          const next = { ...state.categories };
-          for (const key of NOTIFICATION_CATEGORIES) {
-            next[key] = true;
+        hydrateFromServer: async () => {
+          if (get().isSyncing) {
+            return;
           }
-          return { categories: next };
-        }),
+          set({ isSyncing: true });
+          try {
+            const prefs = await notificationPreferencesApi.get();
+            set({
+              ...fromServer(prefs),
+              syncedAt: new Date().toISOString(),
+              isSyncing: false,
+            });
+          } catch (error) {
+            logger.warn(
+              'notificationSettingsStore',
+              'Preference sync failed',
+              toApiError(error),
+            );
+            set({ isSyncing: false });
+          }
+        },
 
-      setQuietHours: quietHours =>
-        set(state => ({ quietHours: { ...state.quietHours, ...quietHours } })),
+        setCategory: (key, value) =>
+          write(
+            { categories: { ...get().categories, [key]: value } },
+            { categories: { [key]: value } },
+          ),
 
-      setSms: value => set({ sms: value }),
-      setEmail: value => set({ email: value }),
+        enableAll: () => {
+          const next = { ...get().categories };
+          const patch: Partial<CategorySwitches> = {};
+          for (const key of NOTIFICATION_CATEGORIES) {
+            if (!next[key]) {
+              next[key] = true;
+              patch[key] = true;
+            }
+          }
+          if (Object.keys(patch).length === 0) {
+            return;
+          }
+          write({ categories: next }, { categories: patch });
+        },
 
-      reset: () =>
-        set({
-          categories: DEFAULT_CATEGORIES,
-          quietHours: DEFAULT_QUIET_HOURS,
-          sms: true,
-          email: false,
-        }),
-    }),
+        setQuietHours: quietHours =>
+          write(
+            { quietHours: { ...get().quietHours, ...quietHours } },
+            { quietHours },
+          ),
+
+        setSms: value => write({ sms: value }, { sms: value }),
+        setEmail: value => write({ email: value }, { email: value }),
+        clearSaveError: () => set({ saveError: null }),
+
+        reset: () =>
+          set({
+            categories: DEFAULT_CATEGORIES,
+            quietHours: DEFAULT_QUIET_HOURS,
+            sms: true,
+            email: false,
+            syncedAt: null,
+            isSyncing: false,
+            saveError: null,
+          }),
+      };
+    },
     {
       name: 'vokve.notificationSettings',
       storage: createJSONStorage(() => mmkvStorage),
       version: 1,
+      partialize: state => ({
+        categories: state.categories,
+        quietHours: state.quietHours,
+        sms: state.sms,
+        email: state.email,
+        syncedAt: state.syncedAt,
+      }),
     },
   ),
 );
@@ -130,9 +255,12 @@ export const useNotificationCategories = () =>
   useNotificationSettingsStore(s => s.categories);
 export const useQuietHours = () =>
   useNotificationSettingsStore(s => s.quietHours);
-export const useSmsNotifications = () => useNotificationSettingsStore(s => s.sms);
+export const useSmsNotifications = () =>
+  useNotificationSettingsStore(s => s.sms);
 export const useEmailNotifications = () =>
   useNotificationSettingsStore(s => s.email);
+export const useNotificationSaveError = () =>
+  useNotificationSettingsStore(s => s.saveError);
 
 /** Whether every category is already on, which is what greys out "Enable All". */
 export const useAllCategoriesEnabled = () =>

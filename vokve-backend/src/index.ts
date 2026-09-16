@@ -4,10 +4,12 @@ import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { getKV } from './db/redis.js';
 import { startScheduler } from './jobs/scheduler.js';
 import { logger } from './lib/logger.js';
+import { configurePushFromEnv } from './lib/push.js';
 
 async function main() {
   await connectMongo();
   getKV();
+  await configurePushFromEnv();
   const app = createApp();
   const server = app.listen(env.PORT, () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV, otpEcho: env.OTP_DEV_ECHO }, 'vokve-backend listening');

@@ -4,10 +4,13 @@ import { setOnSessionExpired } from '../services/api/client';
 import { ApiError, toApiError } from '../services/api/errors';
 import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
+import { registerForPush, unregisterFromPush } from '../services/push';
 import { useAddressesStore } from './addressesStore';
 import { useCoinsStore } from './coinsStore';
+import { useNotificationSettingsStore } from './notificationSettingsStore';
 import { useNotificationsStore } from './notificationsStore';
 import { useOrdersStore } from './ordersStore';
+import { useReferralStore } from './referralStore';
 import type { AuthTokens, User, VerificationChallenge } from '../types/models';
 import type {
   CompleteProfilePayload,
@@ -132,6 +135,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ status: 'authenticated', user, error: null, isSubmitting: false });
       useCoinsStore.getState().hydrateFromServer();
       useNotificationsStore.getState().hydrateFromServer();
+      useNotificationSettingsStore.getState().hydrateFromServer();
+      registerForPush();
       useOrdersStore.getState().hydrateFromServer();
       useAddressesStore.getState().hydrateFromServer();
     } catch (error) {
@@ -176,6 +181,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ status: 'authenticated', user, isSubmitting: false, notice: null });
       useCoinsStore.getState().hydrateFromServer();
       useNotificationsStore.getState().hydrateFromServer();
+      useNotificationSettingsStore.getState().hydrateFromServer();
+      registerForPush();
       useOrdersStore.getState().hydrateFromServer();
       useAddressesStore.getState().hydrateFromServer();
       return true;
@@ -242,6 +249,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       useCoinsStore.getState().hydrateFromServer();
       useNotificationsStore.getState().hydrateFromServer();
+      useNotificationSettingsStore.getState().hydrateFromServer();
+      registerForPush();
       useOrdersStore.getState().hydrateFromServer();
       useAddressesStore.getState().hydrateFromServer();
       return true;
@@ -412,8 +421,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    // Tell the server if we can, but never block the user from leaving.
+    // Tell the server if we can, but never block the user from leaving. The
+    // push token goes first, while the session can still say whose it was.
     try {
+      await unregisterFromPush();
       await authApi.signOut();
     } catch (error) {
       logger.warn('authStore', 'Server sign-out failed, clearing locally', error);
@@ -425,6 +436,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useNotificationsStore.getState().reset();
     useOrdersStore.getState().reset();
     useAddressesStore.getState().reset();
+    useReferralStore.getState().reset();
+    useNotificationSettingsStore.getState().reset();
     set({
       status: 'signed_out',
       user: null,

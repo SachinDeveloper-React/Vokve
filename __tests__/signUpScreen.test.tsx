@@ -16,6 +16,7 @@ import { textOf } from './helpers/text';
 import { SignUpScreen } from '../src/screens/auth/SignUpScreen';
 import { ThemeProvider } from '../src/theme';
 import { useAuthStore } from '../src/stores/authStore';
+import { ApiError } from '../src/services/api/errors';
 
 const mockGoBack = jest.fn();
 const mockNavigate = jest.fn();
@@ -199,6 +200,83 @@ describe('sign-up screen', () => {
       password: 'longenough1',
       dateOfBirth: '1995-04-17',
       gender: 'female',
+    });
+  });
+
+  describe("a friend's referral code", () => {
+    const typeCode = async (
+      tree: ReactTestRenderer.ReactTestRenderer,
+      value: string,
+    ) => {
+      const input = tree.root
+        .findAll(
+          n =>
+            n.props?.accessibilityLabel === 'Referral code, optional' &&
+            typeof n.props.onChangeText === 'function',
+        )
+        .at(-1)!;
+      await ReactTestRenderer.act(() => {
+        input.props.onChangeText(value);
+      });
+    };
+
+    test('rides on the sign-up when typed — upper-cased, spaces dropped', async () => {
+      const tree = await render();
+
+      await fillValidForm(tree);
+      await typeCode(tree, 'asha 2k7');
+      await press(tree, 'Create Account');
+
+      expect(signUp).toHaveBeenCalledWith(
+        expect.objectContaining({ referralCode: 'ASHA2K7' }),
+      );
+    });
+
+    test('is left out entirely when the field is empty', async () => {
+      const tree = await render();
+
+      await fillValidForm(tree);
+      await press(tree, 'Create Account');
+
+      expect(signUp.mock.calls[0][0]).not.toHaveProperty('referralCode');
+    });
+
+    test('a shape that cannot be a code is refused before anything is sent', async () => {
+      const tree = await render();
+
+      await fillValidForm(tree);
+      await typeCode(tree, 'a!');
+      await press(tree, 'Create Account');
+
+      expect(signUp).not.toHaveBeenCalled();
+      expect(textOf(tree, RNText)).toContain(
+        'A code is 4–12 letters and numbers',
+      );
+    });
+
+    test("the server's 'no such code' lands under the field", async () => {
+      signUp.mockImplementation(async () => {
+        useAuthStore.setState({
+          error: new ApiError(
+            'validation',
+            'Check the highlighted fields.',
+            422,
+            {
+              referralCode:
+                'That code does not match anyone. Check it with your friend.',
+            },
+          ),
+        });
+        return false;
+      });
+      const tree = await render();
+
+      await fillValidForm(tree);
+      await typeCode(tree, 'NOPE999');
+      await press(tree, 'Create Account');
+
+      expect(mockNavigate).not.toHaveBeenCalled();
+      expect(textOf(tree, RNText)).toContain('That code does not match anyone');
     });
   });
 

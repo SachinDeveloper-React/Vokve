@@ -3,6 +3,7 @@ import { localDayOf } from '../../lib/dates.js';
 import { workoutSchema, workoutTemplateSchema, exerciseSchema, type Workout, type WorkoutTemplate, type Exercise } from '../../contracts/index.js';
 import { UserModel } from '../identity/models.js';
 import { credit } from '../economy/service.js';
+import { qualifyReferral } from '../social/service.js';
 import { ActivityDailyModel } from '../activity/models.js';
 import { ExerciseModel, WorkoutModel, WorkoutTemplateModel } from './models.js';
 
@@ -99,6 +100,10 @@ export async function saveWorkout(userId: string, input: Workout, meta: SaveMeta
         { upsert: true },
       );
     }
+    // A plausible workout is the referral's qualifying event (RULES F3) —
+    // whether or not the workout itself still paid under the day's cap.
+    // The referral's own idempotency means a replayed save cannot pay twice.
+    await qualifyReferral(userId, localDay, meta.timezone, meta.deviceId);
   }
 
   return { workout: toWorkout(doc!), reward };

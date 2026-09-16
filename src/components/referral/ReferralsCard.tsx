@@ -74,8 +74,13 @@ const ReferralRow = memo(({ referral }: RowProps) => {
 ReferralRow.displayName = 'ReferralRow';
 
 interface Props {
-  /** Newest first. Only the first few are shown. */
+  /** Newest first. Only the first few are shown until expanded. */
   referrals: Referral[];
+  /** Whether every row is shown, or only the newest few. */
+  expanded?: boolean;
+  /** The server has rows beyond `referrals`; the link fetches them. */
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
   onPressViewAll: () => void;
 }
 
@@ -90,50 +95,72 @@ const MAX_ROWS = 3;
  * that looks earned but is not is the kind of thing users screenshot when it
  * never arrives.
  */
-export const ReferralsCard = memo(({ referrals, onPressViewAll }: Props) => {
-  const { colors } = useTheme();
-  const recent = referrals.slice(0, MAX_ROWS);
+export const ReferralsCard = memo(
+  ({
+    referrals,
+    expanded = false,
+    hasMore = false,
+    isLoadingMore = false,
+    onPressViewAll,
+  }: Props) => {
+    const { colors } = useTheme();
+    const recent = expanded ? referrals : referrals.slice(0, MAX_ROWS);
+    // The link is only offered when it would show something more: rows past
+    // the fold, or pages the server still holds.
+    const canShowMore = !expanded
+      ? referrals.length > MAX_ROWS || hasMore
+      : hasMore;
 
-  return (
-    <Card radius="xl" padding="base">
-      <VStack gap="sm">
-        <HStack align="center" justify="between" gap="sm">
-          <AppText variant="h3" numberOfLines={1}>
-            Your Referrals
-          </AppText>
+    return (
+      <Card radius="xl" padding="base">
+        <VStack gap="sm">
+          <HStack align="center" justify="between" gap="sm">
+            <AppText variant="h3" numberOfLines={1}>
+              Your Referrals
+            </AppText>
 
-          <Pressable
-            onPress={onPressViewAll}
-            feedback="opacity"
-            accessibilityRole="link"
-            accessibilityLabel="View all referrals"
-          >
-            <HStack align="center" gap="xxs">
-              <AppText variant="micro" color="primary">
-                View All
-              </AppText>
-              <Icon as={ChevronRight} size="xs" tint={colors.primary} />
-            </HStack>
-          </Pressable>
-        </HStack>
+            {canShowMore ? (
+              <Pressable
+                onPress={onPressViewAll}
+                feedback="opacity"
+                disabled={isLoadingMore}
+                accessibilityRole="link"
+                accessibilityLabel={
+                  expanded ? 'Load more referrals' : 'View all referrals'
+                }
+              >
+                <HStack align="center" gap="xxs">
+                  <AppText variant="micro" color="primary">
+                    {isLoadingMore
+                      ? 'Loading…'
+                      : expanded
+                      ? 'Load more'
+                      : 'View All'}
+                  </AppText>
+                  <Icon as={ChevronRight} size="xs" tint={colors.primary} />
+                </HStack>
+              </Pressable>
+            ) : null}
+          </HStack>
 
-        {recent.length === 0 ? (
-          <AppText variant="micro" color="textSecondary">
-            Nobody has joined on your code yet. Share it above to get started.
-          </AppText>
-        ) : (
-          <VStack>
-            {recent.map((referral, index) => (
-              <Fragment key={referral.id}>
-                {index > 0 ? <Divider /> : null}
-                <ReferralRow referral={referral} />
-              </Fragment>
-            ))}
-          </VStack>
-        )}
-      </VStack>
-    </Card>
-  );
-});
+          {recent.length === 0 ? (
+            <AppText variant="micro" color="textSecondary">
+              Nobody has joined on your code yet. Share it above to get started.
+            </AppText>
+          ) : (
+            <VStack>
+              {recent.map((referral, index) => (
+                <Fragment key={referral.id}>
+                  {index > 0 ? <Divider /> : null}
+                  <ReferralRow referral={referral} />
+                </Fragment>
+              ))}
+            </VStack>
+          )}
+        </VStack>
+      </Card>
+    );
+  },
+);
 
 ReferralsCard.displayName = 'ReferralsCard';

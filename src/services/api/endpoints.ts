@@ -4,7 +4,11 @@ import {
   appNotificationSchema,
   authResponseSchema,
   coinTransactionSchema,
+  notificationCountsSchema,
+  notificationPreferencesSchema,
   orderSchema,
+  referralProgramSchema,
+  referralSchema,
   shopItemSchema,
   dailyActivitySchema,
   deviceRegistrationSchema,
@@ -35,7 +39,9 @@ import type {
   AuthApi,
   DeviceApi,
   NotificationApi,
+  NotificationPreferencesApi,
   OrderApi,
+  ReferralApi,
   ShopApi,
   UserApi,
   WalletApi,
@@ -48,7 +54,9 @@ import {
   mockAuthApi,
   mockDeviceApi,
   mockNotificationApi,
+  mockNotificationPreferencesApi,
   mockOrderApi,
+  mockReferralApi,
   mockShopApi,
   mockUserApi,
   mockWalletApi,
@@ -130,6 +138,8 @@ const realAuthApi: AuthApi = {
     ),
 };
 
+const okSchema = z.object({ ok: z.boolean() });
+
 const realDeviceApi: DeviceApi = {
   register: (profile, refreshToken) =>
     request(deviceRegistrationSchema, client =>
@@ -137,6 +147,10 @@ const realDeviceApi: DeviceApi = {
         // Lets the server bind the session that just started to this device.
         headers: refreshToken ? { 'X-Vokve-Refresh-Token': refreshToken } : {},
       }),
+    ),
+  setPushToken: (deviceId, pushToken) =>
+    request(okSchema, client =>
+      client.patch(`/devices/${encodeURIComponent(deviceId)}`, { pushToken }),
     ),
 };
 
@@ -190,8 +204,6 @@ const realActivityApi: ActivityApi = {
     request(dailyActivitySchema, client => client.get('/activity/today')),
 };
 
-const okSchema = z.object({ ok: z.boolean() });
-
 const redeemResultSchema = z.object({
   order: orderSchema,
   balance: z.number().nonnegative(),
@@ -240,6 +252,30 @@ const realOrderApi: OrderApi = {
     ),
 };
 
+const realNotificationPreferencesApi: NotificationPreferencesApi = {
+  get: () =>
+    request(notificationPreferencesSchema, client =>
+      client.get('/me/notification-preferences'),
+    ),
+  update: patch =>
+    request(notificationPreferencesSchema, client =>
+      client.put('/me/notification-preferences', patch),
+    ),
+};
+
+const realReferralApi: ReferralApi = {
+  me: () =>
+    request(referralProgramSchema, client => client.get('/referrals/me')),
+  list: cursor =>
+    request(pageSchema(referralSchema), client =>
+      client.get('/referrals', { params: { cursor } }),
+    ),
+  apply: code =>
+    request(referralProgramSchema, client =>
+      client.post('/referrals/apply', { code }),
+    ),
+};
+
 const realAddressApi: AddressApi = {
   list: () =>
     request(pageSchema(addressSchema), client =>
@@ -271,6 +307,10 @@ const realNotificationApi: NotificationApi = {
           category: query.category,
         },
       }),
+    ),
+  counts: () =>
+    request(notificationCountsSchema, client =>
+      client.get('/notifications/counts'),
     ),
   markRead: id =>
     request(okSchema, client =>
@@ -330,6 +370,8 @@ export const authApi: AuthApi = {
 export const deviceApi: DeviceApi = {
   register: (profile, refreshToken) =>
     pick(mockDeviceApi, realDeviceApi).register(profile, refreshToken),
+  setPushToken: (deviceId, pushToken) =>
+    pick(mockDeviceApi, realDeviceApi).setPushToken(deviceId, pushToken),
 };
 
 export const walletApi: WalletApi = {
@@ -370,6 +412,12 @@ export const orderApi: OrderApi = {
   cancel: (id, options) => pick(mockOrderApi, realOrderApi).cancel(id, options),
 };
 
+export const referralApi: ReferralApi = {
+  me: () => pick(mockReferralApi, realReferralApi).me(),
+  list: cursor => pick(mockReferralApi, realReferralApi).list(cursor),
+  apply: code => pick(mockReferralApi, realReferralApi).apply(code),
+};
+
 export const addressApi: AddressApi = {
   list: () => pick(mockAddressApi, realAddressApi).list(),
   create: input => pick(mockAddressApi, realAddressApi).create(input),
@@ -378,8 +426,18 @@ export const addressApi: AddressApi = {
   remove: id => pick(mockAddressApi, realAddressApi).remove(id),
 };
 
+export const notificationPreferencesApi: NotificationPreferencesApi = {
+  get: () =>
+    pick(mockNotificationPreferencesApi, realNotificationPreferencesApi).get(),
+  update: patch =>
+    pick(mockNotificationPreferencesApi, realNotificationPreferencesApi).update(
+      patch,
+    ),
+};
+
 export const notificationApi: NotificationApi = {
   list: query => pick(mockNotificationApi, realNotificationApi).list(query),
+  counts: () => pick(mockNotificationApi, realNotificationApi).counts(),
   markRead: id => pick(mockNotificationApi, realNotificationApi).markRead(id),
   markAllRead: () => pick(mockNotificationApi, realNotificationApi).markAllRead(),
 };

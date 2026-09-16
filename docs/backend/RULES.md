@@ -223,11 +223,11 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | # | Rule | Source / note |
 |---|---|---|
 | F1 | Every user has one code, generated at sign-up: 6–8 uppercase alphanumerics, no ambiguous characters (0/O, 1/I). | seed `'VOKVE123'` |
-| F2 | A code can be applied once per invitee, within 7 days of sign-up ⚙, never to oneself. | |
-| F3 | Qualifying event ⚙ (pending C2): invitee's **first plausible workout**. Payout: 300 to inviter *or* 20 to each side. Status `pending` until then, `rewarded` after. | `HowReferralWorksCard`, `EarnCoinsCard` |
+| F2 | A code can be applied once per invitee — on the sign-up form itself, or in the app within 7 days of sign-up ⚙ — never to oneself. | `auth.signUp` checks the code on its field; `verifyOtp` applies it when the account is created |
+| F3 | Qualifying event ⚙: invitee's **first plausible workout**. Payout ⚙ `coins.referral.inviter` / `invitee` — **20 to each side** (C2 resolved). Status `pending` until then, `rewarded` after. | `social.qualifyReferral`, served to `HowReferralWorksCard` / `ClaimReferralCard` |
 | F4 | Inviter cap ⚙: 10 rewarded referrals per calendar month. | |
 | F5 | Device sharing between inviter and invitee, or an invitee whose attestation fails, voids the referral and flags both. | |
-| F6 | Share message and URL come from the server so they can carry campaign parameters. | `shareMessageFor` is client-side today |
+| F6 | Share message and URL come from the server so they can carry campaign parameters. | `GET /referrals/me` — built; the client no longer composes either |
 
 ## §M · Messaging
 

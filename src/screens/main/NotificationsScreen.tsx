@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { SlidersHorizontal } from 'lucide-react-native';
+import { CheckCheck, SlidersHorizontal } from 'lucide-react-native';
 import { AccountMenuRow } from '../../components/account/AccountMenuRow';
 import { NotificationFilters } from '../../components/notifications/NotificationFilters';
 import { NotificationGroupCard } from '../../components/notifications/NotificationGroupCard';
 import { NotificationsHeader } from '../../components/notifications/NotificationsHeader';
+import { Pressable } from '../../components/form/Pressable';
+import { HStack } from '../../components/layout/Stack';
+import { Icon } from '../../components/media/Icon';
+import { AppText } from '../../components/ui/AppText';
+import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
@@ -14,6 +19,7 @@ import {
   useNotificationCounts,
   useNotificationGroups,
   useNotificationsStore,
+  useUnreadNotificationCount,
   type NotificationFilter,
 } from '../../stores/notificationsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
@@ -53,8 +59,13 @@ export const NotificationsScreen = () => {
   const counts = useNotificationCounts();
   const groups = useNotificationGroups(filter);
   const markRead = useNotificationsStore(s => s.markRead);
+  const markAllRead = useNotificationsStore(s => s.markAllRead);
   const hydrateFromServer = useNotificationsStore(s => s.hydrateFromServer);
   const refreshIfStale = useNotificationsStore(s => s.refreshIfStale);
+  const loadMore = useNotificationsStore(s => s.loadMore);
+  const nextCursor = useNotificationsStore(s => s.nextCursor);
+  const isLoadingMore = useNotificationsStore(s => s.isLoadingMore);
+  const unread = useUnreadNotificationCount();
   const isSignedIn = useAuthStatus() === 'authenticated';
 
   // Pushed fresh each time the bell is tapped, so mount is "opened": fetch
@@ -135,6 +146,24 @@ export const NotificationsScreen = () => {
           onChange={setFilter}
         />
 
+        {unread > 0 ? (
+          <HStack align="center" justify="end">
+            <Pressable
+              onPress={markAllRead}
+              feedback="opacity"
+              accessibilityRole="button"
+              accessibilityLabel={`Mark all ${unread} as read`}
+            >
+              <HStack align="center" gap="xxs">
+                <Icon as={CheckCheck} size="xs" tint={colors.primary} />
+                <AppText variant="micro" color="primary">
+                  {`Mark all ${unread} as read`}
+                </AppText>
+              </HStack>
+            </Pressable>
+          </HStack>
+        ) : null}
+
         {groups.length > 0 ? (
           groups.map(group => (
             <NotificationGroupCard
@@ -152,6 +181,22 @@ export const NotificationsScreen = () => {
             />
           </Card>
         )}
+
+        {/*
+          The server has older rows. Under a filter the newer pages may hold
+          none of that kind — the chip's count is the server's total, and this
+          is the way to reach the rest of it.
+        */}
+        {nextCursor !== null ? (
+          <Button
+            label={isLoadingMore ? 'Loading…' : 'Load older notifications'}
+            variant="secondary"
+            fullWidth
+            loading={isLoadingMore}
+            disabled={isLoadingMore}
+            onPress={loadMore}
+          />
+        ) : null}
 
         <Card radius="xl" padding="base">
           <AccountMenuRow

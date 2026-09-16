@@ -62,7 +62,12 @@ const note = (
 });
 
 const seed = (notifications: AppNotification[]) =>
-  useNotificationsStore.setState({ notifications });
+  useNotificationsStore.setState({
+    notifications,
+    counts: null,
+    nextCursor: null,
+    syncedAt: null,
+  });
 
 /**
  * Torn down between tests: the screen subscribes to the notifications store, so
@@ -121,7 +126,10 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
 
 describe('NotificationsScreen', () => {
   test('files each notification under the day it arrived', async () => {
-    seed([note('a', 'steps', at(0, 10, 30)), note('b', 'coins', at(1, 18, 30))]);
+    seed([
+      note('a', 'steps', at(0, 10, 30)),
+      note('b', 'coins', at(1, 18, 30)),
+    ]);
 
     const text = allText(await render());
 
@@ -132,7 +140,10 @@ describe('NotificationsScreen', () => {
   });
 
   test('two notifications on the same day share one heading', async () => {
-    seed([note('a', 'steps', at(0, 10, 30)), note('b', 'streak', at(0, 9, 15))]);
+    seed([
+      note('a', 'steps', at(0, 10, 30)),
+      note('b', 'streak', at(0, 9, 15)),
+    ]);
 
     const headings = allText(await render()).match(/Today/g) ?? [];
 
@@ -189,6 +200,51 @@ describe('NotificationsScreen', () => {
     expect(
       useNotificationsStore.getState().notifications.some(n => !n.read),
     ).toBe(false);
+  });
+
+  test('"Mark all as read" clears every row and the bell in one tap', async () => {
+    seed([
+      note('a', 'steps', at(0, 10, 30)),
+      note('b', 'coins', at(0, 9, 0)),
+      note('c', 'system', at(1, 8, 0), true),
+    ]);
+    const tree = await render();
+    expect(textOf(tree, RNText)).toContain('Mark all 2 as read');
+
+    press(tree, 'Mark all 2 as read');
+
+    expect(
+      useNotificationsStore.getState().notifications.every(n => n.read),
+    ).toBe(true);
+    expect(textOf(tree, RNText)).not.toContain('as read');
+  });
+
+  test("the chips show the server's totals once synced, and older pages can be pulled in", async () => {
+    seed([note('a', 'steps', at(0, 10, 30))]);
+    useNotificationsStore.setState({
+      counts: { all: 41, activity: 30, reward: 10, system: 1, unread: 12 },
+      nextCursor: 'a',
+      syncedAt: new Date().toISOString(),
+    });
+    const tree = await render();
+
+    // One row on the device; forty-one on the server — the chips say so.
+    const labels = tree.root
+      .findAll(n => typeof n.props?.accessibilityLabel === 'string')
+      .map(n => n.props.accessibilityLabel as string);
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'All, 41',
+        'Activity, 30',
+        'Rewards, 10',
+        'System, 1',
+      ]),
+    );
+    expect(textOf(tree, RNText)).toContain('Mark all 12 as read');
+    expect(
+      tree.root.findAll(n => n.props?.label === 'Load older notifications')
+        .length,
+    ).toBeGreaterThan(0);
   });
 
   test('both settings controls lead to the notification settings', async () => {

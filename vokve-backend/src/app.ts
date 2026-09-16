@@ -15,6 +15,7 @@ import { authRouter } from './modules/identity/auth.routes.js';
 import { meRouter } from './modules/identity/me.routes.js';
 import { notificationsRouter } from './modules/notifications/routes.js';
 import { platformRouter } from './modules/platform/routes.js';
+import { socialRouter } from './modules/social/routes.js';
 import { trainingRouter } from './modules/training/routes.js';
 
 /**
@@ -51,6 +52,7 @@ export function createApp() {
   v1.use(activityRouter);
   v1.use(notificationsRouter);
   v1.use(commerceRouter);
+  v1.use(socialRouter);
   app.use('/v1', v1);
 
   app.use((_req, res) => {

@@ -1,7 +1,10 @@
 import { config } from '../../constants/config';
 import {
+  REFERRAL_REWARD_COINS,
+  referralCode,
   seedCoinTransactions,
   seedNotifications,
+  seedReferrals,
   shopItems,
   todayActivity,
   weeklySteps,
@@ -16,7 +19,9 @@ import {
   type Address,
   type AppNotification,
   type AuthResponse,
+  type NotificationPreferences,
   type Order,
+  type ReferralProgram,
   type CoinTransaction,
   type DailyActivity,
   type User,
@@ -24,10 +29,7 @@ import {
   type Workout,
   type WorkoutTemplate,
 } from '../../types/models';
-import type {
-  CompleteProfilePayload,
-  SignUpPayload,
-} from '../../types/forms';
+import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
 import { logger } from '../../utils/logger';
 import { ApiError } from './errors';
 import type {
@@ -36,7 +38,9 @@ import type {
   AuthApi,
   DeviceApi,
   NotificationApi,
+  NotificationPreferencesApi,
   OrderApi,
+  ReferralApi,
   ShopApi,
   UserApi,
   WalletApi,
@@ -101,7 +105,10 @@ const delay = () =>
 const secondsUntil = (timestamp: number) =>
   Math.max(0, Math.round((timestamp - Date.now()) / 1000));
 
-function makeUser(payload?: SignUpPayload, provenBy: 'email' | 'sms' = 'email'): User {
+function makeUser(
+  payload?: SignUpPayload,
+  provenBy: 'email' | 'sms' = 'email',
+): User {
   const now = new Date().toISOString();
   return userSchema.parse({
     id: nextId('usr'),
@@ -151,8 +158,13 @@ function makeChallenge(
     channel,
     target:
       channel === 'email'
-        ? `${pending.payload.email.slice(0, 1)}•••@${pending.payload.email.split('@')[1] ?? ''}`
-        : `${pending.payload.phone.slice(0, 3)}••••••${pending.payload.phone.slice(-4)}`,
+        ? `${pending.payload.email.slice(0, 1)}•••@${
+            pending.payload.email.split('@')[1] ?? ''
+          }`
+        : `${pending.payload.phone.slice(
+            0,
+            3,
+          )}••••••${pending.payload.phone.slice(-4)}`,
     codeLength: MOCK_RULES.otp.length,
     expiresInSeconds: secondsUntil(pending.expiresAt),
     resendInSeconds: secondsUntil(pending.resendAt),
@@ -187,6 +199,20 @@ export const mockAuthApi: AuthApi = {
         'validation',
         'An account with those details already exists.',
         422,
+      );
+    }
+    // A code is checked on the form, on its field, the way the server does —
+    // before any code goes out.
+    if (payload.referralCode && !MOCK_FRIEND_CODES.has(payload.referralCode)) {
+      throw new ApiError(
+        'validation',
+        'Check the highlighted fields.',
+        422,
+        {
+          referralCode:
+            'That code does not match anyone. Check it with your friend.',
+        },
+        'VALIDATION_FAILED',
       );
     }
 
@@ -264,6 +290,17 @@ export const mockAuthApi: AuthApi = {
     // code if that channel could deliver; the mock has no SMS, so it does
     // what the server does without one — nothing, and no `nextVerification`.
     currentUser = makeUser(pending.payload, pending.channel ?? 'email');
+    // The friend's code the form carried opens the referral with the account.
+    if (pending.payload.referralCode) {
+      mockApplied = {
+        code: pending.payload.referralCode,
+        inviterName:
+          pending.payload.referralCode === 'ASHA2K7' ? 'Asha' : 'Ravi',
+        status: 'pending',
+        rewardCoins: REFERRAL_REWARD_COINS,
+        appliedAt: new Date().toISOString(),
+      };
+    }
     return makeAuthResponse(currentUser);
   },
 
@@ -358,7 +395,10 @@ export const mockAuthApi: AuthApi = {
       resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
     };
     pendingSignUps.set(id, pending);
-    logger.info('mockApi', `Reset code for ${identifier} is ${MOCK_RULES.otp} (mock backend)`);
+    logger.info(
+      'mockApi',
+      `Reset code for ${identifier} is ${MOCK_RULES.otp} (mock backend)`,
+    );
     return makeChallenge(id, pending);
   },
 
@@ -366,10 +406,18 @@ export const mockAuthApi: AuthApi = {
     await delay();
     const pending = pendingSignUps.get(verificationId);
     if (!pending) {
-      throw new ApiError('not_found', 'This code is no longer valid. Request a new one.', 404);
+      throw new ApiError(
+        'not_found',
+        'This code is no longer valid. Request a new one.',
+        404,
+      );
     }
     if (code !== MOCK_RULES.otp) {
-      throw new ApiError('validation', 'That code is not right. Check it and try again.', 422);
+      throw new ApiError(
+        'validation',
+        'That code is not right. Check it and try again.',
+        422,
+      );
     }
     pendingSignUps.delete(verificationId);
     return { ok: true };
@@ -380,10 +428,13 @@ export const mockAuthApi: AuthApi = {
     currentUser = null;
     pendingSignUps.clear();
     mockFeed = seedNotifications.map(entry => ({ ...entry }));
-    mockStock = new Map(shopItems.map(item => [item.id, item.inStock ? 25 : 0]));
+    mockStock = new Map(
+      shopItems.map(item => [item.id, item.inStock ? 25 : 0]),
+    );
     mockOrders = [];
     mockAddresses = [];
     mockBalance = null;
+    mockApplied = null;
     return { ok: true };
   },
 };
@@ -463,6 +514,10 @@ export const mockDeviceApi: DeviceApi = {
       minVersion: '1.0.0',
     };
   },
+  async setPushToken() {
+    await delay();
+    return { ok: true };
+  },
 };
 
 /** The server's default page size, so the mock pages exactly where it would. */
@@ -480,7 +535,10 @@ function monthSummaryOf(transactions: CoinTransaction[]) {
   let spent = 0;
   for (const entry of transactions) {
     const at = new Date(entry.createdAt);
-    if (at.getMonth() !== now.getMonth() || at.getFullYear() !== now.getFullYear()) {
+    if (
+      at.getMonth() !== now.getMonth() ||
+      at.getFullYear() !== now.getFullYear()
+    ) {
       continue;
     }
     if (entry.amount > 0) earned += entry.amount;
@@ -493,7 +551,9 @@ export const mockWalletApi: WalletApi = {
   async get() {
     await delay();
     const balance = seedCoinTransactions.reduce((sum, t) => sum + t.amount, 0);
-    const earned = seedCoinTransactions.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const earned = seedCoinTransactions
+      .filter(t => t.amount > 0)
+      .reduce((s, t) => s + t.amount, 0);
     return {
       balance,
       pending: 0,
@@ -517,11 +577,16 @@ export const mockWalletApi: WalletApi = {
    */
   async transactions(query = {}) {
     await delay();
-    const limit = Math.min(100, Math.max(1, query.limit ?? TRANSACTION_PAGE_SIZE));
+    const limit = Math.min(
+      100,
+      Math.max(1, query.limit ?? TRANSACTION_PAGE_SIZE),
+    );
     const rows = query.source
       ? seedCoinTransactions.filter(t => t.source === query.source)
       : seedCoinTransactions;
-    const after = query.cursor ? rows.findIndex(t => t.id === query.cursor) : -1;
+    const after = query.cursor
+      ? rows.findIndex(t => t.id === query.cursor)
+      : -1;
     const data = rows.slice(after + 1, after + 1 + limit);
     const last = data[data.length - 1];
     const hasMore = last !== undefined && rows.indexOf(last) < rows.length - 1;
@@ -530,10 +595,30 @@ export const mockWalletApi: WalletApi = {
   async earnRules() {
     await delay();
     return [
-      { source: 'steps' as const, title: 'Walk', detail: 'Per 100 verified steps', reward: 0.095 },
-      { source: 'workout' as const, title: 'Finish a workout', detail: 'Any logged session', reward: 100 },
-      { source: 'streak' as const, title: 'Keep a streak', detail: '7 days in a row', reward: 50 },
-      { source: 'referral' as const, title: 'Invite a friend', detail: 'Once they verify their number and email', reward: 20 },
+      {
+        source: 'steps' as const,
+        title: 'Walk',
+        detail: 'Per 100 verified steps',
+        reward: 0.095,
+      },
+      {
+        source: 'workout' as const,
+        title: 'Finish a workout',
+        detail: 'Any logged session',
+        reward: 100,
+      },
+      {
+        source: 'streak' as const,
+        title: 'Keep a streak',
+        detail: '7 days in a row',
+        reward: 50,
+      },
+      {
+        source: 'referral' as const,
+        title: 'Invite a friend',
+        detail: 'Once they verify their number and email',
+        reward: 20,
+      },
     ];
   },
 };
@@ -582,7 +667,10 @@ export const mockActivityApi: ActivityApi = {
  * The same chip-per-topic map the notifications store keeps; repeated here
  * rather than imported so the mock does not pull a store into the API layer.
  */
-const MOCK_FEED_CATEGORY: Record<AppNotification['topic'], 'activity' | 'reward' | 'system'> = {
+const MOCK_FEED_CATEGORY: Record<
+  AppNotification['topic'],
+  'activity' | 'reward' | 'system'
+> = {
   steps: 'activity',
   workout: 'activity',
   streak: 'activity',
@@ -595,7 +683,9 @@ const MOCK_FEED_CATEGORY: Record<AppNotification['topic'], 'activity' | 'reward'
 };
 
 /** Read state lives here across calls, so a row read stays read until sign-out. */
-let mockFeed: AppNotification[] = seedNotifications.map(entry => ({ ...entry }));
+let mockFeed: AppNotification[] = seedNotifications.map(entry => ({
+  ...entry,
+}));
 
 export const mockNotificationApi: NotificationApi = {
   async list(query = {}) {
@@ -604,11 +694,24 @@ export const mockNotificationApi: NotificationApi = {
     const rows = query.category
       ? mockFeed.filter(n => MOCK_FEED_CATEGORY[n.topic] === query.category)
       : mockFeed;
-    const after = query.cursor ? rows.findIndex(n => n.id === query.cursor) : -1;
+    const after = query.cursor
+      ? rows.findIndex(n => n.id === query.cursor)
+      : -1;
     const data = rows.slice(after + 1, after + 1 + limit).map(n => ({ ...n }));
     const last = data[data.length - 1];
-    const hasMore = last !== undefined && rows.findIndex(n => n.id === last.id) < rows.length - 1;
+    const hasMore =
+      last !== undefined &&
+      rows.findIndex(n => n.id === last.id) < rows.length - 1;
     return { data, nextCursor: hasMore ? last.id : null };
+  },
+  async counts() {
+    await delay();
+    const counts = { all: mockFeed.length, activity: 0, reward: 0, system: 0, unread: 0 };
+    for (const n of mockFeed) {
+      counts[MOCK_FEED_CATEGORY[n.topic]] += 1;
+      if (!n.read) counts.unread += 1;
+    }
+    return counts;
   },
   async markRead(id) {
     await delay();
@@ -622,12 +725,39 @@ export const mockNotificationApi: NotificationApi = {
   },
 };
 
+/** The server's defaults: everything on but health, quiet 22:00–07:00, SMS on, email off. */
+let mockPreferences: NotificationPreferences = {
+  categories: { activity: true, coins: true, challenges: true, orders: true, offers: true, announcements: true, referrals: true, health: false },
+  quietHours: { enabled: true, start: '22:00', end: '07:00' },
+  sms: true,
+  email: false,
+};
+
+export const mockNotificationPreferencesApi: NotificationPreferencesApi = {
+  async get() {
+    await delay();
+    return mockPreferences;
+  },
+  async update(patch) {
+    await delay();
+    mockPreferences = {
+      categories: { ...mockPreferences.categories, ...patch.categories },
+      quietHours: { ...mockPreferences.quietHours, ...patch.quietHours },
+      sms: patch.sms ?? mockPreferences.sms,
+      email: patch.email ?? mockPreferences.email,
+    };
+    return mockPreferences;
+  },
+};
+
 // ─── Commerce ──────────────────────────────────────────────────────────────
 
 /** The price at and above which the mock, like the server, asks for a step-up. */
 export const MOCK_STEP_UP_THRESHOLD = 1000;
 
-let mockStock = new Map(shopItems.map(item => [item.id, item.inStock ? 25 : 0]));
+let mockStock = new Map(
+  shopItems.map(item => [item.id, item.inStock ? 25 : 0]),
+);
 let mockOrders: Order[] = [];
 let mockAddresses: Address[] = [];
 /**
@@ -674,7 +804,8 @@ export const mockShopApi: ShopApi = {
   async item(id) {
     await delay();
     const item = shopItems.find(entry => entry.id === id);
-    if (!item) throw new ApiError('not_found', 'That reward could not be found.', 404);
+    if (!item)
+      throw new ApiError('not_found', 'That reward could not be found.', 404);
     return withStock(item);
   },
   async redeem(payload) {
@@ -683,29 +814,60 @@ export const mockShopApi: ShopApi = {
       throw new ApiError('unauthorized', 'Your session has expired.', 401);
     }
     const item = shopItems.find(entry => entry.id === payload.itemId);
-    if (!item) throw new ApiError('not_found', 'That reward could not be found.', 404);
+    if (!item)
+      throw new ApiError('not_found', 'That reward could not be found.', 404);
     const quantity = payload.quantity ?? 1;
     const total = item.priceCoins * quantity;
 
     const address = mockAddresses.find(entry => entry.id === payload.addressId);
     if (!address) {
-      throw new ApiError('validation', 'Add a shipping address to redeem rewards.', 422, { addressId: payload.addressId }, 'ADDRESS_REQUIRED');
+      throw new ApiError(
+        'validation',
+        'Add a shipping address to redeem rewards.',
+        422,
+        { addressId: payload.addressId },
+        'ADDRESS_REQUIRED',
+      );
     }
     if (total >= MOCK_STEP_UP_THRESHOLD) {
       if (!payload.stepUpToken) {
-        throw new ApiError('forbidden', 'Confirm it is you to redeem this reward.', 403, null, 'STEP_UP_REQUIRED');
+        throw new ApiError(
+          'forbidden',
+          'Confirm it is you to redeem this reward.',
+          403,
+          null,
+          'STEP_UP_REQUIRED',
+        );
       }
       if (!mockStepUps.delete(payload.stepUpToken)) {
-        throw new ApiError('forbidden', 'That confirmation has expired. Please confirm again.', 403, null, 'STEP_UP_INVALID');
+        throw new ApiError(
+          'forbidden',
+          'That confirmation has expired. Please confirm again.',
+          403,
+          null,
+          'STEP_UP_INVALID',
+        );
       }
     }
     const balance = currentBalance();
     if (balance < total) {
-      throw new ApiError('validation', `You need ${total - balance} more coins for this.`, 422, { required: total, balance }, 'INSUFFICIENT_COINS');
+      throw new ApiError(
+        'validation',
+        `You need ${total - balance} more coins for this.`,
+        422,
+        { required: total, balance },
+        'INSUFFICIENT_COINS',
+      );
     }
     const onHand = mockStock.get(item.id) ?? 0;
     if (onHand < quantity) {
-      throw new ApiError('unknown', `${item.title} is sold out.`, 409, { itemId: item.id }, 'OUT_OF_STOCK');
+      throw new ApiError(
+        'unknown',
+        `${item.title} is sold out.`,
+        409,
+        { itemId: item.id },
+        'OUT_OF_STOCK',
+      );
     }
 
     mockStock.set(item.id, onHand - quantity);
@@ -714,7 +876,15 @@ export const mockShopApi: ShopApi = {
     const order: Order = {
       id: nextId('ord'),
       status: 'placed',
-      items: [{ itemId: item.id, title: item.title, emoji: item.emoji, quantity, priceCoins: item.priceCoins }],
+      items: [
+        {
+          itemId: item.id,
+          title: item.title,
+          emoji: item.emoji,
+          quantity,
+          priceCoins: item.priceCoins,
+        },
+      ],
       totalCoins: total,
       address: snapshotOf(address),
       placedAt: now,
@@ -733,13 +903,15 @@ export const mockOrderApi: OrderApi = {
     const after = cursor ? mockOrders.findIndex(o => o.id === cursor) : -1;
     const data = mockOrders.slice(after + 1, after + 1 + 20);
     const last = data[data.length - 1];
-    const hasMore = last !== undefined && mockOrders.indexOf(last) < mockOrders.length - 1;
+    const hasMore =
+      last !== undefined && mockOrders.indexOf(last) < mockOrders.length - 1;
     return { data, nextCursor: hasMore ? last.id : null };
   },
   async get(id) {
     await delay();
     const order = mockOrders.find(entry => entry.id === id);
-    if (!order) throw new ApiError('not_found', 'That order could not be found.', 404);
+    if (!order)
+      throw new ApiError('not_found', 'That order could not be found.', 404);
     return order;
   },
   async count() {
@@ -749,16 +921,32 @@ export const mockOrderApi: OrderApi = {
   async cancel(id) {
     await delay();
     const order = mockOrders.find(entry => entry.id === id);
-    if (!order) throw new ApiError('not_found', 'That order could not be found.', 404);
-    if (order.status === 'cancelled') return { order, balance: currentBalance() };
+    if (!order)
+      throw new ApiError('not_found', 'That order could not be found.', 404);
+    if (order.status === 'cancelled')
+      return { order, balance: currentBalance() };
     if (!order.cancellable) {
-      throw new ApiError('unknown', `An order that is ${order.status} can no longer be cancelled.`, 409, { status: order.status }, 'ORDER_NOT_CANCELLABLE');
+      throw new ApiError(
+        'unknown',
+        `An order that is ${order.status} can no longer be cancelled.`,
+        409,
+        { status: order.status },
+        'ORDER_NOT_CANCELLABLE',
+      );
     }
     for (const line of order.items) {
-      mockStock.set(line.itemId, (mockStock.get(line.itemId) ?? 0) + line.quantity);
+      mockStock.set(
+        line.itemId,
+        (mockStock.get(line.itemId) ?? 0) + line.quantity,
+      );
     }
     mockBalance = currentBalance() + order.totalCoins;
-    const cancelled: Order = { ...order, status: 'cancelled', cancellable: false, updatedAt: new Date().toISOString() };
+    const cancelled: Order = {
+      ...order,
+      status: 'cancelled',
+      cancellable: false,
+      updatedAt: new Date().toISOString(),
+    };
     mockOrders = mockOrders.map(entry => (entry.id === id ? cancelled : entry));
     return { order: cancelled, balance: mockBalance };
   },
@@ -767,12 +955,15 @@ export const mockOrderApi: OrderApi = {
 export const mockAddressApi: AddressApi = {
   async list() {
     await delay();
-    return [...mockAddresses].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+    return [...mockAddresses].sort(
+      (a, b) => Number(b.isDefault) - Number(a.isDefault),
+    );
   },
   async create(input) {
     await delay();
     const isDefault = mockAddresses.length === 0 || input.isDefault;
-    if (isDefault) mockAddresses = mockAddresses.map(a => ({ ...a, isDefault: false }));
+    if (isDefault)
+      mockAddresses = mockAddresses.map(a => ({ ...a, isDefault: false }));
     const created: Address = { ...input, id: nextId('adr'), isDefault };
     mockAddresses = [created, ...mockAddresses];
     return created;
@@ -780,9 +971,11 @@ export const mockAddressApi: AddressApi = {
   async update(id, patch) {
     await delay();
     const existing = mockAddresses.find(a => a.id === id);
-    if (!existing) throw new ApiError('not_found', 'That address could not be found.', 404);
+    if (!existing)
+      throw new ApiError('not_found', 'That address could not be found.', 404);
     const isDefault = existing.isDefault || (patch.isDefault ?? false);
-    if (patch.isDefault) mockAddresses = mockAddresses.map(a => ({ ...a, isDefault: false }));
+    if (patch.isDefault)
+      mockAddresses = mockAddresses.map(a => ({ ...a, isDefault: false }));
     const updated: Address = { ...existing, ...patch, isDefault };
     mockAddresses = mockAddresses.map(a => (a.id === id ? updated : a));
     return updated;
@@ -793,11 +986,107 @@ export const mockAddressApi: AddressApi = {
   async remove(id) {
     await delay();
     const removed = mockAddresses.find(a => a.id === id);
-    if (!removed) throw new ApiError('not_found', 'That address could not be found.', 404);
+    if (!removed)
+      throw new ApiError('not_found', 'That address could not be found.', 404);
     mockAddresses = mockAddresses.filter(a => a.id !== id);
     if (removed.isDefault && mockAddresses[0]) {
-      mockAddresses = mockAddresses.map((a, index) => ({ ...a, isDefault: index === 0 }));
+      mockAddresses = mockAddresses.map((a, index) => ({
+        ...a,
+        isDefault: index === 0,
+      }));
     }
     return { ok: true };
+  },
+};
+
+// ─── Referrals ─────────────────────────────────────────────────────────────
+
+/** The code this mock user has applied, if any — the invitee's side. */
+let mockApplied: ReferralProgram['applied'] = null;
+
+/** A code a friend could plausibly have — anything but the user's own. */
+const MOCK_FRIEND_CODES = new Set(['ASHA2K7', 'RAVI9XB']);
+
+function mockProgram(): ReferralProgram {
+  const rewarded = seedReferrals.filter(r => r.status === 'rewarded');
+  return {
+    code: referralCode,
+    shareUrl: `https://vokve.app/r/${referralCode}`,
+    shareMessage: `Join me on VOKVE — walk, train and earn coins for real rewards. Use my code ${referralCode} when you sign up and you get ${REFERRAL_REWARD_COINS} coins after your first workout: https://vokve.app/r/${referralCode}`,
+    rewards: {
+      inviter: REFERRAL_REWARD_COINS,
+      invitee: REFERRAL_REWARD_COINS,
+      qualifier: "your friend's first workout",
+      monthlyInviterCap: 10,
+    },
+    stats: {
+      successful: rewarded.length,
+      pending: seedReferrals.length - rewarded.length,
+      coinsEarned: rewarded.reduce((sum, r) => sum + r.rewardCoins, 0),
+      rewardedThisMonth: Math.min(rewarded.length, 3),
+    },
+    referrals: seedReferrals.slice(0, 20),
+    applied: mockApplied,
+    canApply: mockApplied === null,
+    applyBy:
+      mockApplied === null
+        ? new Date(Date.now() + 5 * 86_400_000).toISOString()
+        : null,
+  };
+}
+
+export const mockReferralApi: ReferralApi = {
+  async me() {
+    await delay();
+    return mockProgram();
+  },
+  async list(cursor) {
+    await delay();
+    const after = cursor ? seedReferrals.findIndex(r => r.id === cursor) : -1;
+    const data = seedReferrals.slice(after + 1, after + 1 + 20);
+    const last = data[data.length - 1];
+    const hasMore =
+      last !== undefined &&
+      seedReferrals.indexOf(last) < seedReferrals.length - 1;
+    return { data, nextCursor: hasMore ? last.id : null };
+  },
+  async apply(rawCode) {
+    await delay();
+    const code = rawCode.toUpperCase().replace(/[\s-]/g, '');
+    if (mockApplied) {
+      throw new ApiError(
+        'unknown',
+        'You have already joined on a code.',
+        409,
+        { code: mockApplied.code },
+        'REFERRAL_ALREADY_APPLIED',
+      );
+    }
+    if (code === referralCode) {
+      throw new ApiError(
+        'validation',
+        'That is your own code — share it with a friend instead.',
+        422,
+        null,
+        'REFERRAL_SELF',
+      );
+    }
+    if (!MOCK_FRIEND_CODES.has(code)) {
+      throw new ApiError(
+        'not_found',
+        'That code does not match anyone. Check it and try again.',
+        404,
+        { code },
+        'REFERRAL_CODE_INVALID',
+      );
+    }
+    mockApplied = {
+      code,
+      inviterName: code === 'ASHA2K7' ? 'Asha' : 'Ravi',
+      status: 'pending',
+      rewardCoins: REFERRAL_REWARD_COINS,
+      appliedAt: new Date().toISOString(),
+    };
+    return mockProgram();
   },
 };

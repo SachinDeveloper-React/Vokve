@@ -16,6 +16,7 @@ import { textOf } from './helpers/text';
 import { NotificationSettingsScreen } from '../src/screens/main/NotificationSettingsScreen';
 import { CATEGORY_STYLE } from '../src/components/settings/notificationCategories';
 import { ThemeProvider } from '../src/theme';
+import { ToastProvider } from '../src/components/feedback/Toast';
 import {
   NOTIFICATION_CATEGORIES,
   useNotificationSettingsStore,
@@ -64,7 +65,9 @@ const render = async () => {
     tree = ReactTestRenderer.create(
       <SafeAreaProvider initialMetrics={metrics}>
         <ThemeProvider>
-          <NotificationSettingsScreen />
+          <ToastProvider>
+            <NotificationSettingsScreen />
+          </ToastProvider>
         </ThemeProvider>
       </SafeAreaProvider>,
     );

@@ -7,6 +7,7 @@ import { toApiError } from '../services/api/errors';
 import type {
   AppNotification,
   NotificationCategory,
+  NotificationCountsSummary,
   NotificationTopic,
 } from '../types/models';
 import { toIsoDate, type IsoDate } from '../utils/date';
@@ -50,11 +51,21 @@ export const NOTIFICATION_CATEGORY: Record<
 export type NotificationFilter = NotificationCategory | 'all';
 
 interface NotificationsState {
-  /** Newest first. */
+  /** Newest first: the first page, plus any pages scrolled to. */
   notifications: AppNotification[];
+  /** The server has rows beyond the last one here. */
+  nextCursor: string | null;
+  /**
+   * The server's totals per chip and its unread figure (`GET
+   * /notifications/counts`). The feed here is paged, so counting the rows
+   * on the device would undercount; null until the first sync, when the
+   * hooks fall back to counting what is here.
+   */
+  counts: NotificationCountsSummary | null;
   /** When the server last confirmed the feed; null while still seeded. */
   syncedAt: string | null;
   isSyncing: boolean;
+  isLoadingMore: boolean;
 
   /**
    * Replaces the feed with the server's newest page. The server writes the
@@ -66,6 +77,8 @@ interface NotificationsState {
   hydrateFromServer: () => Promise<void>;
   /** `hydrateFromServer`, unless the feed is fresher than `NOTIFICATIONS_STALE_AFTER_MS`. */
   refreshIfStale: () => Promise<void>;
+  /** Fetches the next page and appends it. A no-op at the end or mid-flight. */
+  loadMore: () => Promise<void>;
 
   /**
    * Marks one row read. A no-op if it is read already or has gone. The dot
@@ -89,8 +102,11 @@ export const useNotificationsStore = create<NotificationsState>()(
   persist(
     (set, get) => ({
       notifications: seedNotifications,
+      nextCursor: null,
+      counts: null,
       syncedAt: null,
       isSyncing: false,
+      isLoadingMore: false,
 
       hydrateFromServer: async () => {
         if (get().isSyncing) {
@@ -98,9 +114,14 @@ export const useNotificationsStore = create<NotificationsState>()(
         }
         set({ isSyncing: true });
         try {
-          const page = await notificationApi.list({ limit: MAX_FEED_ENTRIES });
+          const [page, counts] = await Promise.all([
+            notificationApi.list({ limit: MAX_FEED_ENTRIES }),
+            notificationApi.counts(),
+          ]);
           set({
             notifications: page.data,
+            nextCursor: page.nextCursor,
+            counts,
             syncedAt: new Date().toISOString(),
             isSyncing: false,
           });
@@ -128,6 +149,32 @@ export const useNotificationsStore = create<NotificationsState>()(
         await hydrateFromServer();
       },
 
+      loadMore: async () => {
+        const { nextCursor, isLoadingMore, isSyncing } = get();
+        if (nextCursor === null || isLoadingMore || isSyncing) {
+          return;
+        }
+        set({ isLoadingMore: true });
+        try {
+          const page = await notificationApi.list({
+            cursor: nextCursor,
+            limit: MAX_FEED_ENTRIES,
+          });
+          set(state => ({
+            notifications: [...state.notifications, ...page.data],
+            nextCursor: page.nextCursor,
+            isLoadingMore: false,
+          }));
+        } catch (error) {
+          logger.warn(
+            'notificationsStore',
+            'Could not load more of the feed',
+            toApiError(error),
+          );
+          set({ isLoadingMore: false });
+        }
+      },
+
       markRead: id => {
         const target = get().notifications.find(entry => entry.id === id);
         if (target === undefined || target.read) {
@@ -137,6 +184,12 @@ export const useNotificationsStore = create<NotificationsState>()(
           notifications: state.notifications.map(entry =>
             entry.id === id ? { ...entry, read: true } : entry,
           ),
+          // The bell follows the server's figure once synced; one fewer now,
+          // rather than after a round trip.
+          counts: state.counts && {
+            ...state.counts,
+            unread: Math.max(0, state.counts.unread - 1),
+          },
         }));
         // Only a synced feed has rows the server knows about; a seeded id
         // would 404 for nothing.
@@ -152,13 +205,20 @@ export const useNotificationsStore = create<NotificationsState>()(
       },
 
       markAllRead: () => {
-        if (!get().notifications.some(entry => !entry.read)) {
+        // Unread rows on the device, or unread the server counts on pages
+        // not loaded here — either is something to clear.
+        const { notifications, counts } = get();
+        const anyUnread =
+          notifications.some(entry => !entry.read) ||
+          (counts !== null && counts.unread > 0);
+        if (!anyUnread) {
           return;
         }
         set(state => ({
           notifications: state.notifications.map(entry =>
             entry.read ? entry : { ...entry, read: true },
           ),
+          counts: state.counts && { ...state.counts, unread: 0 },
         }));
         if (get().syncedAt !== null) {
           notificationApi.markAllRead().catch(error => {
@@ -174,8 +234,11 @@ export const useNotificationsStore = create<NotificationsState>()(
       reset: () =>
         set({
           notifications: seedNotifications,
+          nextCursor: null,
+          counts: null,
           syncedAt: null,
           isSyncing: false,
+          isLoadingMore: false,
         }),
     }),
     {
@@ -184,6 +247,8 @@ export const useNotificationsStore = create<NotificationsState>()(
       version: 1,
       partialize: state => ({
         notifications: state.notifications,
+        nextCursor: state.nextCursor,
+        counts: state.counts,
         syncedAt: state.syncedAt,
       }),
     },
@@ -200,11 +265,14 @@ export const useNotifications = () =>
  */
 export const useUnreadNotificationCount = () =>
   useNotificationsStore(
-    s => s.notifications.filter(entry => !entry.read).length,
+    s =>
+      s.counts?.unread ?? s.notifications.filter(entry => !entry.read).length,
   );
 
 export const useHasUnreadNotifications = () =>
-  useNotificationsStore(s => s.notifications.some(entry => !entry.read));
+  useNotificationsStore(s =>
+    s.counts ? s.counts.unread > 0 : s.notifications.some(entry => !entry.read),
+  );
 
 export type NotificationCounts = Record<NotificationFilter, number>;
 
@@ -244,7 +312,19 @@ function countByFilter(notifications: AppNotification[]): NotificationCounts {
  */
 export const useNotificationCounts = (): NotificationCounts => {
   const notifications = useNotifications();
-  return useMemo(() => countByFilter(notifications), [notifications]);
+  const fromServer = useNotificationsStore(s => s.counts);
+  return useMemo(
+    () =>
+      fromServer
+        ? {
+            all: fromServer.all,
+            activity: fromServer.activity,
+            reward: fromServer.reward,
+            system: fromServer.system,
+          }
+        : countByFilter(notifications),
+    [fromServer, notifications],
+  );
 };
 
 export interface NotificationGroup {

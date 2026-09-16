@@ -5,6 +5,15 @@ import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
 import { AppText } from '../ui/AppText';
 
+interface Props {
+  /**
+   * Coins per qualifying friend, as the server states it (RULES F3). Null
+   * before the first sync, when the line stays generic rather than naming
+   * a figure the app made up.
+   */
+  inviterCoins?: number | null;
+}
+
 /**
  * The pitch, in two lines and a sentence.
  *
@@ -12,7 +21,7 @@ import { AppText } from '../ui/AppText';
  * card would make it look like one section among the four under it. The
  * coins are decoration and are hidden from the screen reader as such.
  */
-export const ReferralHeroBanner = memo(() => {
+export const ReferralHeroBanner = memo(({ inviterCoins = null }: Props) => {
   const { colors } = useTheme();
 
   return (
@@ -26,7 +35,9 @@ export const ReferralHeroBanner = memo(() => {
         </VStack>
 
         <AppText variant="micro" color="textSecondary" numberOfLines={2}>
-          Share your code, friends join and you both get rewarded!
+          {inviterCoins !== null
+            ? `Share your code and earn ${inviterCoins} coins for every friend who joins and works out.`
+            : 'Share your code, friends join and you both get rewarded!'}
         </AppText>
       </VStack>
 

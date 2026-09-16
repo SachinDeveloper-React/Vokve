@@ -11,6 +11,14 @@ const envSchema = z.object({
   MONGODB_URI: z.string().default('mongodb://localhost:27017/vokve?replicaSet=rs0&directConnection=true'),
   REDIS_URL: z.string().optional(),
   JWT_SECRET: z.string().min(16).default('dev-only-secret-change-me-please'),
+  /** Where a referral link points (RULES F6). The page redirects to the store until deep links exist. */
+  SHARE_URL_BASE: z.string().url().default('https://vokve.app/r'),
+  /**
+   * The Firebase service account for push (FCM), as the JSON itself or a path
+   * to the file. Absent means no push channel: feed rows only, and every
+   * send is logged as `push.no_provider`.
+   */
+  FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(60),
   /** Dev only — OTP codes echoed in responses. Hard-refused in production. */

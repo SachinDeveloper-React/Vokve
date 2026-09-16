@@ -59,7 +59,7 @@ curl -s $B/dev/jobs/coin-expiry -H "$H" -H "authorization: Bearer <access>" -H "
 
 ## Notifications and push
 
-`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. **There is no push provider configured** — `lib/push.ts` logs `push.no_provider` and the feed row is the only channel until FCM is wired in with `setPushTransport()` (a service account this repo does not carry).
+`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once `FIREBASE_SERVICE_ACCOUNT` is set (the service-account JSON, or a path to it — see `.env.example`); without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.
 
 ## Tests
 

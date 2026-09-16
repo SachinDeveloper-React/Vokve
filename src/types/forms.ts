@@ -136,6 +136,21 @@ export const signUpSchema = z
     acceptedTerms: z.boolean().refine(accepted => accepted, {
       message: 'You need to accept the terms to continue',
     }),
+    /**
+     * A friend's code, optional (RULES F2). Only the shape is checked here —
+     * whether it belongs to anyone is the server's answer, and it comes back
+     * on this field. Spaces and dashes are forgiven; the server drops them.
+     */
+    referralCode: z
+      .string()
+      .trim()
+      .transform(value => value.toUpperCase().replace(/[\s-]/g, ''))
+      .refine(value => value.length === 0 || /^[A-Z0-9]{4,12}$/.test(value), {
+        message: 'A code is 4–12 letters and numbers',
+      })
+      // Optional at the schema level too, so a form built without the field
+      // — every sign-up before this one existed — still parses.
+      .optional(),
   })
   // Reported on `confirmPassword` rather than the form root, so the message
   // lands under the field the user has to fix.
@@ -158,6 +173,8 @@ export interface SignUpPayload {
   password: string;
   dateOfBirth: string;
   gender: Gender;
+  /** A friend's referral code, if one was typed; absent otherwise. */
+  referralCode?: string;
 }
 
 export function toSignUpPayload(values: SignUpValues): SignUpPayload {
@@ -165,12 +182,16 @@ export function toSignUpPayload(values: SignUpValues): SignUpPayload {
     // Already trimmed by the schema; lower-cased here so two sign-ups that
     // differ only in capitalisation cannot become two accounts.
     email: values.email.toLowerCase(),
-    phone: `${findCountry(values.phone.country).dialCode}${values.phone.number}`,
+    phone: `${findCountry(values.phone.country).dialCode}${
+      values.phone.number
+    }`,
     password: values.password,
     dateOfBirth: values.dateOfBirth,
     // The schema's refine has already ruled null out by the time a parsed value
     // reaches here; the assertion is what tells the compiler that.
     gender: values.gender as Gender,
+    // An empty field is no code at all, not a code of "".
+    ...(values.referralCode ? { referralCode: values.referralCode } : {}),
   };
 }
 
@@ -197,16 +218,22 @@ export const completeProfileSchema = z.object({
   // Nullable with a `superRefine` rather than a plain `positive()`, for the
   // same reason `gender` is: an empty field is genuinely null, and a schema
   // that narrows null away stops matching the default value the control needs.
-  height: z.number().nullable().superRefine((value, ctx) => {
-    if (value === null || value <= 0) {
-      ctx.addIssue({ code: 'custom', message: 'Enter your height' });
-    }
-  }),
-  weight: z.number().nullable().superRefine((value, ctx) => {
-    if (value === null || value <= 0) {
-      ctx.addIssue({ code: 'custom', message: 'Enter your weight' });
-    }
-  }),
+  height: z
+    .number()
+    .nullable()
+    .superRefine((value, ctx) => {
+      if (value === null || value <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Enter your height' });
+      }
+    }),
+  weight: z
+    .number()
+    .nullable()
+    .superRefine((value, ctx) => {
+      if (value === null || value <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Enter your weight' });
+      }
+    }),
 });
 export type CompleteProfileValues = z.infer<typeof completeProfileSchema>;
 
@@ -288,7 +315,11 @@ export type ProfileValues = z.infer<typeof profileSchema>;
  * new form.
  */
 const addressLine = (label: string, max: number) =>
-  z.string().trim().min(1, `Enter ${label}`).max(max, `Keep ${label} under ${max} characters`);
+  z
+    .string()
+    .trim()
+    .min(1, `Enter ${label}`)
+    .max(max, `Keep ${label} under ${max} characters`);
 
 export const addressFormSchema = z.object({
   label: addressLine('a name for this address', 30),

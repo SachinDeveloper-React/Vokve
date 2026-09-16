@@ -8,6 +8,7 @@ import { expireIdleWallets, warnExpiringWallets } from '../src/modules/economy/w
 import { NotificationPreferencesModel, UserModel } from '../src/modules/identity/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
 import { flushDeferredPushes, notify, quietHoursDelayMs } from '../src/modules/notifications/service.js';
+import { configurePushFromEnv, sendPush } from '../src/lib/push.js';
 import { app, authed, signUpAndRegister } from './helpers.js';
 
 const DAY = '2026-09-14';
@@ -195,5 +196,31 @@ describe('coin expiry reminders (RULES E10)', () => {
     expect((await warnExpiringWallets(new Date(second.getTime() + 10 * DAYS))).warned).toBe(0);
     expect(await warnExpiringWallets(new Date(second.getTime() + 76 * DAYS + 60_000))).toEqual({ warned: 1, repeated: 0 });
     expect(await NotificationModel.countDocuments({ userId: session.userId })).toBe(2);
+  });
+});
+
+describe('push plumbing', () => {
+  it('the app registers its token through the device heartbeat, and a push goes to that token', async () => {
+    const session = await signUpAndRegister();
+    const sent = capturingTransport();
+    await UserModel.updateOne({ _id: session.userId }, { $set: { timezone: 'UTC' } });
+
+    const set = await request(app).patch(`/v1/devices/${session.deviceId}`).set(authed(session)).send({ pushToken: 'fcm-abc' });
+    expect(set.body).toEqual({ ok: true });
+
+    await notify({ userId: session.userId, topic: 'coins', title: 'T', message: 'M', now: new Date('2026-09-14T12:00:00Z') });
+    expect(sent[0].tokens).toEqual(['fcm-abc']);
+
+    // Withdrawn on sign-out: the next message finds no device.
+    await request(app).patch(`/v1/devices/${session.deviceId}`).set(authed(session)).send({ pushToken: null });
+    const after = await notify({ userId: session.userId, topic: 'coins', title: 'T2', message: 'M', now: new Date('2026-09-14T12:00:00Z') });
+    expect(after.push).toBe('no_device');
+  });
+
+  it('without a service account there is no provider, and a provider that throws never fails the caller', async () => {
+    expect(await configurePushFromEnv()).toBe(false);
+
+    setPushTransport({ async send() { throw new Error('FCM down'); } });
+    await expect(sendPush(['tok'], { title: 'T', body: 'B', data: {} })).resolves.toEqual({ sent: 0, invalid: [] });
   });
 });

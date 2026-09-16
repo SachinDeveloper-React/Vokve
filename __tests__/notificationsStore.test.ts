@@ -11,6 +11,7 @@
 jest.mock('../src/services/api/endpoints', () => ({
   notificationApi: {
     list: jest.fn(),
+    counts: jest.fn(),
     markRead: jest.fn(),
     markAllRead: jest.fn(),
   },
@@ -27,10 +28,13 @@ const { notificationApi } = jest.requireMock(
 ) as {
   notificationApi: {
     list: jest.Mock;
+    counts: jest.Mock;
     markRead: jest.Mock;
     markAllRead: jest.Mock;
   };
 };
+
+const COUNTS = { all: 2, activity: 0, reward: 2, system: 0, unread: 1 };
 
 const note = (id: string, read = false): AppNotification => ({
   id,
@@ -47,6 +51,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 beforeEach(() => {
   useNotificationsStore.getState().reset();
   notificationApi.list.mockReset();
+  notificationApi.counts.mockReset().mockResolvedValue(COUNTS);
   notificationApi.markRead.mockReset().mockResolvedValue({ ok: true });
   notificationApi.markAllRead.mockReset().mockResolvedValue({ ok: true });
 });
@@ -64,6 +69,40 @@ test("a sync replaces the seeded feed with the server's newest page", async () =
   expect(state.syncedAt).not.toBeNull();
   expect(state.isSyncing).toBe(false);
   expect(notificationApi.list).toHaveBeenCalledWith({ limit: 50 });
+  // The chips and the bell read the server's totals, not the rows on hand.
+  expect(state.counts).toEqual(COUNTS);
+});
+
+test('the bell and the chips prefer the server\'s counts, and reading moves the unread figure at once', async () => {
+  notificationApi.list.mockResolvedValue({
+    data: [note('s1'), note('s2', true)],
+    nextCursor: null,
+  });
+  await useNotificationsStore.getState().hydrateFromServer();
+  // Only one row on the device is unread, but the server says the same — and it is what counts.
+  useNotificationsStore.setState({ counts: { ...COUNTS, unread: 7, all: 40 } });
+
+  useNotificationsStore.getState().markRead('s1');
+  await flush();
+  expect(useNotificationsStore.getState().counts?.unread).toBe(6);
+
+  useNotificationsStore.getState().markAllRead();
+  await flush();
+  expect(useNotificationsStore.getState().counts?.unread).toBe(0);
+});
+
+test('load more appends the next page and stops at the end', async () => {
+  notificationApi.list
+    .mockResolvedValueOnce({ data: [note('p1')], nextCursor: 'p1' })
+    .mockResolvedValueOnce({ data: [note('p2')], nextCursor: null });
+  await useNotificationsStore.getState().hydrateFromServer();
+
+  await useNotificationsStore.getState().loadMore();
+  expect(notificationApi.list).toHaveBeenLastCalledWith({ cursor: 'p1', limit: 50 });
+  expect(useNotificationsStore.getState().notifications.map(n => n.id)).toEqual(['p1', 'p2']);
+
+  await useNotificationsStore.getState().loadMore();
+  expect(notificationApi.list).toHaveBeenCalledTimes(2); // the end: nothing more asked for
 });
 
 test('a failed sync keeps whatever was on the device', async () => {
