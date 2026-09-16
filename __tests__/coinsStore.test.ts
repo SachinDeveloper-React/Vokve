@@ -85,6 +85,7 @@ describe('syncing with the server', () => {
     walletApi: {
       get: jest.Mock;
       transactions: jest.Mock;
+      earnRules: jest.Mock;
     };
   };
 
@@ -102,10 +103,17 @@ describe('syncing with the server', () => {
     remainingToday: 240,
   };
 
+  const rules = [
+    { source: 'steps', title: 'Walk', detail: 'Per 100 verified steps', reward: 0.095 },
+    { source: 'workout', title: 'Finish a workout', detail: 'Any logged session', reward: 100 },
+  ];
+
   beforeEach(() => {
     useCoinsStore.getState().reset();
     walletApi.get.mockReset();
     walletApi.transactions.mockReset();
+    walletApi.earnRules.mockReset();
+    walletApi.earnRules.mockResolvedValue(rules);
   });
 
   test("the server's figures replace the seeded ones, month summary and countdown included", async () => {
@@ -142,6 +150,8 @@ describe('syncing with the server', () => {
     expect(state.syncedAt).not.toBeNull();
     // The wallet's own card only needs the newest fifty rows.
     expect(walletApi.transactions).toHaveBeenCalledWith({ limit: 50 });
+    // The rate card is the server's, never the app's (RULES E14).
+    expect(state.earnRules).toEqual(rules);
   });
 
   test('a failed sync keeps the cached figures and records why', async () => {

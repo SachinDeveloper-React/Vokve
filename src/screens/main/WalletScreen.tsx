@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
 import { CoinBalanceCard } from '../../components/wallet/CoinBalanceCard';
 import { CoinExpirySheet } from '../../components/wallet/CoinExpirySheet';
+import { CoinsInfoSheet } from '../../components/wallet/CoinsInfoSheet';
 import { CoinsSummaryCard } from '../../components/wallet/CoinsSummaryCard';
 import { KeepGoingCard } from '../../components/wallet/KeepGoingCard';
 import { RecentTransactionsCard } from '../../components/wallet/RecentTransactionsCard';
@@ -18,7 +19,11 @@ import {
   useCoinBalance,
   useCoinExpiry,
   useCoinTransactions,
+  useCoinsEarnedToday,
+  useCoinsRemainingToday,
   useCoinsStore,
+  useDailyCoinCap,
+  useEarnRules,
   useIsWalletSyncing,
   useLifetimeEarned,
   useMonthlyCoinSummary,
@@ -57,6 +62,10 @@ export const WalletScreen = () => {
   const transactions = useCoinTransactions();
   const summary = useMonthlyCoinSummary();
   const expiry = useCoinExpiry();
+  const earnRules = useEarnRules();
+  const dailyCap = useDailyCoinCap();
+  const earnedToday = useCoinsEarnedToday();
+  const remainingToday = useCoinsRemainingToday();
   const hasUnreadNotifications = useHasUnreadNotifications();
 
   const isSyncing = useIsWalletSyncing();
@@ -133,10 +142,19 @@ export const WalletScreen = () => {
     navigation.navigate('Referral');
   }, [navigation]);
 
-  // Orders has no screen yet. Wired as a no-op rather than left off, so the
-  // row keeps the shape it will ship with and only the handler changes when
-  // the screen lands.
-  const notImplemented = useCallback(() => {}, []);
+  // "Your Coins ?" — what coins are, the served rate card, the daily cap.
+  const [isCoinsInfoOpen, setCoinsInfoOpen] = useState(false);
+  const openCoinsInfo = useCallback(() => setCoinsInfoOpen(true), []);
+  const closeCoinsInfo = useCallback(() => setCoinsInfoOpen(false), []);
+  const onShopFromCoinsInfo = useCallback(() => {
+    setCoinsInfoOpen(false);
+    navigation.navigate('Main', { screen: 'Shop' });
+  }, [navigation]);
+
+  const onOpenOrders = useCallback(
+    () => navigation.navigate('Orders'),
+    [navigation],
+  );
 
   return (
     <Screen edges={['top']}>
@@ -177,13 +195,14 @@ export const WalletScreen = () => {
           expiryUrgency={expiry.urgency}
           onPressAboutExpiry={openExpiry}
           onPressExpiryInfo={openExpiry}
+          onPressBalanceInfo={openCoinsInfo}
         />
 
         <WalletActionsRow
           onPressEarn={onOpenReferral}
           onPressShop={onOpenShop}
           onPressHistory={onOpenHistory}
-          onPressOrders={notImplemented}
+          onPressOrders={onOpenOrders}
         />
 
         <KeepGoingCard />
@@ -206,6 +225,17 @@ export const WalletScreen = () => {
         balance={balance}
         expiry={expiry}
         onPressEarn={onEarnFromExpiry}
+      />
+
+      <CoinsInfoSheet
+        visible={isCoinsInfoOpen}
+        onClose={closeCoinsInfo}
+        rules={earnRules}
+        dailyCap={dailyCap}
+        earnedToday={earnedToday}
+        remainingToday={remainingToday}
+        pending={pending}
+        onPressShop={onShopFromCoinsInfo}
       />
     </Screen>
   );

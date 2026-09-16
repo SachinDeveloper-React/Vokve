@@ -279,3 +279,33 @@ export const profileSchema = z.object({
   notes: z.string().max(280, 'Keep it under 280 characters').optional(),
 });
 export type ProfileValues = z.infer<typeof profileSchema>;
+
+/**
+ * A shipping address as the form collects it (RULES R4). Trimmed throughout:
+ * addresses are pasted more often than typed, and a trailing space is not a
+ * mistake the user can see. The PIN is India's six digits — the only country
+ * the shop ships to today; `country` is carried so that can change without a
+ * new form.
+ */
+const addressLine = (label: string, max: number) =>
+  z.string().trim().min(1, `Enter ${label}`).max(max, `Keep ${label} under ${max} characters`);
+
+export const addressFormSchema = z.object({
+  label: addressLine('a name for this address', 30),
+  name: addressLine("the recipient's name", 80),
+  phone: z
+    .string()
+    .trim()
+    .min(1, 'Enter a phone number for the courier')
+    .regex(/^\+?\d[\d ]{7,18}$/, 'That number does not look right'),
+  line1: addressLine('the street address', 120),
+  line2: z.string().trim().max(120, 'Keep this line under 120 characters'),
+  city: addressLine('the city', 60),
+  state: addressLine('the state', 60),
+  postalCode: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'Enter the 6-digit PIN code'),
+  isDefault: z.boolean(),
+});
+export type AddressFormValues = z.infer<typeof addressFormSchema>;

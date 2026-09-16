@@ -8,10 +8,12 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { requestContext } from './middleware/requestContext.js';
 import { versionGate } from './middleware/version.js';
 import { activityRouter } from './modules/activity/routes.js';
+import { commerceRouter } from './modules/commerce/routes.js';
 import { devicesRouter } from './modules/devices/routes.js';
 import { walletRouter } from './modules/economy/routes.js';
 import { authRouter } from './modules/identity/auth.routes.js';
 import { meRouter } from './modules/identity/me.routes.js';
+import { notificationsRouter } from './modules/notifications/routes.js';
 import { platformRouter } from './modules/platform/routes.js';
 import { trainingRouter } from './modules/training/routes.js';
 
@@ -47,6 +49,8 @@ export function createApp() {
   v1.use(walletRouter);
   v1.use(trainingRouter);
   v1.use(activityRouter);
+  v1.use(notificationsRouter);
+  v1.use(commerceRouter);
   app.use('/v1', v1);
 
   app.use((_req, res) => {

@@ -87,6 +87,9 @@ export const VerifyOtpScreen = () => {
   // which channel, the session says which step, and only the copy changes.
   const isEmail = pending?.channel === 'email';
   const isSecondary = useAuthStore(s => s.status === 'authenticated');
+  // A step-up proves the person, not a contact (RULES O8): same code entry,
+  // different question, and the way out is a cancel rather than a skip.
+  const isStepUp = pending?.purpose === 'step_up';
 
   /**
    * Nothing to verify — the store was cleared, or the screen was reached
@@ -204,7 +207,11 @@ export const VerifyOtpScreen = () => {
 
           <VStack align="center" gap="xs">
             <AppText variant="h1" center>
-              {isEmail ? 'Verify Your Email' : 'Verify Your Number'}
+              {isStepUp
+                ? "Confirm It's You"
+                : isEmail
+                ? 'Verify Your Email'
+                : 'Verify Your Number'}
             </AppText>
             <AppText variant="body" color="textSecondary" center>
               {`Enter the ${codeLength}-digit OTP sent to`}
@@ -221,7 +228,9 @@ export const VerifyOtpScreen = () => {
                 feedback="opacity"
                 accessibilityRole="button"
                 accessibilityLabel={
-                  isSecondary
+                  isStepUp
+                    ? 'Cancel confirmation'
+                    : isSecondary
                     ? `Skip ${isEmail ? 'email' : 'phone'} verification for now`
                     : `Change ${isEmail ? 'email address' : 'phone number'}`
                 }
@@ -230,7 +239,11 @@ export const VerifyOtpScreen = () => {
                   variant="bodyStrong"
                   style={{ color: colors.brandAccent }}
                 >
-                  {isSecondary ? 'Skip for now' : 'Change'}
+                  {isStepUp
+                    ? 'Cancel'
+                    : isSecondary
+                    ? 'Skip for now'
+                    : 'Change'}
                 </AppText>
               </Pressable>
             </HStack>

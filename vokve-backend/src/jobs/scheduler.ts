@@ -1,6 +1,7 @@
 import { getKV } from '../db/redis.js';
 import { logger } from '../lib/logger.js';
-import { expireIdleWallets } from '../modules/economy/wallet.service.js';
+import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
+import { flushDeferredPushes } from '../modules/notifications/service.js';
 
 /**
  * The daily jobs (BACKEND §9), run from inside the API process.
@@ -24,8 +25,21 @@ interface DailyJob {
   run: () => Promise<unknown>;
 }
 
+/**
+ * In order: the warnings go out before the sweep, so a wallet on its last
+ * day is told "tonight" rather than being emptied without a word.
+ */
 const DAILY_JOBS: readonly DailyJob[] = [
+  { name: 'coin-expiry-warn', run: () => warnExpiringWallets() },
   { name: 'coin-expiry', run: () => expireIdleWallets() },
+];
+
+/**
+ * Every tick, unclaimed: each is idempotent over its own rows, and running
+ * on two instances at once only means the work is split, not doubled.
+ */
+const HOURLY_JOBS: readonly DailyJob[] = [
+  { name: 'flush-deferred-pushes', run: () => flushDeferredPushes() },
 ];
 
 /** `YYYY-MM-DD` in UTC — the calendar the claim keys live on. */
@@ -52,10 +66,25 @@ export async function runDailyJobs(now = new Date()): Promise<void> {
   }
 }
 
+export async function runHourlyJobs(now = new Date()): Promise<void> {
+  for (const job of HOURLY_JOBS) {
+    try {
+      await job.run();
+    } catch (err) {
+      logger.error({ err, job: job.name, at: now }, 'job.failed');
+    }
+  }
+}
+
+async function tick(): Promise<void> {
+  await runHourlyJobs();
+  await runDailyJobs();
+}
+
 /** Starts the hourly tick and returns what stops it, for shutdown. */
 export function startScheduler(): () => void {
-  void runDailyJobs();
-  const timer = setInterval(() => void runDailyJobs(), TICK_MS);
+  void tick();
+  const timer = setInterval(() => void tick(), TICK_MS);
   timer.unref();
   return () => clearInterval(timer);
 }

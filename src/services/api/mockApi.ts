@@ -1,6 +1,8 @@
 import { config } from '../../constants/config';
 import {
   seedCoinTransactions,
+  seedNotifications,
+  shopItems,
   todayActivity,
   weeklySteps,
   workoutTemplates,
@@ -11,7 +13,10 @@ import {
   userSchema,
   verificationChallengeSchema,
   workoutSchema,
+  type Address,
+  type AppNotification,
   type AuthResponse,
+  type Order,
   type CoinTransaction,
   type DailyActivity,
   type User,
@@ -25,7 +30,18 @@ import type {
 } from '../../types/forms';
 import { logger } from '../../utils/logger';
 import { ApiError } from './errors';
-import type { ActivityApi, AuthApi, DeviceApi, UserApi, WalletApi, WorkoutApi } from './contracts';
+import type {
+  ActivityApi,
+  AddressApi,
+  AuthApi,
+  DeviceApi,
+  NotificationApi,
+  OrderApi,
+  ShopApi,
+  UserApi,
+  WalletApi,
+  WorkoutApi,
+} from './contracts';
 
 /**
  * An in-memory stand-in for the backend, so the whole app can be built and
@@ -67,6 +83,8 @@ interface PendingSignUp {
   resendAt: number;
   /** Which code this is — the phone's, or the email's that follows it. */
   channel?: 'sms' | 'email';
+  /** A step-up code proves the user, not a contact: it answers with a token. */
+  purpose?: 'step_up';
 }
 
 const pendingSignUps = new Map<string, PendingSignUp>();
@@ -138,6 +156,7 @@ function makeChallenge(
     codeLength: MOCK_RULES.otp.length,
     expiresInSeconds: secondsUntil(pending.expiresAt),
     resendInSeconds: secondsUntil(pending.resendAt),
+    purpose: pending.purpose ?? null,
     // The mock's one code, surfaced the way the dev server surfaces its own.
     devCode: MOCK_RULES.otp,
   });
@@ -219,6 +238,17 @@ export const mockAuthApi: AuthApi = {
 
     pendingSignUps.delete(verificationId);
 
+    // A step-up: the session is refreshed and the proof rides with it,
+    // remembered so the redeem that follows can recognise and spend it.
+    if (currentUser && pending.purpose === 'step_up') {
+      const stepUpToken = nextId('mock.stepup');
+      mockStepUps.add(stepUpToken);
+      return authResponseSchema.parse({
+        ...makeAuthResponse(currentUser),
+        stepUpToken,
+      });
+    }
+
     // A verification on an account that already exists — the email asked
     // for by the banner, or a phone once SMS exists — stamps that contact.
     if (currentUser && pending.channel === 'email') {
@@ -259,6 +289,29 @@ export const mockAuthApi: AuthApi = {
     return makeChallenge(emailId, pending);
   },
 
+  async stepUp() {
+    await delay();
+    if (!currentUser) {
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    }
+    const id = nextId('ver');
+    const pending: PendingSignUp = {
+      payload: {
+        email: currentUser.email,
+        phone: currentUser.phone ?? '',
+        password: '',
+        dateOfBirth: currentUser.dateOfBirth ?? '',
+        gender: currentUser.gender ?? 'other',
+      },
+      channel: 'email',
+      purpose: 'step_up',
+      expiresAt: Date.now() + OTP_LIFETIME_SECONDS * 1000,
+      resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
+    };
+    pendingSignUps.set(id, pending);
+    return makeChallenge(id, pending);
+  },
+
   async resendOtp(verificationId) {
     await delay();
 
@@ -274,7 +327,7 @@ export const mockAuthApi: AuthApi = {
     // Both clocks restart, exactly as a real resend would: the new code has its
     // own lifetime, and the cooldown begins again from now.
     const refreshed: PendingSignUp = {
-      payload: pending.payload,
+      ...pending,
       expiresAt: Date.now() + OTP_LIFETIME_SECONDS * 1000,
       resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
     };
@@ -326,6 +379,11 @@ export const mockAuthApi: AuthApi = {
     await delay();
     currentUser = null;
     pendingSignUps.clear();
+    mockFeed = seedNotifications.map(entry => ({ ...entry }));
+    mockStock = new Map(shopItems.map(item => [item.id, item.inStock ? 25 : 0]));
+    mockOrders = [];
+    mockAddresses = [];
+    mockBalance = null;
     return { ok: true };
   },
 };
@@ -448,6 +506,7 @@ export const mockWalletApi: WalletApi = {
       dailyCap: 300,
       earnedToday: 60,
       remainingToday: 240,
+      stepUpThreshold: MOCK_STEP_UP_THRESHOLD,
     };
   },
   /**
@@ -516,5 +575,229 @@ export const mockActivityApi: ActivityApi = {
         workoutsCompleted: day.steps > 8000 ? 1 : 0,
       });
     });
+  },
+};
+
+/**
+ * The same chip-per-topic map the notifications store keeps; repeated here
+ * rather than imported so the mock does not pull a store into the API layer.
+ */
+const MOCK_FEED_CATEGORY: Record<AppNotification['topic'], 'activity' | 'reward' | 'system'> = {
+  steps: 'activity',
+  workout: 'activity',
+  streak: 'activity',
+  hydration: 'activity',
+  coins: 'reward',
+  challenge: 'reward',
+  reward: 'reward',
+  health: 'system',
+  system: 'system',
+};
+
+/** Read state lives here across calls, so a row read stays read until sign-out. */
+let mockFeed: AppNotification[] = seedNotifications.map(entry => ({ ...entry }));
+
+export const mockNotificationApi: NotificationApi = {
+  async list(query = {}) {
+    await delay();
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const rows = query.category
+      ? mockFeed.filter(n => MOCK_FEED_CATEGORY[n.topic] === query.category)
+      : mockFeed;
+    const after = query.cursor ? rows.findIndex(n => n.id === query.cursor) : -1;
+    const data = rows.slice(after + 1, after + 1 + limit).map(n => ({ ...n }));
+    const last = data[data.length - 1];
+    const hasMore = last !== undefined && rows.findIndex(n => n.id === last.id) < rows.length - 1;
+    return { data, nextCursor: hasMore ? last.id : null };
+  },
+  async markRead(id) {
+    await delay();
+    mockFeed = mockFeed.map(n => (n.id === id ? { ...n, read: true } : n));
+    return { ok: true };
+  },
+  async markAllRead() {
+    await delay();
+    mockFeed = mockFeed.map(n => (n.read ? n : { ...n, read: true }));
+    return { ok: true };
+  },
+};
+
+// ─── Commerce ──────────────────────────────────────────────────────────────
+
+/** The price at and above which the mock, like the server, asks for a step-up. */
+export const MOCK_STEP_UP_THRESHOLD = 1000;
+
+let mockStock = new Map(shopItems.map(item => [item.id, item.inStock ? 25 : 0]));
+let mockOrders: Order[] = [];
+let mockAddresses: Address[] = [];
+/**
+ * The mock's own wallet balance for redemptions, seeded from the ledger the
+ * first time it is needed. Null until then so a sign-out resets it with the
+ * rest, and so the figure the wallet shows and the one the shop spends
+ * against start out equal.
+ */
+let mockBalance: number | null = null;
+/** Step-up tokens handed out and not yet spent. */
+const mockStepUps = new Set<string>();
+
+function currentBalance(): number {
+  if (mockBalance === null) {
+    mockBalance = seedCoinTransactions.reduce((sum, t) => sum + t.amount, 0);
+  }
+  return mockBalance;
+}
+
+function withStock(item: (typeof shopItems)[number]) {
+  return { ...item, inStock: (mockStock.get(item.id) ?? 0) > 0 };
+}
+
+const snapshotOf = (address: Address): Order['address'] => ({
+  label: address.label,
+  name: address.name,
+  phone: address.phone,
+  line1: address.line1,
+  line2: address.line2,
+  city: address.city,
+  state: address.state,
+  postalCode: address.postalCode,
+  country: address.country,
+});
+
+export const mockShopApi: ShopApi = {
+  async items(query = {}) {
+    await delay();
+    return shopItems
+      .filter(item => !query.category || item.category === query.category)
+      .filter(item => !query.deals || item.isDeal)
+      .map(withStock);
+  },
+  async item(id) {
+    await delay();
+    const item = shopItems.find(entry => entry.id === id);
+    if (!item) throw new ApiError('not_found', 'That reward could not be found.', 404);
+    return withStock(item);
+  },
+  async redeem(payload) {
+    await delay();
+    if (!currentUser) {
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    }
+    const item = shopItems.find(entry => entry.id === payload.itemId);
+    if (!item) throw new ApiError('not_found', 'That reward could not be found.', 404);
+    const quantity = payload.quantity ?? 1;
+    const total = item.priceCoins * quantity;
+
+    const address = mockAddresses.find(entry => entry.id === payload.addressId);
+    if (!address) {
+      throw new ApiError('validation', 'Add a shipping address to redeem rewards.', 422, { addressId: payload.addressId }, 'ADDRESS_REQUIRED');
+    }
+    if (total >= MOCK_STEP_UP_THRESHOLD) {
+      if (!payload.stepUpToken) {
+        throw new ApiError('forbidden', 'Confirm it is you to redeem this reward.', 403, null, 'STEP_UP_REQUIRED');
+      }
+      if (!mockStepUps.delete(payload.stepUpToken)) {
+        throw new ApiError('forbidden', 'That confirmation has expired. Please confirm again.', 403, null, 'STEP_UP_INVALID');
+      }
+    }
+    const balance = currentBalance();
+    if (balance < total) {
+      throw new ApiError('validation', `You need ${total - balance} more coins for this.`, 422, { required: total, balance }, 'INSUFFICIENT_COINS');
+    }
+    const onHand = mockStock.get(item.id) ?? 0;
+    if (onHand < quantity) {
+      throw new ApiError('unknown', `${item.title} is sold out.`, 409, { itemId: item.id }, 'OUT_OF_STOCK');
+    }
+
+    mockStock.set(item.id, onHand - quantity);
+    mockBalance = balance - total;
+    const now = new Date().toISOString();
+    const order: Order = {
+      id: nextId('ord'),
+      status: 'placed',
+      items: [{ itemId: item.id, title: item.title, emoji: item.emoji, quantity, priceCoins: item.priceCoins }],
+      totalCoins: total,
+      address: snapshotOf(address),
+      placedAt: now,
+      updatedAt: now,
+      trackingRef: null,
+      cancellable: true,
+    };
+    mockOrders = [order, ...mockOrders];
+    return { order, balance: mockBalance };
+  },
+};
+
+export const mockOrderApi: OrderApi = {
+  async list(cursor) {
+    await delay();
+    const after = cursor ? mockOrders.findIndex(o => o.id === cursor) : -1;
+    const data = mockOrders.slice(after + 1, after + 1 + 20);
+    const last = data[data.length - 1];
+    const hasMore = last !== undefined && mockOrders.indexOf(last) < mockOrders.length - 1;
+    return { data, nextCursor: hasMore ? last.id : null };
+  },
+  async get(id) {
+    await delay();
+    const order = mockOrders.find(entry => entry.id === id);
+    if (!order) throw new ApiError('not_found', 'That order could not be found.', 404);
+    return order;
+  },
+  async count() {
+    await delay();
+    return mockOrders.length;
+  },
+  async cancel(id) {
+    await delay();
+    const order = mockOrders.find(entry => entry.id === id);
+    if (!order) throw new ApiError('not_found', 'That order could not be found.', 404);
+    if (order.status === 'cancelled') return { order, balance: currentBalance() };
+    if (!order.cancellable) {
+      throw new ApiError('unknown', `An order that is ${order.status} can no longer be cancelled.`, 409, { status: order.status }, 'ORDER_NOT_CANCELLABLE');
+    }
+    for (const line of order.items) {
+      mockStock.set(line.itemId, (mockStock.get(line.itemId) ?? 0) + line.quantity);
+    }
+    mockBalance = currentBalance() + order.totalCoins;
+    const cancelled: Order = { ...order, status: 'cancelled', cancellable: false, updatedAt: new Date().toISOString() };
+    mockOrders = mockOrders.map(entry => (entry.id === id ? cancelled : entry));
+    return { order: cancelled, balance: mockBalance };
+  },
+};
+
+export const mockAddressApi: AddressApi = {
+  async list() {
+    await delay();
+    return [...mockAddresses].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  },
+  async create(input) {
+    await delay();
+    const isDefault = mockAddresses.length === 0 || input.isDefault;
+    if (isDefault) mockAddresses = mockAddresses.map(a => ({ ...a, isDefault: false }));
+    const created: Address = { ...input, id: nextId('adr'), isDefault };
+    mockAddresses = [created, ...mockAddresses];
+    return created;
+  },
+  async update(id, patch) {
+    await delay();
+    const existing = mockAddresses.find(a => a.id === id);
+    if (!existing) throw new ApiError('not_found', 'That address could not be found.', 404);
+    const isDefault = existing.isDefault || (patch.isDefault ?? false);
+    if (patch.isDefault) mockAddresses = mockAddresses.map(a => ({ ...a, isDefault: false }));
+    const updated: Address = { ...existing, ...patch, isDefault };
+    mockAddresses = mockAddresses.map(a => (a.id === id ? updated : a));
+    return updated;
+  },
+  async setDefault(id) {
+    return mockAddressApi.update(id, { isDefault: true });
+  },
+  async remove(id) {
+    await delay();
+    const removed = mockAddresses.find(a => a.id === id);
+    if (!removed) throw new ApiError('not_found', 'That address could not be found.', 404);
+    mockAddresses = mockAddresses.filter(a => a.id !== id);
+    if (removed.isDefault && mockAddresses[0]) {
+      mockAddresses = mockAddresses.map((a, index) => ({ ...a, isDefault: index === 0 }));
+    }
+    return { ok: true };
   },
 };

@@ -63,6 +63,10 @@ export const AccountScreen = () => {
     () => navigation.navigate('Streak'),
     [navigation],
   );
+  const onOpenOrders = useCallback(
+    () => navigation.navigate('Orders'),
+    [navigation],
+  );
 
   // "My Rewards" used to open the Wallet tab, which is the coin balance rather
   // than the rewards themselves — and the tab bar already leads there. It now
@@ -129,7 +133,7 @@ export const AccountScreen = () => {
 
         <AccountMenuList
           appVersion={config.appVersion}
-          onPressOrders={notImplemented}
+          onPressOrders={onOpenOrders}
           onPressRewards={onOpenRewards}
           onPressStreakFreeze={onOpenStreak}
           onPressHealthData={notImplemented}

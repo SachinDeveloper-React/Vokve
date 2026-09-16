@@ -4,7 +4,10 @@ import { setOnSessionExpired } from '../services/api/client';
 import { ApiError, toApiError } from '../services/api/errors';
 import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
+import { useAddressesStore } from './addressesStore';
 import { useCoinsStore } from './coinsStore';
+import { useNotificationsStore } from './notificationsStore';
+import { useOrdersStore } from './ordersStore';
 import type { AuthTokens, User, VerificationChallenge } from '../types/models';
 import type {
   CompleteProfilePayload,
@@ -41,6 +44,12 @@ interface AuthState {
    * signed-in one verifying an email — and the reset screen reads only this.
    */
   pendingReset: VerificationChallenge | null;
+  /**
+   * The proof that a step-up code just passed (RULES O8), waiting for the
+   * one action that asked for it. Taken with `takeStepUpToken` so it is used
+   * once; cleared on sign-out. Never persisted — ten minutes is its life.
+   */
+  stepUpToken: string | null;
   /** Set while a sign-in / sign-up / verification request is in flight. */
   isSubmitting: boolean;
   error: ApiError | null;
@@ -62,6 +71,14 @@ interface AuthState {
   cancelVerification: () => void;
   /** Sends a new email code and makes it the pending challenge. */
   requestEmailVerification: () => Promise<boolean>;
+  /**
+   * Asks for a second factor before a sensitive action. The challenge
+   * becomes the pending one, so the root navigator opens the OTP screen;
+   * when the code passes, `stepUpToken` is set and the screen closes.
+   */
+  requestStepUp: () => Promise<boolean>;
+  /** Hands over the token and forgets it — one action, once. */
+  takeStepUpToken: () => string | null;
   /** Starts a reset; the challenge lands in `pendingReset`. Always succeeds for a well-formed identifier. */
   forgotPassword: (identifier: string) => Promise<boolean>;
   resendResetOtp: () => Promise<boolean>;
@@ -84,6 +101,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   pendingVerification: null,
   pendingReset: null,
+  stepUpToken: null,
   isSubmitting: false,
   error: null,
   notice: null,
@@ -113,6 +131,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await userApi.me();
       set({ status: 'authenticated', user, error: null, isSubmitting: false });
       useCoinsStore.getState().hydrateFromServer();
+      useNotificationsStore.getState().hydrateFromServer();
+      useOrdersStore.getState().hydrateFromServer();
+      useAddressesStore.getState().hydrateFromServer();
     } catch (error) {
       const apiError = toApiError(error);
       logger.warn('authStore', `Session restore failed: ${apiError.code ?? apiError.kind}`, apiError);
@@ -154,6 +175,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       set({ status: 'authenticated', user, isSubmitting: false, notice: null });
       useCoinsStore.getState().hydrateFromServer();
+      useNotificationsStore.getState().hydrateFromServer();
+      useOrdersStore.getState().hydrateFromServer();
+      useAddressesStore.getState().hydrateFromServer();
       return true;
     } catch (error) {
       set({ error: toApiError(error), isSubmitting: false });
@@ -188,10 +212,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     set({ isSubmitting: true, error: null });
     try {
-      const { user, tokens, nextVerification } = await authApi.verifyOtp(
-        pending.verificationId,
-        code,
-      );
+      const { user, tokens, nextVerification, stepUpToken } =
+        await authApi.verifyOtp(pending.verificationId, code);
       await secureStorage.saveTokens(tokens);
       // The phone code is the one that starts a session; the device is
       // registered against it. The email code that follows only refreshes
@@ -212,9 +234,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         status: 'authenticated',
         user,
         pendingVerification: nextVerification ?? null,
+        // Only a step-up code carries one; every other code leaves what was
+        // there alone, so a token taken earlier is not wiped by an unrelated
+        // verification in between.
+        stepUpToken: stepUpToken ?? get().stepUpToken,
         isSubmitting: false,
       });
       useCoinsStore.getState().hydrateFromServer();
+      useNotificationsStore.getState().hydrateFromServer();
+      useOrdersStore.getState().hydrateFromServer();
+      useAddressesStore.getState().hydrateFromServer();
       return true;
     } catch (error) {
       const apiError = toApiError(error);
@@ -347,6 +376,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  requestStepUp: async () => {
+    set({ isSubmitting: true, error: null, stepUpToken: null });
+    try {
+      const pendingVerification = await authApi.stepUp();
+      set({ pendingVerification, isSubmitting: false });
+      return true;
+    } catch (error) {
+      set({ error: toApiError(error), isSubmitting: false });
+      return false;
+    }
+  },
+
+  takeStepUpToken: () => {
+    const token = get().stepUpToken;
+    if (token !== null) {
+      set({ stepUpToken: null });
+    }
+    return token;
+  },
+
   completeProfile: async payload => {
     set({ isSubmitting: true, error: null });
     try {
@@ -370,11 +419,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       logger.warn('authStore', 'Server sign-out failed, clearing locally', error);
     }
     await secureStorage.clearTokens();
+    // The caches are this user's: the next sign-in hydrates its own, but
+    // until it does the wallet and feed must not show the last user's.
+    useCoinsStore.getState().reset();
+    useNotificationsStore.getState().reset();
+    useOrdersStore.getState().reset();
+    useAddressesStore.getState().reset();
     set({
       status: 'signed_out',
       user: null,
       pendingVerification: null,
       pendingReset: null,
+      stepUpToken: null,
       error: null,
       notice: null,
     });
@@ -394,6 +450,7 @@ setOnSessionExpired(() => {
     status: 'signed_out',
     user: null,
     pendingVerification: null,
+    stepUpToken: null,
     notice: 'Your session has expired. Please sign in again.',
   });
 });
@@ -475,6 +532,9 @@ export const usePendingContactVerification = () =>
   useAuthStore(s =>
     s.status === 'authenticated' ? s.pendingVerification : null,
   );
+
+/** The step-up proof, for the screen waiting to spend it. */
+export const useStepUpToken = () => useAuthStore(s => s.stepUpToken);
 
 /** The email one specifically — the banner offers to request it. */
 export const usePendingEmailVerification = () =>

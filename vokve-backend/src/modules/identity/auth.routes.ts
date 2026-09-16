@@ -3,7 +3,7 @@ import { rateLimit } from '../../middleware/rateLimit.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import {
-  otpRequestBody, refreshBody, refreshSession, requestContactChange, requestOtp, resendOtp, resendOtpBody, resetPassword,
+  otpRequestBody, refreshBody, refreshSession, requestContactChange, requestOtp, requestStepUp, resendOtp, resendOtpBody, resetPassword,
   resetPasswordBody, sendEmailOtp, sendPhoneOtp, signIn, signInBody, signOut, signUp, signUpBody, verifyOtp, verifyOtpBody,
 } from './auth.service.js';
 import { z } from 'zod';
@@ -41,6 +41,10 @@ authRouter.post('/auth/refresh', validate('body', refreshBody), async (req, res)
 
 authRouter.post('/auth/sign-out', requireAuth, async (req, res) => {
   res.json(await signOut(req.ctx.userId!, req.ctx.deviceId));
+});
+
+authRouter.post('/auth/step-up', requireAuth, rateLimit({ name: 'step-up-user', max: 5, windowSeconds: 3600, by: 'user' }), async (req, res) => {
+  res.json(await requestStepUp(req.ctx.userId!, meta(req)));
 });
 
 authRouter.post('/auth/email/send-otp', requireAuth, rateLimit({ name: 'email-otp-user', max: 5, windowSeconds: 3600, by: 'user' }), async (req, res) => {

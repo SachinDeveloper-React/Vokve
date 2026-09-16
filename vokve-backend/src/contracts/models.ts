@@ -224,6 +224,73 @@ export const shopItemSchema = z.object({
 export type ShopItem = z.infer<typeof shopItemSchema>;
 
 /**
+ * Where a reward is sent (RULES R4). Indian addressing — a state and a
+ * six-digit PIN — because that is where the shop ships; `country` is carried
+ * so the form can grow without a migration. Soft-deleted rather than removed:
+ * an order keeps a snapshot, but the row it came from should still resolve.
+ */
+export const addressSchema = z.object({
+  id: z.string(),
+  /** "Home", "Office" — what the picker shows first. */
+  label: z.string().min(1).max(30),
+  name: z.string().min(1).max(80),
+  /** E.164, for the courier. */
+  phone: z.string().min(8).max(20),
+  line1: z.string().min(1).max(120),
+  line2: z.string().max(120).default(''),
+  city: z.string().min(1).max(60),
+  state: z.string().min(1).max(60),
+  postalCode: z.string().min(3).max(12),
+  country: z.string().length(2).default('IN'),
+  isDefault: z.boolean().default(false),
+});
+export type Address = z.infer<typeof addressSchema>;
+
+/**
+ * An order's life (RULES R5): `placed → confirmed → shipped → delivered`;
+ * `placed | confirmed → cancelled`; `delivered → refunded` by an admin.
+ * Closed, like every enum: a new state ships behind a client release.
+ */
+export const orderStatusSchema = z.enum([
+  'placed',
+  'confirmed',
+  'shipped',
+  'delivered',
+  'cancelled',
+  'refunded',
+]);
+export type OrderStatus = z.infer<typeof orderStatusSchema>;
+
+export const orderItemSchema = z.object({
+  itemId: z.string(),
+  title: z.string(),
+  emoji: z.string().default('🎁'),
+  quantity: z.number().int().positive(),
+  /** Per unit, at the time of the order — a later price change does not rewrite history. */
+  priceCoins: z.number().int().positive(),
+});
+export type OrderItem = z.infer<typeof orderItemSchema>;
+
+export const orderSchema = z.object({
+  id: z.string(),
+  status: orderStatusSchema,
+  items: z.array(orderItemSchema).min(1),
+  /** The whole order, in coins. */
+  totalCoins: z.number().int().positive(),
+  /** The address as it was when the order was placed (RULES R4). */
+  address: addressSchema.omit({ id: true, isDefault: true }),
+  /** ISO-8601. */
+  placedAt: z.string(),
+  /** ISO-8601 of the latest state change; equals `placedAt` on a fresh order. */
+  updatedAt: z.string(),
+  /** Courier reference once shipped; null before. */
+  trackingRef: z.string().nullable().default(null),
+  /** Whether the user may still cancel — `placed` or `confirmed` (R5). */
+  cancellable: z.boolean(),
+});
+export type Order = z.infer<typeof orderSchema>;
+
+/**
  * What a challenge is counted in.
  *
  * The metric picks the unit a progress line is written in and the colour the
@@ -652,6 +719,12 @@ export const verificationChallengeSchema = z.object({
    * OTP screen in dev builds so the flow can be walked without a mailbox.
    */
   devCode: z.string().nullable().default(null),
+  /**
+   * What the code is for. Only the step-up purpose changes what the screen
+   * says — "Confirm it's you" rather than "Verify your email" — so the rest
+   * are left as the server names them and never branched on.
+   */
+  purpose: z.string().nullable().default(null),
 });
 export type VerificationChallenge = z.infer<typeof verificationChallengeSchema>;
 
@@ -666,6 +739,12 @@ export const authResponseSchema = z.object({
    * banner asks again later.
    */
   nextVerification: verificationChallengeSchema.nullable().default(null),
+  /**
+   * Present when the code that just passed was a step-up (RULES O8): a
+   * short-lived token for one sensitive action — a redemption above the
+   * threshold. Null on every other verification.
+   */
+  stepUpToken: z.string().nullable().default(null),
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
 
@@ -694,6 +773,12 @@ export const walletSchema = z.object({
   dailyCap: z.number().nonnegative(),
   earnedToday: z.number().nonnegative(),
   remainingToday: z.number().nonnegative(),
+  /**
+   * The price at and above which a redemption asks for a code first
+   * (⚙ `coins.stepUpThreshold`, RULES O8), so the checkout can say so before
+   * the server does.
+   */
+  stepUpThreshold: z.number().nonnegative(),
 });
 export type Wallet = z.infer<typeof walletSchema>;
 

@@ -6,6 +6,7 @@ export { CoinDayGroupCard } from './CoinDayGroupCard';
 export type { CoinDayGroup } from './CoinDayGroupCard';
 export { CoinExpiryPanel } from './CoinExpiryPanel';
 export { CoinExpirySheet } from './CoinExpirySheet';
+export { CoinsInfoSheet } from './CoinsInfoSheet';
 export { CoinSourceFilterChip } from './CoinSourceFilterChip';
 export type { CoinSourceFilter } from './CoinSourceFilterChip';
 export { CoinSourceFilters } from './CoinSourceFilters';

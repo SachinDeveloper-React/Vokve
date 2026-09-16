@@ -5,7 +5,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { validate } from '../../middleware/validate.js';
 import { COIN_SOURCES } from './models.js';
-import { earnRules, expireIdleWallets, getWallet, listTransactions } from './wallet.service.js';
+import { earnRules, expireIdleWallets, getWallet, listTransactions, warnExpiringWallets } from './wallet.service.js';
 
 export const walletRouter = Router();
 walletRouter.use('/wallet', requireAuth, requireDevice);
@@ -39,5 +39,9 @@ if (!isProduction) {
   walletRouter.post('/dev/jobs/coin-expiry', requireAuth, requireDevice, validate('body', body), async (req, res) => {
     const now = req.body.now ? new Date(req.body.now) : new Date();
     res.json(await expireIdleWallets(now));
+  });
+  walletRouter.post('/dev/jobs/coin-expiry-warn', requireAuth, requireDevice, validate('body', body), async (req, res) => {
+    const now = req.body.now ? new Date(req.body.now) : new Date();
+    res.json(await warnExpiringWallets(now));
   });
 }

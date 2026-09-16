@@ -39,3 +39,30 @@ export const APP_RELEASES = [
   { platform: 'ios', version: '1.0.0', build: '1', status: 'current', releasedAt: new Date('2026-09-01') },
   { platform: 'android', version: '1.0.0', build: '1', status: 'current', releasedAt: new Date('2026-09-01') },
 ];
+
+/**
+ * The reward catalogue, copied from the client's `seedData.shopItems` so the
+ * shop looks the same against a fresh database as it did against the seed.
+ * Stock is a starting figure for a demo; fulfilment adjusts it.
+ */
+export const SHOP_ITEMS = [
+  { _id: 'tee', title: 'VOKVE T-Shirt', description: 'Breathable training tee with the wordmark across the chest.', priceCoins: 1200, category: 'apparel', emoji: '👕', badge: 'bestseller', isDeal: false, sort: 1 },
+  { _id: 'steel-bottle', title: 'VOKVE Steel Bottle', description: '750ml double-wall steel — cold for 24 hours.', priceCoins: 850, category: 'accessories', emoji: '🍶', badge: 'popular', isDeal: false, sort: 2 },
+  { _id: 'yoga-mat', title: 'Yoga Mat', description: '6mm non-slip mat with a carry strap.', priceCoins: 1500, category: 'gear', emoji: '🧘', badge: 'new_arrival', isDeal: false, sort: 3 },
+  { _id: 'cap', title: 'VOKVE Cap', description: 'Curved-peak cap, one size, embroidered logo.', priceCoins: 650, category: 'apparel', emoji: '🧢', badge: 'limited', isDeal: false, sort: 4 },
+  { _id: 'hoodie', title: 'VOKVE Hoodie', description: 'Heavyweight cotton hoodie for the walk to the gym.', priceCoins: 2200, category: 'apparel', emoji: '🧥', badge: null, isDeal: false, sort: 5 },
+  { _id: 'shorts', title: 'Training Shorts', description: 'Quick-dry shorts with a zipped phone pocket.', priceCoins: 1100, category: 'apparel', emoji: '🩳', badge: null, isDeal: true, sort: 6 },
+  { _id: 'gym-towel', title: 'Microfibre Towel', description: 'Quick-dry, with a clip for the rack.', priceCoins: 350, category: 'accessories', emoji: '🧺', badge: null, isDeal: false, sort: 7 },
+  { _id: 'wrist-wraps', title: 'Wrist Wraps', description: 'Elastic wraps for press days.', priceCoins: 500, category: 'accessories', emoji: '🧤', badge: null, isDeal: true, sort: 8 },
+  { _id: 'resistance-bands', title: 'Resistance Band Set', description: 'Five loops, light through extra heavy.', priceCoins: 950, category: 'gear', emoji: '🎽', badge: null, isDeal: false, sort: 9 },
+  { _id: 'jump-rope', title: 'Speed Rope', description: 'Ball-bearing speed rope, adjustable length.', priceCoins: 400, category: 'gear', emoji: '🪢', badge: null, isDeal: true, sort: 10 },
+  { _id: 'streak-freeze', title: 'Streak Freeze', description: 'Keeps your streak alive for one rest day.', priceCoins: 300, category: 'lifestyle', emoji: '🧊', badge: null, isDeal: false, sort: 11 },
+  { _id: 'pro-month', title: 'One Month of Pro', description: 'Advanced analytics and custom plans.', priceCoins: 3000, category: 'lifestyle', emoji: '⭐', badge: null, isDeal: false, sort: 12 },
+] as const;
+
+/** Digital rewards never run out; physical ones start with a demo quantity, the limited cap with three. */
+export const SHOP_STOCK = SHOP_ITEMS.map(item => ({
+  _id: item._id,
+  onHand: item.category === 'lifestyle' ? 1_000_000 : item.badge === 'limited' ? 3 : 25,
+  lowStockAt: 5,
+}));

@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SlidersHorizontal } from 'lucide-react-native';
 import { AccountMenuRow } from '../../components/account/AccountMenuRow';
@@ -9,7 +9,7 @@ import { NotificationsHeader } from '../../components/notifications/Notification
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
-import { useCurrentUser } from '../../stores/authStore';
+import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import {
   useNotificationCounts,
   useNotificationGroups,
@@ -53,6 +53,29 @@ export const NotificationsScreen = () => {
   const counts = useNotificationCounts();
   const groups = useNotificationGroups(filter);
   const markRead = useNotificationsStore(s => s.markRead);
+  const hydrateFromServer = useNotificationsStore(s => s.hydrateFromServer);
+  const refreshIfStale = useNotificationsStore(s => s.refreshIfStale);
+  const isSignedIn = useAuthStatus() === 'authenticated';
+
+  // Pushed fresh each time the bell is tapped, so mount is "opened": fetch
+  // then if the cached feed has gone stale. Only with a session — the dev
+  // bypass reaches this screen without one.
+  useEffect(() => {
+    if (isSignedIn) {
+      refreshIfStale();
+    }
+  }, [isSignedIn, refreshIfStale]);
+
+  // The spinner follows the pull, not the background refresh above.
+  const [isPulling, setPulling] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await hydrateFromServer();
+    } finally {
+      setPulling(false);
+    }
+  }, [hydrateFromServer]);
 
   // A notification tap can open the app straight onto this screen, and
   // `goBack` with nothing behind it is silently a no-op — the chevron would
@@ -89,6 +112,14 @@ export const NotificationsScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPulling}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <NotificationsHeader
           name={user?.name}

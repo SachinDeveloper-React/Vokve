@@ -45,13 +45,21 @@ curl -s $B/me -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…
 # 5. exercise the daily cap: 20k steps → 19 coins held; a workout → 100 credited; check the wallet
 curl -s $B/dev/steps -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"steps":20000}'
 curl -s $B/wallet -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
-# 6. see the coins expire: run the idle sweep as of 91 days from now, then read the wallet again
+# 6. redeem a reward: add an address, then buy (a step-up code is asked for at 1,000+ coins — POST /auth/step-up, verify-otp, pass stepUpToken)
+curl -s $B/me/addresses -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"label":"Home","name":"Asha Verma","phone":"+919876543210","line1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}'
+curl -s $B/shop/redeem -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -H "idempotency-key: $(uuidgen)" -d '{"itemId":"cap","addressId":"adr_…"}'
+curl -s $B/orders -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+# 7. see the coins expire: run the idle sweep as of 91 days from now, then read the wallet again
 curl -s $B/dev/jobs/coin-expiry -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d "{\"now\":\"$(date -u -v+91d +%Y-%m-%dT%H:%M:%SZ)\"}"
 ```
 
 ## Jobs
 
-`src/jobs/scheduler.ts` ticks hourly inside the API process and runs each daily job once per UTC day (claim key in Redis/memory KV, so two instances never both run it). Today: the coin idle-expiry sweep (`expireIdleWallets`, RULES E9). Runs on boot too, so a process started at 00:05 does not wait a day.
+`src/jobs/scheduler.ts` ticks hourly inside the API process. Daily jobs run once per UTC day (claim key in Redis/memory KV, so two instances never both run one): the coin expiry warnings (`warnExpiringWallets`, RULES E10 — feed row + push at 14 and 3 days) and then the idle-expiry sweep (`expireIdleWallets`, RULES E9). Hourly, unclaimed: `flushDeferredPushes` sends the pushes quiet hours held back. Runs on boot too, so a process started at 00:05 does not wait a day.
+
+## Notifications and push
+
+`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. **There is no push provider configured** — `lib/push.ts` logs `push.no_provider` and the feed row is the only channel until FCM is wired in with `setPushTransport()` (a service account this repo does not carry).
 
 ## Tests
 
@@ -65,7 +73,8 @@ npm test        # vitest + mongodb-memory-server (replica set), no Docker needed
 src/config      env, defaults (every ⚙ value), remote config (app_config overrides)
 src/lib         errors (the client's ApiError shape), coins (milli-coins), dates (local day), tokens, otp
 src/middleware  requestContext (X-Vokve-* headers), auth, device (428), version (426), idempotency, rateLimit
-src/modules     identity · devices · economy · training · activity · platform
+src/modules     identity · devices · economy · training · activity · notifications · commerce · platform
+src/jobs        the in-process scheduler (daily: expiry warn + sweep; hourly: deferred pushes)
 src/seed        catalogue + config fixtures
 test            integration tests against a real replica set
 ```

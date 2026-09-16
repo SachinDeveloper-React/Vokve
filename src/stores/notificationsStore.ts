@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { seedNotifications } from '../constants/seedData';
+import { notificationApi } from '../services/api/endpoints';
+import { toApiError } from '../services/api/errors';
 import type {
   AppNotification,
   NotificationCategory,
@@ -9,7 +11,18 @@ import type {
 } from '../types/models';
 import { toIsoDate, type IsoDate } from '../utils/date';
 import { formatRelativeDay } from '../utils/format';
+import { logger } from '../utils/logger';
 import { mmkvStorage } from './index';
+
+/**
+ * How much of the feed is kept on the device. The centre shows what happened
+ * lately, not an archive: fifty rows is a couple of weeks of a busy user, and
+ * anything older lives on the server.
+ */
+const MAX_FEED_ENTRIES = 50;
+
+/** How old a synced feed may be before opening the centre fetches it again. */
+export const NOTIFICATIONS_STALE_AFTER_MS = 60_000;
 
 /**
  * Which filter each topic answers to.
@@ -39,8 +52,26 @@ export type NotificationFilter = NotificationCategory | 'all';
 interface NotificationsState {
   /** Newest first. */
   notifications: AppNotification[];
+  /** When the server last confirmed the feed; null while still seeded. */
+  syncedAt: string | null;
+  isSyncing: boolean;
 
-  /** Marks one row read. A no-op if it is read already or has gone. */
+  /**
+   * Replaces the feed with the server's newest page. The server writes the
+   * rows (BACKEND §6.14); this store is its cache, and the read marks below
+   * are sent back so the bell agrees across devices. A failed sync keeps the
+   * cached rows and is logged, not thrown — every caller's answer to it is
+   * to show what it has.
+   */
+  hydrateFromServer: () => Promise<void>;
+  /** `hydrateFromServer`, unless the feed is fresher than `NOTIFICATIONS_STALE_AFTER_MS`. */
+  refreshIfStale: () => Promise<void>;
+
+  /**
+   * Marks one row read. A no-op if it is read already or has gone. The dot
+   * clears at once; the server is told after, and a failure is logged rather
+   * than undone — a row the user has read is read, whatever the network says.
+   */
   markRead: (id: string) => void;
   markAllRead: () => void;
   reset: () => void;
@@ -56,39 +87,105 @@ interface NotificationsState {
  */
 export const useNotificationsStore = create<NotificationsState>()(
   persist(
-    set => ({
+    (set, get) => ({
       notifications: seedNotifications,
+      syncedAt: null,
+      isSyncing: false,
 
-      markRead: id =>
-        set(state => {
-          const target = state.notifications.find(entry => entry.id === id);
-          if (target === undefined || target.read) {
-            return state;
-          }
-          return {
-            notifications: state.notifications.map(entry =>
-              entry.id === id ? { ...entry, read: true } : entry,
-            ),
-          };
+      hydrateFromServer: async () => {
+        if (get().isSyncing) {
+          return;
+        }
+        set({ isSyncing: true });
+        try {
+          const page = await notificationApi.list({ limit: MAX_FEED_ENTRIES });
+          set({
+            notifications: page.data,
+            syncedAt: new Date().toISOString(),
+            isSyncing: false,
+          });
+        } catch (error) {
+          logger.warn(
+            'notificationsStore',
+            'Feed sync failed',
+            toApiError(error),
+          );
+          set({ isSyncing: false });
+        }
+      },
+
+      refreshIfStale: async () => {
+        const { syncedAt, isSyncing, hydrateFromServer } = get();
+        if (isSyncing) {
+          return;
+        }
+        const age = syncedAt
+          ? Date.now() - new Date(syncedAt).getTime()
+          : Infinity;
+        if (age < NOTIFICATIONS_STALE_AFTER_MS) {
+          return;
+        }
+        await hydrateFromServer();
+      },
+
+      markRead: id => {
+        const target = get().notifications.find(entry => entry.id === id);
+        if (target === undefined || target.read) {
+          return;
+        }
+        set(state => ({
+          notifications: state.notifications.map(entry =>
+            entry.id === id ? { ...entry, read: true } : entry,
+          ),
+        }));
+        // Only a synced feed has rows the server knows about; a seeded id
+        // would 404 for nothing.
+        if (get().syncedAt !== null) {
+          notificationApi.markRead(id).catch(error => {
+            logger.warn(
+              'notificationsStore',
+              'Could not mark read on the server',
+              toApiError(error),
+            );
+          });
+        }
+      },
+
+      markAllRead: () => {
+        if (!get().notifications.some(entry => !entry.read)) {
+          return;
+        }
+        set(state => ({
+          notifications: state.notifications.map(entry =>
+            entry.read ? entry : { ...entry, read: true },
+          ),
+        }));
+        if (get().syncedAt !== null) {
+          notificationApi.markAllRead().catch(error => {
+            logger.warn(
+              'notificationsStore',
+              'Could not mark all read on the server',
+              toApiError(error),
+            );
+          });
+        }
+      },
+
+      reset: () =>
+        set({
+          notifications: seedNotifications,
+          syncedAt: null,
+          isSyncing: false,
         }),
-
-      markAllRead: () =>
-        set(state =>
-          state.notifications.some(entry => !entry.read)
-            ? {
-                notifications: state.notifications.map(entry =>
-                  entry.read ? entry : { ...entry, read: true },
-                ),
-              }
-            : state,
-        ),
-
-      reset: () => set({ notifications: seedNotifications }),
     }),
     {
       name: 'vokve.notifications',
       storage: createJSONStorage(() => mmkvStorage),
       version: 1,
+      partialize: state => ({
+        notifications: state.notifications,
+        syncedAt: state.syncedAt,
+      }),
     },
   ),
 );
@@ -172,7 +269,11 @@ function groupByDay(notifications: AppNotification[]): NotificationGroup[] {
     let group = byDate.get(date);
 
     if (group === undefined) {
-      group = { date, title: formatRelativeDay(entry.createdAt), notifications: [] };
+      group = {
+        date,
+        title: formatRelativeDay(entry.createdAt),
+        notifications: [],
+      };
       byDate.set(date, group);
       groups.push(group);
     }

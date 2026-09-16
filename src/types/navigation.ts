@@ -120,6 +120,17 @@ export type RootStackParamList = {
    * `navigate('CoinHistory')` shows everything.
    */
   CoinHistory: { source?: CoinSource } | undefined;
+  /** From the wallet's "My Orders", the shop's bag and the account's menu. */
+  Orders: undefined;
+  OrderDetail: { id: string };
+  /**
+   * The address book. `select` opens it from a checkout: tapping an address
+   * makes it the default and returns, which is how the checkout learns of
+   * the choice without state riding back through the route.
+   */
+  Addresses: { select?: boolean } | undefined;
+  /** `id` edits; without it, a new address. */
+  AddressForm: { id?: string } | undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

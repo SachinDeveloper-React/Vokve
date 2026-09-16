@@ -80,6 +80,7 @@ export async function createChallenge(input: CreateChallenge): Promise<Verificat
     verificationId: id,
     phone: input.channel === 'sms' ? input.target : '',
     channel: input.channel,
+    purpose: input.purpose,
     target: maskTarget(input.target, input.channel),
     codeLength: otp.length,
     expiresInSeconds: otp.ttlSeconds,

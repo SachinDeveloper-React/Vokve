@@ -76,6 +76,10 @@ const seed = (transactions: CoinTransaction[]) => {
     expiresAt: null,
     expiryWindowDays: null,
     expiryWarnDays: null,
+    earnRules: null,
+    dailyCap: 300,
+    earnedToday: 0,
+    remainingToday: 300,
     syncedAt: null,
     syncError: null,
   });
@@ -401,6 +405,72 @@ describe('WalletScreen', () => {
       expect(allText(tree)).toContain('Nothing to expire yet');
     });
 
+  });
+
+  describe('"Your Coins" explainer', () => {
+    test('opens from the "?" on the balance label with the served rate card', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      useCoinsStore.setState({
+        earnRules: [
+          { source: 'steps', title: 'Walk', detail: 'Per 100 verified steps', reward: 0.095 },
+          { source: 'referral', title: 'Invite a friend', detail: 'Once they verify', reward: 20 },
+        ],
+        dailyCap: 300,
+        earnedToday: 60,
+        remainingToday: 240,
+      });
+      const tree = await render();
+
+      expect(allText(tree)).not.toContain('Ways to earn');
+      press(tree, 'Your Coins, what is this?');
+
+      const text = allText(tree);
+      expect(text).toContain('Ways to earn');
+      expect(text).toContain('Per 100 verified steps');
+      expect(text).toContain('Once they verify');
+      expect(text).toContain('Up to 300 coins a day');
+      expect(text).toContain('60 earned so far today, 240 still to go');
+    });
+
+    test('before a sync the rate card says the rates are still to load, rather than inventing them', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      const tree = await render();
+
+      press(tree, 'Your Coins, what is this?');
+
+      const text = allText(tree);
+      expect(text).toContain('The current rates load the next time you are online.');
+      expect(text).not.toContain('Per 1,000 steps');
+    });
+
+    test('a day at the cap says so, and when it resets', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      useCoinsStore.setState({ dailyCap: 300, earnedToday: 300, remainingToday: 0 });
+      const tree = await render();
+
+      press(tree, 'Your Coins, what is this?');
+
+      const text = allText(tree);
+      expect(text).toContain('Daily limit reached');
+      expect(text).toContain('resets at midnight');
+    });
+
+    test('"Spend in the shop" closes it and opens the shop tab', async () => {
+      seed([tx('a', 100, daysAgo(0))]);
+      const tree = await render();
+      press(tree, 'Your Coins, what is this?');
+
+      const shop = tree.root
+        .findAll(n => n.props?.label === 'Spend in the shop')
+        .find(n => typeof n.props.onPress === 'function');
+      if (!shop) throw new Error('No shop button');
+      ReactTestRenderer.act(() => shop.props.onPress());
+
+      expect(mockNavigate).toHaveBeenCalledWith('Main', { screen: 'Shop' });
+    });
+  });
+
+  describe('coin expiry, continued', () => {
     test('"Earn coins" in the explainer closes it and opens Referral & Earn', async () => {
       seed([tx('a', 100, daysAgo(0))]);
       const tree = await render();

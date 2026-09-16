@@ -5,7 +5,7 @@ import { seedCoinTransactions } from '../constants/seedData';
 import { walletApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import { logger } from '../utils/logger';
-import type { CoinSource, CoinTransaction } from '../types/models';
+import type { CoinSource, CoinTransaction, EarnRule } from '../types/models';
 import { mmkvStorage } from './index';
 
 /**
@@ -96,6 +96,14 @@ interface CoinsState {
   /** The window and warn thresholds in force on the server; null before a sync. */
   expiryWindowDays: number | null;
   expiryWarnDays: number[] | null;
+  /**
+   * The rate card, as the server serves it (RULES E14) — never written into
+   * the app, because the rates are config the owner can change. Null until
+   * the first sync.
+   */
+  earnRules: EarnRule[] | null;
+  /** The price from which a redemption asks for a code first (RULES O8). */
+  stepUpThreshold: number;
   /** When the server last confirmed these figures; null while still seeded. */
   syncedAt: string | null;
   isSyncing: boolean;
@@ -157,6 +165,8 @@ export const useCoinsStore = create<CoinsState>()(
       expiresAt: null,
       expiryWindowDays: null,
       expiryWarnDays: null,
+      earnRules: null,
+      stepUpThreshold: 1000,
       syncedAt: null,
       isSyncing: false,
       syncError: null,
@@ -167,9 +177,10 @@ export const useCoinsStore = create<CoinsState>()(
         }
         set({ isSyncing: true });
         try {
-          const [wallet, page] = await Promise.all([
+          const [wallet, page, earnRules] = await Promise.all([
             walletApi.get(),
             walletApi.transactions({ limit: MAX_LEDGER_ENTRIES }),
+            walletApi.earnRules(),
           ]);
           set({
             balance: wallet.balance,
@@ -184,6 +195,8 @@ export const useCoinsStore = create<CoinsState>()(
             expiresAt: wallet.expiresAt,
             expiryWindowDays: wallet.expiryWindowDays,
             expiryWarnDays: wallet.expiryWarnDays,
+            earnRules,
+            stepUpThreshold: wallet.stepUpThreshold,
             syncedAt: new Date().toISOString(),
             isSyncing: false,
             syncError: null,
@@ -291,6 +304,8 @@ export const useCoinsStore = create<CoinsState>()(
           expiresAt: null,
           expiryWindowDays: null,
           expiryWarnDays: null,
+          earnRules: null,
+          stepUpThreshold: 1000,
           syncedAt: null,
           isSyncing: false,
           syncError: null,
@@ -313,6 +328,8 @@ export const useCoinsStore = create<CoinsState>()(
         expiresAt: state.expiresAt,
         expiryWindowDays: state.expiryWindowDays,
         expiryWarnDays: state.expiryWarnDays,
+        earnRules: state.earnRules,
+        stepUpThreshold: state.stepUpThreshold,
         syncedAt: state.syncedAt,
       }),
     },
@@ -327,6 +344,8 @@ export const useCoinsRemainingToday = () =>
   useCoinsStore(s => s.remainingToday);
 export const useLifetimeEarned = () => useCoinsStore(s => s.lifetimeEarned);
 export const useCoinTransactions = () => useCoinsStore(s => s.transactions);
+export const useEarnRules = () => useCoinsStore(s => s.earnRules);
+export const useStepUpThreshold = () => useCoinsStore(s => s.stepUpThreshold);
 export const useWalletSyncedAt = () => useCoinsStore(s => s.syncedAt);
 export const useIsWalletSyncing = () => useCoinsStore(s => s.isSyncing);
 export const useWalletSyncError = () => useCoinsStore(s => s.syncError);

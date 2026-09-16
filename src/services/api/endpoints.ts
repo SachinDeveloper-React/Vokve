@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import {
+  addressSchema,
+  appNotificationSchema,
   authResponseSchema,
   coinTransactionSchema,
+  orderSchema,
+  shopItemSchema,
   dailyActivitySchema,
   deviceRegistrationSchema,
   earnRuleSchema,
@@ -25,12 +29,27 @@ import type {
 import { config } from '../../constants/config';
 import { logger } from '../../utils/logger';
 import { request } from './client';
-import type { ActivityApi, AuthApi, DeviceApi, UserApi, WalletApi, WorkoutApi } from './contracts';
+import type {
+  ActivityApi,
+  AddressApi,
+  AuthApi,
+  DeviceApi,
+  NotificationApi,
+  OrderApi,
+  ShopApi,
+  UserApi,
+  WalletApi,
+  WorkoutApi,
+} from './contracts';
 import {
   MOCK_RULES,
   mockActivityApi,
+  mockAddressApi,
   mockAuthApi,
   mockDeviceApi,
+  mockNotificationApi,
+  mockOrderApi,
+  mockShopApi,
   mockUserApi,
   mockWalletApi,
   mockWorkoutApi,
@@ -88,6 +107,11 @@ const realAuthApi: AuthApi = {
   sendEmailOtp: (): Promise<VerificationChallenge> =>
     request(verificationChallengeSchema, client =>
       client.post('/auth/email/send-otp'),
+    ),
+
+  stepUp: (): Promise<VerificationChallenge> =>
+    request(verificationChallengeSchema, client =>
+      client.post('/auth/step-up'),
     ),
 
   forgotPassword: (identifier: string): Promise<VerificationChallenge> =>
@@ -166,6 +190,96 @@ const realActivityApi: ActivityApi = {
     request(dailyActivitySchema, client => client.get('/activity/today')),
 };
 
+const okSchema = z.object({ ok: z.boolean() });
+
+const redeemResultSchema = z.object({
+  order: orderSchema,
+  balance: z.number().nonnegative(),
+});
+
+const realShopApi: ShopApi = {
+  items: (query = {}) =>
+    request(pageSchema(shopItemSchema), client =>
+      client.get('/shop/items', {
+        params: {
+          category: query.category,
+          deals: query.deals ? 'true' : undefined,
+        },
+      }),
+    ).then(page => page.data),
+  item: id =>
+    request(shopItemSchema, client =>
+      client.get(`/shop/items/${encodeURIComponent(id)}`),
+    ),
+  redeem: (payload, { idempotencyKey }) =>
+    request(redeemResultSchema, client =>
+      client.post('/shop/redeem', payload, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+};
+
+const realOrderApi: OrderApi = {
+  list: cursor =>
+    request(pageSchema(orderSchema), client =>
+      client.get('/orders', { params: { cursor } }),
+    ),
+  get: id =>
+    request(orderSchema, client =>
+      client.get(`/orders/${encodeURIComponent(id)}`),
+    ),
+  count: () =>
+    request(z.object({ count: z.number().int().nonnegative() }), client =>
+      client.get('/orders/count'),
+    ).then(result => result.count),
+  cancel: (id, { idempotencyKey }) =>
+    request(redeemResultSchema, client =>
+      client.post(`/orders/${encodeURIComponent(id)}/cancel`, undefined, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+};
+
+const realAddressApi: AddressApi = {
+  list: () =>
+    request(pageSchema(addressSchema), client =>
+      client.get('/me/addresses'),
+    ).then(page => page.data),
+  create: input =>
+    request(addressSchema, client => client.post('/me/addresses', input)),
+  update: (id, patch) =>
+    request(addressSchema, client =>
+      client.put(`/me/addresses/${encodeURIComponent(id)}`, patch),
+    ),
+  setDefault: id =>
+    request(addressSchema, client =>
+      client.post(`/me/addresses/${encodeURIComponent(id)}/default`),
+    ),
+  remove: id =>
+    request(okSchema, client =>
+      client.delete(`/me/addresses/${encodeURIComponent(id)}`),
+    ),
+};
+
+const realNotificationApi: NotificationApi = {
+  list: (query = {}) =>
+    request(pageSchema(appNotificationSchema), client =>
+      client.get('/notifications', {
+        params: {
+          cursor: query.cursor,
+          limit: query.limit,
+          category: query.category,
+        },
+      }),
+    ),
+  markRead: id =>
+    request(okSchema, client =>
+      client.post(`/notifications/${encodeURIComponent(id)}/read`),
+    ),
+  markAllRead: () =>
+    request(okSchema, client => client.post('/notifications/read-all')),
+};
+
 /**
  * The implementations screens and stores actually call.
  *
@@ -209,6 +323,7 @@ export const authApi: AuthApi = {
     pick(mockAuthApi, realAuthApi).forgotPassword(identifier),
   resetPassword: (verificationId, code, password) =>
     pick(mockAuthApi, realAuthApi).resetPassword(verificationId, code, password),
+  stepUp: () => pick(mockAuthApi, realAuthApi).stepUp(),
   signOut: () => pick(mockAuthApi, realAuthApi).signOut(),
 };
 
@@ -239,5 +354,33 @@ export const workoutApi: WorkoutApi = {
 export const activityApi: ActivityApi = {
   weekly: () => pick(mockActivityApi, realActivityApi).weekly(),
   today: () => pick(mockActivityApi, realActivityApi).today(),
+};
+
+export const shopApi: ShopApi = {
+  items: query => pick(mockShopApi, realShopApi).items(query),
+  item: id => pick(mockShopApi, realShopApi).item(id),
+  redeem: (payload, options) =>
+    pick(mockShopApi, realShopApi).redeem(payload, options),
+};
+
+export const orderApi: OrderApi = {
+  list: cursor => pick(mockOrderApi, realOrderApi).list(cursor),
+  get: id => pick(mockOrderApi, realOrderApi).get(id),
+  count: () => pick(mockOrderApi, realOrderApi).count(),
+  cancel: (id, options) => pick(mockOrderApi, realOrderApi).cancel(id, options),
+};
+
+export const addressApi: AddressApi = {
+  list: () => pick(mockAddressApi, realAddressApi).list(),
+  create: input => pick(mockAddressApi, realAddressApi).create(input),
+  update: (id, patch) => pick(mockAddressApi, realAddressApi).update(id, patch),
+  setDefault: id => pick(mockAddressApi, realAddressApi).setDefault(id),
+  remove: id => pick(mockAddressApi, realAddressApi).remove(id),
+};
+
+export const notificationApi: NotificationApi = {
+  list: query => pick(mockNotificationApi, realNotificationApi).list(query),
+  markRead: id => pick(mockNotificationApi, realNotificationApi).markRead(id),
+  markAllRead: () => pick(mockNotificationApi, realNotificationApi).markAllRead(),
 };
 

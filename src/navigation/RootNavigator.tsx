@@ -8,6 +8,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { config } from '../constants/config';
 import { ActiveWorkoutScreen } from '../screens/main/ActiveWorkoutScreen';
 import { AddMealScreen } from '../screens/main/AddMealScreen';
+import { AddressFormScreen } from '../screens/main/AddressFormScreen';
+import { AddressesScreen } from '../screens/main/AddressesScreen';
 import { AnalyticsScreen } from '../screens/main/AnalyticsScreen';
 import { BloodPressureScreen } from '../screens/main/BloodPressureScreen';
 import { ChallengesScreen } from '../screens/main/ChallengesScreen';
@@ -22,6 +24,8 @@ import { NotificationSettingsScreen } from '../screens/main/NotificationSettings
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
 import { NutritionHistoryScreen } from '../screens/main/NutritionHistoryScreen';
 import { NutritionScreen } from '../screens/main/NutritionScreen';
+import { OrderDetailScreen } from '../screens/main/OrderDetailScreen';
+import { OrdersScreen } from '../screens/main/OrdersScreen';
 import { ReferralScreen } from '../screens/main/ReferralScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
@@ -162,6 +166,26 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="CoinHistory"
               component={CoinHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Orders"
+              component={OrdersScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="OrderDetail"
+              component={OrderDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Addresses"
+              component={AddressesScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="AddressForm"
+              component={AddressFormScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

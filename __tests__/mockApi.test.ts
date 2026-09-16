@@ -20,13 +20,21 @@ import { ApiError } from '../src/services/api/errors';
 import { shouldUseMockApi } from '../src/services/api/endpoints';
 import {
   MOCK_RULES,
+  MOCK_STEP_UP_THRESHOLD,
   mockActivityApi,
+  mockAddressApi,
   mockAuthApi,
+  mockNotificationApi,
+  mockOrderApi,
+  mockShopApi,
   mockUserApi,
   mockWalletApi,
   mockWorkoutApi,
 } from '../src/services/api/mockApi';
-import { seedCoinTransactions } from '../src/constants/seedData';
+import {
+  seedCoinTransactions,
+  seedNotifications,
+} from '../src/constants/seedData';
 import type { SignUpPayload } from '../src/types/forms';
 
 const PAYLOAD: SignUpPayload = {
@@ -289,5 +297,131 @@ describe('the wallet ledger', () => {
     const spent = thisMonth.filter(r => r.amount < 0).reduce((s, r) => s - r.amount, 0);
 
     expect(wallet.monthSummary).toEqual({ earned, spent, net: earned - spent });
+  });
+});
+
+describe('the notification feed', () => {
+  test('pages with a cursor and filters by chip', async () => {
+    const first = await mockNotificationApi.list({ limit: 3 });
+    expect(first.data).toHaveLength(3);
+    expect(first.nextCursor).toBe(first.data[2].id);
+
+    const second = await mockNotificationApi.list({
+      limit: 3,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.data[0].id).toBe(seedNotifications[3].id);
+
+    const rewards = await mockNotificationApi.list({ category: 'reward' });
+    expect(rewards.data.length).toBeGreaterThan(0);
+    expect(
+      rewards.data.every(n => ['coins', 'challenge', 'reward'].includes(n.topic)),
+    ).toBe(true);
+  });
+
+  test('a read mark survives the next fetch, and sign-out forgets it', async () => {
+    const before = await mockNotificationApi.list();
+    const target = before.data.find(n => !n.read);
+    if (!target) throw new Error('The seed has no unread row to read');
+
+    await mockNotificationApi.markRead(target.id);
+    const after = await mockNotificationApi.list();
+    expect(after.data.find(n => n.id === target.id)?.read).toBe(true);
+
+    await mockNotificationApi.markAllRead();
+    expect((await mockNotificationApi.list()).data.every(n => n.read)).toBe(true);
+
+    await mockAuthApi.signOut();
+    expect((await mockNotificationApi.list()).data.some(n => !n.read)).toBe(true);
+  });
+});
+
+describe('the shop, orders and addresses', () => {
+  const ADDRESS = {
+    label: 'Home', name: 'Asha Verma', phone: '+919876543210', line1: '12 MG Road', line2: '',
+    city: 'Bengaluru', state: 'Karnataka', postalCode: '560001', country: 'IN', isDefault: false,
+  };
+
+  /** Signs in and walks the flow to a session, as the screens would. */
+  const signIn = async () => {
+    await mockAuthApi.signUp(PAYLOAD);
+    const challenge = await mockAuthApi.signUp({ ...PAYLOAD, email: 'shopper@example.com', phone: '+919876543211' });
+    await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
+  };
+
+  test('the catalogue carries stock, and filters by category and deals', async () => {
+    const all = await mockShopApi.items();
+    expect(all.length).toBeGreaterThan(5);
+    expect(all.find(i => i.id === 'gym-towel')?.inStock).toBe(false);
+    const apparel = await mockShopApi.items({ category: 'apparel' });
+    expect(apparel.every(i => i.category === 'apparel')).toBe(true);
+    const deals = await mockShopApi.items({ deals: true });
+    expect(deals.every(i => i.isDeal)).toBe(true);
+  });
+
+  test('the first address is the default; the default can move, and a deleted default hands over', async () => {
+    await signIn();
+    const home = await mockAddressApi.create(ADDRESS);
+    expect(home.isDefault).toBe(true);
+    const office = await mockAddressApi.create({ ...ADDRESS, label: 'Office' });
+    expect(office.isDefault).toBe(false);
+
+    await mockAddressApi.setDefault(office.id);
+    const book = await mockAddressApi.list();
+    expect(book.map(a => [a.label, a.isDefault])).toEqual([['Office', true], ['Home', false]]);
+
+    await mockAddressApi.remove(office.id);
+    expect((await mockAddressApi.list())[0]).toMatchObject({ label: 'Home', isDefault: true });
+  });
+
+  test('redeeming needs an address, spends the balance, takes stock, and lands in the orders', async () => {
+    await signIn();
+    await expectApiError(
+      () => mockShopApi.redeem({ itemId: 'cap', addressId: 'nope' }, { idempotencyKey: 'k' }),
+      'validation',
+    );
+    const home = await mockAddressApi.create(ADDRESS);
+    const before = (await mockWalletApi.get()).balance;
+
+    const { order, balance } = await mockShopApi.redeem({ itemId: 'cap', addressId: home.id }, { idempotencyKey: 'k' });
+    expect(order).toMatchObject({ status: 'placed', totalCoins: 650, cancellable: true, address: { city: 'Bengaluru' } });
+    expect(balance).toBe(before - 650);
+    expect(await mockOrderApi.count()).toBe(1);
+    expect((await mockOrderApi.list()).data[0].id).toBe(order.id);
+
+    // Cancel puts the coins and the stock back; a second cancel changes nothing.
+    const cancelled = await mockOrderApi.cancel(order.id, { idempotencyKey: 'c' });
+    expect(cancelled.order.status).toBe('cancelled');
+    expect(cancelled.balance).toBe(before);
+    expect((await mockOrderApi.cancel(order.id, { idempotencyKey: 'c2' })).balance).toBe(before);
+  });
+
+  test('at the threshold the mock asks for a step-up, and the code it issues works once', async () => {
+    await signIn();
+    const home = await mockAddressApi.create(ADDRESS);
+    const tee = (await mockShopApi.items()).find(i => i.id === 'tee')!;
+    expect(tee.priceCoins).toBeGreaterThanOrEqual(MOCK_STEP_UP_THRESHOLD);
+
+    await expectApiError(
+      () => mockShopApi.redeem({ itemId: 'tee', addressId: home.id }, { idempotencyKey: 'k' }),
+      'forbidden',
+    );
+
+    const challenge = await mockAuthApi.stepUp();
+    expect(challenge).toMatchObject({ channel: 'email', purpose: 'step_up' });
+    const verified = await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
+    expect(verified.stepUpToken).toEqual(expect.any(String));
+
+    const placed = await mockShopApi.redeem(
+      { itemId: 'tee', addressId: home.id, stepUpToken: verified.stepUpToken! },
+      { idempotencyKey: 'k' },
+    );
+    expect(placed.order.totalCoins).toBe(tee.priceCoins);
+
+    // Spent: the same token is refused the second time.
+    await expectApiError(
+      () => mockShopApi.redeem({ itemId: 'tee', addressId: home.id, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k2' }),
+      'forbidden',
+    );
   });
 });

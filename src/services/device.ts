@@ -7,6 +7,7 @@ import { deviceApi } from './api/endpoints';
 import { setDeviceReregistrar, setRequestHeadersProvider } from './api/client';
 import { toApiError } from './api/errors';
 import { logger } from '../utils/logger';
+import { uuid } from '../utils/uuid';
 
 /**
  * Who this install is, to the server (BACKEND.md §13.1).
@@ -29,17 +30,6 @@ const DEVICE_ID_KEY = 'vokve.device.id';
 const storage = () => getMMKV();
 
 let installIdCache: string | null = null;
-
-function uuid(): string {
-  // RFC 4122 v4 from Math.random is fine here: the id only needs to be unique
-  // per install, not unguessable — the server binds it to a session anyway.
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.floor(Math.random() * 16);
-    // The variant nibble is 8, 9, a or b.
-    const nibble = c === 'x' ? r : 8 + (r % 4);
-    return nibble.toString(16);
-  });
-}
 
 export async function getInstallId(): Promise<string> {
   if (installIdCache) return installIdCache;

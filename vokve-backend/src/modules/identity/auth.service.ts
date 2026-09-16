@@ -4,7 +4,7 @@ import { env } from '../../config/env.js';
 import { getConfig } from '../../config/remote.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
-import { hashToken, newRefreshToken, signAccessToken } from '../../lib/tokens.js';
+import { hashToken, newRefreshToken, signAccessToken, signStepUpToken } from '../../lib/tokens.js';
 import { authResponseSchema, genderSchema, type AuthResponse } from '../../contracts/index.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { AuditLogModel } from '../platform/models.js';
@@ -160,6 +160,16 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
       const user = await UserModel.findById(challenge.userId);
       if (!user || user.deletedAt) throw Errors.unauthorized();
       return issueSession(user, meta);
+    }
+    case 'step_up': {
+      // A second factor for one action (RULES O8): the session is refreshed
+      // like any other verification, and the token that rides with it is
+      // what the sensitive endpoint asks for.
+      const user = await UserModel.findById(challenge.userId);
+      if (!user || user.deletedAt) throw Errors.unauthorized();
+      await AuditLogModel.create({ actorType: 'user', actorId: user._id, deviceId: meta.deviceId, action: 'user.step_up', subjectType: 'user', subjectId: user._id });
+      const session = await issueSession(user, meta);
+      return { ...session, stepUpToken: signStepUpToken(user._id) };
     }
     case 'change_phone':
     case 'change_email': {
@@ -327,6 +337,18 @@ export async function signOut(userId: string, deviceId?: string) {
   const filter = deviceId ? { userId, deviceId, revokedAt: null } : { userId, revokedAt: null };
   await RefreshTokenModel.updateMany(filter, { $set: { revokedAt: new Date() } });
   return { ok: true };
+}
+
+/**
+ * Starts a step-up (RULES O8): a code to the email, which is the channel
+ * that delivers today. Only a user with a proven email can be asked — a
+ * code sent to an address nobody has confirmed proves nothing.
+ */
+export async function requestStepUp(userId: string, meta: Meta) {
+  const user = await UserModel.findById(userId);
+  if (!user || user.deletedAt) throw Errors.unauthorized();
+  if (!user.emailVerifiedAt) throw Errors.forbidden('EMAIL_NOT_VERIFIED', 'Verify your email address first.');
+  return createChallenge({ channel: 'email', purpose: 'step_up', target: user.email, userId, deviceId: meta.deviceId, ip: meta.ip });
 }
 
 export async function sendEmailOtp(userId: string, meta: Meta) {
