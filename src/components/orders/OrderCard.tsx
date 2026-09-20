@@ -4,7 +4,7 @@ import { ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import type { Order } from '../../types/models';
-import { formatRelativeDay } from '../../utils/format';
+import { formatMoney, formatRelativeDay } from '../../utils/format';
 import { Box } from '../layout/Box';
 import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
@@ -47,9 +47,12 @@ export const OrderCard = memo(({ order, onPress }: Props) => {
       onPress={handlePress}
       feedback="scale"
       accessibilityRole="button"
-      accessibilityLabel={`${orderTitle(order)}, ${order.status}, ${
-        order.totalCoins
-      } coins`}
+      accessibilityLabel={`${orderTitle(order)}, ${order.status.replace(
+        '_',
+        ' ',
+      )}, ${formatMoney(order.payable, order.currency)}${
+        order.coinsUsed > 0 ? ` and ${order.coinsUsed} coins` : ''
+      }`}
     >
       <Card radius="xl" padding="md">
         <HStack align="center" gap="md">
@@ -69,11 +72,23 @@ export const OrderCard = memo(({ order, onPress }: Props) => {
             <AppText variant="bodyStrong" numberOfLines={1}>
               {orderTitle(order)}
             </AppText>
-            <CoinAmount
-              amount={order.totalCoins}
-              size="sm"
-              tint={colors.textSecondary}
-            />
+            <HStack align="center" gap="sm">
+              <AppText variant="bodyStrong">
+                {formatMoney(order.payable, order.currency)}
+              </AppText>
+              {order.coinsUsed > 0 ? (
+                <HStack align="center" gap="xxs">
+                  <AppText variant="micro" color="textTertiary">
+                    +
+                  </AppText>
+                  <CoinAmount
+                    amount={order.coinsUsed}
+                    size="sm"
+                    tint={colors.textSecondary}
+                  />
+                </HStack>
+              ) : null}
+            </HStack>
           </VStack>
 
           <Icon as={ChevronRight} size="sm" color="textTertiary" />

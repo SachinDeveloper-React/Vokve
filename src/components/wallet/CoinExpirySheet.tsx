@@ -42,7 +42,7 @@ function rulesFor(expiry: CoinExpiry): Rule[] {
     {
       title: 'Spending does not count',
       detail:
-        'Redeeming in the shop uses coins but does not reset the window. Only earning does.',
+        'Paying with coins in the shop spends them but does not reset the window. Only earning does.',
     },
     {
       title: 'We remind you before',

@@ -1,10 +1,11 @@
 /**
- * The shop is where coins leave the wallet, so the checks here are about the
- * spend and what steers it: that the filter row and the category tiles both
- * narrow the shelf, that a card leads to the sheet rather than spending on
- * its own, that the sheet refuses a spend the balance cannot cover and says
- * by how much, and that a redeem really moves the balance and shows up as an
- * order on the bag.
+ * The shop's front is where a user finds things, so the checks here are
+ * about what steers them: that the filter row and the category tiles both
+ * narrow the shelf, that a card leads to the item's page rather than
+ * spending on its own, that "Add" puts a one-size item straight in the
+ * basket while a sized one opens the page where the sizes are, and that
+ * the heart, the cart badge and the wishlist badge all read from their
+ * stores.
  *
  * @format
  */
@@ -19,12 +20,13 @@ import { ToastProvider } from '../src/components/feedback/Toast';
 import { ThemeProvider } from '../src/theme';
 import { useAddressesStore } from '../src/stores/addressesStore';
 import { useAuthStore } from '../src/stores/authStore';
+import { useCartStore } from '../src/stores/cartStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
 import { useOrdersStore } from '../src/stores/ordersStore';
-import { useShopStore } from '../src/stores/shopStore';
-import { ApiError } from '../src/services/api/errors';
+import { DEFAULT_SHOP_CONFIG, useShopStore } from '../src/stores/shopStore';
+import { useWishlistStore } from '../src/stores/wishlistStore';
 import { shopItems } from '../src/constants/seedData';
-import type { Address, CoinTransaction, Order } from '../src/types/models';
+import type { Cart, CoinTransaction, ShopItem } from '../src/types/models';
 
 const mockNavigate = jest.fn();
 
@@ -38,10 +40,28 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
-// The redeem flow talks to the server; every endpoint the stores reach for
-// is stubbed, and each test says what the server answers.
+// The basket and the wishlist talk to the server; every endpoint the
+// stores reach for is stubbed, and each test says what the server answers.
 jest.mock('../src/services/api/endpoints', () => ({
-  shopApi: { items: jest.fn(), item: jest.fn(), redeem: jest.fn() },
+  shopApi: {
+    items: jest.fn(),
+    item: jest.fn(),
+    categories: jest.fn(),
+    config: jest.fn(),
+  },
+  cartApi: {
+    get: jest.fn(),
+    setLine: jest.fn(),
+    removeLine: jest.fn(),
+    clear: jest.fn(),
+  },
+  wishlistApi: {
+    list: jest.fn(),
+    ids: jest.fn(),
+    add: jest.fn(),
+    remove: jest.fn(),
+  },
+  checkoutApi: { quote: jest.fn(), place: jest.fn(), pay: jest.fn() },
   orderApi: {
     list: jest.fn(),
     get: jest.fn(),
@@ -64,42 +84,50 @@ jest.mock('../src/services/api/endpoints', () => ({
   authApi: { stepUp: jest.fn(), signOut: jest.fn() },
 }));
 
-const { shopApi, authApi, walletApi } = jest.requireMock(
+const { shopApi, cartApi, wishlistApi, walletApi } = jest.requireMock(
   '../src/services/api/endpoints',
 ) as {
-  shopApi: { redeem: jest.Mock; items: jest.Mock };
-  authApi: { stepUp: jest.Mock };
+  shopApi: { items: jest.Mock; categories: jest.Mock; config: jest.Mock };
+  cartApi: { get: jest.Mock; setLine: jest.Mock };
+  wishlistApi: { add: jest.Mock; remove: jest.Mock };
   walletApi: { get: jest.Mock; transactions: jest.Mock; earnRules: jest.Mock };
 };
 
-const HOME: Address = {
-  id: 'adr-home',
-  label: 'Home',
-  name: 'Asha Verma',
-  phone: '+919876543210',
-  line1: '12 MG Road',
-  line2: '',
-  city: 'Bengaluru',
-  state: 'Karnataka',
-  postalCode: '560001',
-  country: 'IN',
-  isDefault: true,
-};
-
-const placedOrder = (itemId: string, priceCoins: number): Order => ({
-  id: `ord-${itemId}`,
-  status: 'placed',
-  items: [{ itemId, title: itemId, emoji: '🎁', quantity: 1, priceCoins }],
-  totalCoins: priceCoins,
-  address: {
-    ...HOME,
-    id: undefined,
-    isDefault: undefined,
-  } as unknown as Order['address'],
-  placedAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  trackingRef: null,
-  cancellable: true,
+/** The basket the server would answer with, holding `quantity` of `item`. */
+const cartWith = (
+  item: ShopItem,
+  quantity: number,
+  size: string | null = null,
+): Cart => ({
+  lines: [{ item, quantity, size, addedAt: new Date().toISOString() }],
+  count: quantity,
+  quote: {
+    currency: 'INR',
+    lines: [
+      {
+        itemId: item.id,
+        title: item.title,
+        emoji: item.emoji,
+        quantity,
+        size,
+        price: item.price,
+        mrp: item.mrp,
+        lineTotal: item.price * quantity,
+        inStock: true,
+      },
+    ],
+    mrpTotal: (item.mrp ?? item.price) * quantity,
+    discount: ((item.mrp ?? item.price) - item.price) * quantity,
+    subtotal: item.price * quantity,
+    shipping: 4900,
+    total: item.price * quantity + 4900,
+    coinValuePaise: 25,
+    coinsMax: item.coinsMax * quantity,
+    coinsApplied: item.coinsMax * quantity,
+    coinsValue: item.coinsMax * quantity * 25,
+    payable: item.price * quantity + 4900 - item.coinsMax * quantity * 25,
+    needsStepUp: false,
+  },
 });
 
 const metrics = {
@@ -143,15 +171,27 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
 beforeEach(() => {
   mockNavigate.mockClear();
-  shopApi.redeem.mockReset();
-  shopApi.items.mockReset().mockResolvedValue(shopItems);
-  authApi.stepUp.mockReset();
+  shopApi.items
+    .mockReset()
+    .mockResolvedValue({
+      data: shopItems,
+      nextCursor: null,
+      total: shopItems.length,
+    });
+  shopApi.categories.mockReset().mockResolvedValue([]);
+  shopApi.config.mockReset().mockResolvedValue(DEFAULT_SHOP_CONFIG);
+  cartApi.get.mockReset().mockRejectedValue(new Error('offline'));
+  cartApi.setLine.mockReset();
+  wishlistApi.add.mockReset().mockResolvedValue({ ok: true });
+  wishlistApi.remove.mockReset().mockResolvedValue({ ok: true });
   walletApi.get.mockReset().mockRejectedValue(new Error('offline'));
   walletApi.transactions.mockReset().mockRejectedValue(new Error('offline'));
   walletApi.earnRules.mockReset().mockRejectedValue(new Error('offline'));
   useShopStore.getState().reset();
   useOrdersStore.getState().reset();
   useAddressesStore.getState().reset();
+  useCartStore.getState().reset();
+  useWishlistStore.getState().reset();
   // Signed in: a step-up challenge only counts as pending on a session, and
   // the shop only refreshes its catalogue for one.
   useAuthStore.setState({
@@ -203,11 +243,37 @@ const press = async (
   await ReactTestRenderer.act(() => node.props.onPress());
 };
 
-const apparel = shopItems.filter(i => i.category === 'apparel');
-const gear = shopItems.filter(i => i.category === 'gear');
+/** Waits for the promises a press set off — a mocked server answering. */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+/** Presses the button labelled `label` on the card of `itemId`. */
+const pressButton = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  label: string,
+  itemId: string,
+) => {
+  const card = tree.root.findAll(n => n.props?.item?.id === itemId)[0];
+  const button = card
+    ?.findAll(
+      n => n.props?.label === label && typeof n.props.onPress === 'function',
+    )
+    .at(-1);
+  if (!button) throw new Error(`No "${label}" on ${itemId}`);
+  await ReactTestRenderer.act(async () => {
+    button.props.onPress();
+  });
+};
+
+const clothing = shopItems.filter(i => i.category === 'clothing');
+const gym = shopItems.filter(i => i.category === 'gym');
 const deals = shopItems.filter(i => i.isDeal);
 const soldOut = shopItems.find(i => !i.inStock)!;
 const tee = shopItems.find(i => i.id === 'tee')!;
+const shaker = shopItems.find(i => i.id === 'shaker')!;
 
 describe('ShopScreen', () => {
   test('the shelf opens on the whole catalogue, sold-out items included', async () => {
@@ -218,17 +284,21 @@ describe('ShopScreen', () => {
       expect(text).toContain(item.title);
     }
     expect(text).toContain('Sold out');
+    // Prices are money with the list price beside them; the coin cap reads "up to".
+    expect(text).toContain('₹799');
+    expect(text).toContain('₹1,199');
+    expect(text).toContain('33% off');
   });
 
   test('a category chip narrows the shelf to that category', async () => {
     seed(5000);
     const tree = await render();
 
-    await press(tree, 'Apparel');
+    await press(tree, 'Clothes');
     const text = allText(tree);
 
-    for (const item of apparel) expect(text).toContain(item.title);
-    for (const item of gear) expect(text).not.toContain(item.title);
+    for (const item of clothing) expect(text).toContain(item.title);
+    for (const item of gym) expect(text).not.toContain(item.title);
   });
 
   test('the deals chip cuts across categories to the flagged items', async () => {
@@ -243,317 +313,148 @@ describe('ShopScreen', () => {
     expect(text).not.toContain(tee.title); // a bestseller, not a deal
   });
 
-  test('a category tile is the same filter as its chip, with a live count', async () => {
+  test("a category tile shows the shelf's count and opens its page", async () => {
     seed(5000);
     const tree = await render();
 
-    // Counted from the catalogue, so a seed change cannot leave a stale figure.
-    expect(allText(tree)).toContain(`${gear.length} Rewards`);
-
-    await press(tree, `Fitness Gear, ${gear.length} rewards`);
-    const text = allText(tree);
-
-    for (const item of gear) expect(text).toContain(item.title);
-    expect(text).not.toContain(tee.title);
+    expect(allText(tree)).toContain(`${gym.length} Rewards`);
+    await press(tree, `Gym, ${gym.length} rewards`);
+    expect(mockNavigate).toHaveBeenCalledWith('ShopBrowse', {
+      category: 'gym',
+    });
   });
 
-  test('a card opens the sheet; the sheet leads to the checkout, not straight to a spend', async () => {
+  test("the server's shelf counts outrank the catalogue on hand", async () => {
+    seed(5000);
+    const summaries = [
+      {
+        category: 'clothing' as const,
+        count: 40,
+        inStock: 38,
+        subcategories: [],
+      },
+      { category: 'gym' as const, count: 12, inStock: 12, subcategories: [] },
+      { category: 'sports' as const, count: 9, inStock: 9, subcategories: [] },
+      {
+        category: 'accessories' as const,
+        count: 7,
+        inStock: 6,
+        subcategories: [],
+      },
+    ];
+    useShopStore.setState({ categories: summaries });
+    shopApi.categories.mockResolvedValue(summaries);
+
+    const text = allText(await render());
+    expect(text).toContain('40 Rewards');
+  });
+
+  test('search, "View All", deals and the coins banner each open the right page', async () => {
     seed(5000);
     const tree = await render();
-    const before = useCoinsStore.getState().balance;
 
-    await press(tree, 'View Details');
-    expect(useCoinsStore.getState().balance).toBe(before); // nothing spent yet
-    expect(allText(tree)).toContain(shopItems[0].description);
+    await press(tree, 'Search the shop');
+    expect(mockNavigate).toHaveBeenCalledWith('ShopSearch');
 
-    await press(tree, 'Redeem');
+    await press(tree, 'View all Featured Rewards');
+    expect(mockNavigate).toHaveBeenCalledWith('ShopBrowse', {
+      title: 'All rewards',
+    });
 
-    // The checkout: nothing has been spent, and with no address on file the
-    // only way forward is to add one.
-    expect(useCoinsStore.getState().balance).toBe(before);
-    expect(shopApi.redeem).not.toHaveBeenCalled();
-    const text = allText(tree);
-    expect(text).toContain('Confirm redemption');
-    expect(text).toContain('Add an address first');
+    await press(tree, 'Deals');
+    await press(tree, 'View all Featured Rewards');
+    expect(mockNavigate).toHaveBeenLastCalledWith('ShopBrowse', {
+      deals: true,
+    });
+
+    await press(tree, 'Best Rewards. Top quality products, curated for you');
+    expect(mockNavigate).toHaveBeenLastCalledWith('ShopBrowse', {
+      title: 'All rewards',
+    });
   });
 
-  test('a reward the balance cannot cover says what is missing', async () => {
-    seed(tee.priceCoins - 260);
+  test("a card's body opens the item's page, and nothing is spent or added on the way", async () => {
+    seed(5000);
     const tree = await render();
 
-    await press(tree, 'View Details');
-
-    expect(allText(tree)).toContain('Need 260 more');
-    // Sold-out and unaffordable buttons are disabled, so the redeem label is
-    // present but not pressable.
-    const redeem = tree.root
-      .findAll(n => n.props?.accessibilityLabel === 'Need 260 more')
-      .find(n => typeof n.props.onPress === 'function');
-    expect(redeem?.props.accessibilityState?.disabled).toBe(true);
+    await press(tree, `${tee.title}, view details`);
+    expect(mockNavigate).toHaveBeenCalledWith('ProductDetail', { id: 'tee' });
+    expect(cartApi.setLine).not.toHaveBeenCalled();
   });
 
-  test("the bag counts the server's orders, not purchase rows (RULES R7)", async () => {
-    // Two purchase rows in the ledger, but the server says three orders —
-    // one paid for from another device. The bag believes the server.
-    seed(1000, 2);
-    useOrdersStore.setState({ count: 3 });
-
+  test('"Add" puts a one-size item straight in the basket and the badge counts it', async () => {
+    seed(5000);
+    cartApi.setLine.mockResolvedValue(cartWith(shaker, 1));
     const tree = await render();
 
+    await pressButton(tree, 'Add', shaker.id);
+    await settle();
+
+    expect(cartApi.setLine).toHaveBeenCalledWith({
+      itemId: 'shaker',
+      quantity: 1,
+      size: null,
+    });
+    expect(useCartStore.getState().cart?.count).toBe(1);
+    expect(allText(tree)).toContain('Added to cart');
+    // The header's badge is the basket's units.
     expect(
-      tree.root.findAll(
-        n => n.props?.accessibilityLabel === 'Orders, 3 on the way',
-      ).length,
+      tree.root.findAll(n => n.props?.accessibilityLabel === 'Cart, 1 items')
+        .length,
     ).toBeGreaterThan(0);
   });
 
-  test('the bag opens the orders screen', async () => {
-    seed(1000);
-    const tree = await render();
-
-    await press(tree, 'Orders');
-
-    expect(mockNavigate).toHaveBeenCalledWith('Orders');
-  });
-
-  test('a sold-out item cannot be opened for redeeming', async () => {
+  test('a sized item cannot be added from a card: "Choose size" opens its page instead', async () => {
     seed(5000);
     const tree = await render();
 
-    const button = tree.root
-      .findAll(n => n.props?.accessibilityLabel === 'Sold out')
-      .find(n => typeof n.props.onPress === 'function');
-
-    expect(soldOut).toBeDefined();
-    expect(button?.props.accessibilityState?.disabled).toBe(true);
-  });
-});
-
-/** Lets the store's fire-and-forget follow-ups settle. */
-const settle = () =>
-  ReactTestRenderer.act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+    await pressButton(tree, 'Choose size', tee.id);
+    expect(mockNavigate).toHaveBeenCalledWith('ProductDetail', { id: 'tee' });
+    expect(cartApi.setLine).not.toHaveBeenCalled();
   });
 
-const pressButton = async (
-  tree: ReactTestRenderer.ReactTestRenderer,
-  label: string,
-) => {
-  const node = tree.root
-    .findAll(n => n.props?.label === label)
-    .find(n => typeof n.props.onPress === 'function');
-  if (!node) throw new Error(`No button labelled "${label}"`);
-  await ReactTestRenderer.act(async () => {
-    node.props.onPress();
+  test('the heart saves an item at once, the header shows it, and a refusal puts it back', async () => {
+    seed(5000);
+    const tree = await render();
+
+    await press(tree, `Save ${shaker.title} to wishlist`);
+    expect(useWishlistStore.getState().ids).toEqual(['shaker']);
+    expect(wishlistApi.add).toHaveBeenCalledWith('shaker');
+    expect(
+      tree.root.findAll(
+        n => n.props?.accessibilityLabel === 'Wishlist, 1 saved',
+      ).length,
+    ).toBeGreaterThan(0);
+
+    wishlistApi.remove.mockRejectedValueOnce(new Error('Network Error'));
+    await press(tree, `Remove ${shaker.title} from wishlist`);
+    await settle();
+    expect(useWishlistStore.getState().ids).toEqual(['shaker']);
+    expect(allText(tree)).toContain("Couldn't update your wishlist");
   });
-  await settle();
-};
 
-describe('ShopScreen › redeeming (RULES R2–R4, O8)', () => {
-  const towel = shopItems.find(i => i.id === 'jump-rope')!; // 400, under the threshold and in stock
+  test('the cart and the heart in the header open their screens', async () => {
+    seed(5000);
+    const tree = await render();
 
-  /**
-   * Opens the sheet for an item, then its checkout. The card is found by the
-   * `item` prop it was rendered with, and its "View Details" inside it.
-   */
-  const openCheckout = async (
-    tree: ReactTestRenderer.ReactTestRenderer,
-    item: (typeof shopItems)[number],
-  ) => {
-    const card = tree.root.findAll(n => n.props?.item?.id === item.id)[0];
+    await press(tree, 'Cart');
+    expect(mockNavigate).toHaveBeenCalledWith('Cart');
+    await press(tree, 'Wishlist');
+    expect(mockNavigate).toHaveBeenCalledWith('Wishlist');
+  });
+
+  test('a sold-out item cannot be added', async () => {
+    seed(5000);
+    const tree = await render();
+
+    const card = tree.root.findAll(n => n.props?.item?.id === soldOut.id)[0];
     const button = card
-      ?.findAll(
+      .findAll(
         n =>
-          n.props?.label === 'View Details' &&
+          n.props?.label === 'Sold out' &&
           typeof n.props.onPress === 'function',
       )
       .at(-1);
-    if (!button) throw new Error(`No card for ${item.title}`);
-    await ReactTestRenderer.act(() => button.props.onPress());
-    await press(tree, 'Redeem');
-  };
-
-  test('with an address and enough coins, confirming places the order and moves the balance', async () => {
-    seed(5000);
-    useAddressesStore.setState({ addresses: [HOME] });
-    shopApi.redeem.mockResolvedValue({
-      order: placedOrder('jump-rope', 400),
-      balance: 4600,
-    });
-
-    const tree = await render();
-    await openCheckout(tree, towel);
-    expect(allText(tree)).toContain('Deliver to · Home');
-
-    await pressButton(tree, 'Confirm & redeem');
-
-    expect(shopApi.redeem).toHaveBeenCalledWith(
-      {
-        itemId: 'jump-rope',
-        quantity: 1,
-        addressId: 'adr-home',
-        stepUpToken: undefined,
-      },
-      { idempotencyKey: expect.any(String) },
-    );
-    expect(useCoinsStore.getState().balance).toBe(4600);
-    expect(useOrdersStore.getState().orders[0]).toMatchObject({
-      id: 'ord-jump-rope',
-    });
-    expect(useOrdersStore.getState().count).toBe(1);
-    expect(allText(tree)).toContain('Redeemed');
-  });
-
-  test('above the threshold the server asks for a code; the token that comes back finishes the order', async () => {
-    seed(5000);
-    useAddressesStore.setState({ addresses: [HOME] });
-    shopApi.redeem
-      .mockRejectedValueOnce(
-        new ApiError(
-          'forbidden',
-          'Confirm it is you.',
-          403,
-          null,
-          'STEP_UP_REQUIRED',
-        ),
-      )
-      .mockResolvedValueOnce({
-        order: placedOrder('tee', 1200),
-        balance: 3800,
-      });
-    const challenge = {
-      verificationId: 'vrf-1',
-      phone: '',
-      channel: 'email' as const,
-      target: 'a•••@example.com',
-      codeLength: 6,
-      expiresInSeconds: 300,
-      resendInSeconds: 30,
-      devCode: null,
-      purpose: 'step_up',
-    };
-    authApi.stepUp.mockResolvedValue(challenge);
-
-    const tree = await render();
-    await openCheckout(tree, tee);
-    expect(allText(tree)).toContain('need a quick code');
-
-    await pressButton(tree, 'Confirm & get code');
-
-    // The attempt is parked, the OTP challenge is pending, nothing is spent.
-    expect(authApi.stepUp).toHaveBeenCalledTimes(1);
-    expect(useShopStore.getState().pendingRedeem).toMatchObject({
-      itemId: 'tee',
-      addressId: 'adr-home',
-    });
-    expect(useAuthStore.getState().pendingVerification).toMatchObject({
-      verificationId: 'vrf-1',
-    });
-    expect(useCoinsStore.getState().balance).toBe(5000);
-    const firstKey = shopApi.redeem.mock.calls[0][1].idempotencyKey;
-
-    // The code passes: the auth store holds a token and the challenge is done.
-    await ReactTestRenderer.act(async () => {
-      useAuthStore.setState({
-        stepUpToken: 'tok-1',
-        pendingVerification: null,
-      });
-    });
-    await settle();
-
-    expect(shopApi.redeem).toHaveBeenCalledTimes(2);
-    expect(shopApi.redeem.mock.calls[1][0]).toMatchObject({
-      itemId: 'tee',
-      stepUpToken: 'tok-1',
-    });
-    // The retry is the same attempt: same key, so the server replays rather than doubles.
-    expect(shopApi.redeem.mock.calls[1][1].idempotencyKey).toBe(firstKey);
-    expect(useShopStore.getState().pendingRedeem).toBeNull();
-    expect(useAuthStore.getState().stepUpToken).toBeNull(); // spent
-    expect(useCoinsStore.getState().balance).toBe(3800);
-    expect(allText(tree)).toContain('Redeemed');
-  });
-
-  test('backing out of the code drops the attempt', async () => {
-    seed(5000);
-    useAddressesStore.setState({ addresses: [HOME] });
-    shopApi.redeem.mockRejectedValue(
-      new ApiError(
-        'forbidden',
-        'Confirm it is you.',
-        403,
-        null,
-        'STEP_UP_REQUIRED',
-      ),
-    );
-    authApi.stepUp.mockResolvedValue({
-      verificationId: 'vrf-2',
-      phone: '',
-      channel: 'email',
-      target: '',
-      codeLength: 6,
-      expiresInSeconds: 300,
-      resendInSeconds: 30,
-      devCode: null,
-      purpose: 'step_up',
-    });
-
-    const tree = await render();
-    await openCheckout(tree, tee);
-    await pressButton(tree, 'Confirm & get code');
-    expect(useShopStore.getState().pendingRedeem).not.toBeNull();
-
-    // The user taps Cancel on the OTP screen: the challenge goes, no token.
-    await ReactTestRenderer.act(async () => {
-      useAuthStore.getState().cancelVerification();
-    });
-    await settle();
-
-    expect(useShopStore.getState().pendingRedeem).toBeNull();
-    expect(shopApi.redeem).toHaveBeenCalledTimes(1);
-    expect(allText(tree)).toContain('Redemption cancelled');
-  });
-
-  test('a wallet the server finds short is told so, and nothing changes', async () => {
-    seed(5000);
-    useAddressesStore.setState({ addresses: [HOME] });
-    shopApi.redeem.mockRejectedValue(
-      new ApiError(
-        'validation',
-        'You need 250 more coins for this.',
-        422,
-        { required: 400, balance: 150 },
-        'INSUFFICIENT_COINS',
-      ),
-    );
-
-    const tree = await render();
-    await openCheckout(tree, towel);
-    await pressButton(tree, 'Confirm & redeem');
-
-    expect(allText(tree)).toContain('Not enough coins');
-    expect(useOrdersStore.getState().orders).toHaveLength(0);
-    expect(useShopStore.getState().pendingRedeem).toBeNull();
-  });
-
-  test("the checkout's address row opens the address book to choose, or the form to add", async () => {
-    seed(5000);
-    useAddressesStore.setState({ addresses: [HOME] });
-    let tree = await render();
-    await openCheckout(tree, towel);
-    await press(tree, 'Deliver to Home. Change address');
-    expect(mockNavigate).toHaveBeenCalledWith('Addresses', { select: true });
-
-    await ReactTestRenderer.act(() => {
-      tree.unmount();
-    });
-    mounted = null;
-    mockNavigate.mockClear();
-    useAddressesStore.setState({ addresses: [] });
-    tree = await render();
-    await openCheckout(tree, towel);
-    await press(tree, 'Add a shipping address');
-    expect(mockNavigate).toHaveBeenCalledWith('AddressForm');
+    expect(button?.props.disabled).toBe(true);
   });
 });

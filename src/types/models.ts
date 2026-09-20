@@ -184,13 +184,28 @@ export const coinTransactionSchema = z.object({
 });
 export type CoinTransaction = z.infer<typeof coinTransactionSchema>;
 
+/**
+ * The four shelves of the shop (RULES R9): what you wear, what you train
+ * with, what you play with, and the small things that go with any of them.
+ * A closed enum — a new shelf ships behind a client release.
+ */
 export const shopCategorySchema = z.enum([
-  'apparel',
+  'clothing',
+  'gym',
+  'sports',
   'accessories',
-  'gear',
-  'lifestyle',
 ]);
 export type ShopCategory = z.infer<typeof shopCategorySchema>;
+
+/** How a catalogue list may be ordered. `popular` is the default everywhere. */
+export const shopSortSchema = z.enum([
+  'popular',
+  'price_asc',
+  'price_desc',
+  'newest',
+  'rating',
+]);
+export type ShopSort = z.infer<typeof shopSortSchema>;
 
 /**
  * The flag a reward can carry on its card. An enum rather than a free string:
@@ -206,12 +221,30 @@ export const shopBadgeSchema = z.enum([
 ]);
 export type ShopBadge = z.infer<typeof shopBadgeSchema>;
 
+/** The star average and how many stars it rests on, as the catalogue carries them. */
+export const ratingSummarySchema = z.object({
+  /** 0 with no reviews; otherwise 1–5 to one decimal. */
+  average: z.number().min(0).max(5),
+  count: z.number().int().nonnegative(),
+});
+export type RatingSummary = z.infer<typeof ratingSummarySchema>;
+
 export const shopItemSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string().default(''),
-  /** Coins only — the shop has no cash price to fall back on. */
-  priceCoins: z.number().int().positive(),
+  /** The selling price, in paise (RULES R1, R11). */
+  price: z.number().int().positive(),
+  /** The list price it is struck through against, in paise; null when there is no discount. */
+  mrp: z.number().int().positive().nullable().default(null),
+  currency: z.string().length(3).default('INR'),
+  /**
+   * The most coins that may go towards one unit of this item (⚙
+   * `commerce.coinShareMax` of the price, at ⚙ `commerce.coinValuePaise`
+   * each) — what the card means by "or ₹349 + 150 coins". Computed by the
+   * server so a share change is live on the next fetch.
+   */
+  coinsMax: z.number().int().nonnegative(),
   category: shopCategorySchema,
   /** Stands in for product art until the catalogue ships real images. */
   emoji: z.string().default('🎁'),
@@ -220,8 +253,172 @@ export const shopItemSchema = z.object({
   /** Surfaces the item under the shop's "Deals" filter. */
   isDeal: z.boolean().default(false),
   inStock: z.boolean().default(true),
+  /** On the home shelf. A catalogue flag like `isDeal`, not a category. */
+  featured: z.boolean().default(false),
+  /**
+   * A finer grouping inside the category — "T-shirts", "Rackets" — for the
+   * chips on a category page. Null where the category is grouping enough.
+   */
+  subcategory: z.string().nullable().default(null),
+  /** Search words the title does not carry: "tee", "vest", "rope". */
+  tags: z.array(z.string()).default([]),
+  /** The sizes it comes in — clothes, mostly. Empty when it comes in one. */
+  sizes: z.array(z.string()).default([]),
+  rating: ratingSummarySchema,
 });
 export type ShopItem = z.infer<typeof shopItemSchema>;
+
+/** `GET /shop/categories`: what each shelf holds, for tiles and filters. */
+export const shopCategorySummarySchema = z.object({
+  category: shopCategorySchema,
+  /** Every active item on the shelf. */
+  count: z.number().int().nonnegative(),
+  /** Of those, the ones that can be redeemed right now. */
+  inStock: z.number().int().nonnegative(),
+  /** The shelf's subcategories, with counts, in catalogue order. */
+  subcategories: z.array(
+    z.object({ name: z.string(), count: z.number().int().nonnegative() }),
+  ),
+});
+export type ShopCategorySummary = z.infer<typeof shopCategorySummarySchema>;
+
+/**
+ * `GET /shop/config`: the till's rules, so the app can draw a price split
+ * and a shipping line before asking for a quote. Every value is a ⚙ the
+ * server owns (RULES R11–R13); the app never hardcodes one.
+ */
+export const shopConfigSchema = z.object({
+  currency: z.string().length(3),
+  /** What one coin is worth at checkout, in paise. */
+  coinValuePaise: z.number().int().positive(),
+  /** The most of the goods total that coins may cover: 0.3 is 30%, 1 is all of it. */
+  coinShareMax: z.number().min(0).max(1),
+  shippingFeePaise: z.number().int().nonnegative(),
+  /** Goods at or above this ship free; null means shipping is always charged. */
+  freeShippingAbovePaise: z.number().int().nonnegative().nullable(),
+  maxQuantityPerLine: z.number().int().positive(),
+  /** Who collects the money; `mock` captures at once and exists only outside production. */
+  paymentProvider: z.enum(['mock', 'razorpay']),
+  /** The gateway's public key, for the app to open its checkout with; null for the mock. */
+  paymentKeyId: z.string().nullable(),
+  /** Coins at or above this in one order ask for a code first (RULES O8). */
+  stepUpThreshold: z.number().nonnegative(),
+});
+export type ShopConfig = z.infer<typeof shopConfigSchema>;
+
+/** One thing in a basket or an order: which item, how many, which size. */
+export const purchaseLineSchema = z.object({
+  itemId: z.string().min(1),
+  quantity: z.number().int().min(1).max(10),
+  /** One of the item's `sizes`, or null for an item that comes in one. */
+  size: z.string().max(12).nullable().default(null),
+});
+export type PurchaseLine = z.infer<typeof purchaseLineSchema>;
+
+/**
+ * The till's arithmetic for a set of lines (RULES R11–R13), every figure in
+ * paise except the coins. The app draws this and never re-derives it: the
+ * split between money and coins is the server's call, and a client that
+ * summed its own would be one config change away from showing the wrong
+ * total.
+ */
+export const quoteSchema = z.object({
+  currency: z.string().length(3),
+  lines: z.array(
+    z.object({
+      itemId: z.string(),
+      title: z.string(),
+      emoji: z.string(),
+      quantity: z.number().int().positive(),
+      size: z.string().nullable(),
+      /** Per unit, in paise. */
+      price: z.number().int().positive(),
+      mrp: z.number().int().positive().nullable(),
+      lineTotal: z.number().int().positive(),
+      inStock: z.boolean(),
+    }),
+  ),
+  /** The lines at list price, before any discount. */
+  mrpTotal: z.number().int().nonnegative(),
+  /** How much the selling prices are under the list prices. */
+  discount: z.number().int().nonnegative(),
+  /** The goods at selling price. */
+  subtotal: z.number().int().nonnegative(),
+  shipping: z.number().int().nonnegative(),
+  /** Goods plus shipping, before coins. */
+  total: z.number().int().nonnegative(),
+  /** What one coin is worth here, in paise. */
+  coinValuePaise: z.number().int().positive(),
+  /** The most coins this order may take: the share cap, then the wallet. */
+  coinsMax: z.number().int().nonnegative(),
+  /** The coins the quote was asked for, clamped to `coinsMax`. */
+  coinsApplied: z.number().int().nonnegative(),
+  /** What those coins are worth, in paise. */
+  coinsValue: z.number().int().nonnegative(),
+  /** What is left to pay in money. Zero means no payment step. */
+  payable: z.number().int().nonnegative(),
+  /** True when `coinsApplied` is at or above the step-up threshold (RULES O8). */
+  needsStepUp: z.boolean(),
+});
+export type Quote = z.infer<typeof quoteSchema>;
+
+/** A basket line with the item it points at, as the cart screen draws it. */
+export const cartLineSchema = z.object({
+  item: shopItemSchema,
+  quantity: z.number().int().positive(),
+  size: z.string().nullable(),
+  /** ISO-8601. */
+  addedAt: z.string(),
+});
+export type CartLine = z.infer<typeof cartLineSchema>;
+
+/**
+ * The basket (RULES R14): the lines with their items, and a quote for them
+ * at the most coins the wallet allows, so the cart can show what checking
+ * out would cost before the checkout is opened.
+ */
+export const cartSchema = z.object({
+  lines: z.array(cartLineSchema),
+  /** Units across every line — the badge on the cart icon. */
+  count: z.number().int().nonnegative(),
+  quote: quoteSchema,
+});
+export type Cart = z.infer<typeof cartSchema>;
+
+/** A review as the product page shows it (RULES R15). */
+export const reviewSchema = z.object({
+  id: z.string(),
+  itemId: z.string(),
+  /** 1–5. */
+  rating: z.number().int().min(1).max(5),
+  title: z.string().max(80).nullable().default(null),
+  body: z.string().min(1).max(1000),
+  /** The reviewer's first name, or "A VOKVE member" — never the account itself. */
+  authorName: z.string(),
+  /** They bought it here: an order of theirs holds the item. */
+  verified: z.boolean(),
+  /** The reader wrote this one — it gets an Edit rather than a byline. */
+  mine: z.boolean(),
+  /** ISO-8601. */
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Review = z.infer<typeof reviewSchema>;
+
+export const reviewSummarySchema = ratingSummarySchema.extend({
+  /** How many reviews gave one star, two, … five — in that order. */
+  histogram: z.array(z.number().int().nonnegative()).length(5),
+});
+export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
+
+/** `GET /shop/items/:id/reviews`: a page, the totals, and the reader's own if there is one. */
+export const reviewPageSchema = z.object({
+  data: z.array(reviewSchema),
+  nextCursor: z.string().nullable(),
+  summary: reviewSummarySchema,
+  mine: reviewSchema.nullable(),
+});
+export type ReviewPage = z.infer<typeof reviewPageSchema>;
 
 /**
  * Where a reward is sent (RULES R4). Indian addressing — a state and a
@@ -247,11 +444,14 @@ export const addressSchema = z.object({
 export type Address = z.infer<typeof addressSchema>;
 
 /**
- * An order's life (RULES R5): `placed → confirmed → shipped → delivered`;
- * `placed | confirmed → cancelled`; `delivered → refunded` by an admin.
- * Closed, like every enum: a new state ships behind a client release.
+ * An order's life (RULES R5): `pending_payment → placed → confirmed →
+ * shipped → delivered`; `pending_payment | placed | confirmed → cancelled`;
+ * `delivered → refunded` by an admin. An order that needs no money —
+ * coins covered it — is born `placed`. Closed, like every enum: a new
+ * state ships behind a client release.
  */
 export const orderStatusSchema = z.enum([
+  'pending_payment',
   'placed',
   'confirmed',
   'shipped',
@@ -266,17 +466,58 @@ export const orderItemSchema = z.object({
   title: z.string(),
   emoji: z.string().default('🎁'),
   quantity: z.number().int().positive(),
-  /** Per unit, at the time of the order — a later price change does not rewrite history. */
-  priceCoins: z.number().int().positive(),
+  size: z.string().nullable().default(null),
+  /** Per unit, in paise, at the time of the order — a later price change does not rewrite history. */
+  price: z.number().int().positive(),
+  mrp: z.number().int().positive().nullable().default(null),
 });
 export type OrderItem = z.infer<typeof orderItemSchema>;
+
+/** Where the money stands (RULES R12). */
+export const paymentStatusSchema = z.enum([
+  /** Coins covered the whole order; there was nothing to collect. */
+  'not_required',
+  'pending',
+  'paid',
+  'failed',
+  /** The money was sent back after a cancellation. */
+  'refunded',
+]);
+export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
+
+export const orderPaymentSchema = z.object({
+  provider: z.enum(['mock', 'razorpay']).nullable(),
+  status: paymentStatusSchema,
+  /** In paise — what the gateway was asked to collect. */
+  amount: z.number().int().nonnegative(),
+  currency: z.string().length(3),
+  /** The gateway's own order id, for the app to open its checkout with. */
+  providerOrderId: z.string().nullable(),
+  /** ISO-8601, once captured. */
+  paidAt: z.string().nullable(),
+  /** ISO-8601: an unpaid order is released after this (⚙ `commerce.paymentWindowMinutes`). */
+  expiresAt: z.string().nullable(),
+});
+export type OrderPayment = z.infer<typeof orderPaymentSchema>;
 
 export const orderSchema = z.object({
   id: z.string(),
   status: orderStatusSchema,
   items: z.array(orderItemSchema).min(1),
-  /** The whole order, in coins. */
-  totalCoins: z.number().int().positive(),
+  currency: z.string().length(3),
+  /** The goods at selling price, in paise. */
+  subtotal: z.number().int().nonnegative(),
+  /** How far under list price the goods were, in paise. */
+  discount: z.number().int().nonnegative(),
+  shipping: z.number().int().nonnegative(),
+  /** Goods plus shipping, before coins. */
+  total: z.number().int().nonnegative(),
+  /** The coins that went towards it, and what they were worth in paise. */
+  coinsUsed: z.number().int().nonnegative(),
+  coinsValue: z.number().int().nonnegative(),
+  /** The money side, in paise. Zero when coins covered it. */
+  payable: z.number().int().nonnegative(),
+  payment: orderPaymentSchema,
   /** The address as it was when the order was placed (RULES R4). */
   address: addressSchema.omit({ id: true, isDefault: true }),
   /** ISO-8601. */
@@ -285,10 +526,35 @@ export const orderSchema = z.object({
   updatedAt: z.string(),
   /** Courier reference once shipped; null before. */
   trackingRef: z.string().nullable().default(null),
-  /** Whether the user may still cancel — `placed` or `confirmed` (R5). */
+  /** Whether the user may still cancel — `pending_payment`, `placed` or `confirmed` (R5). */
   cancellable: z.boolean(),
 });
 export type Order = z.infer<typeof orderSchema>;
+
+/**
+ * What the app needs to collect the money for an order it just placed: the
+ * gateway, its order, the amount, and the public key to open the checkout
+ * with. Null on the checkout response when coins covered everything.
+ */
+export const paymentIntentSchema = z.object({
+  provider: z.enum(['mock', 'razorpay']),
+  orderId: z.string(),
+  providerOrderId: z.string(),
+  amount: z.number().int().positive(),
+  currency: z.string().length(3),
+  keyId: z.string().nullable(),
+  /** ISO-8601: pay by then or the order is released. */
+  expiresAt: z.string(),
+});
+export type PaymentIntent = z.infer<typeof paymentIntentSchema>;
+
+/** `POST /checkout`: the order, the wallet after it, and the payment to collect if any. */
+export const checkoutResultSchema = z.object({
+  order: orderSchema,
+  balance: z.number().nonnegative(),
+  payment: paymentIntentSchema.nullable(),
+});
+export type CheckoutResult = z.infer<typeof checkoutResultSchema>;
 
 /**
  * What a challenge is counted in.
@@ -351,12 +617,7 @@ export const achievementSchema = z.object({
 export type Achievement = z.infer<typeof achievementSchema>;
 
 /** Which meal of the day a food entry belongs to. */
-export const mealSlotSchema = z.enum([
-  'breakfast',
-  'lunch',
-  'snack',
-  'dinner',
-]);
+export const mealSlotSchema = z.enum(['breakfast', 'lunch', 'snack', 'dinner']);
 export type MealSlot = z.infer<typeof mealSlotSchema>;
 
 /**
@@ -716,7 +977,9 @@ export const notificationPreferencesSchema = z.object({
   sms: z.boolean(),
   email: z.boolean(),
 });
-export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
+export type NotificationPreferences = z.infer<
+  typeof notificationPreferencesSchema
+>;
 
 /** `GET /notifications/counts`: totals per chip, and the unread figure the bell is drawn from. */
 export const notificationCountsSchema = z.object({
@@ -726,7 +989,9 @@ export const notificationCountsSchema = z.object({
   system: z.number().int().nonnegative(),
   unread: z.number().int().nonnegative(),
 });
-export type NotificationCountsSummary = z.infer<typeof notificationCountsSchema>;
+export type NotificationCountsSummary = z.infer<
+  typeof notificationCountsSchema
+>;
 
 export const appNotificationSchema = z.object({
   id: z.string(),
@@ -842,7 +1107,6 @@ export const authResponseSchema = z.object({
   stepUpToken: z.string().nullable().default(null),
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;
-
 
 // ─── Shapes that exist only on the server side of the contract ──────────────
 

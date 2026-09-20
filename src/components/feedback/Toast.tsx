@@ -15,11 +15,21 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { CircleAlert, CircleCheck, Info, TriangleAlert } from 'lucide-react-native';
+import {
+  CircleAlert,
+  CircleCheck,
+  Info,
+  TriangleAlert,
+} from 'lucide-react-native';
 import { duration as durations, radius, spacing, useTheme } from '../../theme';
 import { AppText } from '../ui/AppText';
 import { Icon } from '../media/Icon';
 import type { AlertTone } from './Alert';
+
+export interface ToastAction {
+  label: string;
+  onPress: () => void;
+}
 
 export interface ToastOptions {
   title: string;
@@ -27,11 +37,15 @@ export interface ToastOptions {
   tone?: AlertTone;
   /** Milliseconds on screen. Pass 0 to require a tap to dismiss. */
   durationMs?: number;
+  /** One follow-up — "View cart" after an add. Tapping it dismisses the toast. */
+  action?: ToastAction;
 }
 
-interface ToastRecord extends Required<Omit<ToastOptions, 'message'>> {
+interface ToastRecord
+  extends Required<Omit<ToastOptions, 'message' | 'action'>> {
   id: string;
   message?: string;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
@@ -93,11 +107,30 @@ const ToastItem = memo(
               {toast.title}
             </AppText>
             {toast.message ? (
-              <AppText variant="caption" color="textSecondary" numberOfLines={2}>
+              <AppText
+                variant="caption"
+                color="textSecondary"
+                numberOfLines={2}
+              >
                 {toast.message}
               </AppText>
             ) : null}
           </View>
+          {toast.action ? (
+            <Pressable
+              onPress={() => {
+                onDismiss();
+                toast.action?.onPress();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={toast.action.label}
+              hitSlop={8}
+            >
+              <AppText variant="bodyStrong" color="primary">
+                {toast.action.label}
+              </AppText>
+            </Pressable>
+          ) : null}
         </Pressable>
       </Animated.View>
     );
@@ -134,6 +167,7 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
         message: options.message,
         tone: options.tone ?? 'info',
         durationMs: options.durationMs ?? DEFAULT_DURATION,
+        action: options.action,
       };
 
       setToasts(current => [...current, record].slice(-MAX_VISIBLE));

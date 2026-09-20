@@ -1,5 +1,6 @@
 import { getKV } from '../db/redis.js';
 import { logger } from '../lib/logger.js';
+import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
 import { flushDeferredPushes } from '../modules/notifications/service.js';
 
@@ -40,6 +41,7 @@ const DAILY_JOBS: readonly DailyJob[] = [
  */
 const HOURLY_JOBS: readonly DailyJob[] = [
   { name: 'flush-deferred-pushes', run: () => flushDeferredPushes() },
+  { name: 'expire-unpaid-orders', run: () => expireUnpaidOrders() },
 ];
 
 /** `YYYY-MM-DD` in UTC — the calendar the claim keys live on. */

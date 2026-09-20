@@ -45,11 +45,21 @@ curl -s $B/me -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…
 # 5. exercise the daily cap: 20k steps → 19 coins held; a workout → 100 credited; check the wallet
 curl -s $B/dev/steps -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"steps":20000}'
 curl -s $B/wallet -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
-# 6. redeem a reward: add an address, then buy (a step-up code is asked for at 1,000+ coins — POST /auth/step-up, verify-otp, pass stepUpToken)
+# 6. browse the catalogue: the shelves with counts, then a shelf sorted by price, then a search
+curl -s "$B/shop/categories" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+curl -s "$B/shop/items?category=gym&sort=price_asc&inStock=true&limit=20" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+curl -s "$B/shop/items?q=racket" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+# 7. buy: add an address, put a cap in the basket, see the split (30% coins, the rest money), check out with 300 coins, pay (mock gateway accepts any id)
 curl -s $B/me/addresses -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"label":"Home","name":"Asha Verma","phone":"+919876543210","line1":"12 MG Road","city":"Bengaluru","state":"Karnataka","postalCode":"560001"}'
-curl -s $B/shop/redeem -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -H "idempotency-key: $(uuidgen)" -d '{"itemId":"cap","addressId":"adr_…"}'
+curl -s $B/cart/lines -X PUT -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"itemId":"cap","quantity":1}'
+curl -s $B/checkout -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -H "idempotency-key: $(uuidgen)" -d '{"fromCart":true,"addressId":"adr_…","coins":300}'
+curl -s $B/orders/ord_…/pay -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -H "idempotency-key: $(uuidgen)" -d '{"providerPaymentId":"pay_test"}'
+# (1,000+ coins in one order asks for a step-up code first — POST /auth/step-up, verify-otp, pass stepUpToken)
 curl -s $B/orders -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
-# 7. see the coins expire: run the idle sweep as of 91 days from now, then read the wallet again
+# save something for later, and say what you thought of what arrived
+curl -s $B/wishlist/yoga-mat -X PUT -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+curl -s $B/shop/items/cap/reviews/me -X PUT -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"rating":5,"title":"Fits well","body":"Stays on through a run, and the peak holds its shape."}'
+# 8. see the coins expire: run the idle sweep as of 91 days from now, then read the wallet again
 curl -s $B/dev/jobs/coin-expiry -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d "{\"now\":\"$(date -u -v+91d +%Y-%m-%dT%H:%M:%SZ)\"}"
 ```
 

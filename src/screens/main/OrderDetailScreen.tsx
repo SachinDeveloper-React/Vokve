@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { MapPin, PackageX, Truck } from 'lucide-react-native';
+import { CreditCard, MapPin, PackageX, Truck } from 'lucide-react-native';
 import { formatAddressLines } from '../../components/address/AddressCard';
 import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { useToast } from '../../components/feedback/Toast';
@@ -18,21 +18,27 @@ import { Icon } from '../../components/media/Icon';
 import { Emoji } from '../../components/media/Emoji';
 import { OrderStatusPill } from '../../components/orders/OrderStatusPill';
 import { orderTitle } from '../../components/orders/OrderCard';
+import { PriceBreakdown } from '../../components/shop/PriceBreakdown';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
-import { CoinAmount } from '../../components/wallet/CoinAmount';
 import { orderApi } from '../../services/api/endpoints';
 import { toApiError } from '../../services/api/errors';
+import { useCheckoutStore, useIsPaying } from '../../stores/checkoutStore';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useOrder, useOrdersStore } from '../../stores/ordersStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import type { Order, OrderStatus } from '../../types/models';
 import type { RootStackScreenProps } from '../../types/navigation';
-import { formatClockTime, formatRelativeDay } from '../../utils/format';
+import {
+  formatClockTime,
+  formatCoins,
+  formatMoney,
+  formatRelativeDay,
+} from '../../utils/format';
 
 const makeStyles = ({ spacing, radius }: ThemeShape) =>
   StyleSheet.create({
@@ -40,6 +46,7 @@ const makeStyles = ({ spacing, radius }: ThemeShape) =>
     empty: { paddingVertical: spacing.xl },
     /** The line between two stops on the journey; fills whatever the labels leave. */
     track: { flex: 1, height: 3, borderRadius: radius.pill },
+    grow: { flex: 1 },
   });
 
 /**
@@ -55,12 +62,23 @@ const JOURNEY: readonly OrderStatus[] = [
 ];
 
 const JOURNEY_COPY: Record<OrderStatus, string> = {
+  pending_payment:
+    'Waiting for your payment. The items are held for you until the window closes.',
   placed: 'We have your order and are getting it ready.',
   confirmed: 'Confirmed and being packed.',
   shipped: 'On its way with the courier.',
   delivered: 'Delivered. Enjoy it!',
-  cancelled: 'Cancelled. The coins are back in your wallet.',
+  cancelled: 'Cancelled. Anything you paid is on its way back.',
   refunded: 'Refunded by our support team.',
+};
+
+/** How the money side reads on the receipt. */
+const PAYMENT_COPY: Record<Order['payment']['status'], string> = {
+  not_required: 'Paid in full with coins',
+  pending: 'Payment pending',
+  paid: 'Paid',
+  failed: 'Payment failed',
+  refunded: 'Refunded',
 };
 
 /**
@@ -86,6 +104,8 @@ export const OrderDetailScreen = () => {
   const cancel = useOrdersStore(s => s.cancel);
   const cancellingId = useOrdersStore(s => s.cancellingId);
   const isCancelling = cancellingId === route.params.id;
+  const payPending = useCheckoutStore(s => s.payPending);
+  const isPaying = useIsPaying();
   const [isConfirmOpen, setConfirmOpen] = useState(false);
 
   // A deep link lands here with an empty cache; the list is not fetched for
@@ -126,7 +146,16 @@ export const OrderDetailScreen = () => {
       setFetched(result);
       toast.show({
         title: 'Order cancelled',
-        message: `${result.totalCoins} coins are back in your wallet.`,
+        message:
+          result.coinsUsed > 0
+            ? `${formatCoins(result.coinsUsed)} coins are back in your wallet${
+                result.payment.status === 'refunded'
+                  ? ', and the payment is being refunded'
+                  : ''
+              }.`
+            : result.payment.status === 'refunded'
+            ? 'The payment is being refunded.'
+            : 'Nothing was charged.',
         tone: 'success',
       });
     } catch (error) {
@@ -141,6 +170,48 @@ export const OrderDetailScreen = () => {
       });
     }
   }, [cancel, route.params.id, toast]);
+
+  const onPayNow = useCallback(async () => {
+    if (!order) return;
+    const outcome = await payPending(order);
+    if (outcome.status === 'placed') {
+      setFetched(outcome.order);
+      toast.show({
+        title: 'Payment received',
+        message: `${formatMoney(
+          outcome.order.payable,
+          outcome.order.currency,
+        )} paid. Your order is placed.`,
+        tone: 'success',
+      });
+    } else if (outcome.status === 'payment_pending') {
+      toast.show({
+        title: 'Payment not completed',
+        message:
+          outcome.error?.message ??
+          'The order is still waiting for its payment.',
+        tone: 'info',
+      });
+    } else if (outcome.status === 'failed') {
+      toast.show({
+        title:
+          outcome.error.code === 'PAYMENT_EXPIRED'
+            ? 'Payment window closed'
+            : "Couldn't take the payment",
+        message: outcome.error.message,
+        tone: 'error',
+      });
+      if (
+        outcome.error.code === 'PAYMENT_EXPIRED' ||
+        outcome.error.code === 'ORDER_NOT_PENDING'
+      ) {
+        orderApi
+          .get(order.id)
+          .then(setFetched)
+          .catch(() => {});
+      }
+    }
+  }, [order, payPending, toast]);
 
   const cancelActions = useMemo(
     () => [
@@ -263,21 +334,85 @@ export const OrderDetailScreen = () => {
                       <VStack flex={1} gap="xxs">
                         <AppText variant="bodyStrong">{line.title}</AppText>
                         <AppText variant="micro" color="textTertiary">
-                          {`Qty ${line.quantity}`}
+                          {[
+                            line.size ? `Size ${line.size}` : null,
+                            `Qty ${line.quantity}`,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
                         </AppText>
                       </VStack>
-                      <CoinAmount
-                        amount={line.priceCoins * line.quantity}
-                        size="sm"
-                      />
+                      <AppText variant="bodyStrong">
+                        {formatMoney(
+                          line.price * line.quantity,
+                          order.currency,
+                        )}
+                      </AppText>
                     </HStack>
                   </Fragment>
                 ))}
                 <Divider />
-                <HStack align="center" justify="between">
-                  <AppText variant="bodyStrong">Total</AppText>
-                  <CoinAmount amount={order.totalCoins} size="md" />
+                <PriceBreakdown
+                  figures={{
+                    currency: order.currency,
+                    mrpTotal: order.subtotal + order.discount,
+                    discount: order.discount,
+                    subtotal: order.subtotal,
+                    shipping: order.shipping,
+                    coinsApplied: order.coinsUsed,
+                    coinsValue: order.coinsValue,
+                    payable: order.payable,
+                  }}
+                  payableLabel={
+                    order.payment.status === 'paid' ||
+                    order.payment.status === 'refunded'
+                      ? 'Paid'
+                      : order.payable === 0
+                      ? 'To pay'
+                      : 'To pay'
+                  }
+                />
+                <HStack align="center" gap="sm">
+                  <Icon
+                    as={CreditCard}
+                    size="sm"
+                    tint={
+                      order.payment.status === 'pending' ||
+                      order.payment.status === 'failed'
+                        ? colors.warning
+                        : colors.success
+                    }
+                  />
+                  <AppText
+                    variant="caption"
+                    color="textSecondary"
+                    style={styles.grow}
+                  >
+                    {PAYMENT_COPY[order.payment.status]}
+                    {order.payment.paidAt
+                      ? ` · ${formatRelativeDay(
+                          order.payment.paidAt,
+                        )}, ${formatClockTime(order.payment.paidAt)}`
+                      : ''}
+                    {order.status === 'pending_payment' &&
+                    order.payment.expiresAt
+                      ? ` · pay by ${formatClockTime(order.payment.expiresAt)}`
+                      : ''}
+                  </AppText>
                 </HStack>
+                {order.status === 'pending_payment' ? (
+                  <Button
+                    label={`Pay ${formatMoney(
+                      order.payable,
+                      order.currency,
+                    )} now`}
+                    variant="brand"
+                    fullWidth
+                    loading={isPaying}
+                    disabled={isPaying || isCancelling}
+                    onPress={onPayNow}
+                  />
+                ) : null}
               </VStack>
             </Card>
 
@@ -318,7 +453,17 @@ export const OrderDetailScreen = () => {
         title={order ? `Cancel ${orderTitle(order)}?` : 'Cancel order?'}
         message={
           order
-            ? `${order.totalCoins} coins go straight back to your wallet. This cannot be undone.`
+            ? order.coinsUsed > 0
+              ? `${formatCoins(
+                  order.coinsUsed,
+                )} coins go straight back to your wallet${
+                  order.payment.status === 'paid'
+                    ? ', and the payment is refunded'
+                    : ''
+                }. This cannot be undone.`
+              : order.payment.status === 'paid'
+              ? 'The payment is refunded. This cannot be undone.'
+              : 'Nothing has been charged. This cannot be undone.'
             : undefined
         }
         actions={cancelActions}

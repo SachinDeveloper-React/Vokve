@@ -106,7 +106,7 @@ export const AccountScreen = () => {
           onPressAvatar={notImplemented}
         />
 
-        <EmailVerificationBanner reason="redeem rewards and receive payouts" />
+        <EmailVerificationBanner reason="place orders and receive payouts" />
 
         <ProfileSummaryCard
           name={user?.name}

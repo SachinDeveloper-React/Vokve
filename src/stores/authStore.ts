@@ -6,11 +6,14 @@ import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
 import { registerForPush, unregisterFromPush } from '../services/push';
 import { useAddressesStore } from './addressesStore';
+import { useCartStore } from './cartStore';
+import { useCheckoutStore } from './checkoutStore';
 import { useCoinsStore } from './coinsStore';
 import { useNotificationSettingsStore } from './notificationSettingsStore';
 import { useNotificationsStore } from './notificationsStore';
 import { useOrdersStore } from './ordersStore';
 import { useReferralStore } from './referralStore';
+import { useWishlistStore } from './wishlistStore';
 import type { AuthTokens, User, VerificationChallenge } from '../types/models';
 import type {
   CompleteProfilePayload,
@@ -139,6 +142,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       registerForPush();
       useOrdersStore.getState().hydrateFromServer();
       useAddressesStore.getState().hydrateFromServer();
+      useCartStore.getState().hydrateFromServer();
+      useWishlistStore.getState().hydrateFromServer();
     } catch (error) {
       const apiError = toApiError(error);
       logger.warn('authStore', `Session restore failed: ${apiError.code ?? apiError.kind}`, apiError);
@@ -185,6 +190,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       registerForPush();
       useOrdersStore.getState().hydrateFromServer();
       useAddressesStore.getState().hydrateFromServer();
+      useCartStore.getState().hydrateFromServer();
+      useWishlistStore.getState().hydrateFromServer();
       return true;
     } catch (error) {
       set({ error: toApiError(error), isSubmitting: false });
@@ -253,6 +260,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       registerForPush();
       useOrdersStore.getState().hydrateFromServer();
       useAddressesStore.getState().hydrateFromServer();
+      useCartStore.getState().hydrateFromServer();
+      useWishlistStore.getState().hydrateFromServer();
       return true;
     } catch (error) {
       const apiError = toApiError(error);
@@ -436,6 +445,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useNotificationsStore.getState().reset();
     useOrdersStore.getState().reset();
     useAddressesStore.getState().reset();
+    useCartStore.getState().reset();
+    useWishlistStore.getState().reset();
+    useCheckoutStore.getState().reset();
     useReferralStore.getState().reset();
     useNotificationSettingsStore.getState().reset();
     set({

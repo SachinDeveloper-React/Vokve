@@ -1,7 +1,13 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { CoinSource, MealSlot, WorkoutTemplate } from './models';
+import type {
+  CoinSource,
+  MealSlot,
+  PurchaseLine,
+  ShopCategory,
+  WorkoutTemplate,
+} from './models';
 
 export type AuthStackParamList = {
   Welcome: undefined;
@@ -131,6 +137,30 @@ export type RootStackParamList = {
   Addresses: { select?: boolean } | undefined;
   /** `id` edits; without it, a new address. */
   AddressForm: { id?: string } | undefined;
+  /**
+   * A page of the catalogue: one category, the deals, or everything —
+   * paged from the server, sortable, searchable within. `title` overrides
+   * the heading the params would otherwise produce.
+   */
+  ShopBrowse:
+    | { category?: ShopCategory; deals?: boolean; title?: string }
+    | undefined;
+  /** Search across the whole catalogue, opened from the shop's search field. */
+  ShopSearch: undefined;
+  /** One item in full — sizes, reviews, the basket and "Buy now". */
+  ProductDetail: { id: string };
+  /** The basket. */
+  Cart: undefined;
+  /**
+   * The till. `fromCart` buys the basket; `lines` buys exactly these —
+   * "Buy now" from a product page — leaving the basket as it was.
+   */
+  Checkout: { fromCart: true } | { lines: PurchaseLine[] };
+  Wishlist: undefined;
+  /** Every review of an item, paged, with the summary and a way to write one. */
+  Reviews: { itemId: string };
+  /** Write or edit the reader's own review of an item. */
+  WriteReview: { itemId: string };
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

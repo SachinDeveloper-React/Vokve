@@ -49,6 +49,23 @@ export const CONFIG_DEFAULTS = {
     shadow: true,
   },
   streak: { restoreCost: 50, restoreWindowDays: 7 },
+  /**
+   * The shop's money side (RULES R1, R11–R13). Prices are paise; a coin is
+   * worth `coinValuePaise` at the till, and at most `coinShareMax` of the
+   * goods (0.3 = 30%) may be paid with coins — the rest is money. Set the
+   * share to 1 and an order can be coins alone; set it to 0 and the shop is
+   * cash only. Changed from `app_config` without a deploy, like every ⚙.
+   */
+  commerce: {
+    currency: 'INR',
+    coinValuePaise: 25,
+    coinShareMax: 0.3,
+    shippingFeePaise: 4900,
+    freeShippingAbovePaise: 99900,
+    maxQuantityPerLine: 5,
+    /** How long an unpaid order holds its stock and coins before it is released. */
+    paymentWindowMinutes: 30,
+  },
   otp: {
     /**
      * Where the sign-up code goes. Email while there is no SMS provider

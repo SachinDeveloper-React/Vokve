@@ -3,7 +3,7 @@ import {
   LayoutGrid,
   Percent,
   Shirt,
-  Sparkles,
+  Trophy,
   Watch,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
@@ -36,11 +36,23 @@ export interface ShopCategoryPresentation {
  * different things. Ordered as the design lists them.
  */
 export const SHOP_CATEGORIES: readonly ShopCategoryPresentation[] = [
-  { value: 'apparel', label: 'Apparel', icon: Shirt, tint: 'avatarPurple' },
-  { value: 'accessories', label: 'Accessories', icon: Watch, tint: 'avatarGreen' },
-  { value: 'gear', label: 'Fitness Gear', icon: Dumbbell, tint: 'primary' },
-  { value: 'lifestyle', label: 'Lifestyle', icon: Sparkles, tint: 'brandAccent' },
+  { value: 'clothing', label: 'Clothes', icon: Shirt, tint: 'avatarPurple' },
+  { value: 'gym', label: 'Gym', icon: Dumbbell, tint: 'primary' },
+  { value: 'sports', label: 'Sports', icon: Trophy, tint: 'brandAccent' },
+  {
+    value: 'accessories',
+    label: 'Accessories',
+    icon: Watch,
+    tint: 'avatarGreen',
+  },
 ];
+
+/** The presentation for one category, for a screen opened on it. */
+export function presentationOf(
+  category: ShopCategory,
+): ShopCategoryPresentation {
+  return SHOP_CATEGORIES.find(c => c.value === category) ?? SHOP_CATEGORIES[0];
+}
 
 /**
  * The two filter chips that are not categories. `all` clears the filter;

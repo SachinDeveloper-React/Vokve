@@ -3,12 +3,19 @@ import {
   addressSchema,
   appNotificationSchema,
   authResponseSchema,
+  cartSchema,
+  checkoutResultSchema,
   coinTransactionSchema,
   notificationCountsSchema,
   notificationPreferencesSchema,
   orderSchema,
+  quoteSchema,
   referralProgramSchema,
   referralSchema,
+  reviewPageSchema,
+  reviewSchema,
+  shopCategorySummarySchema,
+  shopConfigSchema,
   shopItemSchema,
   dailyActivitySchema,
   deviceRegistrationSchema,
@@ -37,6 +44,8 @@ import type {
   ActivityApi,
   AddressApi,
   AuthApi,
+  CartApi,
+  CheckoutApi,
   DeviceApi,
   NotificationApi,
   NotificationPreferencesApi,
@@ -45,6 +54,7 @@ import type {
   ShopApi,
   UserApi,
   WalletApi,
+  WishlistApi,
   WorkoutApi,
 } from './contracts';
 import {
@@ -52,6 +62,8 @@ import {
   mockActivityApi,
   mockAddressApi,
   mockAuthApi,
+  mockCartApi,
+  mockCheckoutApi,
   mockDeviceApi,
   mockNotificationApi,
   mockNotificationPreferencesApi,
@@ -60,6 +72,7 @@ import {
   mockShopApi,
   mockUserApi,
   mockWalletApi,
+  mockWishlistApi,
   mockWorkoutApi,
 } from './mockApi';
 
@@ -204,28 +217,115 @@ const realActivityApi: ActivityApi = {
     request(dailyActivitySchema, client => client.get('/activity/today')),
 };
 
-const redeemResultSchema = z.object({
+const orderResultSchema = z.object({
   order: orderSchema,
   balance: z.number().nonnegative(),
 });
 
+const cataloguePageSchema = pageSchema(shopItemSchema).extend({
+  total: z.number().int().nonnegative(),
+});
+
+/** Booleans travel as the words the server's query parser reads; an unset one is left out. */
+const flag = (value: boolean | undefined) => (value ? 'true' : undefined);
+
 const realShopApi: ShopApi = {
   items: (query = {}) =>
-    request(pageSchema(shopItemSchema), client =>
+    request(cataloguePageSchema, client =>
       client.get('/shop/items', {
         params: {
           category: query.category,
-          deals: query.deals ? 'true' : undefined,
+          subcategory: query.subcategory,
+          deals: flag(query.deals),
+          featured: flag(query.featured),
+          inStock: flag(query.inStock),
+          q: query.q || undefined,
+          sort: query.sort,
+          minPrice: query.minPrice,
+          maxPrice: query.maxPrice,
+          minRating: query.minRating,
+          cursor: query.cursor,
+          limit: query.limit,
         },
       }),
-    ).then(page => page.data),
+    ),
   item: id =>
     request(shopItemSchema, client =>
       client.get(`/shop/items/${encodeURIComponent(id)}`),
     ),
-  redeem: (payload, { idempotencyKey }) =>
-    request(redeemResultSchema, client =>
-      client.post('/shop/redeem', payload, {
+  categories: () =>
+    request(pageSchema(shopCategorySummarySchema), client =>
+      client.get('/shop/categories'),
+    ).then(page => page.data),
+  config: () => request(shopConfigSchema, client => client.get('/shop/config')),
+  reviews: (itemId, query = {}) =>
+    request(reviewPageSchema, client =>
+      client.get(`/shop/items/${encodeURIComponent(itemId)}/reviews`, {
+        params: { sort: query.sort, cursor: query.cursor, limit: query.limit },
+      }),
+    ),
+  writeReview: (itemId, input) =>
+    request(reviewSchema, client =>
+      client.put(`/shop/items/${encodeURIComponent(itemId)}/reviews/me`, input),
+    ),
+  deleteReview: itemId =>
+    request(okSchema, client =>
+      client.delete(`/shop/items/${encodeURIComponent(itemId)}/reviews/me`),
+    ),
+};
+
+const realWishlistApi: WishlistApi = {
+  list: () =>
+    request(pageSchema(shopItemSchema), client => client.get('/wishlist')).then(
+      page => page.data,
+    ),
+  ids: () =>
+    request(pageSchema(z.string()), client => client.get('/wishlist/ids')).then(
+      page => page.data,
+    ),
+  add: itemId =>
+    request(okSchema, client =>
+      client.put(`/wishlist/${encodeURIComponent(itemId)}`),
+    ),
+  remove: itemId =>
+    request(okSchema, client =>
+      client.delete(`/wishlist/${encodeURIComponent(itemId)}`),
+    ),
+};
+
+const realCartApi: CartApi = {
+  get: () => request(cartSchema, client => client.get('/cart')),
+  setLine: line =>
+    request(cartSchema, client =>
+      client.put('/cart/lines', {
+        itemId: line.itemId,
+        quantity: line.quantity,
+        size: line.size ?? null,
+      }),
+    ),
+  removeLine: (itemId, size) =>
+    request(cartSchema, client =>
+      client.delete(`/cart/lines/${encodeURIComponent(itemId)}`, {
+        params: { size: size ?? undefined },
+      }),
+    ),
+  clear: () => request(cartSchema, client => client.delete('/cart')),
+};
+
+const realCheckoutApi: CheckoutApi = {
+  quote: (lines, coins) =>
+    request(quoteSchema, client =>
+      client.post('/checkout/quote', { lines, coins }),
+    ),
+  place: (payload, { idempotencyKey }) =>
+    request(checkoutResultSchema, client =>
+      client.post('/checkout', payload, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  pay: (orderId, proof, { idempotencyKey }) =>
+    request(orderResultSchema, client =>
+      client.post(`/orders/${encodeURIComponent(orderId)}/pay`, proof, {
         headers: { 'Idempotency-Key': idempotencyKey },
       }),
     ),
@@ -245,7 +345,7 @@ const realOrderApi: OrderApi = {
       client.get('/orders/count'),
     ).then(result => result.count),
   cancel: (id, { idempotencyKey }) =>
-    request(redeemResultSchema, client =>
+    request(orderResultSchema, client =>
       client.post(`/orders/${encodeURIComponent(id)}/cancel`, undefined, {
         headers: { 'Idempotency-Key': idempotencyKey },
       }),
@@ -401,8 +501,37 @@ export const activityApi: ActivityApi = {
 export const shopApi: ShopApi = {
   items: query => pick(mockShopApi, realShopApi).items(query),
   item: id => pick(mockShopApi, realShopApi).item(id),
-  redeem: (payload, options) =>
-    pick(mockShopApi, realShopApi).redeem(payload, options),
+  categories: () => pick(mockShopApi, realShopApi).categories(),
+  config: () => pick(mockShopApi, realShopApi).config(),
+  reviews: (itemId, query) =>
+    pick(mockShopApi, realShopApi).reviews(itemId, query),
+  writeReview: (itemId, input) =>
+    pick(mockShopApi, realShopApi).writeReview(itemId, input),
+  deleteReview: itemId => pick(mockShopApi, realShopApi).deleteReview(itemId),
+};
+
+export const wishlistApi: WishlistApi = {
+  list: () => pick(mockWishlistApi, realWishlistApi).list(),
+  ids: () => pick(mockWishlistApi, realWishlistApi).ids(),
+  add: itemId => pick(mockWishlistApi, realWishlistApi).add(itemId),
+  remove: itemId => pick(mockWishlistApi, realWishlistApi).remove(itemId),
+};
+
+export const cartApi: CartApi = {
+  get: () => pick(mockCartApi, realCartApi).get(),
+  setLine: line => pick(mockCartApi, realCartApi).setLine(line),
+  removeLine: (itemId, size) =>
+    pick(mockCartApi, realCartApi).removeLine(itemId, size),
+  clear: () => pick(mockCartApi, realCartApi).clear(),
+};
+
+export const checkoutApi: CheckoutApi = {
+  quote: (lines, coins) =>
+    pick(mockCheckoutApi, realCheckoutApi).quote(lines, coins),
+  place: (payload, options) =>
+    pick(mockCheckoutApi, realCheckoutApi).place(payload, options),
+  pay: (orderId, proof, options) =>
+    pick(mockCheckoutApi, realCheckoutApi).pay(orderId, proof, options),
 };
 
 export const orderApi: OrderApi = {

@@ -11,7 +11,10 @@ import { APP_RELEASES, EXERCISES, SHOP_ITEMS, SHOP_STOCK, WORKOUT_TEMPLATES } fr
 export async function seed(): Promise<void> {
   await Promise.all(EXERCISES.map(e => ExerciseModel.updateOne({ _id: e._id }, { $set: e }, { upsert: true })));
   await Promise.all(WORKOUT_TEMPLATES.map(t => WorkoutTemplateModel.updateOne({ _id: t._id }, { $set: t }, { upsert: true })));
-  await Promise.all(SHOP_ITEMS.map(i => ShopItemModel.updateOne({ _id: i._id }, { $set: i }, { upsert: true })));
+  // Catalogue rows are the seed's to overwrite — copy, tags, price — except
+  // `popularity`, which is what selling has added to the starting figure.
+  await Promise.all(SHOP_ITEMS.map(({ popularity, ...i }) =>
+    ShopItemModel.updateOne({ _id: i._id }, { $set: i, $setOnInsert: { popularity } }, { upsert: true })));
   // Stock is only ever *created* by the seed: a re-seed must not undo sales.
   await Promise.all(SHOP_STOCK.map(s => ShopInventoryModel.updateOne({ _id: s._id }, { $setOnInsert: s }, { upsert: true })));
   await Promise.all(APP_RELEASES.map(r => AppReleaseModel.updateOne({ platform: r.platform, version: r.version, build: r.build }, { $set: r }, { upsert: true })));

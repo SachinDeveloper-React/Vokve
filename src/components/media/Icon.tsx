@@ -35,6 +35,8 @@ interface Props {
   /** Overrides the token colour — for icons on a gradient, for instance. */
   tint?: string;
   strokeWidth?: number;
+  /** A fill for the glyph's body — a filled star, a filled heart. Unfilled by default. */
+  fill?: string;
 }
 
 /**
@@ -45,7 +47,14 @@ interface Props {
  * import of just the icons used stays tree-shakeable.
  */
 export const Icon = memo(
-  ({ as: Component, size = 'md', color = 'text', tint, strokeWidth = 2 }: Props) => {
+  ({
+    as: Component,
+    size = 'md',
+    color = 'text',
+    tint,
+    strokeWidth = 2,
+    fill,
+  }: Props) => {
     const { colors } = useTheme();
 
     return (
@@ -53,6 +62,7 @@ export const Icon = memo(
         size={typeof size === 'number' ? size : SIZES[size]}
         color={tint ?? colors[color]}
         strokeWidth={strokeWidth}
+        fill={fill ?? 'none'}
       />
     );
   },

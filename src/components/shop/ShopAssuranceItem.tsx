@@ -24,20 +24,22 @@ interface Props {
  * quiet. The colour stays on the glyph, where it separates the four promises
  * without ranking them.
  */
-export const ShopAssuranceItem = memo(({ icon, tint, title, caption }: Props) => (
-  <HStack align="start" gap="sm">
-    <Icon as={icon} size="md" tint={tint} />
+export const ShopAssuranceItem = memo(
+  ({ icon, tint, title, caption }: Props) => (
+    <HStack align="start" gap="sm">
+      <Icon as={icon} size="md" tint={tint} />
 
-    <VStack flex={1} gap="xxs">
-      <AppText variant="micro" numberOfLines={1} style={styles.title}>
-        {title}
-      </AppText>
-      <AppText variant="micro" color="textTertiary" numberOfLines={2}>
-        {caption}
-      </AppText>
-    </VStack>
-  </HStack>
-));
+      <VStack flex={1} gap="xxs">
+        <AppText variant="micro" numberOfLines={1} style={styles.title}>
+          {title}
+        </AppText>
+        <AppText variant="micro" color="textTertiary" numberOfLines={2}>
+          {caption}
+        </AppText>
+      </VStack>
+    </HStack>
+  ),
+);
 
 ShopAssuranceItem.displayName = 'ShopAssuranceItem';
 

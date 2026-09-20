@@ -29,7 +29,10 @@ interface Props {
 export const FeaturedRewardsRow = memo(
   ({ items, onPressItem, onPressViewAll }: Props) => (
     <VStack gap="md">
-      <ShopSectionHeader title="Featured Rewards" onPressViewAll={onPressViewAll} />
+      <ShopSectionHeader
+        title="Featured Rewards"
+        onPressViewAll={onPressViewAll}
+      />
 
       {items.length === 0 ? (
         <Box py="xl">

@@ -191,7 +191,7 @@ Body:
 
 ### 3.6 Idempotency
 
-`Idempotency-Key: <uuid v4>` on every write that moves coins, creates an order, or logs an entry. Store key + response 24 h; replay on repeat. Required on: workout save, activity ingest, redeem, challenge claim, freeze, restore, hydration/food/vital entries.
+`Idempotency-Key: <uuid v4>` on every write that moves coins, creates an order, or logs an entry. Store key + response 24 h; replay on repeat. Required on: workout save, activity ingest, checkout, pay, cancel, challenge claim, freeze, restore, hydration/food/vital entries.
 
 ### 3.7 Pagination
 
@@ -242,7 +242,7 @@ Frozen contract. The DB may hold more; the API may not return less.
 
 **Economy**
 - `CoinTransaction` — `id, title, source (steps|workout|streak|challenge|referral|purchase|refund), amount (signed int), createdAt`
-- `ShopItem` — `id, title, description, priceCoins, category (apparel|accessories|gear|lifestyle), emoji, badge? (bestseller|popular|new_arrival|limited), isDeal, inStock`
+- `ShopItem` — `id, title, description, price (paise), mrp (paise|null), currency, coinsMax (server-computed: the share cap on this item), category (clothing|gym|sports|accessories), subcategory, tags[], sizes[], rating { average, count }, emoji, badge?, isDeal, featured, inStock`. `ShopCategorySummary` — `category, count, inStock, subcategories[{ name, count }]`. `ShopConfig` — `currency, coinValuePaise, coinShareMax, shippingFeePaise, freeShippingAbovePaise, maxQuantityPerLine, paymentProvider, paymentKeyId, stepUpThreshold`. `Cart` — `lines[{ item, quantity, size, addedAt }], count, quote`. `Quote` — `lines[], mrpTotal, discount, subtotal, shipping, total, coinValuePaise, coinsMax, coinsApplied, coinsValue, payable, needsStepUp`. `Review` — `id, itemId, rating, title, body, authorName, verified, mine, createdAt, updatedAt`. `Order` — `id, status, items[{ itemId, title, emoji, quantity, size, price, mrp }], currency, subtotal, discount, shipping, total, coinsUsed, coinsValue, payable, payment { provider, status, amount, currency, providerOrderId, paidAt, expiresAt }, address, placedAt, updatedAt, trackingRef, cancellable`
 - `Challenge` — `id, title, description, emoji, metric (steps|calories|minutes|days|workouts), cadence (daily|weekly|monthly), goal, progress, rewardCoins, rewardsBadge, startsAt? (null = running)`
 - `Achievement` — `id, value (string), label, metric, achievedAt?`
 - `LeaderboardEntry` — `id, name, location, rank, coins, perk, avatarUrl?`
@@ -378,13 +378,52 @@ Every screen in the app, what it renders, where that data comes from today, what
 - **Backend:** `GET /wallet/transactions?cursor=&limit=&source=` — `source` is validated against `COIN_SOURCES` (422 otherwise); the cursor is scoped to the filter. Tested in `vokve-backend/test/economy.test.ts`.
 
 #### Shop
-- **Renders:** header with coin badge (bag count = the server's order count, RULES R7 → Orders), `ShopCoinsBanner`, `ShopCategoryFilter` (All / Deals / 4 categories), `FeaturedRewardsRow` (filtered items, `inStock` from the server), `DailyOffersCard` (static copy), `TopCategoriesGrid` (counts per category), `ShopAssuranceStrip`, `ShopItemDetailSheet` (price, shortfall "Need 260 more", Redeem → checkout), `RedeemConfirmSheet` (item, the default address with Change/Add, coins before/after, the step-up notice at or above `stepUpThreshold`, "Confirm & redeem" / "Confirm & get code"), pull-to-refresh.
-- **Source today:** `shopStore` — a cache of `GET /shop/items` seeded with the old catalogue, refreshed on tab focus when older than 5 min; `ordersStore.count`; `addressesStore` default address.
-- **Actions (built):** `shopStore.redeem({ itemId, addressId })` → `POST /shop/redeem` with a per-attempt `Idempotency-Key`. Outcomes: `placed` (balance set from the answer, order prepended, wallet + catalogue re-synced, toast) · `step_up_required` (the store asks `POST /auth/step-up`, parks the attempt, the root navigator pushes the OTP screen in "Confirm It's You" mode; when the code passes the auth store holds `stepUpToken`, the shop resumes the **same attempt with the same key** and spends the token; backing out of the code drops the attempt) · `address_required` · `failed` (`INSUFFICIENT_COINS`, `OUT_OF_STOCK` re-syncs stock, other).
-- **Backend (built — `modules/commerce`):** `GET /shop/items?category=&deals=`, `GET /shop/items/:id`, `POST /shop/redeem` (`requireVerifiedContacts` → validate → `idempotent` → one transaction per §8.5: `$gte` balance decrement, `$gte` stock decrement, order with address snapshot, `purchase` ledger row, audit; gates in fix-order: `REDEMPTION_RESTRICTED` 403 for restricted/banned tiers when trust is enforced, `ADDRESS_REQUIRED` 422, `STEP_UP_REQUIRED` / `STEP_UP_INVALID` 403 at or above `coins.stepUpThreshold` or for the watch tier, `INSUFFICIENT_COINS` 422 with `{ required, balance }`, `OUT_OF_STOCK` 409), `GET /orders?cursor=&limit=`, `GET /orders/count`, `GET /orders/:id`, `POST /orders/:id/cancel` (idempotent; R6 refund row + stock restore; 409 `ORDER_NOT_CANCELLABLE` past `confirmed`), `GET/POST /me/addresses`, `PUT /me/addresses/:id`, `POST /me/addresses/:id/default`, `DELETE /me/addresses/:id` (soft; the newest survivor inherits the default). Order events notify under the `orders` preference switch. Seeded catalogue + stock in `seed/data.ts`. Tested in `test/commerce.test.ts` (including six concurrent buyers for one unit).
-- **Step-up (RULES O8, built):** `POST /auth/step-up` → email challenge with `purpose: 'step_up'`; `verify-otp` on it returns `AuthResponse` + `stepUpToken` (HS256 JWT, 10 min, `jti`); the redeem burns the `jti` in the KV so a token works once and only for its user.
+- **Model (RULES R1, R11–R15):** the shop sells for money, and coins go towards the bill. Every item has a `price` in paise, an `mrp` it is struck through against, `sizes` where it comes in more than one, a `rating` summarised from its reviews, and a server-computed `coinsMax` — the most coins one unit may take (⚙ `commerce.coinShareMax` of the price, 30% by default, at ⚙ `commerce.coinValuePaise` each, ₹0.25). The split is the server's: set the share to 1 and an order can be coins alone, to 0 and the shop is cash only, without a client release. Four shelves — **Clothes**, **Gym**, **Sports**, **Accessories** — with `subcategory`, `tags`, `featured`, `isDeal` and a `popularity` every order bumps.
+- **Renders:** `ShopHeader` (heart with a dot when anything is saved, cart with the basket's unit count, avatar), `ShopSearchBar` (→ `ShopSearch`), `ShopCoinsBanner` (→ `ShopBrowse` "All rewards"), `ShopCategoryFilter` (All / Deals / 4 categories — narrows the local shelf, featured first), `FeaturedRewardsRow` of `ShopItemCard`s (art with a raised heart, stars with count or "No reviews yet", `Price` — money, struck MRP, "% off" — "up to N coins", and **Add** for a one-size item / **Choose size** for a sized one, which opens the page instead), `DailyOffersCard` (→ deals), `TopCategoriesGrid` (server counts win), `ShopAssuranceStrip`, pull-to-refresh.
+- **Source today:** `shopStore` — the first 100 of `GET /shop/items`, `GET /shop/categories` and `GET /shop/config` (the till's rules, defaulted to the server's defaults before the first sync so a price split drawn on the first frame matches), refreshed on tab focus when older than 5 min. `cartStore` (`GET /cart`, written through on every change; the server's basket is always the truth because it carries the quote) and `wishlistStore` (ids on sign-in, items on demand; a heart flips at once and flips back on refusal) both hydrate with the session and reset on sign-out.
+- **Backend (built — `modules/commerce`):**
+  - Catalogue: `GET /shop/items?category=&subcategory=&deals=&featured=&inStock=&q=&sort=&minPrice=&maxPrice=&minRating=&cursor=&limit=` → `{ data, nextCursor, total }` (`q` word-prefix over title / description / tags / subcategory; `sort` ∈ `popular` · `rating` · `price_asc` · `price_desc` · `newest`; `minPrice`/`maxPrice` paise inclusive; `minRating` 1–5 — an unrated item never passes; `inStock` after the inventory join; opaque offset cursor), `GET /shop/categories`, `GET /shop/config`, `GET /shop/items/:id`.
+  - Reviews (R15): `GET /shop/items/:id/reviews?sort=recent|top&cursor=&limit=` → `{ data, nextCursor, summary { average, count, histogram[5] }, mine }`; `PUT /shop/items/:id/reviews/me` `{ rating 1–5, title?, body 10–1000 }` creates or replaces the reader's one review (rate-limited 10/h; `verified` decided from their orders at write time; `authorName` is a first name or "A VOKVE member"); `DELETE …/reviews/me`. Every write recomputes `ratingAverage`/`ratingCount` on the item, which is what lists sort and filter by.
+  - Wishlist: `GET /wishlist` (items in full, newest save first), `GET /wishlist/ids`, `PUT /wishlist/:itemId` (idempotent), `DELETE /wishlist/:itemId`.
+  - Cart (R14): `GET /cart` → `{ lines[{ item, quantity, size, addedAt }], count, quote }` (a line whose item went off sale is dropped and the drop written back; the quote is at the most coins allowed), `PUT /cart/lines` `{ itemId, quantity, size? }` (upsert by item + size; 0 removes; the same checks as a checkout — `SIZE_REQUIRED` / `SIZE_INVALID` 422 with `details.sizes`, `QUANTITY_LIMIT` 422 with `details.max`), `DELETE /cart/lines/:itemId?size=`, `DELETE /cart`. Each answers with the whole basket.
+  - Quote (R11–R13): `POST /checkout/quote` `{ lines, coins: number | 'max' }` → `Quote`, no side effects: `subtotal` = Σ price×qty, `discount` = Σ (mrp−price)×qty, `shipping` = 0 at or above ⚙ `freeShippingAbovePaise` else ⚙ `shippingFeePaise`, `coinsMax` = min(⌊subtotal × coinShareMax ÷ coinValuePaise⌋, whole coins in the wallet), `coinsApplied` clamped to it, `coinsValue` = coins × value, `payable` = total − coinsValue, `needsStepUp` when coinsApplied ≥ ⚙ `coins.stepUpThreshold`.
+  - Checkout (R2–R4, R12, O8): `POST /checkout` (`requireVerifiedContacts` → validate → `idempotent`) `{ lines | fromCart: true, addressId, coins, stepUpToken? }`. Gates in fix-order: `PURCHASES_RESTRICTED` 403, `ADDRESS_REQUIRED` 422, `CART_EMPTY` 422, `COINS_OVER_LIMIT` 422 with `details.coinsMax` (the app re-quotes rather than being charged a different sum), `OUT_OF_STOCK` 409, `STEP_UP_REQUIRED` / `STEP_UP_INVALID` 403 (the coins part at or above the threshold, or the watch tier). Then one transaction: `$gte` balance decrement + `purchase` ledger row for the coins part, `$gte` stock decrement per line, `popularity` bump, the order with an address snapshot, the basket lines cleared when `fromCart`, audit. An order that still owes money is born **`pending_payment`** with its coins and stock held for ⚙ `commerce.paymentWindowMinutes` (30); one the coins covered is `placed` at once. Answers `{ order, balance, payment: PaymentIntent | null }` — the gateway order is created *after* the transaction (a network call to someone else is not held inside a lock) and the order released if it fails.
+  - Payment (R12): `POST /orders/:id/pay` `{ providerPaymentId, signature? }` (`idempotent`) verifies the proof with the provider — `lib/payments.ts`: **`mock`** accepts any id and refunds instantly (dev/test; refused in production), **`razorpay`** creates the gateway order with our id as receipt and checks the checkout's HMAC-SHA256 `order_id|payment_id` signature (`PAYMENT_PROVIDER`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`) — then marks it paid and `placed`, and only then sends "Order placed". `ORDER_NOT_PENDING` / `PAYMENT_EXPIRED` 409, `PAYMENT_INVALID` 422. Paid once, paid: a second proof answers with the same order. The hourly job `expire-unpaid-orders` releases orders past their window (coins and stock back, "Order expired" notification).
+  - Cancel (R5, R6): `POST /orders/:id/cancel` while `pending_payment | placed | confirmed` — one transaction puts the coins back as a `refund` row and restores stock; money already taken is refunded through the gateway after (`payment.status: 'refunded'`; a refund the gateway refuses leaves the order cancelled with the payment still marked paid, logged for support). `GET /orders/count` counts everything but `pending_payment` (R7).
+  - Seeded catalogue + stock in `seed/data.ts` (prices in paise, sizes, list prices; `popularity` set only on insert). Tested in `test/commerce.test.ts` (catalogue filters, config, wishlist, cart, quote arithmetic, checkout → pay → cancel, coins-only orders, six concurrent buyers, step-up, tiers, expiry, reviews).
 
-#### Orders (root route `Orders`, from the wallet's tile, the shop's bag and the account's menu)
+#### Product (root route `ProductDetail { id }`, from any card, the wishlist, the cart)
+- **Renders:** back chevron, the item's heart and the cart icon with its badge; the art with its badge; category · subcategory; title; stars with count (→ `Reviews`) or "Be the first to review"; `Price` (large); "Pay up to N coins with coins (₹x off) · you have M"; `SizePicker` (nothing picked to begin with — a default size would be quietly wrong for most); `QuantityStepper` (1..⚙ `maxQuantityPerLine`); About + delivery line from `ShopConfig` + stock line; **Reviews** (average, histogram, the three most recent `ReviewCard`s with "Verified buyer", "See all N", "Write a review" / "Edit your review"); a sticky bar with **Add to cart** and **Buy now**.
+- **Source:** the shelf's copy at once, `GET /shop/items/:id` on arrival for fresh stock and rating (and the whole item for a deep link), `useReviews(id, 'recent', 3)`. Add to cart → `cartStore.add(item, size, quantity)` with a toast that offers the cart; Buy now → `Checkout { lines: [{ itemId, quantity, size }] }` — exactly this line, the basket untouched. A sized item with no size picked is stopped on the page with the reason under the sizes.
+
+#### Cart (root route `Cart`, from the shop's header, the product page, the add-to-cart toast)
+- **Renders:** `HistoryHeader` ("N items"), one card per line (art → product, title, size, unit price, a `QuantityStepper` whose minus at one is a bin, the line total, "Sold out — remove it to check out"), an **Estimate** card (`PriceBreakdown` of the server's quote at the most coins allowed, "Up to N coins can go towards this order"), a "My orders" link, and a sticky **Checkout · ₹payable** that a sold-out line disables; empty state → the shop.
+- **Source:** `cartStore` — `GET /cart` on open, `PUT /cart/lines` on every stepper change, the server's basket taken as the truth each time (the stepper holds still while a write is in flight).
+
+#### Checkout (root route `Checkout { fromCart: true } | { lines }`, from the cart and "Buy now")
+- **Renders:** `HistoryHeader`, `EmailVerificationBanner` ("place an order"), the delivery address card (Change → `Addresses { select }`, Add → `AddressForm`), the lines, a **Pay with coins** card (a switch with "Up to N coins (30% of the items) · you have M", a slider 0..coinsMax whose figure and "− ₹x" move at once, the step-up notice at or above the threshold), a **Summary** `PriceBreakdown`, and a sticky button: "Pay ₹x" / "Confirm & pay ₹x" (step-up ahead) / "Place order · N coins" (nothing to pay) / "Add a delivery address".
+- **Source:** `POST /checkout/quote` on open at `'max'` — the coins start at their ceiling, because a user who came to spend them should not have to ask — and again after a refusal that could have changed the figures (`OUT_OF_STOCK`, `COINS_OVER_LIMIT`, `INSUFFICIENT_COINS`). The slider only moves the coins within the quote; the money that follows is the one line the contract fixes (coins × value), so the figure shown is the figure charged.
+- **Placing (`checkoutStore.placeOrder`):** one `Idempotency-Key` per attempt. Outcomes: `placed` (order upserted, balance set, wallet + catalogue re-synced, the basket re-fetched when it was bought, toast, `replace → OrderDetail`) · `step_up_required` (the store asks `POST /auth/step-up`, parks the attempt, the OTP screen opens in "Confirm It's You" mode; the token that comes back resumes the **same attempt with the same key**; backing out drops it with "Checkout cancelled") · `address_required` (→ `AddressForm`) · `payment_pending` (the user closed the gateway sheet, or no gateway is wired in this build: the order is saved and can be paid from its page until the window closes) · `failed` (worded by code).
+- **Paying (`services/payments.ts` → `checkoutStore`):** the `PaymentIntent` the server issued is handed to `collectPayment` — the **mock** provider answers with a made-up proof at once; **razorpay** is the one function to fill in when the SDK is added (the snippet is in the file) and until then resolves `payment_pending` with a clear message — and the proof goes to `POST /orders/:id/pay` under the key `${orderId}:pay`.
+
+#### Wishlist (root route `Wishlist`, from the shop's header)
+- **Renders:** a two-column grid of the same `ShopItemCard`s (so a saved thing can be added, or unsaved from its own heart, without opening it), "N items saved", empty state → the shop.
+- **Source:** `wishlistStore.loadItems()` → `GET /wishlist` on open; the ids it carries mark every heart in the app.
+
+#### Reviews (root routes `Reviews { itemId }` and `WriteReview { itemId }`)
+- **Reviews:** `HistoryHeader` (the item's name), a summary card (average out of 5, stars, count, **Write a review** / **Edit yours**), Most recent / Highest rated, a paged list of `ReviewCard`s (`useReviews`, 10 a page, retry after a failed page), empty state → write the first.
+- **WriteReview:** `GET …/reviews?limit=1` on open — a review on file fills the form and turns it into an edit with a **Delete review** (confirmed in an `ActionSheet`); `RatingPicker` (Poor → Excellent), an optional title (≤ 80), the words (10–1000 with a live count); the form refuses to send without stars or with fewer than ten characters, `PUT …/reviews/me` on submit, the catalogue re-synced so the item's stars follow, back on success.
+
+#### Shop — Browse (root route `ShopBrowse { category?, deals?, title? }`, from a category tile, "View All", the deals card and the coins banner)
+- **Renders:** `HistoryHeader` (back chevron, balance, the shelf's name, "N rewards[ in stock]"), `ShopBrowseToolbar` (subcategory chips from the shelf's `ShopCategorySummary` — hidden for deals / all; **Sort** opening an `ActionSheet` of Popular / Top rated / Price: low to high / Price: high to low / Newest; **Filters · n** opening `ShopFilterSheet`; an "In stock only" switch), a two-column `FlashList` of `ShopItemCard`s, footer spinner / "Try again" for a failed page, an empty state that offers "Clear filters" when any are set, pull-to-refresh.
+- **Filters (`ShopFilterSheet`):** a price band (Under ₹300 / ₹300–₹600 / ₹600–₹1,000 / Over ₹1,000) or a min/max of the user's own in rupees (swapped if backwards), a star floor (3★ / 4★ / 4.5★ & up), Deals only, In stock only — edited as a draft and applied on "Show results" (or cleared at once), so the list rebuilds once rather than on every tap. Travel as `minPrice`/`maxPrice` (paise), `minRating`, `deals`, `inStock`.
+- **Source:** `useCatalogue(query)` — pages `GET /shop/items` 20 at a time by cursor; any change to category / subcategory / sort / filters is a new list (the old query's answer in flight is discarded); a page-2 request reads the query as it is *now*; after a failed page the end-reached hook stops asking and only "Try again" retries. A card opens `ProductDetail`.
+
+#### Shop — Search (root route `ShopSearch`, from the shop's search bar; fade transition)
+- **Renders:** back chevron + an auto-focused field ("Search tees, mats, rackets…", clear ✕), the four category chips (toggle to narrow the same search), "N results for \"q\"", a two-column results grid of `ShopItemCard`s, and — while the field is empty — **Recent searches** (tap to run again, ✕ to forget) or a hint card; "Nothing for \"q\"" worded differently when a category is narrowing it.
+- **Source:** the field's text becomes the request 250 ms after the last keystroke and only from 2 characters (`MIN_QUERY_LENGTH`), through `useCatalogue({ q, category }, isSearching)` — one request per settled query, never one per keystroke, and a late answer for a query the user has left is dropped. `shopSearchStore` (MMKV, on-device only, never sent) keeps the last 8 searches, newest first, case-folded de-dup; a search is remembered once its results land.
+
+#### Orders (root route `Orders`, from the wallet's tile, the cart's footer, the wallet's tile and the account's menu)
 - **Renders:** `HistoryHeader`, one `OrderCard` per order (emoji, title × qty, placed day, `OrderStatusPill`, total), pull-to-refresh, cursor paging, empty state → shop, footer row → Addresses. `OrderDetail` (`{ id }`): status copy + journey track (placed → confirmed → shipped → delivered), tracking ref, items, address snapshot, "Cancel order" while `cancellable` (asks first via `ActionSheet`; refund refreshes the wallet). A deep link with an empty cache fetches the one order.
 - **Source today:** `ordersStore` — `GET /orders` first page + `GET /orders/count`, hydrated on sign-in and on open when stale.
 
@@ -528,7 +567,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 | E | `POST /auth/sign-out` | → `{ ok }`; revokes this device's refresh token |
 | N | `POST /auth/email/send-otp` | (auth'd) → `VerificationChallenge { channel:'email' }`. Auto-sent after phone verification; this is the resend |
 | N | `POST /auth/otp/request` (public) | `{ identifier, purpose:'login' }` → `VerificationChallenge` — passwordless login on either channel |
-| N | `POST /auth/step-up` | `{ purpose:'redeem' }` → challenge; `verify-otp` then returns a short-lived `stepUpToken` required by `/shop/redeem` above ⚙ 1,000 coins |
+| N | `POST /auth/step-up` | → challenge; `verify-otp` then returns a short-lived `stepUpToken` required by `/checkout` when the coins part is at or above ⚙ 1,000 coins |
 | E | `POST /auth/refresh` (public) | `{ refreshToken }` → `AuthTokens` |
 | N | `POST /auth/social` | `{ provider, idToken, nonce? }` → `AuthResponse` |
 | N | `POST /auth/forgot-password` (public) | `{ identifier }` → `VerificationChallenge` — **a decoy for an unknown identifier** (stored, rate-limited, masked, never delivered, never echoed), so the shape and every later error are identical either way |
@@ -601,14 +640,21 @@ Every screen in the app, what it renders, where that data comes from today, what
 | N | `GET /leaderboard/history` | `{ bestRank, bestRankAchievedOn, topTenFinishes, rewardCoinsEarned, rewardsWon, periods[] }` |
 | N | `GET /leaderboard/reward-tiers` | |
 
-### 6.9 Shop and orders
+### 6.9 Shop, cart, checkout and orders
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /shop/items?category=&deals=&cursor=` | `inStock` from inventory |
+| N | `GET /shop/items?category=&subcategory=&deals=&featured=&inStock=&q=&sort=&minPrice=&maxPrice=&minRating=&cursor=&limit=` | `{ data, nextCursor, total }`; prices in paise with `mrp` and `coinsMax`; `q` word-prefix; `sort` popular / rating / price_asc / price_desc / newest |
+| N | `GET /shop/categories` | `ShopCategorySummary[]` — count, in-stock count, subcategories per shelf |
+| N | `GET /shop/config` | The till's rules: coin value, coin share, shipping, per-line cap, payment provider + key, step-up threshold |
 | N | `GET /shop/items/:id` | |
-| N | `POST /shop/redeem` | `{ itemId, quantity, addressId }` — one transaction (§8.5) |
-| N | `GET /orders?cursor=`, `GET /orders/:id` | |
-| N | `POST /orders/:id/cancel` | Refund row + inventory restore, only while `status ∈ {placed, confirmed}` |
+| N | `GET /shop/items/:id/reviews?sort=&cursor=&limit=` · `PUT /shop/items/:id/reviews/me` · `DELETE …/reviews/me` | One review per user per item; summary + histogram; `verified` from orders |
+| N | `GET /wishlist` · `GET /wishlist/ids` · `PUT /wishlist/:itemId` · `DELETE /wishlist/:itemId` | Saved-for-later; ids are what mark hearts |
+| N | `GET /cart` · `PUT /cart/lines` · `DELETE /cart/lines/:itemId?size=` · `DELETE /cart` | The basket with its quote; lines keyed by item + size |
+| N | `POST /checkout/quote` | `{ lines, coins }` → `Quote`, no side effects |
+| N | `POST /checkout` | `{ lines | fromCart, addressId, coins, stepUpToken? }` — one transaction (§8.5); born `pending_payment` when money is owed, `placed` when coins covered it; answers a `PaymentIntent` |
+| N | `POST /orders/:id/pay` | `{ providerPaymentId, signature? }` — the gateway's proof; mock accepts, Razorpay checks the HMAC |
+| N | `GET /orders?cursor=`, `GET /orders/:id`, `GET /orders/count` | Count excludes `pending_payment` |
+| N | `POST /orders/:id/cancel` | Coins refund row + inventory restore + gateway refund, while `status ∈ {pending_payment, placed, confirmed}` |
 
 ### 6.10 Hydration
 | | Method + path | Notes |
@@ -874,7 +920,7 @@ await session.withTransaction(async () => {
   const inv = await shop_inventory.findOneAndUpdate(
     { _id: itemId, onHand: { $gte: qty } }, { $inc: { onHand: -qty } }, { session });
   if (!inv) throw new ApiError(409, 'OUT_OF_STOCK');
-  const order = await orders.insertOne({ userId, status: 'placed', items, totalCoins: price, addressSnapshot }, { session });
+  const order = await orders.insertOne({ userId, status: payable > 0 ? 'pending_payment' : 'placed', items, coinsUsed: coins, payable, addressSnapshot }, { session });
   await coin_ledger.insertOne({ userId, amount: -price, source: 'purchase',
     referenceType: 'order', referenceId: order.insertedId, idempotencyKey }, { session });
   await audit_log.insertOne({ ... }, { session });
@@ -1000,7 +1046,7 @@ Beyond the screens. Each is small on its own; together they are what make the pr
 | 9 | **Push campaigns & segmentation** | Offers/announcements to a segment (country, tier, inactivity, version) with quiet-hours respect and per-category consent | `campaigns`, admin `POST /campaigns` | P4 |
 | 10 | **Weekly insights digest** | Push/email: steps vs last week, health score trend, streak, nutrition adherence | `weeklyDigest` job | P4 |
 | 11 | **Referral deep links & attribution** | Universal/App Links `vokve.app/r/CODE` → server redirect page → store → deferred attribution by `installId`/`vendorId` on first register | `GET /r/:code`, `referrals.attribution` | P5 |
-| 12 | **KYC-lite before shipping** | Verified email + phone + address + trust ≥ Normal + step-up above threshold | precondition on `/shop/redeem` | P5 |
+| 12 | **KYC-lite before shipping** | Verified email + phone + address + trust ≥ Normal + step-up above threshold | precondition on `/checkout` | P5 |
 | 13 | **Version gating & adoption** | `app_releases` statuses; `426` on blocked builds; adoption dashboard; fraud-by-build view | `GET /releases`, `version_stats` | P1 |
 | 14 | **Admin console API** | User 360 (devices, ledger, holds, flags, orders, samples), order ops, config editor, read-only impersonation for support | `apps/admin-api` | P3→P5 |
 | 15 | **Data lifecycle automation** | Retention jobs per collection, export bundles, deletion with legal hold, consent log | `retention` job, `users.flags.legalHold` | P1, P6 |
@@ -1080,12 +1126,27 @@ POST /v1/vitals
       "recordedAt":"2026-09-13T09:30:00Z","band":"normal" }
 ```
 
-**Insufficient coins**
+**Checkout — coins over the quote's ceiling, then a placed order awaiting payment**
 ```http
-POST /v1/shop/redeem
-{ "itemId":"band","quantity":1,"addressId":"adr_01HZ" }
-422 { "error":{ "code":"INSUFFICIENT_COINS","message":"You need 210 more coins for this reward.",
-                "details":{"required":450,"balance":240} } }
+POST /v1/checkout
+{ "lines":[{"itemId":"cap","quantity":1,"size":null}],"addressId":"adr_01HZ","coins":900 }
+422 { "error":{ "code":"COINS_OVER_LIMIT","message":"Up to 538 coins can go towards this order.",
+                "details":{"coinsMax":538,"requested":900} } }
+
+POST /v1/checkout
+{ "lines":[{"itemId":"cap","quantity":1,"size":null}],"addressId":"adr_01HZ","coins":300 }
+200 { "order":{ "id":"ord_01HZ…","status":"pending_payment","subtotal":44900,"discount":15000,"shipping":4900,
+                "total":49800,"coinsUsed":300,"coinsValue":7500,"payable":42300,
+                "payment":{"provider":"mock","status":"pending","amount":42300,"currency":"INR",
+                           "providerOrderId":"mockord_ord_01HZ…","paidAt":null,"expiresAt":"2026-09-18T10:15:00Z"}, … },
+      "balance":940,
+      "payment":{ "provider":"mock","orderId":"ord_01HZ…","providerOrderId":"mockord_ord_01HZ…",
+                  "amount":42300,"currency":"INR","keyId":null,"expiresAt":"2026-09-18T10:15:00Z" } }
+
+POST /v1/orders/ord_01HZ…/pay
+{ "providerPaymentId":"pay_ABC","signature":"…" }
+200 { "order":{ "id":"ord_01HZ…","status":"placed","payment":{"status":"paid","paidAt":"2026-09-18T09:47:12Z", …}, … },
+      "balance":940 }
 ```
 
 **Wallet**

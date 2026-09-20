@@ -25,6 +25,11 @@ afterEach(async () => {
   await Promise.all(collections.map(c => c.deleteMany({})));
   const { invalidateConfig } = await import('../src/config/remote.js');
   invalidateConfig();
+  // The in-memory KV holds rate-limit counters, idempotency replays and
+  // burned step-up tokens; each test starts with none of another's. In
+  // tests `quit()` only empties the map — the instance stays usable.
+  const { getKV } = await import('../src/db/redis.js');
+  await getKV().quit();
 });
 
 afterAll(async () => {

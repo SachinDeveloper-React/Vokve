@@ -1,5 +1,12 @@
 import type {
   Address,
+  Cart,
+  CheckoutResult,
+  PurchaseLine,
+  Quote,
+  Review,
+  ReviewPage,
+  ShopConfig,
   AppNotification,
   AuthResponse,
   CoinSource,
@@ -14,7 +21,9 @@ import type {
   Referral,
   ReferralProgram,
   ShopCategory,
+  ShopCategorySummary,
   ShopItem,
+  ShopSort,
   User,
   VerificationChallenge,
   Wallet,
@@ -22,10 +31,7 @@ import type {
   WorkoutTemplate,
 } from '../../types/models';
 import type { DeviceProfile } from '../device';
-import type {
-  CompleteProfilePayload,
-  SignUpPayload,
-} from '../../types/forms';
+import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
 
 /**
  * The shape of every API group, written once.
@@ -52,7 +58,11 @@ export interface AuthApi {
    */
   forgotPassword(identifier: string): Promise<VerificationChallenge>;
   /** Finishes it: the code proves the identifier, the password replaces the old one. */
-  resetPassword(verificationId: string, code: string, password: string): Promise<{ ok: boolean }>;
+  resetPassword(
+    verificationId: string,
+    code: string,
+    password: string,
+  ): Promise<{ ok: boolean }>;
   /**
    * Asks for a second factor before one sensitive action (RULES O8). The
    * code goes to the verified email; `verifyOtp` on it answers with a
@@ -73,13 +83,19 @@ export interface DeviceApi {
    * Registers this install and returns the server's id for it. Takes the
    * refresh token so the server can bind the session to the device.
    */
-  register(profile: DeviceProfile, refreshToken: string | null): Promise<DeviceRegistration>;
+  register(
+    profile: DeviceProfile,
+    refreshToken: string | null,
+  ): Promise<DeviceRegistration>;
   /**
    * The device's push token, as FCM hands it out — `null` withdraws it
    * (permission revoked, signing out). Where a push for this user is
    * actually sent to.
    */
-  setPushToken(deviceId: string, pushToken: string | null): Promise<{ ok: boolean }>;
+  setPushToken(
+    deviceId: string,
+    pushToken: string | null,
+  ): Promise<{ ok: boolean }>;
 }
 
 /**
@@ -144,20 +160,96 @@ export interface NotificationApi {
   markAllRead(): Promise<{ ok: boolean }>;
 }
 
+/**
+ * How the catalogue may be narrowed and ordered — one shape for the shelf,
+ * a category page, the deals page and search, because the server answers
+ * all four from one list (`GET /shop/items`).
+ */
 export interface ShopItemsQuery {
   category?: ShopCategory;
+  subcategory?: string;
   deals?: boolean;
+  featured?: boolean;
+  /** Free text over title, description, tags and subcategory; a prefix matches. */
+  q?: string;
+  sort?: ShopSort;
+  /** Only what can be bought right now. */
+  inStock?: boolean;
+  /** Paise, inclusive. */
+  minPrice?: number;
+  maxPrice?: number;
+  /** 1–5: items rated at least this. */
+  minRating?: number;
+  cursor?: string;
+  /** Rows per page. The server caps it at 100 and defaults to 20. */
+  limit?: number;
 }
 
-export interface RedeemPayload {
-  itemId: string;
-  quantity?: number;
+/** A catalogue page: the rows, the cursor for the next, and how many the whole query holds. */
+export interface CataloguePage extends Page<ShopItem> {
+  total: number;
+}
+
+export type ReviewSort = 'recent' | 'top';
+
+export interface ReviewsQuery {
+  sort?: ReviewSort;
+  cursor?: string;
+  limit?: number;
+}
+
+/** What the review form collects (RULES R15). */
+export interface ReviewInput {
+  rating: number;
+  title?: string | null;
+  body: string;
+}
+
+export interface ShopApi {
+  items(query?: ShopItemsQuery): Promise<CataloguePage>;
+  item(id: string): Promise<ShopItem>;
+  /** What each shelf holds: counts, in-stock counts, subcategories. */
+  categories(): Promise<ShopCategorySummary[]>;
+  /** The till's rules — coin value, coin share, shipping — so prices are drawn the way they are charged. */
+  config(): Promise<ShopConfig>;
+  reviews(itemId: string, query?: ReviewsQuery): Promise<ReviewPage>;
+  /** Creates or replaces the reader's own review of the item. */
+  writeReview(itemId: string, input: ReviewInput): Promise<Review>;
+  deleteReview(itemId: string): Promise<{ ok: boolean }>;
+}
+
+export interface WishlistApi {
+  /** The saved items, newest save first, with stock and price as they are now. */
+  list(): Promise<ShopItem[]>;
+  ids(): Promise<string[]>;
+  add(itemId: string): Promise<{ ok: boolean }>;
+  remove(itemId: string): Promise<{ ok: boolean }>;
+}
+
+export interface CartApi {
+  get(): Promise<Cart>;
+  /** Sets a line's quantity — add, change, or remove at zero — and answers with the whole basket. */
+  setLine(line: {
+    itemId: string;
+    quantity: number;
+    size?: string | null;
+  }): Promise<Cart>;
+  removeLine(itemId: string, size?: string | null): Promise<Cart>;
+  clear(): Promise<Cart>;
+}
+
+export interface CheckoutPayload {
+  /** The lines to buy, or `fromCart` for the basket. */
+  lines?: PurchaseLine[];
+  fromCart?: boolean;
   addressId: string;
+  /** The coins to put towards it; the quote said how many may. */
+  coins: number;
   /** The step-up proof, when the server asked for one. */
   stepUpToken?: string;
 }
 
-export interface RedeemOptions {
+export interface IdempotentOptions {
   /**
    * Sent as `Idempotency-Key` (BACKEND.md §3.6): the same key on a retry
    * replays the same order rather than placing a second one. One key per
@@ -166,15 +258,35 @@ export interface RedeemOptions {
   idempotencyKey: string;
 }
 
-export interface ShopApi {
-  items(query?: ShopItemsQuery): Promise<ShopItem[]>;
-  item(id: string): Promise<ShopItem>;
+/** Kept under its old name for the stores that only cancel. */
+export type RedeemOptions = IdempotentOptions;
+
+/** What the gateway handed back once the user paid. */
+export interface PaymentProof {
+  providerPaymentId: string;
+  signature?: string;
+}
+
+export interface CheckoutApi {
+  /** The till's arithmetic for some lines, with nothing placed. */
+  quote(lines: PurchaseLine[], coins: number | 'max'): Promise<Quote>;
   /**
-   * Spends coins on a reward (RULES R2–R4). The errors a screen branches on:
-   * `STEP_UP_REQUIRED` (403), `ADDRESS_REQUIRED` (422), `INSUFFICIENT_COINS`
-   * (422, `details.required` / `details.balance`), `OUT_OF_STOCK` (409).
+   * Places the order (RULES R2–R4, R11–R13). The errors a screen branches
+   * on: `STEP_UP_REQUIRED` (403), `ADDRESS_REQUIRED` (422),
+   * `COINS_OVER_LIMIT` (422, `details.coinsMax`), `INSUFFICIENT_COINS`
+   * (422), `OUT_OF_STOCK` (409), `SIZE_REQUIRED` / `QUANTITY_LIMIT` (422),
+   * `CART_EMPTY` (422).
    */
-  redeem(payload: RedeemPayload, options: RedeemOptions): Promise<{ order: Order; balance: number }>;
+  place(
+    payload: CheckoutPayload,
+    options: IdempotentOptions,
+  ): Promise<CheckoutResult>;
+  /** Hands the server the gateway's proof; `PAYMENT_EXPIRED` / `ORDER_NOT_PENDING` (409) when too late. */
+  pay(
+    orderId: string,
+    proof: PaymentProof,
+    options: IdempotentOptions,
+  ): Promise<{ order: Order; balance: number }>;
 }
 
 export interface OrderApi {
@@ -183,7 +295,10 @@ export interface OrderApi {
   /** How many orders the shop's header counts (RULES R7). */
   count(): Promise<number>;
   /** Idempotent: a second cancel returns the cancelled order unchanged. */
-  cancel(id: string, options: RedeemOptions): Promise<{ order: Order; balance: number }>;
+  cancel(
+    id: string,
+    options: IdempotentOptions,
+  ): Promise<{ order: Order; balance: number }>;
 }
 
 /** Everything but the id — what the form collects. */

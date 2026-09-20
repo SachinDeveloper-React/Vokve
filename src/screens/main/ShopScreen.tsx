@@ -4,7 +4,6 @@ import { useNavigation } from '@react-navigation/native';
 import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
 import { DailyOffersCard } from '../../components/shop/DailyOffersCard';
 import { FeaturedRewardsRow } from '../../components/shop/FeaturedRewardsRow';
-import { RedeemConfirmSheet } from '../../components/shop/RedeemConfirmSheet';
 import { ShopAssuranceStrip } from '../../components/shop/ShopAssuranceStrip';
 import {
   ShopCategoryFilter,
@@ -12,32 +11,20 @@ import {
 } from '../../components/shop/ShopCategoryFilter';
 import { ShopCoinsBanner } from '../../components/shop/ShopCoinsBanner';
 import { ShopHeader } from '../../components/shop/ShopHeader';
-import { ShopItemDetailSheet } from '../../components/shop/ShopItemDetailSheet';
+import { ShopSearchBar } from '../../components/shop/ShopSearchBar';
 import { TopCategoriesGrid } from '../../components/shop/TopCategoriesGrid';
 import { Screen } from '../../components/ui/Screen';
-import { useToast } from '../../components/feedback/Toast';
+import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
+import { useCartCount } from '../../stores/cartStore';
+import { useCoinBalance } from '../../stores/coinsStore';
 import {
-  useAddressesStore,
-  useDefaultAddress,
-} from '../../stores/addressesStore';
-import {
-  useAuthStatus,
-  useCurrentUser,
-  usePendingContactVerification,
-  useStepUpToken,
-} from '../../stores/authStore';
-import { useCoinBalance, useStepUpThreshold } from '../../stores/coinsStore';
-import { useOrderCount } from '../../stores/ordersStore';
-import {
-  useIsRedeeming,
-  usePendingRedeem,
+  useShopCategories,
   useShopItems,
   useShopStore,
-  type RedeemOutcome,
 } from '../../stores/shopStore';
+import { useWishlistCount } from '../../stores/wishlistStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { formatCoins } from '../../utils/format';
-import type { Address, ShopItem } from '../../types/models';
+import type { ShopCategory, ShopItem } from '../../types/models';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -45,50 +32,37 @@ const makeStyles = ({ spacing }: ThemeShape) =>
   });
 
 /**
- * The reward catalogue.
+ * The shop's front: a search field, the featured shelf, the four category
+ * tiles, the deals card — each a door to a page that pages from the server.
  *
- * A `ScrollView` of sections rather than a recycling list: the catalogue is a
- * fixed handful of items and only the featured shelf scrolls, sideways. Swap
- * the shelf to FlashList when the shop starts paging from the server.
+ * A `ScrollView` of sections rather than a recycling list: only the shelf
+ * scrolls, sideways, and it holds the featured rows of a catalogue the
+ * store already has. Everything longer than that lives on the browse
+ * screen, which is a list and knows how to load more.
  *
- * The filter row drives the featured shelf. Tapping a category tile lower
- * down sets the same filter, so the two are one control drawn twice — the
- * chips for a user who knows what they want, the tiles for one who is
- * browsing and wants to see how much is in each.
+ * The filter row narrows the shelf in place, for a user browsing here; the
+ * tiles lower down open the category's own page, for one who wants all of
+ * it. Both are the same four categories, drawn twice.
  */
 export const ShopScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
-  const toast = useToast();
   const user = useCurrentUser();
   const balance = useCoinBalance();
-  const stepUpThreshold = useStepUpThreshold();
   const isSignedIn = useAuthStatus() === 'authenticated';
 
   const shopItems = useShopItems();
+  const categories = useShopCategories();
   const isCatalogueSyncing = useShopStore(s => s.isSyncing);
   const catalogueSyncedAt = useShopStore(s => s.syncedAt);
   const hydrateCatalogue = useShopStore(s => s.hydrateFromServer);
   const refreshCatalogueIfStale = useShopStore(s => s.refreshIfStale);
-  const redeem = useShopStore(s => s.redeem);
-  const resumeAfterStepUp = useShopStore(s => s.resumeAfterStepUp);
-  const abandonRedeem = useShopStore(s => s.abandonRedeem);
-  const isRedeeming = useIsRedeeming();
-  const pendingRedeem = usePendingRedeem();
 
-  // The count is the server's — orders, not purchase rows (RULES R7).
-  const orderCount = useOrderCount();
-  const defaultAddress = useDefaultAddress();
-  const hydrateAddresses = useAddressesStore(s => s.hydrateFromServer);
-
-  const stepUpToken = useStepUpToken();
-  const pendingContact = usePendingContactVerification();
+  const cartCount = useCartCount();
+  const wishlistCount = useWishlistCount();
 
   const [filter, setFilter] = useState<ShopFilter>('all');
-  const [selected, setSelected] = useState<ShopItem | null>(null);
-  /** The reward the checkout sheet is open for, or null. */
-  const [checkout, setCheckout] = useState<ShopItem | null>(null);
 
   // The catalogue is stock-aware, so the tab refreshes on focus — stale-checked,
   // and only with a session, like the wallet.
@@ -100,119 +74,60 @@ export const ShopScreen = () => {
     return navigation.addListener('focus', refreshCatalogueIfStale);
   }, [isSignedIn, navigation, refreshCatalogueIfStale]);
 
+  // The shelf: featured items first, then the rest, under the chosen chip.
   const featured = useMemo(() => {
-    if (filter === 'all') return shopItems;
-    if (filter === 'deals') return shopItems.filter(item => item.isDeal);
-    return shopItems.filter(item => item.category === filter);
+    const pool =
+      filter === 'all'
+        ? shopItems
+        : filter === 'deals'
+        ? shopItems.filter(item => item.isDeal)
+        : shopItems.filter(item => item.category === filter);
+    return [...pool].sort((a, b) => Number(b.featured) - Number(a.featured));
   }, [filter, shopItems]);
-
-  const closeDetail = useCallback(() => setSelected(null), []);
-  const closeCheckout = useCallback(() => setCheckout(null), []);
-
-  // The detail sheet closes itself on Redeem; the checkout opens in its
-  // place, because React Native's modals do not stack.
-  const openCheckout = useCallback((item: ShopItem) => setCheckout(item), []);
-
-  /** What each outcome says to the user, in one place for the first try and the resume. */
-  const announce = useCallback(
-    (item: ShopItem, outcome: RedeemOutcome) => {
-      switch (outcome.status) {
-        case 'placed':
-          setCheckout(null);
-          toast.show({
-            title: 'Redeemed',
-            message: `${item.title} is on its way. ${formatCoins(
-              item.priceCoins,
-            )} coins deducted.`,
-            tone: 'success',
-          });
-          return;
-        case 'step_up_required':
-          // The OTP screen is opening over the shop; the sheet would sit
-          // underneath it and greet the user twice on the way back.
-          setCheckout(null);
-          return;
-        case 'address_required':
-          hydrateAddresses();
-          toast.show({
-            title: 'Add an address first',
-            message: 'Rewards are posted to you — tell us where.',
-            tone: 'warning',
-          });
-          return;
-        case 'failed':
-          toast.show({
-            title:
-              outcome.error.code === 'INSUFFICIENT_COINS'
-                ? 'Not enough coins'
-                : outcome.error.code === 'OUT_OF_STOCK'
-                ? 'Sold out'
-                : "Couldn't redeem",
-            message: outcome.error.message,
-            tone: outcome.error.code === 'OUT_OF_STOCK' ? 'warning' : 'error',
-          });
-          if (outcome.error.code === 'OUT_OF_STOCK') {
-            setCheckout(null);
-            hydrateCatalogue();
-          }
-      }
-    },
-    [hydrateAddresses, hydrateCatalogue, toast],
-  );
-
-  const confirmRedeem = useCallback(
-    async (item: ShopItem, address: Address) => {
-      const outcome = await redeem({ itemId: item.id, addressId: address.id });
-      announce(item, outcome);
-    },
-    [announce, redeem],
-  );
-
-  // The step-up came back with a token: finish what it interrupted.
-  useEffect(() => {
-    if (!stepUpToken || !pendingRedeem) {
-      return;
-    }
-    const item = shopItems.find(entry => entry.id === pendingRedeem.itemId);
-    resumeAfterStepUp().then(outcome => {
-      if (outcome && item) {
-        announce(item, outcome);
-      }
-    });
-  }, [announce, pendingRedeem, resumeAfterStepUp, shopItems, stepUpToken]);
-
-  // The OTP screen closed without a token — the user backed out. The attempt
-  // is dropped rather than left waiting for a code that will never come.
-  useEffect(() => {
-    if (pendingRedeem && !pendingContact && !stepUpToken) {
-      abandonRedeem();
-      toast.show({ title: 'Redemption cancelled', tone: 'info' });
-    }
-  }, [abandonRedeem, pendingContact, pendingRedeem, stepUpToken, toast]);
 
   const onOpenAccount = useCallback(
     () => navigation.navigate('Main', { screen: 'Account' }),
     [navigation],
   );
-  const onOpenOrders = useCallback(
-    () => navigation.navigate('Orders'),
+  const onOpenCart = useCallback(
+    () => navigation.navigate('Cart'),
     [navigation],
   );
-  // From the checkout: pick another address, or add the first. The sheet
-  // stays open underneath and reads the new default on return.
-  const onPressAddress = useCallback(() => {
-    if (defaultAddress) {
-      navigation.navigate('Addresses', { select: true });
+  const onOpenWishlist = useCallback(
+    () => navigation.navigate('Wishlist'),
+    [navigation],
+  );
+  const onOpenItem = useCallback(
+    (item: ShopItem) => navigation.navigate('ProductDetail', { id: item.id }),
+    [navigation],
+  );
+  const onOpenSearch = useCallback(
+    () => navigation.navigate('ShopSearch'),
+    [navigation],
+  );
+  const onOpenAll = useCallback(
+    () => navigation.navigate('ShopBrowse', { title: 'All rewards' }),
+    [navigation],
+  );
+  const onOpenDeals = useCallback(
+    () => navigation.navigate('ShopBrowse', { deals: true }),
+    [navigation],
+  );
+  const onOpenCategory = useCallback(
+    (category: ShopCategory) => navigation.navigate('ShopBrowse', { category }),
+    [navigation],
+  );
+
+  // "View All" on the shelf opens whatever the chips are showing, in full.
+  const onViewAllShelf = useCallback(() => {
+    if (filter === 'all') {
+      onOpenAll();
+    } else if (filter === 'deals') {
+      onOpenDeals();
     } else {
-      navigation.navigate('AddressForm');
+      onOpenCategory(filter);
     }
-  }, [defaultAddress, navigation]);
-
-  const showAll = useCallback(() => setFilter('all'), []);
-
-  // The daily offers page has no screen yet. Wired as a no-op rather than
-  // left off, so the card keeps the shape it will ship with.
-  const notImplemented = useCallback(() => {}, []);
+  }, [filter, onOpenAll, onOpenCategory, onOpenDeals]);
 
   return (
     <Screen edges={['top']}>
@@ -231,46 +146,36 @@ export const ShopScreen = () => {
         <ShopHeader
           name={user?.name}
           avatarUri={user?.avatarUrl}
-          orderCount={orderCount}
-          onPressOrders={onOpenOrders}
+          cartCount={cartCount}
+          wishlistCount={wishlistCount}
+          onPressCart={onOpenCart}
+          onPressWishlist={onOpenWishlist}
           onPressAvatar={onOpenAccount}
         />
 
-        <EmailVerificationBanner reason="redeem rewards" />
-        <ShopCoinsBanner balance={balance} onPressBestRewards={showAll} />
+        <ShopSearchBar onPress={onOpenSearch} />
+
+        <EmailVerificationBanner reason="place orders" />
+        <ShopCoinsBanner balance={balance} onPressBestRewards={onOpenAll} />
 
         <ShopCategoryFilter value={filter} onChange={setFilter} />
 
         <FeaturedRewardsRow
           items={featured}
-          onPressItem={setSelected}
-          onPressViewAll={showAll}
+          onPressItem={onOpenItem}
+          onPressViewAll={onViewAllShelf}
         />
 
-        <DailyOffersCard onPressDailyOffers={notImplemented} />
+        <DailyOffersCard onPressDailyOffers={onOpenDeals} />
 
-        <TopCategoriesGrid items={shopItems} onPressCategory={setFilter} />
+        <TopCategoriesGrid
+          items={shopItems}
+          summaries={categories}
+          onPressCategory={onOpenCategory}
+        />
 
         <ShopAssuranceStrip />
       </ScrollView>
-
-      <ShopItemDetailSheet
-        item={selected}
-        balance={balance}
-        onRedeem={openCheckout}
-        onClose={closeDetail}
-      />
-
-      <RedeemConfirmSheet
-        item={checkout}
-        balance={balance}
-        address={defaultAddress}
-        stepUpThreshold={stepUpThreshold}
-        isRedeeming={isRedeeming}
-        onConfirm={confirmRedeem}
-        onPressAddress={onPressAddress}
-        onClose={closeCheckout}
-      />
     </Screen>
   );
 };

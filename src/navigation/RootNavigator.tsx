@@ -27,6 +27,14 @@ import { NutritionScreen } from '../screens/main/NutritionScreen';
 import { OrderDetailScreen } from '../screens/main/OrderDetailScreen';
 import { OrdersScreen } from '../screens/main/OrdersScreen';
 import { ReferralScreen } from '../screens/main/ReferralScreen';
+import { CartScreen } from '../screens/main/CartScreen';
+import { CheckoutScreen } from '../screens/main/CheckoutScreen';
+import { ProductDetailScreen } from '../screens/main/ProductDetailScreen';
+import { ReviewsScreen } from '../screens/main/ReviewsScreen';
+import { ShopBrowseScreen } from '../screens/main/ShopBrowseScreen';
+import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
+import { WishlistScreen } from '../screens/main/WishlistScreen';
+import { WriteReviewScreen } from '../screens/main/WriteReviewScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
 import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
@@ -187,6 +195,46 @@ export const RootNavigator = () => {
               name="AddressForm"
               component={AddressFormScreen}
               options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ShopBrowse"
+              component={ShopBrowseScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ShopSearch"
+              component={ShopSearchScreen}
+              options={{ animation: 'fade' }}
+            />
+            <Stack.Screen
+              name="ProductDetail"
+              component={ProductDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Cart"
+              component={CartScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Checkout"
+              component={CheckoutScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Wishlist"
+              component={WishlistScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Reviews"
+              component={ReviewsScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="WriteReview"
+              component={WriteReviewScreen}
+              options={{ animation: 'slide_from_bottom' }}
             />
             <Stack.Screen
               name="BloodPressure"

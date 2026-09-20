@@ -35,6 +35,16 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().optional(),
 
+  /**
+   * Who collects the money side of an order. `mock` captures every payment
+   * at once (dev and test); `razorpay` creates a gateway order and verifies
+   * the checkout signature, and needs both keys. Refused in production
+   * unless it is a real provider.
+   */
+  PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+
   /** SMS channel (OTP). Nothing implemented yet (D-31); the name reserves the slot. */
   SMS_PROVIDER: z.enum(['msg91', 'twilio']).optional(),
 });
@@ -49,4 +59,10 @@ if (isProduction && env.OTP_DEV_ECHO) {
 }
 if (isProduction && env.JWT_SECRET === 'dev-only-secret-change-me-please') {
   throw new Error('JWT_SECRET must be set in production');
+}
+if (isProduction && env.PAYMENT_PROVIDER === 'mock') {
+  throw new Error('PAYMENT_PROVIDER must be a real gateway in production');
+}
+if (env.PAYMENT_PROVIDER === 'razorpay' && (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET)) {
+  throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENT_PROVIDER=razorpay');
 }

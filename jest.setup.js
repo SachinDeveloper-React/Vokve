@@ -51,3 +51,10 @@ jest.mock('@react-native-firebase/messaging', () => ({
   requestPermission: jest.fn().mockResolvedValue(1),
   onTokenRefresh: jest.fn(() => jest.fn()),
 }));
+
+// The slider is a native view; the checkout only needs something that
+// renders and forwards the props a test reads (`value`, `onValueChange`).
+jest.mock('@react-native-community/slider', () => ({
+  __esModule: true,
+  default: 'Slider',
+}));

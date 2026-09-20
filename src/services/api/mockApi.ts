@@ -19,9 +19,16 @@ import {
   type Address,
   type AppNotification,
   type AuthResponse,
+  type Cart,
+  type CheckoutResult,
   type NotificationPreferences,
   type Order,
+  type PurchaseLine,
+  type Quote,
   type ReferralProgram,
+  type Review,
+  type ShopConfig,
+  type ShopItem,
   type CoinTransaction,
   type DailyActivity,
   type User,
@@ -36,6 +43,8 @@ import type {
   ActivityApi,
   AddressApi,
   AuthApi,
+  CartApi,
+  CheckoutApi,
   DeviceApi,
   NotificationApi,
   NotificationPreferencesApi,
@@ -44,6 +53,7 @@ import type {
   ShopApi,
   UserApi,
   WalletApi,
+  WishlistApi,
   WorkoutApi,
 } from './contracts';
 
@@ -434,6 +444,9 @@ export const mockAuthApi: AuthApi = {
     mockOrders = [];
     mockAddresses = [];
     mockBalance = null;
+    mockCart = [];
+    mockWishlist = [];
+    mockReviews = [];
     mockApplied = null;
     return { ok: true };
   },
@@ -752,16 +765,34 @@ export const mockNotificationPreferencesApi: NotificationPreferencesApi = {
 
 // ─── Commerce ──────────────────────────────────────────────────────────────
 
-/** The price at and above which the mock, like the server, asks for a step-up. */
-export const MOCK_STEP_UP_THRESHOLD = 1000;
+/** The till's rules the mock charges by — the server's defaults, so the sums agree with the backend tests. */
+export const MOCK_SHOP_CONFIG: ShopConfig = {
+  currency: 'INR',
+  coinValuePaise: 25,
+  coinShareMax: 0.3,
+  shippingFeePaise: 4900,
+  freeShippingAbovePaise: 99900,
+  maxQuantityPerLine: 5,
+  paymentProvider: 'mock',
+  paymentKeyId: null,
+  stepUpThreshold: 1000,
+};
+
+/** The coins at and above which the mock, like the server, asks for a step-up. */
+export const MOCK_STEP_UP_THRESHOLD = MOCK_SHOP_CONFIG.stepUpThreshold;
+/** How long the mock holds an unpaid order. */
+const MOCK_PAYMENT_WINDOW_MS = 30 * 60_000;
 
 let mockStock = new Map(
   shopItems.map(item => [item.id, item.inStock ? 25 : 0]),
 );
 let mockOrders: Order[] = [];
 let mockAddresses: Address[] = [];
+let mockCart: { itemId: string; quantity: number; size: string | null; addedAt: string }[] = [];
+let mockWishlist: { itemId: string; addedAt: string }[] = [];
+let mockReviews: (Review & { userId: string })[] = [];
 /**
- * The mock's own wallet balance for redemptions, seeded from the ledger the
+ * The mock's own wallet balance for purchases, seeded from the ledger the
  * first time it is needed. Null until then so a sign-out resets it with the
  * rest, and so the figure the wallet shows and the one the shop spends
  * against start out equal.
@@ -777,8 +808,28 @@ function currentBalance(): number {
   return mockBalance;
 }
 
-function withStock(item: (typeof shopItems)[number]) {
-  return { ...item, inStock: (mockStock.get(item.id) ?? 0) > 0 };
+/** A review as the app sees it: the row without the account that wrote it. */
+function stripUser(review: Review & { userId: string }): Review {
+  const visible: Review & { userId?: string } = { ...review };
+  delete visible.userId;
+  return visible;
+}
+
+/** The star average and count the item carries, from the mock's reviews. */
+function ratingOf(itemId: string): ShopItem['rating'] {
+  const mine = mockReviews.filter(r => r.itemId === itemId);
+  if (mine.length === 0) return { average: 0, count: 0 };
+  const sum = mine.reduce((total, r) => total + r.rating, 0);
+  return { average: Math.round((sum / mine.length) * 10) / 10, count: mine.length };
+}
+
+function withStock(item: (typeof shopItems)[number]): ShopItem {
+  return {
+    ...item,
+    inStock: (mockStock.get(item.id) ?? 0) > 0,
+    coinsMax: Math.floor((item.price * MOCK_SHOP_CONFIG.coinShareMax) / MOCK_SHOP_CONFIG.coinValuePaise),
+    rating: ratingOf(item.id),
+  };
 }
 
 const snapshotOf = (address: Address): Order['address'] => ({
@@ -793,107 +844,348 @@ const snapshotOf = (address: Address): Order['address'] => ({
   country: address.country,
 });
 
+const notFound = (what: string) => new ApiError('not_found', `${what} could not be found.`, 404);
+
+/**
+ * The server's search, sort and paging, on the seed. The seed is already in
+ * "popular" order; price and newest sorts reorder it, and a cursor is where
+ * the last page ended — the same opaque `offset:` the server hands out.
+ */
 export const mockShopApi: ShopApi = {
   async items(query = {}) {
     await delay();
-    return shopItems
+    const words = (query.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = (item: (typeof shopItems)[number]) =>
+      words.every(word =>
+        [item.title, item.description, item.subcategory ?? '', ...item.tags]
+          .join(' ')
+          .toLowerCase()
+          .includes(word),
+      );
+    let rows = shopItems
       .filter(item => !query.category || item.category === query.category)
+      .filter(item => !query.subcategory || item.subcategory === query.subcategory)
       .filter(item => !query.deals || item.isDeal)
-      .map(withStock);
+      .filter(item => !query.featured || item.featured)
+      .filter(item => query.minPrice === undefined || item.price >= query.minPrice)
+      .filter(item => query.maxPrice === undefined || item.price <= query.maxPrice)
+      .filter(matches)
+      .map(withStock)
+      .filter(item => query.minRating === undefined || item.rating.average >= query.minRating)
+      .filter(item => !query.inStock || item.inStock);
+    if (query.sort === 'price_asc') rows = [...rows].sort((a, b) => a.price - b.price);
+    if (query.sort === 'price_desc') rows = [...rows].sort((a, b) => b.price - a.price);
+    if (query.sort === 'newest') rows = [...rows].reverse();
+    if (query.sort === 'rating')
+      rows = [...rows].sort((a, b) => b.rating.average - a.rating.average || b.rating.count - a.rating.count);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const offset = query.cursor ? Number(query.cursor.replace(/^offset:/, '')) || 0 : 0;
+    const data = rows.slice(offset, offset + limit);
+    const end = offset + data.length;
+    return { data, nextCursor: end < rows.length ? `offset:${end}` : null, total: rows.length };
+  },
+  async categories() {
+    await delay();
+    return (['clothing', 'gym', 'sports', 'accessories'] as const).map(category => {
+      const mine = shopItems.filter(item => item.category === category);
+      const subcategories: { name: string; count: number }[] = [];
+      for (const item of mine) {
+        if (!item.subcategory) continue;
+        const found = subcategories.find(sc => sc.name === item.subcategory);
+        if (found) found.count += 1;
+        else subcategories.push({ name: item.subcategory, count: 1 });
+      }
+      return {
+        category,
+        count: mine.length,
+        inStock: mine.filter(item => (mockStock.get(item.id) ?? 0) > 0).length,
+        subcategories,
+      };
+    });
+  },
+  async config() {
+    await delay();
+    return MOCK_SHOP_CONFIG;
   },
   async item(id) {
     await delay();
     const item = shopItems.find(entry => entry.id === id);
-    if (!item)
-      throw new ApiError('not_found', 'That reward could not be found.', 404);
+    if (!item) throw notFound('That item');
     return withStock(item);
   },
-  async redeem(payload) {
+  async reviews(itemId, query = {}) {
     await delay();
-    if (!currentUser) {
-      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    if (!shopItems.some(entry => entry.id === itemId)) throw notFound('That item');
+    const readerId = currentUser?.id ?? null;
+    const all = mockReviews
+      .filter(r => r.itemId === itemId)
+      .sort((a, b) =>
+        query.sort === 'top'
+          ? b.rating - a.rating || b.createdAt.localeCompare(a.createdAt)
+          : b.createdAt.localeCompare(a.createdAt),
+      )
+      .map(({ userId, ...r }) => ({ ...r, mine: userId === readerId }));
+    const histogram = [0, 0, 0, 0, 0];
+    for (const r of all) histogram[r.rating - 1] += 1;
+    const limit = query.limit ?? 10;
+    const offset = query.cursor ? Number(query.cursor.replace(/^offset:/, '')) || 0 : 0;
+    const data = all.slice(offset, offset + limit);
+    return {
+      data,
+      nextCursor: offset + data.length < all.length ? `offset:${offset + data.length}` : null,
+      summary: { ...ratingOf(itemId), histogram },
+      mine: all.find(r => r.mine) ?? null,
+    };
+  },
+  async writeReview(itemId, input) {
+    await delay();
+    if (!currentUser) throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    if (!shopItems.some(entry => entry.id === itemId)) throw notFound('That item');
+    if (input.body.trim().length < 10) {
+      throw new ApiError('validation', 'Say a little more — at least ten characters.', 422, { body: 'Say a little more — at least ten characters.' });
     }
-    const item = shopItems.find(entry => entry.id === payload.itemId);
-    if (!item)
-      throw new ApiError('not_found', 'That reward could not be found.', 404);
-    const quantity = payload.quantity ?? 1;
-    const total = item.priceCoins * quantity;
+    const now = new Date().toISOString();
+    const existing = mockReviews.find(r => r.itemId === itemId && r.userId === currentUser!.id);
+    const bought = mockOrders.some(o => o.status !== 'cancelled' && o.status !== 'pending_payment' && o.items.some(l => l.itemId === itemId));
+    const review: Review & { userId: string } = {
+      id: existing?.id ?? nextId('rev'),
+      itemId,
+      userId: currentUser.id,
+      rating: input.rating,
+      title: input.title?.trim() || null,
+      body: input.body.trim(),
+      authorName: currentUser.name?.trim().split(/\s+/)[0] || 'A VOKVE member',
+      verified: bought,
+      mine: true,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    mockReviews = [review, ...mockReviews.filter(r => r.id !== review.id)];
+    return stripUser(review);
+  },
+  async deleteReview(itemId) {
+    await delay();
+    const before = mockReviews.length;
+    mockReviews = mockReviews.filter(r => !(r.itemId === itemId && r.userId === currentUser?.id));
+    if (mockReviews.length === before) throw notFound('Your review');
+    return { ok: true };
+  },
+};
 
+export const mockWishlistApi: WishlistApi = {
+  async list() {
+    await delay();
+    return mockWishlist
+      .map(entry => shopItems.find(item => item.id === entry.itemId))
+      .filter((item): item is (typeof shopItems)[number] => item !== undefined)
+      .map(withStock);
+  },
+  async ids() {
+    await delay();
+    return mockWishlist.map(entry => entry.itemId);
+  },
+  async add(itemId) {
+    await delay();
+    if (!shopItems.some(entry => entry.id === itemId)) throw notFound('That item');
+    if (!mockWishlist.some(entry => entry.itemId === itemId)) {
+      mockWishlist = [{ itemId, addedAt: new Date().toISOString() }, ...mockWishlist];
+    }
+    return { ok: true };
+  },
+  async remove(itemId) {
+    await delay();
+    mockWishlist = mockWishlist.filter(entry => entry.itemId !== itemId);
+    return { ok: true };
+  },
+};
+
+/** The server's line checks: the item, its size, the per-line cap. */
+function priceLine(line: PurchaseLine): { item: ShopItem; quantity: number; size: string | null } {
+  const raw = shopItems.find(entry => entry.id === line.itemId);
+  if (!raw) throw new ApiError('not_found', 'One of the items is no longer available.', 404, { itemId: line.itemId }, 'ITEM_UNAVAILABLE');
+  const item = withStock(raw);
+  let size: string | null = null;
+  if (item.sizes.length > 0) {
+    if (!line.size) throw new ApiError('validation', `Pick a size for ${item.title}.`, 422, { itemId: item.id, sizes: item.sizes }, 'SIZE_REQUIRED');
+    if (!item.sizes.includes(line.size)) throw new ApiError('validation', `${item.title} does not come in ${line.size}.`, 422, { itemId: item.id, sizes: item.sizes }, 'SIZE_INVALID');
+    size = line.size;
+  }
+  if (line.quantity > MOCK_SHOP_CONFIG.maxQuantityPerLine) {
+    throw new ApiError('validation', `You can order up to ${MOCK_SHOP_CONFIG.maxQuantityPerLine} of ${item.title} at a time.`, 422, { itemId: item.id, max: MOCK_SHOP_CONFIG.maxQuantityPerLine }, 'QUANTITY_LIMIT');
+  }
+  return { item, quantity: line.quantity, size };
+}
+
+/** The server's quote arithmetic (RULES R11–R13), on the mock's balance. */
+function quoteFor(lines: PurchaseLine[], coins: number | 'max'): Quote {
+  const priced = lines.map(priceLine);
+  const cfg = MOCK_SHOP_CONFIG;
+  const subtotal = priced.reduce((sum, l) => sum + l.item.price * l.quantity, 0);
+  const mrpTotal = priced.reduce((sum, l) => sum + (l.item.mrp ?? l.item.price) * l.quantity, 0);
+  const shipping =
+    priced.length === 0 || (cfg.freeShippingAbovePaise !== null && subtotal >= cfg.freeShippingAbovePaise)
+      ? 0
+      : cfg.shippingFeePaise;
+  const total = subtotal + shipping;
+  const coinsMax = Math.max(0, Math.min(Math.floor((subtotal * cfg.coinShareMax) / cfg.coinValuePaise), Math.floor(currentBalance())));
+  const coinsApplied = coins === 'max' ? coinsMax : Math.max(0, Math.min(Math.floor(coins), coinsMax));
+  const coinsValue = coinsApplied * cfg.coinValuePaise;
+  return {
+    currency: cfg.currency,
+    lines: priced.map(l => ({
+      itemId: l.item.id,
+      title: l.item.title,
+      emoji: l.item.emoji,
+      quantity: l.quantity,
+      size: l.size,
+      price: l.item.price,
+      mrp: l.item.mrp,
+      lineTotal: l.item.price * l.quantity,
+      inStock: (mockStock.get(l.item.id) ?? 0) >= l.quantity,
+    })),
+    mrpTotal,
+    discount: mrpTotal - subtotal,
+    subtotal,
+    shipping,
+    total,
+    coinValuePaise: cfg.coinValuePaise,
+    coinsMax,
+    coinsApplied,
+    coinsValue,
+    payable: total - coinsValue,
+    needsStepUp: coinsApplied > 0 && coinsApplied >= cfg.stepUpThreshold,
+  };
+}
+
+function cartView(): Cart {
+  mockCart = mockCart.filter(line => shopItems.some(item => item.id === line.itemId));
+  return {
+    lines: mockCart.map(line => ({
+      item: withStock(shopItems.find(item => item.id === line.itemId)!),
+      quantity: line.quantity,
+      size: line.size,
+      addedAt: line.addedAt,
+    })),
+    count: mockCart.reduce((sum, line) => sum + line.quantity, 0),
+    quote: quoteFor(mockCart.map(l => ({ itemId: l.itemId, quantity: l.quantity, size: l.size })), 'max'),
+  };
+}
+
+export const mockCartApi: CartApi = {
+  async get() {
+    await delay();
+    return cartView();
+  },
+  async setLine(line) {
+    await delay();
+    const size = line.size ?? null;
+    if (line.quantity > 0) {
+      const priced = priceLine({ itemId: line.itemId, quantity: line.quantity, size });
+      const index = mockCart.findIndex(l => l.itemId === priced.item.id && l.size === priced.size);
+      if (index >= 0) mockCart[index] = { ...mockCart[index], quantity: priced.quantity };
+      else mockCart = [...mockCart, { itemId: priced.item.id, quantity: priced.quantity, size: priced.size, addedAt: new Date().toISOString() }];
+    } else {
+      mockCart = mockCart.filter(l => !(l.itemId === line.itemId && l.size === size));
+    }
+    return cartView();
+  },
+  async removeLine(itemId, size) {
+    return mockCartApi.setLine({ itemId, quantity: 0, size: size ?? null });
+  },
+  async clear() {
+    await delay();
+    mockCart = [];
+    return cartView();
+  },
+};
+
+export const mockCheckoutApi: CheckoutApi = {
+  async quote(lines, coins) {
+    await delay();
+    return quoteFor(lines, coins);
+  },
+  async place(payload) {
+    await delay();
+    if (!currentUser) throw new ApiError('unauthorized', 'Your session has expired.', 401);
     const address = mockAddresses.find(entry => entry.id === payload.addressId);
     if (!address) {
-      throw new ApiError(
-        'validation',
-        'Add a shipping address to redeem rewards.',
-        422,
-        { addressId: payload.addressId },
-        'ADDRESS_REQUIRED',
-      );
+      throw new ApiError('validation', 'Add a delivery address to place an order.', 422, { addressId: payload.addressId }, 'ADDRESS_REQUIRED');
     }
-    if (total >= MOCK_STEP_UP_THRESHOLD) {
+    const lines = payload.fromCart
+      ? mockCart.map(l => ({ itemId: l.itemId, quantity: l.quantity, size: l.size }))
+      : payload.lines ?? [];
+    if (lines.length === 0) throw new ApiError('validation', 'There is nothing to order yet.', 422, null, 'CART_EMPTY');
+    const q = quoteFor(lines, payload.coins);
+    if (payload.coins > q.coinsMax) {
+      throw new ApiError('validation', `Up to ${q.coinsMax} coins can go towards this order.`, 422, { coinsMax: q.coinsMax, requested: payload.coins }, 'COINS_OVER_LIMIT');
+    }
+    const soldOut = q.lines.find(l => !l.inStock);
+    if (soldOut) throw new ApiError('unknown', `${soldOut.title} is sold out.`, 409, { itemId: soldOut.itemId }, 'OUT_OF_STOCK');
+    if (q.needsStepUp) {
       if (!payload.stepUpToken) {
-        throw new ApiError(
-          'forbidden',
-          'Confirm it is you to redeem this reward.',
-          403,
-          null,
-          'STEP_UP_REQUIRED',
-        );
+        throw new ApiError('forbidden', 'Confirm it is you to use this many coins.', 403, null, 'STEP_UP_REQUIRED');
       }
       if (!mockStepUps.delete(payload.stepUpToken)) {
-        throw new ApiError(
-          'forbidden',
-          'That confirmation has expired. Please confirm again.',
-          403,
-          null,
-          'STEP_UP_INVALID',
-        );
+        throw new ApiError('forbidden', 'That confirmation has expired. Please confirm again.', 403, null, 'STEP_UP_INVALID');
       }
     }
-    const balance = currentBalance();
-    if (balance < total) {
-      throw new ApiError(
-        'validation',
-        `You need ${total - balance} more coins for this.`,
-        422,
-        { required: total, balance },
-        'INSUFFICIENT_COINS',
-      );
-    }
-    const onHand = mockStock.get(item.id) ?? 0;
-    if (onHand < quantity) {
-      throw new ApiError(
-        'unknown',
-        `${item.title} is sold out.`,
-        409,
-        { itemId: item.id },
-        'OUT_OF_STOCK',
-      );
-    }
 
-    mockStock.set(item.id, onHand - quantity);
-    mockBalance = balance - total;
-    const now = new Date().toISOString();
+    for (const line of q.lines) mockStock.set(line.itemId, (mockStock.get(line.itemId) ?? 0) - line.quantity);
+    mockBalance = currentBalance() - q.coinsApplied;
+    if (payload.fromCart) mockCart = [];
+    const now = new Date();
+    const pending = q.payable > 0;
+    const orderId = nextId('ord');
     const order: Order = {
-      id: nextId('ord'),
-      status: 'placed',
-      items: [
-        {
-          itemId: item.id,
-          title: item.title,
-          emoji: item.emoji,
-          quantity,
-          priceCoins: item.priceCoins,
-        },
-      ],
-      totalCoins: total,
+      id: orderId,
+      status: pending ? 'pending_payment' : 'placed',
+      items: q.lines.map(l => ({ itemId: l.itemId, title: l.title, emoji: l.emoji, quantity: l.quantity, size: l.size, price: l.price, mrp: l.mrp })),
+      currency: q.currency,
+      subtotal: q.subtotal,
+      discount: q.discount,
+      shipping: q.shipping,
+      total: q.total,
+      coinsUsed: q.coinsApplied,
+      coinsValue: q.coinsValue,
+      payable: q.payable,
+      payment: {
+        provider: pending ? 'mock' : null,
+        status: pending ? 'pending' : 'not_required',
+        amount: q.payable,
+        currency: q.currency,
+        providerOrderId: pending ? `mockord_${orderId}` : null,
+        paidAt: null,
+        expiresAt: pending ? new Date(now.getTime() + MOCK_PAYMENT_WINDOW_MS).toISOString() : null,
+      },
       address: snapshotOf(address),
-      placedAt: now,
-      updatedAt: now,
+      placedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
       trackingRef: null,
       cancellable: true,
     };
     mockOrders = [order, ...mockOrders];
-    return { order, balance: mockBalance };
+    const result: CheckoutResult = {
+      order,
+      balance: mockBalance,
+      payment: pending
+        ? { provider: 'mock', orderId, providerOrderId: `mockord_${orderId}`, amount: q.payable, currency: q.currency, keyId: null, expiresAt: order.payment.expiresAt! }
+        : null,
+    };
+    return result;
+  },
+  async pay(orderId, proof) {
+    await delay();
+    const order = mockOrders.find(entry => entry.id === orderId);
+    if (!order) throw notFound('That order');
+    if (order.payment.status === 'paid') return { order, balance: currentBalance() };
+    if (order.status !== 'pending_payment') {
+      throw new ApiError('unknown', `This order is ${order.status.replace('_', ' ')} and has no payment to take.`, 409, { status: order.status }, 'ORDER_NOT_PENDING');
+    }
+    if (!proof.providerPaymentId) throw new ApiError('validation', 'That payment could not be verified.', 422, null, 'PAYMENT_INVALID');
+    const now = new Date().toISOString();
+    const paid: Order = { ...order, status: 'placed', updatedAt: now, payment: { ...order.payment, status: 'paid', paidAt: now } };
+    mockOrders = mockOrders.map(entry => (entry.id === orderId ? paid : entry));
+    return { order: paid, balance: currentBalance() };
   },
 };
 
@@ -910,19 +1202,17 @@ export const mockOrderApi: OrderApi = {
   async get(id) {
     await delay();
     const order = mockOrders.find(entry => entry.id === id);
-    if (!order)
-      throw new ApiError('not_found', 'That order could not be found.', 404);
+    if (!order) throw notFound('That order');
     return order;
   },
   async count() {
     await delay();
-    return mockOrders.length;
+    return mockOrders.filter(o => o.status !== 'pending_payment').length;
   },
   async cancel(id) {
     await delay();
     const order = mockOrders.find(entry => entry.id === id);
-    if (!order)
-      throw new ApiError('not_found', 'That order could not be found.', 404);
+    if (!order) throw notFound('That order');
     if (order.status === 'cancelled')
       return { order, balance: currentBalance() };
     if (!order.cancellable) {
@@ -940,12 +1230,13 @@ export const mockOrderApi: OrderApi = {
         (mockStock.get(line.itemId) ?? 0) + line.quantity,
       );
     }
-    mockBalance = currentBalance() + order.totalCoins;
+    mockBalance = currentBalance() + order.coinsUsed;
     const cancelled: Order = {
       ...order,
       status: 'cancelled',
       cancellable: false,
       updatedAt: new Date().toISOString(),
+      payment: order.payment.status === 'paid' ? { ...order.payment, status: 'refunded' } : order.payment,
     };
     mockOrders = mockOrders.map(entry => (entry.id === id ? cancelled : entry));
     return { order: cancelled, balance: mockBalance };

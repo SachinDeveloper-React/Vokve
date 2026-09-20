@@ -29,8 +29,12 @@ interface OrdersState {
   hydrateFromServer: () => Promise<void>;
   refreshIfStale: () => Promise<void>;
   loadMore: () => Promise<void>;
-  /** Puts a freshly placed order at the top without a round trip. */
-  prepend: (order: Order) => void;
+  /**
+   * Puts a freshly placed order at the top, or replaces the row it already
+   * has, without a round trip. The count only grows for an order that is
+   * an order — one still waiting on its payment is not counted (R7).
+   */
+  upsert: (order: Order) => void;
   /**
    * Cancels, and on success replaces the row and refreshes the wallet — the
    * refund is the wallet's to show. Throws the `ApiError` so the screen can
@@ -118,11 +122,19 @@ export const useOrdersStore = create<OrdersState>()(
         }
       },
 
-      prepend: order =>
-        set(state => ({
-          orders: [order, ...state.orders.filter(o => o.id !== order.id)],
-          count: state.count + 1,
-        })),
+      upsert: order =>
+        set(state => {
+          const existing = state.orders.find(o => o.id === order.id);
+          const wasCounted =
+            existing !== undefined && existing.status !== 'pending_payment';
+          const isCounted = order.status !== 'pending_payment';
+          return {
+            orders: existing
+              ? state.orders.map(o => (o.id === order.id ? order : o))
+              : [order, ...state.orders],
+            count: state.count + (isCounted && !wasCounted ? 1 : 0),
+          };
+        }),
 
       cancel: async id => {
         set({ cancellingId: id });

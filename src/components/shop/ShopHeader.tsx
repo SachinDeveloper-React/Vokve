@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { ShoppingBag } from 'lucide-react-native';
+import { Heart, ShoppingCart } from 'lucide-react-native';
 import { HStack, VStack } from '../layout/Stack';
 import { Avatar } from '../media/Avatar';
 import { AppText } from '../ui/AppText';
@@ -11,9 +11,12 @@ interface Props {
   /** Null while the profile is still loading or the user is a guest. */
   name?: string | null;
   avatarUri?: string | null;
-  /** Redeemed rewards on their way. Shown as a count on the bag. */
-  orderCount?: number;
-  onPressOrders: () => void;
+  /** Units in the basket. Shown as a count on the cart. */
+  cartCount?: number;
+  /** Saved items. Shown as a dot on the heart. */
+  wishlistCount?: number;
+  onPressCart: () => void;
+  onPressWishlist: () => void;
   onPressAvatar: () => void;
   title?: string;
   subtitle?: string;
@@ -23,20 +26,23 @@ interface Props {
  * The shop's masthead: wordmark and actions on one row, the screen's name
  * beneath.
  *
- * The header action is a bag with the order count rather than the bell the
- * other tabs carry. Every redemption here becomes an order, and the one
- * question a shopper has after redeeming — "did that go through?" — is
- * answered by the number on the bag without leaving the screen.
+ * The header actions are the heart and the cart rather than the bell the
+ * other tabs carry: the two questions a shopper has while browsing are
+ * "what have I saved" and "what have I picked", and the count on the cart
+ * answers the second without leaving the screen. Orders live behind the
+ * cart and the wallet, where a user goes to see what they have bought.
  */
 export const ShopHeader = memo(
   ({
     name,
     avatarUri,
-    orderCount = 0,
-    onPressOrders,
+    cartCount = 0,
+    wishlistCount = 0,
+    onPressCart,
+    onPressWishlist,
     onPressAvatar,
     title = 'Shop',
-    subtitle = 'Spend your coins on exciting rewards',
+    subtitle = 'Gear up — pay with money, coins, or both',
   }: Props) => (
     <VStack gap="base" pt="sm">
       <HStack align="center" justify="between">
@@ -44,13 +50,22 @@ export const ShopHeader = memo(
 
         <HStack align="center" gap="md">
           <IconButton
-            icon={ShoppingBag}
-            onPress={onPressOrders}
-            badge={orderCount}
+            icon={Heart}
+            onPress={onPressWishlist}
+            badge={wishlistCount > 0}
             accessibilityLabel={
-              orderCount > 0
-                ? `Orders, ${orderCount} on the way`
-                : 'Orders'
+              wishlistCount > 0
+                ? `Wishlist, ${wishlistCount} saved`
+                : 'Wishlist'
+            }
+          />
+
+          <IconButton
+            icon={ShoppingCart}
+            onPress={onPressCart}
+            badge={cartCount}
+            accessibilityLabel={
+              cartCount > 0 ? `Cart, ${cartCount} items` : 'Cart'
             }
           />
 

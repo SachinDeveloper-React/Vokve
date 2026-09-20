@@ -21,6 +21,7 @@ export const ORDER_STATUS_STYLE: Record<
   OrderStatus,
   { label: string; tint: Tint }
 > = {
+  pending_payment: { label: 'Awaiting payment', tint: 'warning' },
   placed: { label: 'Placed', tint: 'primary' },
   confirmed: { label: 'Confirmed', tint: 'brandAccent' },
   shipped: { label: 'Shipped', tint: 'warning' },

@@ -53,7 +53,20 @@ jest.mock('../src/services/api/endpoints', () => ({
     setDefault: jest.fn(),
     remove: jest.fn(),
   },
-  shopApi: { items: jest.fn(), item: jest.fn(), redeem: jest.fn() },
+  shopApi: { items: jest.fn(), item: jest.fn(), config: jest.fn() },
+  cartApi: {
+    get: jest.fn(),
+    setLine: jest.fn(),
+    removeLine: jest.fn(),
+    clear: jest.fn(),
+  },
+  wishlistApi: {
+    list: jest.fn(),
+    ids: jest.fn(),
+    add: jest.fn(),
+    remove: jest.fn(),
+  },
+  checkoutApi: { quote: jest.fn(), place: jest.fn(), pay: jest.fn() },
   notificationApi: {
     list: jest.fn(),
     markRead: jest.fn(),
@@ -79,10 +92,11 @@ const metrics = {
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
 };
 
+/** A cap bought with 300 coins (₹75) and ₹423 in money: ₹449 + ₹49 delivery − ₹75. */
 const order = (
   id: string,
   status: Order['status'],
-  totalCoins = 650,
+  coinsUsed = 300,
 ): Order => ({
   id,
   status,
@@ -92,10 +106,33 @@ const order = (
       title: 'VOKVE Cap',
       emoji: '🧢',
       quantity: 1,
-      priceCoins: totalCoins,
+      size: null,
+      price: 44900,
+      mrp: 59900,
     },
   ],
-  totalCoins,
+  currency: 'INR',
+  subtotal: 44900,
+  discount: 15000,
+  shipping: 4900,
+  total: 49800,
+  coinsUsed,
+  coinsValue: coinsUsed * 25,
+  payable: 49800 - coinsUsed * 25,
+  payment: {
+    provider: 'mock',
+    status:
+      status === 'cancelled'
+        ? 'refunded'
+        : status === 'pending_payment'
+        ? 'pending'
+        : 'paid',
+    amount: 49800 - coinsUsed * 25,
+    currency: 'INR',
+    providerOrderId: `mockord_${id}`,
+    paidAt: status === 'pending_payment' ? null : new Date().toISOString(),
+    expiresAt: null,
+  },
   address: {
     label: 'Home',
     name: 'Asha Verma',
@@ -110,7 +147,10 @@ const order = (
   placedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   trackingRef: status === 'shipped' ? 'DL123' : null,
-  cancellable: status === 'placed' || status === 'confirmed',
+  cancellable:
+    status === 'placed' ||
+    status === 'confirmed' ||
+    status === 'pending_payment',
 });
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
@@ -227,7 +267,7 @@ describe('OrdersScreen', () => {
     });
     const tree = await render(<OrdersScreen />);
 
-    await press(tree, 'VOKVE Cap, placed, 650 coins');
+    await press(tree, 'VOKVE Cap, placed, ₹423 and 300 coins');
     expect(mockNavigate).toHaveBeenCalledWith('OrderDetail', { id: 'ord-1' });
 
     const addresses = tree.root
@@ -330,7 +370,8 @@ describe('OrderDetailScreen', () => {
     expect(useOrdersStore.getState().orders[0].status).toBe('cancelled');
     expect(walletApi.get).toHaveBeenCalled();
     const text = allText(tree);
-    expect(text).toContain('Cancelled. The coins are back in your wallet.');
+    expect(text).toContain('Cancelled. Anything you paid is on its way back.');
+    expect(text).toContain('Refunded');
     expect(text).not.toContain('Cancel order');
   });
 

@@ -192,3 +192,38 @@ export function formatPhoneNumber(e164: string): string {
 
   return grouped ? `${match} ${grouped}` : match;
 }
+
+const CURRENCY_SYMBOL: Record<string, string> = {
+  INR: '₹',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+};
+
+/**
+ * A money figure from its minor units — `44900` paise reads as `₹449`,
+ * `44950` as `₹449.50`. Whole amounts drop the paise: a shop that prices
+ * in whole rupees would otherwise put `.00` after everything, which is
+ * noise on a card. Grouped by hand for the same reason `formatGrouped` is.
+ */
+export function formatMoney(minor: number, currency = 'INR'): string {
+  const symbol = CURRENCY_SYMBOL[currency] ?? `${currency} `;
+  const sign = minor < 0 ? '-' : '';
+  const abs = Math.abs(Math.round(minor));
+  const whole = Math.floor(abs / 100);
+  const fraction = abs % 100;
+  const grouped = formatGrouped(whole);
+  return fraction === 0
+    ? `${sign}${symbol}${grouped}`
+    : `${sign}${symbol}${grouped}.${String(fraction).padStart(2, '0')}`;
+}
+
+/** `29% off` from a list price and a selling price; null when there is no saving to name. */
+export function formatDiscount(
+  price: number,
+  mrp: number | null,
+): string | null {
+  if (mrp === null || mrp <= price) return null;
+  const pct = Math.round(((mrp - price) / mrp) * 100);
+  return pct > 0 ? `${pct}% off` : null;
+}

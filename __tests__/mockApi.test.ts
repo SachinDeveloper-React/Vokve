@@ -24,12 +24,15 @@ import {
   mockActivityApi,
   mockAddressApi,
   mockAuthApi,
+  mockCartApi,
+  mockCheckoutApi,
   mockNotificationApi,
   mockOrderApi,
   mockReferralApi,
   mockShopApi,
   mockUserApi,
   mockWalletApi,
+  mockWishlistApi,
   mockWorkoutApi,
 } from '../src/services/api/mockApi';
 import {
@@ -352,14 +355,48 @@ describe('the shop, orders and addresses', () => {
     await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
   };
 
-  test('the catalogue carries stock, and filters by category and deals', async () => {
-    const all = await mockShopApi.items();
-    expect(all.length).toBeGreaterThan(5);
-    expect(all.find(i => i.id === 'gym-towel')?.inStock).toBe(false);
-    const apparel = await mockShopApi.items({ category: 'apparel' });
-    expect(apparel.every(i => i.category === 'apparel')).toBe(true);
+  test('the catalogue carries stock, and filters by category, deals and featured', async () => {
+    const all = await mockShopApi.items({ limit: 100 });
+    expect(all.total).toBeGreaterThan(20);
+    expect(all.data.find(i => i.id === 'gym-towel')?.inStock).toBe(false);
+    const clothing = await mockShopApi.items({ category: 'clothing' });
+    expect(clothing.data.every(i => i.category === 'clothing')).toBe(true);
     const deals = await mockShopApi.items({ deals: true });
-    expect(deals.every(i => i.isDeal)).toBe(true);
+    expect(deals.data.every(i => i.isDeal)).toBe(true);
+    const featured = await mockShopApi.items({ featured: true });
+    expect(featured.data.every(i => i.featured)).toBe(true);
+    const inStock = await mockShopApi.items({ category: 'accessories', inStock: true });
+    expect(inStock.data.some(i => i.id === 'gym-towel')).toBe(false);
+  });
+
+  test('searches by prefix across title, tags and subcategory, sorts, and pages', async () => {
+    const vest = await mockShopApi.items({ q: 'vest' });
+    expect(vest.data.map(i => i.id)).toEqual(['tank-top']);
+    const leather = await mockShopApi.items({ q: 'leather ball' });
+    expect(leather.data.map(i => i.id)).toEqual(['cricket-ball']);
+    expect((await mockShopApi.items({ q: 'zzzz' })).total).toBe(0);
+
+    const cheap = await mockShopApi.items({ sort: 'price_asc', limit: 1 });
+    expect(cheap.data[0].id).toBe('sweatbands');
+    const dear = await mockShopApi.items({ sort: 'price_desc', limit: 1 });
+    expect(dear.data[0].id).toBe('kettlebell-8');
+
+    const first = await mockShopApi.items({ limit: 10 });
+    expect(first.data).toHaveLength(10);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await mockShopApi.items({ limit: 10, cursor: first.nextCursor ?? undefined });
+    expect(second.data[0].id).not.toBe(first.data[0].id);
+    expect(new Set([...first.data, ...second.data].map(i => i.id)).size).toBe(20);
+  });
+
+  test('describes each shelf with counts and subcategories', async () => {
+    const shelves = await mockShopApi.categories();
+    expect(shelves.map(s => s.category)).toEqual(['clothing', 'gym', 'sports', 'accessories']);
+    const clothing = shelves.find(s => s.category === 'clothing')!;
+    expect(clothing.count).toBe(8);
+    expect(clothing.subcategories[0]).toEqual({ name: 'T-shirts', count: 2 });
+    const accessories = shelves.find(s => s.category === 'accessories')!;
+    expect(accessories.inStock).toBe(accessories.count - 1); // the towel
   });
 
   test('the first address is the default; the default can move, and a deleted default hands over', async () => {
@@ -377,55 +414,120 @@ describe('the shop, orders and addresses', () => {
     expect((await mockAddressApi.list())[0]).toMatchObject({ label: 'Home', isDefault: true });
   });
 
-  test('redeeming needs an address, spends the balance, takes stock, and lands in the orders', async () => {
+  test('the basket keeps lines by item and size, checks sizes, and quotes the split', async () => {
+    await signIn();
+    await expectApiError(() => mockCartApi.setLine({ itemId: 'tee', quantity: 1 }), 'validation');
+    await mockCartApi.setLine({ itemId: 'tee', quantity: 2, size: 'M' });
+    const cart = await mockCartApi.setLine({ itemId: 'cap', quantity: 1 });
+    expect(cart.lines.map(l => [l.item.id, l.quantity, l.size])).toEqual([['tee', 2, 'M'], ['cap', 1, null]]);
+    expect(cart.count).toBe(3);
+    // ₹1,598 + ₹449 = ₹2,047 of goods, over the free-shipping line; 30% is 2,456 coins, capped by the wallet.
+    const balance = Math.floor((await mockWalletApi.get()).balance);
+    expect(cart.quote).toMatchObject({ subtotal: 204700, shipping: 0, coinsMax: Math.min(2456, balance) });
+    expect(cart.quote.payable).toBe(204700 - cart.quote.coinsValue);
+
+    const fewer = await mockCartApi.setLine({ itemId: 'tee', quantity: 0, size: 'M' });
+    expect(fewer.lines.map(l => l.item.id)).toEqual(['cap']);
+    expect((await mockCartApi.clear()).count).toBe(0);
+  });
+
+  test('the wishlist saves once, lists newest first, and forgets', async () => {
+    await signIn();
+    await mockWishlistApi.add('cap');
+    await mockWishlistApi.add('yoga-mat');
+    await mockWishlistApi.add('cap');
+    expect(await mockWishlistApi.ids()).toEqual(['yoga-mat', 'cap']);
+    expect((await mockWishlistApi.list()).map(i => i.id)).toEqual(['yoga-mat', 'cap']);
+    await mockWishlistApi.remove('cap');
+    expect(await mockWishlistApi.ids()).toEqual(['yoga-mat']);
+  });
+
+  test('a quote splits the goods between coins and money the way the server does', async () => {
+    await signIn();
+    // A ₹449 cap: 30% at ₹0.25 a coin is 538 coins; ₹49 to ship under ₹999.
+    const q = await mockCheckoutApi.quote([{ itemId: 'cap', quantity: 1, size: null }], 'max');
+    expect(q).toMatchObject({ subtotal: 44900, discount: 15000, shipping: 4900, total: 49800, coinsMax: 538, coinsApplied: 538, coinsValue: 13450, payable: 36350 });
+    expect((await mockCheckoutApi.quote([{ itemId: 'cap', quantity: 1, size: null }], 100)).payable).toBe(49800 - 2500);
+    expect((await mockCheckoutApi.quote([{ itemId: 'kettlebell-8', quantity: 1, size: null }], 'max')).shipping).toBe(0);
+  });
+
+  test('checkout needs an address, holds coins and stock as pending, and pay makes it an order', async () => {
     await signIn();
     await expectApiError(
-      () => mockShopApi.redeem({ itemId: 'cap', addressId: 'nope' }, { idempotencyKey: 'k' }),
+      () => mockCheckoutApi.place({ lines: [{ itemId: 'cap', quantity: 1, size: null }], addressId: 'nope', coins: 0 }, { idempotencyKey: 'k' }),
       'validation',
     );
     const home = await mockAddressApi.create(ADDRESS);
     const before = (await mockWalletApi.get()).balance;
 
-    const { order, balance } = await mockShopApi.redeem({ itemId: 'cap', addressId: home.id }, { idempotencyKey: 'k' });
-    expect(order).toMatchObject({ status: 'placed', totalCoins: 650, cancellable: true, address: { city: 'Bengaluru' } });
-    expect(balance).toBe(before - 650);
-    expect(await mockOrderApi.count()).toBe(1);
-    expect((await mockOrderApi.list()).data[0].id).toBe(order.id);
+    const placed = await mockCheckoutApi.place({ lines: [{ itemId: 'cap', quantity: 1, size: null }], addressId: home.id, coins: 300 }, { idempotencyKey: 'k' });
+    expect(placed.order).toMatchObject({ status: 'pending_payment', coinsUsed: 300, coinsValue: 7500, payable: 42300, cancellable: true, address: { city: 'Bengaluru' } });
+    expect(placed.payment).toMatchObject({ provider: 'mock', amount: 42300 });
+    expect(placed.balance).toBe(before - 300);
+    expect(await mockOrderApi.count()).toBe(0);
 
-    // Cancel puts the coins and the stock back; a second cancel changes nothing.
-    const cancelled = await mockOrderApi.cancel(order.id, { idempotencyKey: 'c' });
-    expect(cancelled.order.status).toBe('cancelled');
+    const paid = await mockCheckoutApi.pay(placed.order.id, { providerPaymentId: 'mockpay_1' }, { idempotencyKey: 'p' });
+    expect(paid.order).toMatchObject({ status: 'placed', payment: { status: 'paid' } });
+    expect(await mockOrderApi.count()).toBe(1);
+    expect((await mockOrderApi.list()).data[0].id).toBe(placed.order.id);
+
+    // Cancel puts the coins and the stock back and refunds the money; a second cancel changes nothing.
+    const cancelled = await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c' });
+    expect(cancelled.order).toMatchObject({ status: 'cancelled', payment: { status: 'refunded' } });
     expect(cancelled.balance).toBe(before);
-    expect((await mockOrderApi.cancel(order.id, { idempotencyKey: 'c2' })).balance).toBe(before);
+    expect((await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c2' })).balance).toBe(before);
+
+    // More coins than the quote allows is refused; an order the coins cover is placed at once.
+    await expectApiError(
+      () => mockCheckoutApi.place({ lines: [{ itemId: 'cap', quantity: 1, size: null }], addressId: home.id, coins: 9999 }, { idempotencyKey: 'k3' }),
+      'validation',
+    );
   });
 
-  test('at the threshold the mock asks for a step-up, and the code it issues works once', async () => {
+  test('a thousand coins in one order asks for a step-up, and the code it issues works once', async () => {
     await signIn();
     const home = await mockAddressApi.create(ADDRESS);
-    const tee = (await mockShopApi.items()).find(i => i.id === 'tee')!;
-    expect(tee.priceCoins).toBeGreaterThanOrEqual(MOCK_STEP_UP_THRESHOLD);
+    const hoodie = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }], addressId: home.id, coins: MOCK_STEP_UP_THRESHOLD };
 
-    await expectApiError(
-      () => mockShopApi.redeem({ itemId: 'tee', addressId: home.id }, { idempotencyKey: 'k' }),
-      'forbidden',
-    );
+    await expectApiError(() => mockCheckoutApi.place(hoodie, { idempotencyKey: 'k' }), 'forbidden');
 
     const challenge = await mockAuthApi.stepUp();
     expect(challenge).toMatchObject({ channel: 'email', purpose: 'step_up' });
     const verified = await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
     expect(verified.stepUpToken).toEqual(expect.any(String));
 
-    const placed = await mockShopApi.redeem(
-      { itemId: 'tee', addressId: home.id, stepUpToken: verified.stepUpToken! },
-      { idempotencyKey: 'k' },
-    );
-    expect(placed.order.totalCoins).toBe(tee.priceCoins);
+    const placed = await mockCheckoutApi.place({ ...hoodie, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k' });
+    expect(placed.order.coinsUsed).toBe(MOCK_STEP_UP_THRESHOLD);
+    expect(placed.order.items[0].size).toBe('L');
 
-    // Spent: the same token is refused the second time.
+    // The coins come back on cancel, and the same token is refused the second time.
+    await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c' });
     await expectApiError(
-      () => mockShopApi.redeem({ itemId: 'tee', addressId: home.id, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k2' }),
+      () => mockCheckoutApi.place({ ...hoodie, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k2' }),
       'forbidden',
     );
+  });
+
+  test('reviews: one per user, verified for a buyer, summarised onto the item', async () => {
+    await signIn();
+    const home = await mockAddressApi.create(ADDRESS);
+    const placed = await mockCheckoutApi.place({ lines: [{ itemId: 'yoga-mat', quantity: 1, size: null }], addressId: home.id, coins: 0 }, { idempotencyKey: 'k' });
+    await mockCheckoutApi.pay(placed.order.id, { providerPaymentId: 'mockpay_2' }, { idempotencyKey: 'p' });
+
+    await expectApiError(() => mockShopApi.writeReview('yoga-mat', { rating: 5, body: 'Great' }), 'validation');
+    const mine = await mockShopApi.writeReview('yoga-mat', { rating: 4, title: 'Grippy', body: 'Stays put on a wooden floor.' });
+    expect(mine).toMatchObject({ rating: 4, verified: true, mine: true });
+    const edited = await mockShopApi.writeReview('yoga-mat', { rating: 5, body: 'Stays put on a wooden floor. Still grippy.' });
+    expect(edited.id).toBe(mine.id);
+
+    const page = await mockShopApi.reviews('yoga-mat');
+    expect(page.summary).toEqual({ average: 5, count: 1, histogram: [0, 0, 0, 0, 1] });
+    expect(page.mine?.id).toBe(mine.id);
+    expect((await mockShopApi.item('yoga-mat')).rating).toEqual({ average: 5, count: 1 });
+    expect((await mockShopApi.items({ sort: 'rating', limit: 1 })).data[0].id).toBe('yoga-mat');
+
+    await mockShopApi.deleteReview('yoga-mat');
+    expect((await mockShopApi.item('yoga-mat')).rating).toEqual({ average: 0, count: 0 });
   });
 });
 

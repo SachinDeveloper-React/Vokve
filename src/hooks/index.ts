@@ -10,3 +10,7 @@ export {
   useCoinHistory,
 } from './useCoinHistory';
 export type { CoinHistory } from './useCoinHistory';
+export { CATALOGUE_PAGE_SIZE, useCatalogue } from './useCatalogue';
+export type { Catalogue } from './useCatalogue';
+export { REVIEWS_PAGE_SIZE, useReviews } from './useReviews';
+export type { Reviews } from './useReviews';

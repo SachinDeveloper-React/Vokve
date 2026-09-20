@@ -58,7 +58,10 @@ jest.mock('../src/services/api/endpoints', () => ({
     setDefault: jest.fn(),
     remove: jest.fn(),
   },
-  shopApi: { items: jest.fn(), item: jest.fn(), redeem: jest.fn() },
+  shopApi: { items: jest.fn(), item: jest.fn(), config: jest.fn() },
+  cartApi: { get: jest.fn(), setLine: jest.fn(), removeLine: jest.fn(), clear: jest.fn() },
+  wishlistApi: { list: jest.fn(), ids: jest.fn(), add: jest.fn(), remove: jest.fn() },
+  checkoutApi: { quote: jest.fn(), place: jest.fn(), pay: jest.fn() },
   authApi: { stepUp: jest.fn(), signOut: jest.fn() },
 }));
 

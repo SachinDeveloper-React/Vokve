@@ -178,7 +178,7 @@ export const WalletScreen = () => {
           onPressAvatar={onOpenAccount}
         />
 
-        <EmailVerificationBanner reason="redeem your coins" />
+        <EmailVerificationBanner reason="place orders" />
 
         <WalletSyncNotice
           error={syncError}

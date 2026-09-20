@@ -31,14 +31,19 @@ interface Props {
 export const ShopCategoryTile = memo(
   ({ category, label, icon, tint, count, onPress }: Props) => {
     const { isDark } = useTheme();
-    const handlePress = useCallback(() => onPress(category), [category, onPress]);
+    const handlePress = useCallback(
+      () => onPress(category),
+      [category, onPress],
+    );
 
     return (
       <Pressable
         onPress={handlePress}
         feedback="scale"
         accessibilityRole="button"
-        accessibilityLabel={`${label}, ${count} ${count === 1 ? 'reward' : 'rewards'}`}
+        accessibilityLabel={`${label}, ${count} ${
+          count === 1 ? 'reward' : 'rewards'
+        }`}
       >
         <VStack
           align="center"

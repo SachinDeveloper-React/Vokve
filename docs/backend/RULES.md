@@ -101,7 +101,7 @@ Where the client already implements a rule, the source file is cited; the server
 | O2 | One `otp_challenges` collection with `channel` (`sms`/`email`) and `purpose` (`signup_phone, verify_email, login, reset_password, change_phone, change_email, step_up`). A code verifies only its own challenge and purpose. | |
 | O3 | **Phone** OTP is the session gate: `verify-otp` for `signup_phone` creates the user, sets `phoneVerifiedAt`, issues tokens. | existing contract |
 | O4 | **Email** OTP is created and sent automatically after O3 succeeds; `POST /auth/email/send-otp` resends; `verify-otp` sets `emailVerifiedAt`. | D-20 |
-| O5 | `emailVerifiedAt` **and** `phoneVerifiedAt` are required before: `/shop/redeem`, referral payout, leaderboard payout, `reset_password` by email, address creation. Missing → `403 EMAIL_NOT_VERIFIED` / `PHONE_NOT_VERIFIED` with a user-readable message. | |
+| O5 | `emailVerifiedAt` **and** `phoneVerifiedAt` are required before: `/checkout`, referral payout, leaderboard payout, `reset_password` by email, address creation. Missing → `403 EMAIL_NOT_VERIFIED` / `PHONE_NOT_VERIFIED` with a user-readable message. | |
 | O6 | A wrong code leaves the challenge alive (attempt counter +1). The client keeps the user on the screen. | `authStore.verifyOtp` |
 | O7 | Changing email or phone requires OTP on the **new** target and clears the corresponding `…VerifiedAt` until verified. | |
 | O8 | Step-up: `purpose:'step_up'` returns a `stepUpToken` valid 10 min ⚙ for one action. | |
@@ -168,15 +168,21 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 
 | # | Rule | Source / note |
 |---|---|---|
-| R1 | Prices are coins only. No cash path. | `shopItemSchema.priceCoins` |
-| R2 | Redemption is one transaction: lock balance → lock inventory → check both → order + items → inventory − qty → ledger −price → balance. | |
-| R3 | Insufficient funds → `422 INSUFFICIENT_COINS { required, balance }`. Out of stock → `409 OUT_OF_STOCK`. | Client shows "Need N more" |
+| R1 | Prices are money — paise, INR — and coins go *towards* them at the till (R11). A cash-only shop or a coins-only shop are both one config value away; neither needs a client release. | `shopItemSchema.price`, ⚙ `commerce.coinShareMax` |
+| R2 | Checkout is one transaction: `$gte` balance decrement for the coins part → ledger −coins → `$gte` stock decrement per line → popularity → order (address snapshot) → basket cleared when bought from it. Any step failing rolls back the rest. | |
+| R3 | Coins beyond the quote's ceiling → `422 COINS_OVER_LIMIT { coinsMax }` (the app re-quotes); a wallet that shrank in between → `422 INSUFFICIENT_COINS { required, balance }`. Out of stock → `409 OUT_OF_STOCK`. | |
 | R4 | A shipping address is required at redemption and **snapshotted** into the order. | |
-| R5 | Order states: `placed → confirmed → shipped → delivered`; `placed|confirmed → cancelled`; `delivered → refunded` (admin). Every transition is an `order_events` row. | |
-| R6 | Cancel refunds the full price as a `refund` row and restores inventory. | |
-| R7 | Order count shown in the shop = count of `orders`, not ledger rows with `source='purchase'`. | fixes the `ShopScreen` heuristic |
+| R5 | Order states: `pending_payment → placed → confirmed → shipped → delivered`; `pending_payment|placed|confirmed → cancelled`; `delivered → refunded` (admin). An order the coins covered is born `placed`. Every transition is an event on the order. | |
+| R6 | Cancel puts the coins back as a `refund` row, restores inventory, and refunds money already taken through the gateway (`payment.status: 'refunded'`). A refund the gateway refuses leaves the order cancelled with the payment marked paid, for support. | |
+| R7 | Order count shown in the shop = count of `orders` that are not `pending_payment`, never ledger rows with `source='purchase'`. | |
 | R8 | `inStock` = `on_hand > 0`. Low-stock alert at `on_hand ≤ low_stock_at`. | |
-| R9 | `isDeal` and `badge` are catalogue flags, not categories. `ShopCategory` is a closed enum of four. | 🔒 |
+| R9 | `isDeal`, `featured` and `badge` are catalogue flags, not categories. `ShopCategory` is a closed enum of four: `clothing` (Clothes), `gym`, `sports`, `accessories`. Finer grain is `subcategory`, free text the catalogue owns ("Tops", "Mats", "Rackets") and `GET /shop/categories` reports with counts — a new subcategory never needs a client release. | 🔒 |
+| R10 | Catalogue order is the server's: `popular` (a per-item `popularity` counter, +1 per unit ordered, then newest listing first) is the default; `rating`, `price_asc`, `price_desc`, `newest` are the only other sorts. Search (`q`) is word-prefix match across title, description, tags and subcategory; every word must match. Filters: `minPrice`/`maxPrice` (paise, inclusive), `minRating` (an unrated item never passes), `deals`, `inStock`. | `commerce/service.listItems` |
+| R11 | **The split is the server's.** Prices are paise. One coin is worth ⚙ `commerce.coinValuePaise` (₹0.25) at the till, and at most ⚙ `commerce.coinShareMax` (0.3 = 30%) of the *goods* may be paid with coins — the rest, and shipping, is money. `coinsMax` = min(⌊subtotal × share ÷ value⌋, whole coins in the wallet). The app draws the server's quote and never re-adds it; the only arithmetic it does is coins × value for the slider. | `commerce/service.buildQuote` |
+| R12 | **Money is collected after the order is held, not before.** An order owing money is born `pending_payment` with its coins debited and its stock decremented; the gateway order is created after the transaction; the app's proof (`POST /orders/:id/pay`) is verified with the provider — the mock accepts, Razorpay's HMAC-SHA256 of `order_id\|payment_id` is checked — before the order is `placed`. Unpaid past ⚙ `commerce.paymentWindowMinutes` (30) it is released by the hourly job: coins back, stock back. `PAYMENT_PROVIDER=mock` is refused in production. | `lib/payments.ts`, `expireUnpaidOrders` |
+| R13 | Shipping is ⚙ `commerce.shippingFeePaise` (₹49) under ⚙ `commerce.freeShippingAbovePaise` (₹999 of goods) and free at or above it; a quote with no lines ships for nothing. Up to ⚙ `commerce.maxQuantityPerLine` (5) of one item per line — `422 QUANTITY_LIMIT { max }`. A sized item needs one of its sizes — `422 SIZE_REQUIRED { sizes }` / `SIZE_INVALID`. | |
+| R14 | The basket is one document per user, lines keyed by item + size, holding references not snapshots: a price that changes while a thing sits in the basket is the new price at checkout. A line whose item goes off sale is dropped on the next read. The wishlist is one row per (user, item); saving twice is one save. | `carts`, `wishlists` |
+| R15 | Reviews: one per user per item (a unique index; a second write is an edit), 1–5 stars, 10–1000 characters, signed with a first name or "A VOKVE member", `verified` decided at write time from the user's non-cancelled orders and kept. Every write recomputes the item's `ratingAverage`/`ratingCount`, which is what lists sort and filter by — a list never joins `reviews`. Rate-limited 10/h per user. | `reviews`, `commerce/service.upsertReview` |
 
 ## §Y · Hydration
 
@@ -275,7 +281,7 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 
 | # | Rule |
 |---|---|
-| D1 | Coin movements happen inside a MongoDB session transaction: conditional `findOneAndUpdate({ balance: { $gte: price } }, { $inc })` on `coin_balances` plus the ledger insert (and order/inventory writes for redeem). No coin write outside `economy.credit()` / `hold()` / `release()` / `debit()`. |
+| D1 | Coin movements happen inside a MongoDB session transaction: conditional `findOneAndUpdate({ balance: { $gte: price } }, { $inc })` on `coin_balances` plus the ledger insert (and order/inventory writes for checkout). No coin write outside `economy.credit()` / `hold()` / `release()` / `debit()`. |
 | D2 | `local_day` is computed once at write time from the event timestamp and the request's `X-Vokve-Timezone`, stored, and never recomputed. |
 | D3 | Soft-delete user-created documents (`deletedAt`); hard-delete only via account deletion. |
 | D8 | Every collection has declared indexes in `packages/db`; CI fails on drift between declared and deployed indexes. Unique indexes are the enforcement for idempotency — never application-level existence checks. |

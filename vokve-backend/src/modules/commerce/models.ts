@@ -9,19 +9,93 @@ const shopItemSchema = new Schema(
     _id: { type: String, required: true },
     title: { type: String, required: true },
     description: { type: String, default: '' },
-    priceCoins: { type: Number, required: true, min: 1 },
+    /** Selling price and, when discounted, the list price it is struck against — both paise (RULES R11). */
+    price: { type: Number, required: true, min: 1 },
+    mrp: { type: Number, default: null },
     category: { type: String, enum: shopCategorySchema.options, required: true },
     emoji: { type: String, default: '🎁' },
     imageUrl: { type: String, default: null },
     badge: { type: String, enum: [...shopBadgeSchema.options, null], default: null },
     isDeal: { type: Boolean, default: false },
+    featured: { type: Boolean, default: false },
+    subcategory: { type: String, default: null },
+    tags: { type: [String], default: [] },
+    /** The sizes it comes in; empty for one-size. A line records the one chosen. */
+    sizes: { type: [String], default: [] },
+    /** What "popular" sorts by: orders placed, bumped by fulfilment; seeded with a starting figure. */
+    popularity: { type: Number, default: 0 },
+    /** Denormalised from `reviews` on every write, so a list never joins them (RULES R15). */
+    ratingAverage: { type: Number, default: 0 },
+    ratingCount: { type: Number, default: 0 },
+    /** When the item first went on sale — "newest" sorts by it, separately from the row's own timestamps. */
+    listedAt: { type: Date, default: Date.now },
     active: { type: Boolean, default: true },
     sort: { type: Number, default: 0 },
   },
   { timestamps: true, collection: 'shop_items' },
 );
-shopItemSchema.index({ active: 1, sort: 1 });
+shopItemSchema.index({ active: 1, category: 1, sort: 1 });
+shopItemSchema.index({ active: 1, popularity: -1 });
+shopItemSchema.index({ active: 1, price: 1 });
 export const ShopItemModel = model('ShopItem', shopItemSchema);
+
+/**
+ * The basket, one document per user (RULES R14). Lines are references, not
+ * snapshots: a price that changes while something sits in the basket is
+ * the new price at checkout, which is what a shopper expects of a basket
+ * and the opposite of what they expect of an order.
+ */
+const cartSchema = new Schema(
+  {
+    _id: { type: String, required: true }, // userId
+    lines: [{
+      _id: false,
+      itemId: { type: String, required: true },
+      quantity: { type: Number, required: true, min: 1 },
+      size: { type: String, default: null },
+      addedAt: { type: Date, default: Date.now },
+    }],
+  },
+  { timestamps: true, collection: 'carts' },
+);
+export const CartModel = model('Cart', cartSchema);
+
+/** One row per saved item, keyed so a second save of the same item is a no-op rather than a duplicate. */
+const wishlistSchema = new Schema(
+  {
+    _id: { type: String, required: true }, // `${userId}:${itemId}`
+    userId: { type: String, required: true },
+    itemId: { type: String, required: true },
+    addedAt: { type: Date, default: Date.now },
+  },
+  { collection: 'wishlists', versionKey: false },
+);
+wishlistSchema.index({ userId: 1, addedAt: -1 });
+export const WishlistModel = model('Wishlist', wishlistSchema);
+
+/**
+ * Reviews (RULES R15): one per user per item — the unique index is the
+ * rule — edited in place rather than added to. `verified` is set at write
+ * time from the user's orders and never revisited: a review written after
+ * buying stays a buyer's review even if the order is later refunded.
+ */
+const reviewSchema = new Schema(
+  {
+    _id: { type: String, required: true },
+    itemId: { type: String, required: true },
+    userId: { type: String, required: true },
+    authorName: { type: String, required: true },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    title: { type: String, default: null },
+    body: { type: String, required: true },
+    verified: { type: Boolean, default: false },
+  },
+  { timestamps: true, collection: 'reviews' },
+);
+reviewSchema.index({ itemId: 1, userId: 1 }, { unique: true });
+reviewSchema.index({ itemId: 1, createdAt: -1 });
+reviewSchema.index({ itemId: 1, rating: -1, createdAt: -1 });
+export const ReviewModel = model('Review', reviewSchema);
 
 /**
  * Stock, one row per item. The `min: 0` validator is the last line: the
@@ -60,6 +134,23 @@ const addressSchema = new Schema(
 addressSchema.index({ userId: 1, isDefault: 1 });
 export const AddressModel = model('Address', addressSchema);
 
+/** The money side of an order (RULES R12): what the gateway was asked for and where it stands. */
+const paymentSchema = new Schema(
+  {
+    provider: { type: String, default: null },
+    status: { type: String, default: 'not_required' },
+    amount: { type: Number, default: 0 },
+    currency: { type: String, default: 'INR' },
+    providerOrderId: { type: String, default: null },
+    providerPaymentId: { type: String, default: null },
+    paidAt: { type: Date, default: null },
+    /** An unpaid order is released after this by the scheduler. */
+    expiresAt: { type: Date, default: null },
+    refundedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 /**
  * An order and its history in one document (ARCHITECTURE §6): the items and
  * the address are snapshots, so a catalogue edit or a deleted address never
@@ -71,14 +162,25 @@ const orderSchema = new Schema(
     _id: { type: String, required: true },
     userId: { type: String, required: true },
     status: { type: String, enum: ORDER_STATUSES, default: 'placed' },
-    totalCoins: { type: Number, required: true, min: 1 },
+    currency: { type: String, default: 'INR' },
+    /** The till's figures at the time, all paise (RULES R11–R13). */
+    subtotal: { type: Number, required: true, min: 0 },
+    discount: { type: Number, default: 0, min: 0 },
+    shipping: { type: Number, default: 0, min: 0 },
+    total: { type: Number, required: true, min: 0 },
+    coinsUsed: { type: Number, default: 0, min: 0 },
+    coinsValue: { type: Number, default: 0, min: 0 },
+    payable: { type: Number, required: true, min: 0 },
+    payment: { type: paymentSchema, required: true, default: () => ({}) },
     items: [{
       _id: false,
       itemId: { type: String, required: true },
       title: { type: String, required: true },
       emoji: { type: String, default: '🎁' },
       quantity: { type: Number, required: true, min: 1 },
-      priceCoins: { type: Number, required: true, min: 1 },
+      size: { type: String, default: null },
+      price: { type: Number, required: true, min: 1 },
+      mrp: { type: Number, default: null },
     }],
     addressSnapshot: { type: Schema.Types.Mixed, required: true },
     addressId: { type: String, default: null },
@@ -92,7 +194,7 @@ const orderSchema = new Schema(
       actor: { type: String, required: true },
       at: { type: Date, default: Date.now },
     }],
-    /** The ledger row that paid for it, and the refund row if cancelled. */
+    /** The ledger row that paid the coins part, and the refund row if cancelled. */
     ledgerId: { type: String, default: null },
     refundLedgerId: { type: String, default: null },
   },
@@ -100,4 +202,6 @@ const orderSchema = new Schema(
 );
 orderSchema.index({ userId: 1, placedAt: -1 });
 orderSchema.index({ status: 1, placedAt: -1 });
+orderSchema.index({ status: 1, 'payment.expiresAt': 1 });
+orderSchema.index({ userId: 1, 'items.itemId': 1 });
 export const OrderModel = model('Order', orderSchema);
