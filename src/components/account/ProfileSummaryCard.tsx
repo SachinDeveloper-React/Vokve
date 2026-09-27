@@ -1,14 +1,27 @@
 import React, { memo } from 'react';
 import { StyleSheet } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { CalendarDays, ChevronRight, Medal } from 'lucide-react-native';
+import {
+  CalendarDays,
+  ChevronRight,
+  Medal,
+  TrendingUp,
+} from 'lucide-react-native';
 import { darkColors, radius, spacing, useTheme } from '../../theme';
+import type { ProfileSummary } from '../../types/models';
 import { withAlpha } from '../../utils/color';
+import {
+  formatCoins,
+  formatCompactNumber,
+  formatGrouped,
+  formatMonthYear,
+} from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { Avatar } from '../media/Avatar';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
+import { ProgressBar } from '../ui/ProgressBar';
 import { Pressable } from '../form/Pressable';
 import { LevelBadge } from './LevelBadge';
 import { ProfileStatStrip } from './ProfileStatStrip';
@@ -17,53 +30,47 @@ interface Props {
   /** Null while the profile is loading. */
   name?: string | null;
   avatarUri?: string | null;
-  level: number;
-  /** The rank that goes with the level — "Athlo Warrior". */
-  tierTitle: string;
-  /** Already formatted for display — "May 2025". */
-  memberSince: string;
+  /** The server's summary, or null before the first sync. */
+  summary: ProfileSummary | null;
+  /** Spendable coins from the wallet, which is fresher than the summary. */
   coins: number;
-  streakDays: number;
-  achievements: number;
-  totalSteps: number;
   onPress: () => void;
 }
 
 /**
  * The account screen's hero: who the user is and what they have to show for it.
  *
+ * Every figure is the server's (RULES P4): the level from lifetime coins, the
+ * bar from where those coins sit inside the level band, the rank from how
+ * many members have earned more. Nothing is computed here, so the card can
+ * never disagree with the profile screen it leads to.
+ *
  * The whole panel is one press target rather than a card with a button in the
  * corner. Everything on it — name, level, rank, join date, every figure in the
- * strip — leads to the same place, the full profile, so splitting it into a
- * readable part and a tappable part would only invite a user to hunt for which
- * bit was the link.
+ * strip — leads to the same place, so splitting it into a readable part and a
+ * tappable part would only invite a user to hunt for which bit was the link.
+ *
+ * With no summary yet the panel still draws: the name and the avatar are the
+ * auth store's and arrive first, and the figures come in a beat later rather
+ * than the card appearing from nothing.
  */
 export const ProfileSummaryCard = memo(
-  ({
-    name,
-    avatarUri,
-    level,
-    tierTitle,
-    memberSince,
-    coins,
-    streakDays,
-    achievements,
-    totalSteps,
-    onPress,
-  }: Props) => {
+  ({ name, avatarUri, summary, coins, onPress }: Props) => {
     const { colors } = useTheme();
 
     const foreground = colors.tierForeground;
     const secondary = withAlpha(foreground, 0.72);
+    const level = summary?.level ?? 1;
+    const memberSince = summary ? formatMonthYear(summary.memberSince) : '—';
 
     return (
       <Pressable
         onPress={onPress}
         feedback="scale"
         accessibilityRole="button"
-        accessibilityLabel={`${
-          name ?? 'Your account'
-        }, level ${level}, ${tierTitle}. Open profile`}
+        accessibilityLabel={`${name ?? 'Your account'}, level ${level}${
+          summary ? `, ${summary.tierTitle}` : ''
+        }. Open profile`}
       >
         <LinearGradient
           colors={colors.gradient.hero}
@@ -71,7 +78,7 @@ export const ProfileSummaryCard = memo(
           end={{ x: 1, y: 1 }}
           style={styles.panel}
         >
-          <VStack gap="base" style={{ padding: spacing.lg }}>
+          <VStack gap="base" style={styles.body}>
             <HStack align="center" gap="base">
               <Avatar
                 name={name ?? 'vokve'}
@@ -99,7 +106,7 @@ export const ProfileSummaryCard = memo(
                     numberOfLines={1}
                     style={{ color: secondary }}
                   >
-                    {tierTitle}
+                    {summary?.tierTitle ?? 'Getting started'}
                   </AppText>
                 </HStack>
 
@@ -122,13 +129,42 @@ export const ProfileSummaryCard = memo(
               />
             </HStack>
 
+            {summary ? (
+              <VStack gap="xs">
+                <HStack align="center" justify="between" gap="sm">
+                  <AppText variant="micro" style={{ color: secondary }}>
+                    {`${formatCoins(summary.xpIntoLevel)} / ${formatCoins(
+                      summary.xpForNextLevel,
+                    )} to level ${summary.level + 1}`}
+                  </AppText>
+                  {summary.rank !== null ? (
+                    <HStack align="center" gap="xxs">
+                      <Icon as={TrendingUp} size="xs" tint={secondary} />
+                      <AppText variant="micro" style={{ color: secondary }}>
+                        {`#${formatGrouped(
+                          summary.rank,
+                        )} of ${formatCompactNumber(summary.totalMembers)}`}
+                      </AppText>
+                    </HStack>
+                  ) : null}
+                </HStack>
+                <ProgressBar
+                  progress={summary.levelProgress}
+                  tint={darkColors.gold}
+                />
+              </VStack>
+            ) : null}
+
             <Divider tint={colors.overlayMedium} />
 
             <ProfileStatStrip
               coins={coins}
-              streakDays={streakDays}
-              achievements={achievements}
-              totalSteps={totalSteps}
+              streakDays={summary?.stats.currentStreak ?? 0}
+              achievements={
+                summary?.badges.filter(badge => badge.unlockedAt !== null)
+                  .length ?? 0
+              }
+              totalSteps={summary?.stats.totalSteps ?? 0}
             />
           </VStack>
         </LinearGradient>
@@ -146,10 +182,7 @@ ProfileSummaryCard.displayName = 'ProfileSummaryCard';
  * instead of pushing the level badge off the row.
  */
 const styles = StyleSheet.create({
-  panel: {
-    borderRadius: radius.xl,
-    //  margin: spacing.lg,
-    overflow: 'hidden',
-  },
+  panel: { borderRadius: radius.xl, overflow: 'hidden' },
+  body: { padding: spacing.lg },
   name: { flexShrink: 1 },
 });

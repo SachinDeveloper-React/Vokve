@@ -1161,3 +1161,234 @@ export const deviceRegistrationSchema = z.object({
   minVersion: z.string(),
 });
 export type DeviceRegistration = z.infer<typeof deviceRegistrationSchema>;
+
+// ─── Account: profile, privacy, sessions, support ──────────────────────────
+
+/**
+ * What the account screen shows about a member, all of it derived from what
+ * they have actually done (RULES P4, P6): the level from lifetime coins,
+ * the stats from the ledger, the activity days, the workouts and the orders.
+ * Nothing here is stored — recomputing costs a handful of counts and can
+ * never drift from the rows it is counting.
+ */
+export const profileStatsSchema = z.object({
+  /** Spendable coins, as the wallet holds them. */
+  coins: z.number().nonnegative(),
+  /** Every coin ever credited — what the level is measured on. */
+  lifetimeCoins: z.number().nonnegative(),
+  currentStreak: z.number().int().nonnegative(),
+  longestStreak: z.number().int().nonnegative(),
+  totalSteps: z.number().int().nonnegative(),
+  activeDays: z.number().int().nonnegative(),
+  totalWorkouts: z.number().int().nonnegative(),
+  totalWorkoutMinutes: z.number().int().nonnegative(),
+  /** Orders that are not waiting on a payment (RULES R7). */
+  orders: z.number().int().nonnegative(),
+  /** Friends who joined on this member's code and qualified (RULES F3). */
+  referrals: z.number().int().nonnegative(),
+});
+export type ProfileStats = z.infer<typeof profileStatsSchema>;
+
+/** The glyph a badge is drawn with. A closed set so the app never has to guess. */
+export const profileBadgeIconSchema = z.enum([
+  'flame',
+  'footprints',
+  'dumbbell',
+  'coins',
+  'package',
+  'users',
+  'medal',
+]);
+export type ProfileBadgeIcon = z.infer<typeof profileBadgeIconSchema>;
+
+/**
+ * One thing a member has earned, or is on the way to earning. A locked badge
+ * carries its progress rather than being hidden: what is nearly won is the
+ * reason to come back tomorrow.
+ */
+export const profileBadgeSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  /** What it took, in the member's words — "30-day streak". */
+  description: z.string(),
+  icon: profileBadgeIconSchema,
+  /** ISO-8601 when it was earned, or null while it is still locked. */
+  unlockedAt: z.string().nullable().default(null),
+  /** How far along a locked one is, 0–1. Always 1 once unlocked. */
+  progress: z.number().min(0).max(1),
+  /** Where the progress stands and what it is counting towards. */
+  value: z.number().nonnegative(),
+  goal: z.number().positive(),
+});
+export type ProfileBadge = z.infer<typeof profileBadgeSchema>;
+
+/** A field the profile is still missing, and what filling it is worth. */
+export const profileGapSchema = z.object({
+  /** Matches a field the edit form knows how to focus. */
+  field: z.enum([
+    'name',
+    'avatarUrl',
+    'dateOfBirth',
+    'gender',
+    'heightCm',
+    'weightKg',
+    'goal',
+    'email',
+    'phone',
+    'address',
+  ]),
+  label: z.string(),
+  /** Percentage points of completeness this one is worth. */
+  weight: z.number().int().positive(),
+});
+export type ProfileGap = z.infer<typeof profileGapSchema>;
+
+export const profileSummarySchema = z.object({
+  /** `floor(sqrt(lifetimeCoins / 100))`, floored at 1 (RULES P4). */
+  level: z.number().int().positive(),
+  /** The name that goes with the level band — "Athlo Warrior". */
+  tierTitle: z.string(),
+  /** Lifetime coins, the figure the level is read from. */
+  xp: z.number().nonnegative(),
+  /** Coins earned since this level started, and what the next one costs. */
+  xpIntoLevel: z.number().nonnegative(),
+  xpForNextLevel: z.number().positive(),
+  /** 0–1 across the current level, for the bar. */
+  levelProgress: z.number().min(0).max(1),
+  /** ISO-8601 of the account's first day. */
+  memberSince: z.string(),
+  /** Place by lifetime coins among members who are not hidden; null when unranked. */
+  rank: z.number().int().positive().nullable(),
+  totalMembers: z.number().int().nonnegative(),
+  stats: profileStatsSchema,
+  badges: z.array(profileBadgeSchema),
+  /** 0–100, and what would raise it (RULES P6). */
+  completeness: z.number().int().min(0).max(100),
+  gaps: z.array(profileGapSchema),
+  trustTier: z.enum(['trusted', 'normal', 'watch', 'restricted', 'banned']),
+});
+export type ProfileSummary = z.infer<typeof profileSummarySchema>;
+
+/**
+ * The choices a member makes about their own data (RULES P7). Deliberately
+ * short: every switch here changes something the server actually does, so
+ * there is nothing on this screen that only pretends to be a setting.
+ */
+export const privacySettingsSchema = z.object({
+  /** Off drops this account's `POST /events` rows on arrival. */
+  analytics: z.boolean(),
+  /** Off skips any notification marked as a targeted offer. */
+  personalisedOffers: z.boolean(),
+  /** Off means a referral never names this member to the friend who invited them. */
+  shareNameWithReferrer: z.boolean(),
+});
+export type PrivacySettings = z.infer<typeof privacySettingsSchema>;
+
+/** A device with a live session, as the security screen lists them. */
+export const accountSessionSchema = z.object({
+  id: z.string(),
+  platform: z.enum(['ios', 'android']),
+  model: z.string().nullable().default(null),
+  brand: z.string().nullable().default(null),
+  osVersion: z.string().nullable().default(null),
+  appVersion: z.string().nullable().default(null),
+  firstSeenAt: z.string().nullable().default(null),
+  lastSeenAt: z.string().nullable().default(null),
+  /** The phone asking. It cannot revoke itself — signing out is how that is done. */
+  isCurrent: z.boolean().default(false),
+});
+export type AccountSession = z.infer<typeof accountSessionSchema>;
+
+/**
+ * Where a deletion stands (RULES P5). Scheduled rather than immediate: the
+ * grace window is what makes a tap in anger recoverable, and signing in
+ * during it is enough to call it off.
+ */
+export const accountDeletionSchema = z.object({
+  /** ISO-8601 when it was asked for, or null when nothing is scheduled. */
+  scheduledAt: z.string().nullable(),
+  /** ISO-8601 when the data actually goes. */
+  purgeAt: z.string().nullable(),
+  reason: z.string().nullable(),
+  graceDays: z.number().int().positive(),
+});
+export type AccountDeletion = z.infer<typeof accountDeletionSchema>;
+
+export const supportCategorySchema = z.enum([
+  'account',
+  'coins',
+  'orders',
+  'tracking',
+  'payments',
+  'other',
+]);
+export type SupportCategory = z.infer<typeof supportCategorySchema>;
+
+export const supportFaqSchema = z.object({
+  id: z.string(),
+  category: supportCategorySchema,
+  question: z.string(),
+  answer: z.string(),
+});
+export type SupportFaq = z.infer<typeof supportFaqSchema>;
+
+export const supportTicketStatusSchema = z.enum([
+  'open',
+  'in_progress',
+  'resolved',
+  'closed',
+]);
+export type SupportTicketStatus = z.infer<typeof supportTicketStatusSchema>;
+
+export const supportMessageSchema = z.object({
+  id: z.string(),
+  /** Who wrote it. Support replies are written by a human in the admin tool. */
+  from: z.enum(['user', 'support']),
+  body: z.string(),
+  createdAt: z.string(),
+});
+export type SupportMessage = z.infer<typeof supportMessageSchema>;
+
+export const supportTicketSchema = z.object({
+  id: z.string(),
+  /** Short, quotable in an email — "VK-7Q2M". */
+  reference: z.string(),
+  subject: z.string(),
+  category: supportCategorySchema,
+  status: supportTicketStatusSchema,
+  messages: z.array(supportMessageSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SupportTicket = z.infer<typeof supportTicketSchema>;
+
+/** What the About screen shows, judged against the version that asked. */
+export const appAboutSchema = z.object({
+  name: z.string(),
+  company: z.string(),
+  /** The caller's own version, echoed so the screen never has to guess. */
+  version: z.string(),
+  build: z.string().nullable(),
+  latestVersion: z.string().nullable(),
+  minVersion: z.string(),
+  /** The caller is below `minVersion` and the API will refuse it. */
+  updateRequired: z.boolean(),
+  /** There is a newer release than the caller's, but theirs still works. */
+  updateAvailable: z.boolean(),
+  storeUrl: z.string(),
+  releaseNotes: z.array(
+    z.object({
+      version: z.string(),
+      releasedAt: z.string().nullable(),
+      notes: z.string().nullable(),
+    }),
+  ),
+  links: z.object({
+    privacy: z.string(),
+    terms: z.string(),
+    licenses: z.string(),
+    website: z.string(),
+  }),
+  supportEmail: z.string(),
+});
+export type AppAbout = z.infer<typeof appAboutSchema>;

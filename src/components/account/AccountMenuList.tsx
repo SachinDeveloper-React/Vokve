@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import {
   Gift,
+  Heart,
   HeartPulse,
   Info,
   LifeBuoy,
@@ -18,6 +19,7 @@ interface Props {
   /** Shown on the About row — "1.0.0", rendered with the `v` prefix here. */
   appVersion: string;
   onPressOrders: () => void;
+  onPressWishlist: () => void;
   onPressRewards: () => void;
   onPressStreakFreeze: () => void;
   onPressHealthData: () => void;
@@ -44,6 +46,7 @@ export const AccountMenuList = memo(
   ({
     appVersion,
     onPressOrders,
+    onPressWishlist,
     onPressRewards,
     onPressStreakFreeze,
     onPressHealthData,
@@ -62,6 +65,16 @@ export const AccountMenuList = memo(
             title="My Orders"
             subtitle="View your orders and track delivery"
             onPress={onPressOrders}
+          />
+
+          <Divider />
+
+          <AccountMenuRow
+            icon={Heart}
+            tint={colors.destructive}
+            title="Wishlist"
+            subtitle="Everything you saved for later"
+            onPress={onPressWishlist}
           />
 
           <Divider />
@@ -90,7 +103,7 @@ export const AccountMenuList = memo(
             icon={HeartPulse}
             tint={colors.avatarPink}
             title="Health Data"
-            subtitle="Manage your connected health data"
+            subtitle="Your vitals and connected health sources"
             onPress={onPressHealthData}
           />
 
@@ -98,7 +111,7 @@ export const AccountMenuList = memo(
 
           <AccountMenuRow
             icon={LifeBuoy}
-            tint={colors.destructive}
+            tint={colors.avatarOrange}
             title="Help & Support"
             subtitle="Get help and find answers"
             onPress={onPressHelp}

@@ -7,6 +7,7 @@ import { logger } from './lib/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestContext } from './middleware/requestContext.js';
 import { versionGate } from './middleware/version.js';
+import { accountRouter, aboutRouter } from './modules/account/routes.js';
 import { activityRouter } from './modules/activity/routes.js';
 import { commerceRouter } from './modules/commerce/routes.js';
 import { devicesRouter } from './modules/devices/routes.js';
@@ -30,6 +31,11 @@ export function createApp() {
 
   app.use(helmet());
   app.use(cors());
+  // A profile photo is the one body bigger than an API call: it gets its own
+  // parser, mounted first, so raising its ceiling does not raise everyone's.
+  // body-parser marks a request it has read, so the general parser below
+  // leaves this path alone.
+  app.use('/v1/me/avatar', express.json({ limit: '3mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use(requestContext);
   if (!isTest) {
@@ -44,9 +50,11 @@ export function createApp() {
 
   const v1 = express.Router();
   v1.use(platformRouter);
+  v1.use(aboutRouter);
   v1.use(authRouter);
   v1.use(devicesRouter);
   v1.use(meRouter);
+  v1.use(accountRouter);
   v1.use(walletRouter);
   v1.use(trainingRouter);
   v1.use(activityRouter);

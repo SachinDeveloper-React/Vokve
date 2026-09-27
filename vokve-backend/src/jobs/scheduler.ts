@@ -1,5 +1,6 @@
 import { getKV } from '../db/redis.js';
 import { logger } from '../lib/logger.js';
+import { purgeScheduledDeletions } from '../modules/account/service.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
 import { flushDeferredPushes } from '../modules/notifications/service.js';
@@ -33,6 +34,7 @@ interface DailyJob {
 const DAILY_JOBS: readonly DailyJob[] = [
   { name: 'coin-expiry-warn', run: () => warnExpiringWallets() },
   { name: 'coin-expiry', run: () => expireIdleWallets() },
+  { name: 'account-purge', run: () => purgeScheduledDeletions() },
 ];
 
 /**

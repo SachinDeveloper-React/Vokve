@@ -58,3 +58,10 @@ jest.mock('@react-native-community/slider', () => ({
   __esModule: true,
   default: 'Slider',
 }));
+
+// The image picker is a native module; the app only ever asks it to open a
+// camera or a library and hand back an asset, so that is all the double does.
+jest.mock('react-native-image-picker', () => ({
+  launchCamera: jest.fn().mockResolvedValue({ didCancel: true }),
+  launchImageLibrary: jest.fn().mockResolvedValue({ didCancel: true }),
+}));

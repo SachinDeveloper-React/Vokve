@@ -1,11 +1,12 @@
 import { connectMongo, disconnectMongo } from '../db/mongo.js';
 import { logger } from '../lib/logger.js';
+import { SupportFaqModel } from '../modules/account/models.js';
 import { AppReleaseModel } from '../modules/devices/models.js';
 import { AppConfigModel } from '../modules/platform/models.js';
 import { ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
 import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
-import { APP_RELEASES, EXERCISES, SHOP_ITEMS, SHOP_STOCK, WORKOUT_TEMPLATES } from './data.js';
+import { APP_RELEASES, EXERCISES, SHOP_ITEMS, SHOP_STOCK, SUPPORT_FAQS, WORKOUT_TEMPLATES } from './data.js';
 
 /** Idempotent: safe to run on every deploy. Never touches user data. */
 export async function seed(): Promise<void> {
@@ -18,6 +19,9 @@ export async function seed(): Promise<void> {
   // Stock is only ever *created* by the seed: a re-seed must not undo sales.
   await Promise.all(SHOP_STOCK.map(s => ShopInventoryModel.updateOne({ _id: s._id }, { $setOnInsert: s }, { upsert: true })));
   await Promise.all(APP_RELEASES.map(r => AppReleaseModel.updateOne({ platform: r.platform, version: r.version, build: r.build }, { $set: r }, { upsert: true })));
+  // Help articles are the seed's to keep current: support edits land in the
+  // collection, and a re-seed restores the wording the app shipped with.
+  await Promise.all(SUPPORT_FAQS.map(f => SupportFaqModel.updateOne({ _id: f._id }, { $set: f }, { upsert: true })));
   // Config documents are created only if absent, so an operator's override survives a re-seed.
   for (const [key, value] of Object.entries(CONFIG_DEFAULTS)) {
     await AppConfigModel.updateOne({ _id: key }, { $setOnInsert: { _id: key, value, updatedBy: 'seed' } }, { upsert: true });

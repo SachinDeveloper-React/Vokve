@@ -24,6 +24,18 @@ const userSchema = new Schema(
     profileCompletedAt: { type: Date, default: null },
     trust: { score: { type: Number, default: 60 }, tier: { type: String, default: 'normal' }, updatedAt: Date },
     flags: { frozen: { type: Boolean, default: false }, legalHold: { type: Boolean, default: false } },
+    /**
+     * A deletion the member asked for and can still call off (RULES P5).
+     * `purgeAt` is when the daily job actually anonymises the row; both are
+     * cleared when the deletion is cancelled.
+     */
+    deletion: {
+      scheduledAt: { type: Date, default: null },
+      purgeAt: { type: Date, default: null },
+      reason: { type: String, default: null },
+    },
+    /** When the last data export was produced, for the cooldown between them. */
+    lastExportAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true, collection: 'users' },
@@ -32,6 +44,7 @@ userSchema.index({ email: 1 }, { unique: true, collation: { locale: 'en', streng
 userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ country: 1 });
 userSchema.index({ 'trust.tier': 1 });
+userSchema.index({ 'deletion.purgeAt': 1 }, { sparse: true });
 export const UserModel = model('User', userSchema);
 export type UserDoc = InstanceType<typeof UserModel>;
 

@@ -16,6 +16,7 @@ import {
   userSchema,
   verificationChallengeSchema,
   workoutSchema,
+  type AccountSession,
   type Address,
   type AppNotification,
   type AuthResponse,
@@ -23,12 +24,17 @@ import {
   type CheckoutResult,
   type NotificationPreferences,
   type Order,
+  type PrivacySettings,
+  type ProfileBadge,
+  type ProfileSummary,
   type PurchaseLine,
   type Quote,
   type ReferralProgram,
   type Review,
   type ShopConfig,
   type ShopItem,
+  type SupportFaq,
+  type SupportTicket,
   type CoinTransaction,
   type DailyActivity,
   type User,
@@ -40,8 +46,10 @@ import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
 import { logger } from '../../utils/logger';
 import { ApiError } from './errors';
 import type {
+  AccountApi,
   ActivityApi,
   AddressApi,
+  AppApi,
   AuthApi,
   CartApi,
   CheckoutApi,
@@ -51,6 +59,7 @@ import type {
   OrderApi,
   ReferralApi,
   ShopApi,
+  SupportApi,
   UserApi,
   WalletApi,
   WishlistApi,
@@ -97,8 +106,12 @@ interface PendingSignUp {
   resendAt: number;
   /** Which code this is — the phone's, or the email's that follows it. */
   channel?: 'sms' | 'email';
-  /** A step-up code proves the user, not a contact: it answers with a token. */
-  purpose?: 'step_up';
+  /**
+   * What passing it unlocks. A step-up code proves the user, not a contact,
+   * and answers with a token; a contact change moves the address it was
+   * sent to onto the account.
+   */
+  purpose?: 'step_up' | 'change_email' | 'change_phone';
 }
 
 const pendingSignUps = new Map<string, PendingSignUp>();
@@ -274,6 +287,27 @@ export const mockAuthApi: AuthApi = {
 
     pendingSignUps.delete(verificationId);
 
+    // A contact change: passing the code is what moves the address onto the
+    // account, exactly as the server does it.
+    if (
+      currentUser &&
+      (pending.purpose === 'change_email' || pending.purpose === 'change_phone')
+    ) {
+      currentUser =
+        pending.purpose === 'change_email'
+          ? {
+              ...currentUser,
+              email: pending.payload.email,
+              emailVerifiedAt: new Date().toISOString(),
+            }
+          : {
+              ...currentUser,
+              phone: pending.payload.phone,
+              phoneVerifiedAt: new Date().toISOString(),
+            };
+      return makeAuthResponse(currentUser);
+    }
+
     // A step-up: the session is refreshed and the proof rides with it,
     // remembered so the redeem that follows can recognise and spend it.
     if (currentUser && pending.purpose === 'step_up') {
@@ -447,6 +481,13 @@ export const mockAuthApi: AuthApi = {
     mockCart = [];
     mockWishlist = [];
     mockReviews = [];
+    mockPrivacy = {
+      analytics: true,
+      personalisedOffers: true,
+      shareNameWithReferrer: true,
+    };
+    mockDeletion = { scheduledAt: null, purgeAt: null, reason: null };
+    mockTickets = [];
     mockApplied = null;
     return { ok: true };
   },
@@ -491,6 +532,28 @@ export const mockUserApi: UserApi = {
       // past onboarding on the next launch.
       profileCompletedAt: new Date().toISOString(),
     });
+    return currentUser;
+  },
+  async uploadAvatar({ data, contentType }) {
+    await delay();
+    if (!currentUser) {
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    }
+    // The mock keeps the bytes as a data URL, which is what a real server's
+    // media URL stands in for: the `Avatar` renders either without caring.
+    currentUser = {
+      ...currentUser,
+      avatarUrl: `data:${contentType};base64,${data}`,
+    };
+    return currentUser;
+  },
+
+  async removeAvatar() {
+    await delay();
+    if (!currentUser) {
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    }
+    currentUser = { ...currentUser, avatarUrl: null };
     return currentUser;
   },
 };
@@ -719,7 +782,13 @@ export const mockNotificationApi: NotificationApi = {
   },
   async counts() {
     await delay();
-    const counts = { all: mockFeed.length, activity: 0, reward: 0, system: 0, unread: 0 };
+    const counts = {
+      all: mockFeed.length,
+      activity: 0,
+      reward: 0,
+      system: 0,
+      unread: 0,
+    };
     for (const n of mockFeed) {
       counts[MOCK_FEED_CATEGORY[n.topic]] += 1;
       if (!n.read) counts.unread += 1;
@@ -740,7 +809,16 @@ export const mockNotificationApi: NotificationApi = {
 
 /** The server's defaults: everything on but health, quiet 22:00–07:00, SMS on, email off. */
 let mockPreferences: NotificationPreferences = {
-  categories: { activity: true, coins: true, challenges: true, orders: true, offers: true, announcements: true, referrals: true, health: false },
+  categories: {
+    activity: true,
+    coins: true,
+    challenges: true,
+    orders: true,
+    offers: true,
+    announcements: true,
+    referrals: true,
+    health: false,
+  },
   quietHours: { enabled: true, start: '22:00', end: '07:00' },
   sms: true,
   email: false,
@@ -788,7 +866,12 @@ let mockStock = new Map(
 );
 let mockOrders: Order[] = [];
 let mockAddresses: Address[] = [];
-let mockCart: { itemId: string; quantity: number; size: string | null; addedAt: string }[] = [];
+let mockCart: {
+  itemId: string;
+  quantity: number;
+  size: string | null;
+  addedAt: string;
+}[] = [];
 let mockWishlist: { itemId: string; addedAt: string }[] = [];
 let mockReviews: (Review & { userId: string })[] = [];
 /**
@@ -820,14 +903,20 @@ function ratingOf(itemId: string): ShopItem['rating'] {
   const mine = mockReviews.filter(r => r.itemId === itemId);
   if (mine.length === 0) return { average: 0, count: 0 };
   const sum = mine.reduce((total, r) => total + r.rating, 0);
-  return { average: Math.round((sum / mine.length) * 10) / 10, count: mine.length };
+  return {
+    average: Math.round((sum / mine.length) * 10) / 10,
+    count: mine.length,
+  };
 }
 
 function withStock(item: (typeof shopItems)[number]): ShopItem {
   return {
     ...item,
     inStock: (mockStock.get(item.id) ?? 0) > 0,
-    coinsMax: Math.floor((item.price * MOCK_SHOP_CONFIG.coinShareMax) / MOCK_SHOP_CONFIG.coinValuePaise),
+    coinsMax: Math.floor(
+      (item.price * MOCK_SHOP_CONFIG.coinShareMax) /
+        MOCK_SHOP_CONFIG.coinValuePaise,
+    ),
     rating: ratingOf(item.id),
   };
 }
@@ -844,7 +933,8 @@ const snapshotOf = (address: Address): Order['address'] => ({
   country: address.country,
 });
 
-const notFound = (what: string) => new ApiError('not_found', `${what} could not be found.`, 404);
+const notFound = (what: string) =>
+  new ApiError('not_found', `${what} could not be found.`, 404);
 
 /**
  * The server's search, sort and paging, on the seed. The seed is already in
@@ -854,7 +944,11 @@ const notFound = (what: string) => new ApiError('not_found', `${what} could not 
 export const mockShopApi: ShopApi = {
   async items(query = {}) {
     await delay();
-    const words = (query.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const words = (query.q ?? '')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
     const matches = (item: (typeof shopItems)[number]) =>
       words.every(word =>
         [item.title, item.description, item.subcategory ?? '', ...item.tags]
@@ -864,44 +958,69 @@ export const mockShopApi: ShopApi = {
       );
     let rows = shopItems
       .filter(item => !query.category || item.category === query.category)
-      .filter(item => !query.subcategory || item.subcategory === query.subcategory)
+      .filter(
+        item => !query.subcategory || item.subcategory === query.subcategory,
+      )
       .filter(item => !query.deals || item.isDeal)
       .filter(item => !query.featured || item.featured)
-      .filter(item => query.minPrice === undefined || item.price >= query.minPrice)
-      .filter(item => query.maxPrice === undefined || item.price <= query.maxPrice)
+      .filter(
+        item => query.minPrice === undefined || item.price >= query.minPrice,
+      )
+      .filter(
+        item => query.maxPrice === undefined || item.price <= query.maxPrice,
+      )
       .filter(matches)
       .map(withStock)
-      .filter(item => query.minRating === undefined || item.rating.average >= query.minRating)
+      .filter(
+        item =>
+          query.minRating === undefined ||
+          item.rating.average >= query.minRating,
+      )
       .filter(item => !query.inStock || item.inStock);
-    if (query.sort === 'price_asc') rows = [...rows].sort((a, b) => a.price - b.price);
-    if (query.sort === 'price_desc') rows = [...rows].sort((a, b) => b.price - a.price);
+    if (query.sort === 'price_asc')
+      rows = [...rows].sort((a, b) => a.price - b.price);
+    if (query.sort === 'price_desc')
+      rows = [...rows].sort((a, b) => b.price - a.price);
     if (query.sort === 'newest') rows = [...rows].reverse();
     if (query.sort === 'rating')
-      rows = [...rows].sort((a, b) => b.rating.average - a.rating.average || b.rating.count - a.rating.count);
+      rows = [...rows].sort(
+        (a, b) =>
+          b.rating.average - a.rating.average ||
+          b.rating.count - a.rating.count,
+      );
     const limit = Math.min(100, Math.max(1, query.limit ?? 20));
-    const offset = query.cursor ? Number(query.cursor.replace(/^offset:/, '')) || 0 : 0;
+    const offset = query.cursor
+      ? Number(query.cursor.replace(/^offset:/, '')) || 0
+      : 0;
     const data = rows.slice(offset, offset + limit);
     const end = offset + data.length;
-    return { data, nextCursor: end < rows.length ? `offset:${end}` : null, total: rows.length };
+    return {
+      data,
+      nextCursor: end < rows.length ? `offset:${end}` : null,
+      total: rows.length,
+    };
   },
   async categories() {
     await delay();
-    return (['clothing', 'gym', 'sports', 'accessories'] as const).map(category => {
-      const mine = shopItems.filter(item => item.category === category);
-      const subcategories: { name: string; count: number }[] = [];
-      for (const item of mine) {
-        if (!item.subcategory) continue;
-        const found = subcategories.find(sc => sc.name === item.subcategory);
-        if (found) found.count += 1;
-        else subcategories.push({ name: item.subcategory, count: 1 });
-      }
-      return {
-        category,
-        count: mine.length,
-        inStock: mine.filter(item => (mockStock.get(item.id) ?? 0) > 0).length,
-        subcategories,
-      };
-    });
+    return (['clothing', 'gym', 'sports', 'accessories'] as const).map(
+      category => {
+        const mine = shopItems.filter(item => item.category === category);
+        const subcategories: { name: string; count: number }[] = [];
+        for (const item of mine) {
+          if (!item.subcategory) continue;
+          const found = subcategories.find(sc => sc.name === item.subcategory);
+          if (found) found.count += 1;
+          else subcategories.push({ name: item.subcategory, count: 1 });
+        }
+        return {
+          category,
+          count: mine.length,
+          inStock: mine.filter(item => (mockStock.get(item.id) ?? 0) > 0)
+            .length,
+          subcategories,
+        };
+      },
+    );
   },
   async config() {
     await delay();
@@ -915,7 +1034,8 @@ export const mockShopApi: ShopApi = {
   },
   async reviews(itemId, query = {}) {
     await delay();
-    if (!shopItems.some(entry => entry.id === itemId)) throw notFound('That item');
+    if (!shopItems.some(entry => entry.id === itemId))
+      throw notFound('That item');
     const readerId = currentUser?.id ?? null;
     const all = mockReviews
       .filter(r => r.itemId === itemId)
@@ -928,25 +1048,44 @@ export const mockShopApi: ShopApi = {
     const histogram = [0, 0, 0, 0, 0];
     for (const r of all) histogram[r.rating - 1] += 1;
     const limit = query.limit ?? 10;
-    const offset = query.cursor ? Number(query.cursor.replace(/^offset:/, '')) || 0 : 0;
+    const offset = query.cursor
+      ? Number(query.cursor.replace(/^offset:/, '')) || 0
+      : 0;
     const data = all.slice(offset, offset + limit);
     return {
       data,
-      nextCursor: offset + data.length < all.length ? `offset:${offset + data.length}` : null,
+      nextCursor:
+        offset + data.length < all.length
+          ? `offset:${offset + data.length}`
+          : null,
       summary: { ...ratingOf(itemId), histogram },
       mine: all.find(r => r.mine) ?? null,
     };
   },
   async writeReview(itemId, input) {
     await delay();
-    if (!currentUser) throw new ApiError('unauthorized', 'Your session has expired.', 401);
-    if (!shopItems.some(entry => entry.id === itemId)) throw notFound('That item');
+    if (!currentUser)
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    if (!shopItems.some(entry => entry.id === itemId))
+      throw notFound('That item');
     if (input.body.trim().length < 10) {
-      throw new ApiError('validation', 'Say a little more — at least ten characters.', 422, { body: 'Say a little more — at least ten characters.' });
+      throw new ApiError(
+        'validation',
+        'Say a little more — at least ten characters.',
+        422,
+        { body: 'Say a little more — at least ten characters.' },
+      );
     }
     const now = new Date().toISOString();
-    const existing = mockReviews.find(r => r.itemId === itemId && r.userId === currentUser!.id);
-    const bought = mockOrders.some(o => o.status !== 'cancelled' && o.status !== 'pending_payment' && o.items.some(l => l.itemId === itemId));
+    const existing = mockReviews.find(
+      r => r.itemId === itemId && r.userId === currentUser!.id,
+    );
+    const bought = mockOrders.some(
+      o =>
+        o.status !== 'cancelled' &&
+        o.status !== 'pending_payment' &&
+        o.items.some(l => l.itemId === itemId),
+    );
     const review: Review & { userId: string } = {
       id: existing?.id ?? nextId('rev'),
       itemId,
@@ -966,7 +1105,9 @@ export const mockShopApi: ShopApi = {
   async deleteReview(itemId) {
     await delay();
     const before = mockReviews.length;
-    mockReviews = mockReviews.filter(r => !(r.itemId === itemId && r.userId === currentUser?.id));
+    mockReviews = mockReviews.filter(
+      r => !(r.itemId === itemId && r.userId === currentUser?.id),
+    );
     if (mockReviews.length === before) throw notFound('Your review');
     return { ok: true };
   },
@@ -986,9 +1127,13 @@ export const mockWishlistApi: WishlistApi = {
   },
   async add(itemId) {
     await delay();
-    if (!shopItems.some(entry => entry.id === itemId)) throw notFound('That item');
+    if (!shopItems.some(entry => entry.id === itemId))
+      throw notFound('That item');
     if (!mockWishlist.some(entry => entry.itemId === itemId)) {
-      mockWishlist = [{ itemId, addedAt: new Date().toISOString() }, ...mockWishlist];
+      mockWishlist = [
+        { itemId, addedAt: new Date().toISOString() },
+        ...mockWishlist,
+      ];
     }
     return { ok: true };
   },
@@ -1000,18 +1145,49 @@ export const mockWishlistApi: WishlistApi = {
 };
 
 /** The server's line checks: the item, its size, the per-line cap. */
-function priceLine(line: PurchaseLine): { item: ShopItem; quantity: number; size: string | null } {
+function priceLine(line: PurchaseLine): {
+  item: ShopItem;
+  quantity: number;
+  size: string | null;
+} {
   const raw = shopItems.find(entry => entry.id === line.itemId);
-  if (!raw) throw new ApiError('not_found', 'One of the items is no longer available.', 404, { itemId: line.itemId }, 'ITEM_UNAVAILABLE');
+  if (!raw)
+    throw new ApiError(
+      'not_found',
+      'One of the items is no longer available.',
+      404,
+      { itemId: line.itemId },
+      'ITEM_UNAVAILABLE',
+    );
   const item = withStock(raw);
   let size: string | null = null;
   if (item.sizes.length > 0) {
-    if (!line.size) throw new ApiError('validation', `Pick a size for ${item.title}.`, 422, { itemId: item.id, sizes: item.sizes }, 'SIZE_REQUIRED');
-    if (!item.sizes.includes(line.size)) throw new ApiError('validation', `${item.title} does not come in ${line.size}.`, 422, { itemId: item.id, sizes: item.sizes }, 'SIZE_INVALID');
+    if (!line.size)
+      throw new ApiError(
+        'validation',
+        `Pick a size for ${item.title}.`,
+        422,
+        { itemId: item.id, sizes: item.sizes },
+        'SIZE_REQUIRED',
+      );
+    if (!item.sizes.includes(line.size))
+      throw new ApiError(
+        'validation',
+        `${item.title} does not come in ${line.size}.`,
+        422,
+        { itemId: item.id, sizes: item.sizes },
+        'SIZE_INVALID',
+      );
     size = line.size;
   }
   if (line.quantity > MOCK_SHOP_CONFIG.maxQuantityPerLine) {
-    throw new ApiError('validation', `You can order up to ${MOCK_SHOP_CONFIG.maxQuantityPerLine} of ${item.title} at a time.`, 422, { itemId: item.id, max: MOCK_SHOP_CONFIG.maxQuantityPerLine }, 'QUANTITY_LIMIT');
+    throw new ApiError(
+      'validation',
+      `You can order up to ${MOCK_SHOP_CONFIG.maxQuantityPerLine} of ${item.title} at a time.`,
+      422,
+      { itemId: item.id, max: MOCK_SHOP_CONFIG.maxQuantityPerLine },
+      'QUANTITY_LIMIT',
+    );
   }
   return { item, quantity: line.quantity, size };
 }
@@ -1020,15 +1196,32 @@ function priceLine(line: PurchaseLine): { item: ShopItem; quantity: number; size
 function quoteFor(lines: PurchaseLine[], coins: number | 'max'): Quote {
   const priced = lines.map(priceLine);
   const cfg = MOCK_SHOP_CONFIG;
-  const subtotal = priced.reduce((sum, l) => sum + l.item.price * l.quantity, 0);
-  const mrpTotal = priced.reduce((sum, l) => sum + (l.item.mrp ?? l.item.price) * l.quantity, 0);
+  const subtotal = priced.reduce(
+    (sum, l) => sum + l.item.price * l.quantity,
+    0,
+  );
+  const mrpTotal = priced.reduce(
+    (sum, l) => sum + (l.item.mrp ?? l.item.price) * l.quantity,
+    0,
+  );
   const shipping =
-    priced.length === 0 || (cfg.freeShippingAbovePaise !== null && subtotal >= cfg.freeShippingAbovePaise)
+    priced.length === 0 ||
+    (cfg.freeShippingAbovePaise !== null &&
+      subtotal >= cfg.freeShippingAbovePaise)
       ? 0
       : cfg.shippingFeePaise;
   const total = subtotal + shipping;
-  const coinsMax = Math.max(0, Math.min(Math.floor((subtotal * cfg.coinShareMax) / cfg.coinValuePaise), Math.floor(currentBalance())));
-  const coinsApplied = coins === 'max' ? coinsMax : Math.max(0, Math.min(Math.floor(coins), coinsMax));
+  const coinsMax = Math.max(
+    0,
+    Math.min(
+      Math.floor((subtotal * cfg.coinShareMax) / cfg.coinValuePaise),
+      Math.floor(currentBalance()),
+    ),
+  );
+  const coinsApplied =
+    coins === 'max'
+      ? coinsMax
+      : Math.max(0, Math.min(Math.floor(coins), coinsMax));
   const coinsValue = coinsApplied * cfg.coinValuePaise;
   return {
     currency: cfg.currency,
@@ -1058,7 +1251,9 @@ function quoteFor(lines: PurchaseLine[], coins: number | 'max'): Quote {
 }
 
 function cartView(): Cart {
-  mockCart = mockCart.filter(line => shopItems.some(item => item.id === line.itemId));
+  mockCart = mockCart.filter(line =>
+    shopItems.some(item => item.id === line.itemId),
+  );
   return {
     lines: mockCart.map(line => ({
       item: withStock(shopItems.find(item => item.id === line.itemId)!),
@@ -1067,7 +1262,14 @@ function cartView(): Cart {
       addedAt: line.addedAt,
     })),
     count: mockCart.reduce((sum, line) => sum + line.quantity, 0),
-    quote: quoteFor(mockCart.map(l => ({ itemId: l.itemId, quantity: l.quantity, size: l.size })), 'max'),
+    quote: quoteFor(
+      mockCart.map(l => ({
+        itemId: l.itemId,
+        quantity: l.quantity,
+        size: l.size,
+      })),
+      'max',
+    ),
   };
 }
 
@@ -1080,12 +1282,30 @@ export const mockCartApi: CartApi = {
     await delay();
     const size = line.size ?? null;
     if (line.quantity > 0) {
-      const priced = priceLine({ itemId: line.itemId, quantity: line.quantity, size });
-      const index = mockCart.findIndex(l => l.itemId === priced.item.id && l.size === priced.size);
-      if (index >= 0) mockCart[index] = { ...mockCart[index], quantity: priced.quantity };
-      else mockCart = [...mockCart, { itemId: priced.item.id, quantity: priced.quantity, size: priced.size, addedAt: new Date().toISOString() }];
+      const priced = priceLine({
+        itemId: line.itemId,
+        quantity: line.quantity,
+        size,
+      });
+      const index = mockCart.findIndex(
+        l => l.itemId === priced.item.id && l.size === priced.size,
+      );
+      if (index >= 0)
+        mockCart[index] = { ...mockCart[index], quantity: priced.quantity };
+      else
+        mockCart = [
+          ...mockCart,
+          {
+            itemId: priced.item.id,
+            quantity: priced.quantity,
+            size: priced.size,
+            addedAt: new Date().toISOString(),
+          },
+        ];
     } else {
-      mockCart = mockCart.filter(l => !(l.itemId === line.itemId && l.size === size));
+      mockCart = mockCart.filter(
+        l => !(l.itemId === line.itemId && l.size === size),
+      );
     }
     return cartView();
   },
@@ -1106,31 +1326,78 @@ export const mockCheckoutApi: CheckoutApi = {
   },
   async place(payload) {
     await delay();
-    if (!currentUser) throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    if (!currentUser)
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
     const address = mockAddresses.find(entry => entry.id === payload.addressId);
     if (!address) {
-      throw new ApiError('validation', 'Add a delivery address to place an order.', 422, { addressId: payload.addressId }, 'ADDRESS_REQUIRED');
+      throw new ApiError(
+        'validation',
+        'Add a delivery address to place an order.',
+        422,
+        { addressId: payload.addressId },
+        'ADDRESS_REQUIRED',
+      );
     }
     const lines = payload.fromCart
-      ? mockCart.map(l => ({ itemId: l.itemId, quantity: l.quantity, size: l.size }))
+      ? mockCart.map(l => ({
+          itemId: l.itemId,
+          quantity: l.quantity,
+          size: l.size,
+        }))
       : payload.lines ?? [];
-    if (lines.length === 0) throw new ApiError('validation', 'There is nothing to order yet.', 422, null, 'CART_EMPTY');
+    if (lines.length === 0)
+      throw new ApiError(
+        'validation',
+        'There is nothing to order yet.',
+        422,
+        null,
+        'CART_EMPTY',
+      );
     const q = quoteFor(lines, payload.coins);
     if (payload.coins > q.coinsMax) {
-      throw new ApiError('validation', `Up to ${q.coinsMax} coins can go towards this order.`, 422, { coinsMax: q.coinsMax, requested: payload.coins }, 'COINS_OVER_LIMIT');
+      throw new ApiError(
+        'validation',
+        `Up to ${q.coinsMax} coins can go towards this order.`,
+        422,
+        { coinsMax: q.coinsMax, requested: payload.coins },
+        'COINS_OVER_LIMIT',
+      );
     }
     const soldOut = q.lines.find(l => !l.inStock);
-    if (soldOut) throw new ApiError('unknown', `${soldOut.title} is sold out.`, 409, { itemId: soldOut.itemId }, 'OUT_OF_STOCK');
+    if (soldOut)
+      throw new ApiError(
+        'unknown',
+        `${soldOut.title} is sold out.`,
+        409,
+        { itemId: soldOut.itemId },
+        'OUT_OF_STOCK',
+      );
     if (q.needsStepUp) {
       if (!payload.stepUpToken) {
-        throw new ApiError('forbidden', 'Confirm it is you to use this many coins.', 403, null, 'STEP_UP_REQUIRED');
+        throw new ApiError(
+          'forbidden',
+          'Confirm it is you to use this many coins.',
+          403,
+          null,
+          'STEP_UP_REQUIRED',
+        );
       }
       if (!mockStepUps.delete(payload.stepUpToken)) {
-        throw new ApiError('forbidden', 'That confirmation has expired. Please confirm again.', 403, null, 'STEP_UP_INVALID');
+        throw new ApiError(
+          'forbidden',
+          'That confirmation has expired. Please confirm again.',
+          403,
+          null,
+          'STEP_UP_INVALID',
+        );
       }
     }
 
-    for (const line of q.lines) mockStock.set(line.itemId, (mockStock.get(line.itemId) ?? 0) - line.quantity);
+    for (const line of q.lines)
+      mockStock.set(
+        line.itemId,
+        (mockStock.get(line.itemId) ?? 0) - line.quantity,
+      );
     mockBalance = currentBalance() - q.coinsApplied;
     if (payload.fromCart) mockCart = [];
     const now = new Date();
@@ -1139,7 +1406,15 @@ export const mockCheckoutApi: CheckoutApi = {
     const order: Order = {
       id: orderId,
       status: pending ? 'pending_payment' : 'placed',
-      items: q.lines.map(l => ({ itemId: l.itemId, title: l.title, emoji: l.emoji, quantity: l.quantity, size: l.size, price: l.price, mrp: l.mrp })),
+      items: q.lines.map(l => ({
+        itemId: l.itemId,
+        title: l.title,
+        emoji: l.emoji,
+        quantity: l.quantity,
+        size: l.size,
+        price: l.price,
+        mrp: l.mrp,
+      })),
       currency: q.currency,
       subtotal: q.subtotal,
       discount: q.discount,
@@ -1155,7 +1430,9 @@ export const mockCheckoutApi: CheckoutApi = {
         currency: q.currency,
         providerOrderId: pending ? `mockord_${orderId}` : null,
         paidAt: null,
-        expiresAt: pending ? new Date(now.getTime() + MOCK_PAYMENT_WINDOW_MS).toISOString() : null,
+        expiresAt: pending
+          ? new Date(now.getTime() + MOCK_PAYMENT_WINDOW_MS).toISOString()
+          : null,
       },
       address: snapshotOf(address),
       placedAt: now.toISOString(),
@@ -1168,7 +1445,15 @@ export const mockCheckoutApi: CheckoutApi = {
       order,
       balance: mockBalance,
       payment: pending
-        ? { provider: 'mock', orderId, providerOrderId: `mockord_${orderId}`, amount: q.payable, currency: q.currency, keyId: null, expiresAt: order.payment.expiresAt! }
+        ? {
+            provider: 'mock',
+            orderId,
+            providerOrderId: `mockord_${orderId}`,
+            amount: q.payable,
+            currency: q.currency,
+            keyId: null,
+            expiresAt: order.payment.expiresAt!,
+          }
         : null,
     };
     return result;
@@ -1177,13 +1462,35 @@ export const mockCheckoutApi: CheckoutApi = {
     await delay();
     const order = mockOrders.find(entry => entry.id === orderId);
     if (!order) throw notFound('That order');
-    if (order.payment.status === 'paid') return { order, balance: currentBalance() };
+    if (order.payment.status === 'paid')
+      return { order, balance: currentBalance() };
     if (order.status !== 'pending_payment') {
-      throw new ApiError('unknown', `This order is ${order.status.replace('_', ' ')} and has no payment to take.`, 409, { status: order.status }, 'ORDER_NOT_PENDING');
+      throw new ApiError(
+        'unknown',
+        `This order is ${order.status.replace(
+          '_',
+          ' ',
+        )} and has no payment to take.`,
+        409,
+        { status: order.status },
+        'ORDER_NOT_PENDING',
+      );
     }
-    if (!proof.providerPaymentId) throw new ApiError('validation', 'That payment could not be verified.', 422, null, 'PAYMENT_INVALID');
+    if (!proof.providerPaymentId)
+      throw new ApiError(
+        'validation',
+        'That payment could not be verified.',
+        422,
+        null,
+        'PAYMENT_INVALID',
+      );
     const now = new Date().toISOString();
-    const paid: Order = { ...order, status: 'placed', updatedAt: now, payment: { ...order.payment, status: 'paid', paidAt: now } };
+    const paid: Order = {
+      ...order,
+      status: 'placed',
+      updatedAt: now,
+      payment: { ...order.payment, status: 'paid', paidAt: now },
+    };
     mockOrders = mockOrders.map(entry => (entry.id === orderId ? paid : entry));
     return { order: paid, balance: currentBalance() };
   },
@@ -1236,7 +1543,10 @@ export const mockOrderApi: OrderApi = {
       status: 'cancelled',
       cancellable: false,
       updatedAt: new Date().toISOString(),
-      payment: order.payment.status === 'paid' ? { ...order.payment, status: 'refunded' } : order.payment,
+      payment:
+        order.payment.status === 'paid'
+          ? { ...order.payment, status: 'refunded' }
+          : order.payment,
     };
     mockOrders = mockOrders.map(entry => (entry.id === id ? cancelled : entry));
     return { order: cancelled, balance: mockBalance };
@@ -1379,5 +1689,503 @@ export const mockReferralApi: ReferralApi = {
       appliedAt: new Date().toISOString(),
     };
     return mockProgram();
+  },
+};
+
+// ─── Account, support and about ────────────────────────────────────────────
+
+/** The password the mock account is signed up with; anything else is refused. */
+export const MOCK_CURRENT_PASSWORD = 'walk1000steps';
+/** How long the mock holds a scheduled deletion, matching the server's default. */
+const MOCK_DELETION_GRACE_DAYS = 14;
+
+let mockPrivacy: PrivacySettings = {
+  analytics: true,
+  personalisedOffers: true,
+  shareNameWithReferrer: true,
+};
+let mockDeletion: {
+  scheduledAt: string | null;
+  purgeAt: string | null;
+  reason: string | null;
+} = {
+  scheduledAt: null,
+  purgeAt: null,
+  reason: null,
+};
+let mockTickets: SupportTicket[] = [];
+let mockSessions: AccountSession[] = [
+  {
+    id: 'dev-current',
+    platform: 'android',
+    model: 'Pixel 8',
+    brand: 'Google',
+    osVersion: '14',
+    appVersion: config.appVersion,
+    firstSeenAt: daysAgoIso(40),
+    lastSeenAt: new Date().toISOString(),
+    isCurrent: true,
+  },
+  {
+    id: 'dev-old',
+    platform: 'ios',
+    model: 'iPhone 13',
+    brand: 'Apple',
+    osVersion: '17.4',
+    appVersion: '1.0.0',
+    firstSeenAt: daysAgoIso(120),
+    lastSeenAt: daysAgoIso(9),
+    isCurrent: false,
+  },
+];
+
+function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
+/**
+ * The same shape the server computes, on the mock's own figures: the level
+ * from the seeded ledger, the badges from the seeded streak and steps. It
+ * is deliberately a *calculation* rather than a fixture — a screen that
+ * only ever sees one hand-written profile never exercises its own maths.
+ */
+function mockProfile(): ProfileSummary {
+  const lifetimeCoins = seedCoinTransactions
+    .filter(t => t.amount > 0)
+    .reduce((sum, t) => sum + t.amount, 0);
+  const level = Math.max(1, Math.floor(Math.sqrt(lifetimeCoins / 100)));
+  const levelStart = level * level * 100;
+  const nextAt = (level + 1) * (level + 1) * 100;
+  const titles = [
+    'Athlo Rookie',
+    'Athlo Runner',
+    'Athlo Strider',
+    'Athlo Warrior',
+    'Athlo Champion',
+    'Athlo Legend',
+  ];
+  const totalSteps = weeklySteps.reduce((sum, day) => sum + day.steps, 0) * 12;
+  const streak = 12;
+  const workouts = 34;
+  const badge = (
+    id: string,
+    label: string,
+    description: string,
+    icon: ProfileBadge['icon'],
+    value: number,
+    goal: number,
+  ): ProfileBadge => ({
+    id,
+    label,
+    description,
+    icon,
+    unlockedAt: value >= goal ? daysAgoIso(20) : null,
+    progress: Math.min(1, value / goal),
+    value: Math.min(value, goal),
+    goal,
+  });
+
+  return {
+    level,
+    tierTitle: titles[Math.min(Math.floor(level / 5), titles.length - 1)],
+    xp: lifetimeCoins,
+    xpIntoLevel: Math.max(0, lifetimeCoins - levelStart),
+    xpForNextLevel: nextAt - levelStart,
+    levelProgress: Math.max(
+      0,
+      Math.min(1, (lifetimeCoins - levelStart) / (nextAt - levelStart)),
+    ),
+    memberSince: daysAgoIso(260),
+    rank: 412,
+    totalMembers: 18_940,
+    stats: {
+      coins: currentBalance(),
+      lifetimeCoins,
+      currentStreak: streak,
+      longestStreak: 21,
+      totalSteps,
+      activeDays: 96,
+      totalWorkouts: workouts,
+      totalWorkoutMinutes: workouts * 48,
+      orders: mockOrders.filter(o => o.status !== 'pending_payment').length,
+      referrals: seedReferrals.filter(r => r.status === 'rewarded').length,
+    },
+    badges: [
+      badge('streak-7', 'Week One', 'A seven-day streak', 'flame', 21, 7),
+      badge(
+        'streak-30',
+        'Month Strong',
+        'A thirty-day streak',
+        'flame',
+        21,
+        30,
+      ),
+      badge(
+        'steps-100k',
+        'Hundred K',
+        '100,000 steps walked',
+        'footprints',
+        totalSteps,
+        100_000,
+      ),
+      badge(
+        'workouts-25',
+        'Regular',
+        '25 workouts finished',
+        'dumbbell',
+        workouts,
+        25,
+      ),
+      badge(
+        'coins-5000',
+        'Earner',
+        '5,000 coins earned',
+        'coins',
+        lifetimeCoins,
+        5_000,
+      ),
+      badge(
+        'orders-1',
+        'First Order',
+        'Something bought with coins',
+        'package',
+        mockOrders.length,
+        1,
+      ),
+      badge(
+        'referrals-3',
+        'Recruiter',
+        'Three friends brought along',
+        'users',
+        seedReferrals.length,
+        3,
+      ),
+    ],
+    completeness: currentUser?.avatarUrl ? 100 : 90,
+    gaps: currentUser?.avatarUrl
+      ? []
+      : [{ field: 'avatarUrl', label: 'Add a profile photo', weight: 10 }],
+    trustTier: 'normal',
+  };
+}
+
+/**
+ * A pending challenge for a contact the member is moving to. The code goes
+ * to the *new* address, as the server sends it, so the OTP screen's copy
+ * names where to look.
+ */
+function contactChallenge(
+  next: string,
+  channel: 'sms' | 'email',
+  purpose: 'change_email' | 'change_phone',
+): VerificationChallenge {
+  if (!currentUser)
+    throw new ApiError('unauthorized', 'Your session has expired.', 401);
+  const id = nextId('ver');
+  const pending: PendingSignUp = {
+    payload: {
+      email: channel === 'email' ? next : currentUser.email,
+      phone: channel === 'sms' ? next : currentUser.phone ?? '',
+      password: '',
+      dateOfBirth: currentUser.dateOfBirth ?? '',
+      gender: currentUser.gender ?? 'other',
+    },
+    channel,
+    purpose,
+    expiresAt: Date.now() + OTP_LIFETIME_SECONDS * 1000,
+    resendAt: Date.now() + RESEND_COOLDOWN_SECONDS * 1000,
+  };
+  pendingSignUps.set(id, pending);
+  return makeChallenge(id, pending);
+}
+
+const MOCK_FAQS: SupportFaq[] = [
+  {
+    id: 'faq-coins-earn',
+    category: 'coins',
+    question: 'How do I earn coins?',
+    answer:
+      'Walking, finishing a workout, keeping a streak and inviting friends all pay coins. There is a daily ceiling across everything.',
+  },
+  {
+    id: 'faq-coins-expiry',
+    category: 'coins',
+    question: 'Do my coins expire?',
+    answer:
+      'Coins expire after 90 days without earning anything. Earning even one coin resets the window; spending does not.',
+  },
+  {
+    id: 'faq-orders-pay',
+    category: 'payments',
+    question: 'How much can I pay with coins?',
+    answer:
+      'Coins cover up to 30% of the items in an order, at ₹0.25 a coin. The checkout shows the split before you pay.',
+  },
+  {
+    id: 'faq-orders-track',
+    category: 'orders',
+    question: 'Where is my order?',
+    answer:
+      'My Orders shows every order and where it is. Once it ships you get a tracking reference there.',
+  },
+  {
+    id: 'faq-tracking-steps',
+    category: 'tracking',
+    question: 'My steps are not being counted',
+    answer:
+      'Check that VOKVE still has permission to read your health data and that battery optimisation is not stopping it in the background.',
+  },
+  {
+    id: 'faq-account-delete',
+    category: 'account',
+    question: 'How do I delete my account?',
+    answer:
+      'Account → Privacy → Delete account. Deletion is scheduled 14 days ahead so you can change your mind.',
+  },
+];
+
+export const mockAccountApi: AccountApi = {
+  async profile() {
+    await delay();
+    if (!currentUser)
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    return mockProfile();
+  },
+  async privacy() {
+    await delay();
+    return mockPrivacy;
+  },
+  async updatePrivacy(patch) {
+    await delay();
+    mockPrivacy = { ...mockPrivacy, ...patch };
+    return mockPrivacy;
+  },
+  async changePassword({ currentPassword, newPassword }) {
+    await delay();
+    if (currentPassword !== MOCK_CURRENT_PASSWORD) {
+      throw new ApiError(
+        'validation',
+        'That is not your current password.',
+        422,
+        { currentPassword: 'That is not your current password.' },
+        'PASSWORD_INCORRECT',
+      );
+    }
+    if (newPassword === currentPassword) {
+      throw new ApiError(
+        'validation',
+        'Choose a password you have not used here before.',
+        422,
+        { newPassword: 'Choose a different password.' },
+        'PASSWORD_UNCHANGED',
+      );
+    }
+    const others = mockSessions.filter(s => !s.isCurrent).length;
+    mockSessions = mockSessions.filter(s => s.isCurrent);
+    return { ok: true, signedOutSessions: others };
+  },
+  async changeEmail({ email, password }) {
+    await delay();
+    if (password !== MOCK_CURRENT_PASSWORD) {
+      throw new ApiError(
+        'validation',
+        'That is not your password.',
+        422,
+        { password: 'That is not your password.' },
+        'PASSWORD_INCORRECT',
+      );
+    }
+    if (email.includes(MOCK_RULES.takenMarker)) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422, {
+        email: 'That is already registered.',
+      });
+    }
+    return contactChallenge(email, 'email', 'change_email');
+  },
+  async changePhone({ phone, password }) {
+    await delay();
+    if (password !== MOCK_CURRENT_PASSWORD) {
+      throw new ApiError(
+        'validation',
+        'That is not your password.',
+        422,
+        { password: 'That is not your password.' },
+        'PASSWORD_INCORRECT',
+      );
+    }
+    if (phone.includes(MOCK_RULES.takenMarker)) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422, {
+        phone: 'That is already registered.',
+      });
+    }
+    return contactChallenge(phone, 'sms', 'change_phone');
+  },
+  async sessions() {
+    await delay();
+    return mockSessions;
+  },
+  async revokeOtherSessions() {
+    await delay();
+    const others = mockSessions.filter(s => !s.isCurrent).length;
+    mockSessions = mockSessions.filter(s => s.isCurrent);
+    return { signedOut: others };
+  },
+  async exportData() {
+    await delay();
+    return {
+      exportedAt: new Date().toISOString(),
+      format: 'vokve.account.v1',
+      profile: currentUser,
+      privacy: mockPrivacy,
+      coinTransactions: seedCoinTransactions,
+      orders: mockOrders,
+      addresses: mockAddresses,
+      notifications: mockFeed,
+      supportTickets: mockTickets,
+    };
+  },
+  async deletion() {
+    await delay();
+    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS };
+  },
+  async scheduleDeletion({ password, reason }) {
+    await delay();
+    if (password !== MOCK_CURRENT_PASSWORD) {
+      throw new ApiError(
+        'validation',
+        'That is not your password.',
+        422,
+        { password: 'That is not your password.' },
+        'PASSWORD_INCORRECT',
+      );
+    }
+    const now = new Date();
+    mockDeletion = {
+      scheduledAt: now.toISOString(),
+      purgeAt: new Date(
+        now.getTime() + MOCK_DELETION_GRACE_DAYS * 86_400_000,
+      ).toISOString(),
+      reason: reason ?? null,
+    };
+    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS };
+  },
+  async cancelDeletion() {
+    await delay();
+    mockDeletion = { scheduledAt: null, purgeAt: null, reason: null };
+    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS };
+  },
+};
+
+export const mockSupportApi: SupportApi = {
+  async faqs(query = {}) {
+    await delay();
+    const words = (query.q ?? '')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    return MOCK_FAQS.filter(
+      faq => !query.category || faq.category === query.category,
+    ).filter(faq =>
+      words.every(word =>
+        `${faq.question} ${faq.answer}`.toLowerCase().includes(word),
+      ),
+    );
+  },
+  async tickets() {
+    await delay();
+    return mockTickets;
+  },
+  async ticket(id) {
+    await delay();
+    const found = mockTickets.find(t => t.id === id);
+    if (!found)
+      throw new ApiError('not_found', 'That ticket could not be found.', 404);
+    return found;
+  },
+  async createTicket({ subject, category, message }) {
+    await delay();
+    const now = new Date().toISOString();
+    const ticket: SupportTicket = {
+      id: nextId('tkt'),
+      reference: `VK-${nextId('r').slice(-4).toUpperCase()}`,
+      subject,
+      category,
+      status: 'open',
+      messages: [
+        { id: nextId('msg'), from: 'user', body: message, createdAt: now },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+    mockTickets = [ticket, ...mockTickets];
+    return ticket;
+  },
+  async reply(id, message) {
+    await delay();
+    const found = mockTickets.find(t => t.id === id);
+    if (!found)
+      throw new ApiError('not_found', 'That ticket could not be found.', 404);
+    if (found.status === 'closed') {
+      throw new ApiError(
+        'unknown',
+        'This ticket is closed. Open a new one and we will pick it up there.',
+        409,
+        null,
+        'TICKET_CLOSED',
+      );
+    }
+    const replied: SupportTicket = {
+      ...found,
+      status: found.status === 'resolved' ? 'open' : found.status,
+      messages: [
+        ...found.messages,
+        {
+          id: nextId('msg'),
+          from: 'user',
+          body: message,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+    mockTickets = mockTickets.map(t => (t.id === id ? replied : t));
+    return replied;
+  },
+};
+
+export const mockAppApi: AppApi = {
+  async about() {
+    await delay();
+    return {
+      name: 'VOKVE',
+      company: 'VOKVE Fitness',
+      version: config.appVersion,
+      build: '1',
+      latestVersion: config.appVersion,
+      minVersion: '1.0.0',
+      updateRequired: false,
+      updateAvailable: false,
+      storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve',
+      releaseNotes: [
+        {
+          version: config.appVersion,
+          releasedAt: daysAgoIso(3),
+          notes: 'Shop, cart and checkout with coins.',
+        },
+        {
+          version: '1.0.0',
+          releasedAt: daysAgoIso(60),
+          notes: 'First release.',
+        },
+      ],
+      links: {
+        privacy: 'https://vokve.app/privacy',
+        terms: 'https://vokve.app/terms',
+        licenses: 'https://vokve.app/licenses',
+        website: 'https://vokve.app',
+      },
+      supportEmail: 'support@vokve.app',
+    };
   },
 };

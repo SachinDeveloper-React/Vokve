@@ -12,6 +12,7 @@ import {
   type ReferralProgram,
 } from '../../contracts/index.js';
 import { credit } from '../economy/service.js';
+import { AccountPrivacyModel } from '../account/models.js';
 import { UserModel } from '../identity/models.js';
 import { notify } from '../notifications/service.js';
 import { ReferralCodeModel, ReferralModel } from './models.js';
@@ -90,11 +91,21 @@ function toReferral(row: ReferralRow, name: string, timeZone: string, promised: 
   });
 }
 
-/** First names for a set of user ids, "A friend" for one that has gone. */
+/**
+ * First names for a set of user ids, "A friend" for one that has gone — or
+ * for one who turned off being named to whoever invited them (RULES P7).
+ * The referral itself is unaffected; only the name is withheld.
+ */
 async function namesFor(ids: string[]): Promise<Map<string, string>> {
-  const users = await UserModel.find({ _id: { $in: ids } }, { name: 1 }).lean();
+  const [users, hidden] = await Promise.all([
+    UserModel.find({ _id: { $in: ids } }, { name: 1 }).lean(),
+    AccountPrivacyModel.find({ _id: { $in: ids }, shareNameWithReferrer: false }, { _id: 1 }).lean(),
+  ]);
+  const withheld = new Set(hidden.map(row => row._id));
   const names = new Map<string, string>();
-  for (const u of users) names.set(u._id, (u.name ?? '').split(' ')[0] || 'A friend');
+  for (const u of users) {
+    names.set(u._id, withheld.has(u._id) ? 'A friend' : (u.name ?? '').split(' ')[0] || 'A friend');
+  }
   return names;
 }
 

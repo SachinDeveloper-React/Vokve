@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import {
+  accountDeletionSchema,
+  accountSessionSchema,
   addressSchema,
+  appAboutSchema,
   appNotificationSchema,
   authResponseSchema,
   cartSchema,
@@ -9,6 +12,8 @@ import {
   notificationCountsSchema,
   notificationPreferencesSchema,
   orderSchema,
+  privacySettingsSchema,
+  profileSummarySchema,
   quoteSchema,
   referralProgramSchema,
   referralSchema,
@@ -17,6 +22,8 @@ import {
   shopCategorySummarySchema,
   shopConfigSchema,
   shopItemSchema,
+  supportFaqSchema,
+  supportTicketSchema,
   dailyActivitySchema,
   deviceRegistrationSchema,
   earnRuleSchema,
@@ -33,16 +40,15 @@ import {
   type Workout,
   type WorkoutTemplate,
 } from '../../types/models';
-import type {
-  CompleteProfilePayload,
-  SignUpPayload,
-} from '../../types/forms';
+import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
 import { config } from '../../constants/config';
 import { logger } from '../../utils/logger';
 import { request } from './client';
 import type {
+  AccountApi,
   ActivityApi,
   AddressApi,
+  AppApi,
   AuthApi,
   CartApi,
   CheckoutApi,
@@ -52,6 +58,7 @@ import type {
   OrderApi,
   ReferralApi,
   ShopApi,
+  SupportApi,
   UserApi,
   WalletApi,
   WishlistApi,
@@ -59,8 +66,10 @@ import type {
 } from './contracts';
 import {
   MOCK_RULES,
+  mockAccountApi,
   mockActivityApi,
   mockAddressApi,
+  mockAppApi,
   mockAuthApi,
   mockCartApi,
   mockCheckoutApi,
@@ -71,6 +80,7 @@ import {
   mockReferralApi,
   mockShopApi,
   mockUserApi,
+  mockSupportApi,
   mockWalletApi,
   mockWishlistApi,
   mockWorkoutApi,
@@ -173,7 +183,11 @@ const realWalletApi: WalletApi = {
   transactions: (query = {}) =>
     request(pageSchema(coinTransactionSchema), client =>
       client.get('/wallet/transactions', {
-        params: { cursor: query.cursor, limit: query.limit, source: query.source },
+        params: {
+          cursor: query.cursor,
+          limit: query.limit,
+          source: query.source,
+        },
       }),
     ),
   earnRules: () =>
@@ -183,14 +197,17 @@ const realWalletApi: WalletApi = {
 };
 
 const realUserApi: UserApi = {
-  me: (): Promise<User> =>
-    request(userSchema, client => client.get('/me')),
+  me: (): Promise<User> => request(userSchema, client => client.get('/me')),
 
   updateProfile: (patch: Partial<User>): Promise<User> =>
     request(userSchema, client => client.patch('/me', patch)),
 
   completeProfile: (payload: CompleteProfilePayload): Promise<User> =>
     request(userSchema, client => client.post('/me/complete-profile', payload)),
+  uploadAvatar: input =>
+    request(userSchema, client => client.post('/me/avatar', input)),
+  removeAvatar: () =>
+    request(userSchema, client => client.delete('/me/avatar')),
 };
 
 const realWorkoutApi: WorkoutApi = {
@@ -352,6 +369,85 @@ const realOrderApi: OrderApi = {
     ),
 };
 
+const realAccountApi: AccountApi = {
+  profile: () =>
+    request(profileSummarySchema, client => client.get('/me/profile')),
+  privacy: () =>
+    request(privacySettingsSchema, client => client.get('/me/privacy')),
+  updatePrivacy: patch =>
+    request(privacySettingsSchema, client => client.put('/me/privacy', patch)),
+  changePassword: input =>
+    request(
+      z.object({
+        ok: z.boolean(),
+        signedOutSessions: z.number().int().nonnegative(),
+      }),
+      client => client.put('/me/password', input),
+    ),
+  changeEmail: input =>
+    request(verificationChallengeSchema, client =>
+      client.post('/me/email', input),
+    ),
+  changePhone: input =>
+    request(verificationChallengeSchema, client =>
+      client.post('/me/phone', input),
+    ),
+  sessions: () =>
+    request(pageSchema(accountSessionSchema), client =>
+      client.get('/me/sessions'),
+    ).then(page => page.data),
+  revokeOtherSessions: () =>
+    request(z.object({ signedOut: z.number().int().nonnegative() }), client =>
+      client.post('/me/sessions/revoke-others'),
+    ),
+  // The export is the member's own data, whatever shape it has grown into:
+  // validating it against a schema here would mean a new field on the server
+  // could stop them taking a copy of it.
+  exportData: () =>
+    request(z.record(z.string(), z.unknown()), client =>
+      client.get('/me/export'),
+    ),
+  deletion: () =>
+    request(accountDeletionSchema, client => client.get('/me/deletion')),
+  scheduleDeletion: input =>
+    request(accountDeletionSchema, client =>
+      client.post('/me/deletion', input),
+    ),
+  cancelDeletion: () =>
+    request(accountDeletionSchema, client => client.delete('/me/deletion')),
+};
+
+const realSupportApi: SupportApi = {
+  faqs: (query = {}) =>
+    request(pageSchema(supportFaqSchema), client =>
+      client.get('/support/faqs', {
+        params: { q: query.q || undefined, category: query.category },
+      }),
+    ).then(page => page.data),
+  tickets: () =>
+    request(pageSchema(supportTicketSchema), client =>
+      client.get('/support/tickets'),
+    ).then(page => page.data),
+  ticket: id =>
+    request(supportTicketSchema, client =>
+      client.get(`/support/tickets/${encodeURIComponent(id)}`),
+    ),
+  createTicket: input =>
+    request(supportTicketSchema, client =>
+      client.post('/support/tickets', input),
+    ),
+  reply: (id, message) =>
+    request(supportTicketSchema, client =>
+      client.post(`/support/tickets/${encodeURIComponent(id)}/replies`, {
+        message,
+      }),
+    ),
+};
+
+const realAppApi: AppApi = {
+  about: () => request(appAboutSchema, client => client.get('/app/about')),
+};
+
 const realNotificationPreferencesApi: NotificationPreferencesApi = {
   get: () =>
     request(notificationPreferencesSchema, client =>
@@ -462,7 +558,11 @@ export const authApi: AuthApi = {
   forgotPassword: identifier =>
     pick(mockAuthApi, realAuthApi).forgotPassword(identifier),
   resetPassword: (verificationId, code, password) =>
-    pick(mockAuthApi, realAuthApi).resetPassword(verificationId, code, password),
+    pick(mockAuthApi, realAuthApi).resetPassword(
+      verificationId,
+      code,
+      password,
+    ),
   stepUp: () => pick(mockAuthApi, realAuthApi).stepUp(),
   signOut: () => pick(mockAuthApi, realAuthApi).signOut(),
 };
@@ -485,6 +585,8 @@ export const userApi: UserApi = {
   updateProfile: patch => pick(mockUserApi, realUserApi).updateProfile(patch),
   completeProfile: payload =>
     pick(mockUserApi, realUserApi).completeProfile(payload),
+  uploadAvatar: input => pick(mockUserApi, realUserApi).uploadAvatar(input),
+  removeAvatar: () => pick(mockUserApi, realUserApi).removeAvatar(),
 };
 
 export const workoutApi: WorkoutApi = {
@@ -568,6 +670,39 @@ export const notificationApi: NotificationApi = {
   list: query => pick(mockNotificationApi, realNotificationApi).list(query),
   counts: () => pick(mockNotificationApi, realNotificationApi).counts(),
   markRead: id => pick(mockNotificationApi, realNotificationApi).markRead(id),
-  markAllRead: () => pick(mockNotificationApi, realNotificationApi).markAllRead(),
+  markAllRead: () =>
+    pick(mockNotificationApi, realNotificationApi).markAllRead(),
 };
 
+export const accountApi: AccountApi = {
+  profile: () => pick(mockAccountApi, realAccountApi).profile(),
+  privacy: () => pick(mockAccountApi, realAccountApi).privacy(),
+  updatePrivacy: patch =>
+    pick(mockAccountApi, realAccountApi).updatePrivacy(patch),
+  changePassword: input =>
+    pick(mockAccountApi, realAccountApi).changePassword(input),
+  changeEmail: input => pick(mockAccountApi, realAccountApi).changeEmail(input),
+  changePhone: input => pick(mockAccountApi, realAccountApi).changePhone(input),
+  sessions: () => pick(mockAccountApi, realAccountApi).sessions(),
+  revokeOtherSessions: () =>
+    pick(mockAccountApi, realAccountApi).revokeOtherSessions(),
+  exportData: () => pick(mockAccountApi, realAccountApi).exportData(),
+  deletion: () => pick(mockAccountApi, realAccountApi).deletion(),
+  scheduleDeletion: input =>
+    pick(mockAccountApi, realAccountApi).scheduleDeletion(input),
+  cancelDeletion: () => pick(mockAccountApi, realAccountApi).cancelDeletion(),
+};
+
+export const supportApi: SupportApi = {
+  faqs: query => pick(mockSupportApi, realSupportApi).faqs(query),
+  tickets: () => pick(mockSupportApi, realSupportApi).tickets(),
+  ticket: id => pick(mockSupportApi, realSupportApi).ticket(id),
+  createTicket: input =>
+    pick(mockSupportApi, realSupportApi).createTicket(input),
+  reply: (id, message) =>
+    pick(mockSupportApi, realSupportApi).reply(id, message),
+};
+
+export const appApi: AppApi = {
+  about: () => pick(mockAppApi, realAppApi).about(),
+};

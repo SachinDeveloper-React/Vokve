@@ -26,10 +26,38 @@ export const workoutTemplates: WorkoutTemplate[] = [
     estimatedMinutes: 55,
     muscleGroups: ['chest', 'shoulders', 'triceps'],
     exercises: [
-      { id: 'bench', name: 'Barbell Bench Press', muscleGroup: 'chest', equipment: 'barbell', isTimed: false, imageUrl: null },
-      { id: 'ohp', name: 'Overhead Press', muscleGroup: 'shoulders', equipment: 'barbell', isTimed: false, imageUrl: null },
-      { id: 'incline-db', name: 'Incline Dumbbell Press', muscleGroup: 'chest', equipment: 'dumbbell', isTimed: false, imageUrl: null },
-      { id: 'pushdown', name: 'Cable Tricep Pushdown', muscleGroup: 'triceps', equipment: 'cable', isTimed: false, imageUrl: null },
+      {
+        id: 'bench',
+        name: 'Barbell Bench Press',
+        muscleGroup: 'chest',
+        equipment: 'barbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'ohp',
+        name: 'Overhead Press',
+        muscleGroup: 'shoulders',
+        equipment: 'barbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'incline-db',
+        name: 'Incline Dumbbell Press',
+        muscleGroup: 'chest',
+        equipment: 'dumbbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'pushdown',
+        name: 'Cable Tricep Pushdown',
+        muscleGroup: 'triceps',
+        equipment: 'cable',
+        isTimed: false,
+        imageUrl: null,
+      },
     ],
   },
   {
@@ -39,10 +67,38 @@ export const workoutTemplates: WorkoutTemplate[] = [
     estimatedMinutes: 60,
     muscleGroups: ['back', 'biceps'],
     exercises: [
-      { id: 'deadlift', name: 'Deadlift', muscleGroup: 'back', equipment: 'barbell', isTimed: false, imageUrl: null },
-      { id: 'pullup', name: 'Pull-up', muscleGroup: 'back', equipment: 'bodyweight', isTimed: false, imageUrl: null },
-      { id: 'row', name: 'Barbell Row', muscleGroup: 'back', equipment: 'barbell', isTimed: false, imageUrl: null },
-      { id: 'curl', name: 'Dumbbell Curl', muscleGroup: 'biceps', equipment: 'dumbbell', isTimed: false, imageUrl: null },
+      {
+        id: 'deadlift',
+        name: 'Deadlift',
+        muscleGroup: 'back',
+        equipment: 'barbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'pullup',
+        name: 'Pull-up',
+        muscleGroup: 'back',
+        equipment: 'bodyweight',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'row',
+        name: 'Barbell Row',
+        muscleGroup: 'back',
+        equipment: 'barbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'curl',
+        name: 'Dumbbell Curl',
+        muscleGroup: 'biceps',
+        equipment: 'dumbbell',
+        isTimed: false,
+        imageUrl: null,
+      },
     ],
   },
   {
@@ -52,10 +108,38 @@ export const workoutTemplates: WorkoutTemplate[] = [
     estimatedMinutes: 65,
     muscleGroups: ['legs', 'glutes', 'core'],
     exercises: [
-      { id: 'squat', name: 'Back Squat', muscleGroup: 'legs', equipment: 'barbell', isTimed: false, imageUrl: null },
-      { id: 'rdl', name: 'Romanian Deadlift', muscleGroup: 'glutes', equipment: 'barbell', isTimed: false, imageUrl: null },
-      { id: 'legpress', name: 'Leg Press', muscleGroup: 'legs', equipment: 'machine', isTimed: false, imageUrl: null },
-      { id: 'plank', name: 'Plank', muscleGroup: 'core', equipment: 'bodyweight', isTimed: true, imageUrl: null },
+      {
+        id: 'squat',
+        name: 'Back Squat',
+        muscleGroup: 'legs',
+        equipment: 'barbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'rdl',
+        name: 'Romanian Deadlift',
+        muscleGroup: 'glutes',
+        equipment: 'barbell',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'legpress',
+        name: 'Leg Press',
+        muscleGroup: 'legs',
+        equipment: 'machine',
+        isTimed: false,
+        imageUrl: null,
+      },
+      {
+        id: 'plank',
+        name: 'Plank',
+        muscleGroup: 'core',
+        equipment: 'bodyweight',
+        isTimed: true,
+        imageUrl: null,
+      },
     ],
   },
   {
@@ -65,8 +149,22 @@ export const workoutTemplates: WorkoutTemplate[] = [
     estimatedMinutes: 25,
     muscleGroups: ['cardio', 'full_body'],
     exercises: [
-      { id: 'row-erg', name: 'Rowing Intervals', muscleGroup: 'cardio', equipment: 'machine', isTimed: true, imageUrl: null },
-      { id: 'burpee', name: 'Burpees', muscleGroup: 'full_body', equipment: 'bodyweight', isTimed: true, imageUrl: null },
+      {
+        id: 'row-erg',
+        name: 'Rowing Intervals',
+        muscleGroup: 'cardio',
+        equipment: 'machine',
+        isTimed: true,
+        imageUrl: null,
+      },
+      {
+        id: 'burpee',
+        name: 'Burpees',
+        muscleGroup: 'full_body',
+        equipment: 'bodyweight',
+        isTimed: true,
+        imageUrl: null,
+      },
     ],
   },
 ];
@@ -93,32 +191,14 @@ export const todayActivity = {
   caloriesBurned: 358,
 };
 
-/**
- * The profile figures the account screen leads with, none of which the user
- * API carries yet: level and tier title are awarded server-side once the
- * progression rules exist, achievements come from a challenges service that is
- * not built, and lifetime steps need a health data source connected. Seeded
- * here in one object rather than scattered as literals in the screen, so the
- * whole export can be deleted the day those arrive.
- *
- * `streakDays` is deliberately absent — that one *is* on the user record.
- */
-export const profileHighlights = {
-  level: 18,
-  /** The name that goes with the level, shown beside it on the profile panel. */
-  tierTitle: 'Athlo Warrior',
-  /** Formatted for display: the API has no join date to derive it from. */
-  memberSince: 'May 2025',
-  achievements: 15,
-  totalSteps: 245_600,
-};
-
 /** Local `YYYY-MM-DD` for `days` days before today. */
 function dateDaysAgo(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}`;
 }
 
 /** Every day from `from` days ago down to `to` days ago, inclusive. */
@@ -156,16 +236,76 @@ function daysAgo(days: number): string {
  * explain. The whole export goes once earning is wired to real activity.
  */
 export const seedCoinTransactions: CoinTransaction[] = [
-  { id: 'c-1', title: '6 245 steps walked', source: 'steps', amount: 60, createdAt: daysAgo(0) },
-  { id: 'c-2', title: 'Resistance band', source: 'purchase', amount: -450, createdAt: daysAgo(1) },
-  { id: 'c-3', title: 'Push Day completed', source: 'workout', amount: 100, createdAt: daysAgo(1) },
-  { id: 'c-4', title: '7 day streak bonus', source: 'streak', amount: 175, createdAt: daysAgo(2) },
-  { id: 'c-5', title: '10 000 steps challenge', source: 'challenge', amount: 500, createdAt: daysAgo(4) },
-  { id: 'c-6', title: 'Leg Day completed', source: 'workout', amount: 100, createdAt: daysAgo(5) },
-  { id: 'c-7', title: 'Friend joined vokve', source: 'referral', amount: 300, createdAt: daysAgo(8) },
-  { id: 'c-8', title: 'Protein sample pack', source: 'purchase', amount: -250, createdAt: daysAgo(11) },
-  { id: 'c-9', title: 'Conditioning completed', source: 'workout', amount: 100, createdAt: daysAgo(12) },
-  { id: 'c-10', title: 'Welcome bonus', source: 'challenge', amount: 605, createdAt: daysAgo(20) },
+  {
+    id: 'c-1',
+    title: '6 245 steps walked',
+    source: 'steps',
+    amount: 60,
+    createdAt: daysAgo(0),
+  },
+  {
+    id: 'c-2',
+    title: 'Resistance band',
+    source: 'purchase',
+    amount: -450,
+    createdAt: daysAgo(1),
+  },
+  {
+    id: 'c-3',
+    title: 'Push Day completed',
+    source: 'workout',
+    amount: 100,
+    createdAt: daysAgo(1),
+  },
+  {
+    id: 'c-4',
+    title: '7 day streak bonus',
+    source: 'streak',
+    amount: 175,
+    createdAt: daysAgo(2),
+  },
+  {
+    id: 'c-5',
+    title: '10 000 steps challenge',
+    source: 'challenge',
+    amount: 500,
+    createdAt: daysAgo(4),
+  },
+  {
+    id: 'c-6',
+    title: 'Leg Day completed',
+    source: 'workout',
+    amount: 100,
+    createdAt: daysAgo(5),
+  },
+  {
+    id: 'c-7',
+    title: 'Friend joined vokve',
+    source: 'referral',
+    amount: 300,
+    createdAt: daysAgo(8),
+  },
+  {
+    id: 'c-8',
+    title: 'Protein sample pack',
+    source: 'purchase',
+    amount: -250,
+    createdAt: daysAgo(11),
+  },
+  {
+    id: 'c-9',
+    title: 'Conditioning completed',
+    source: 'workout',
+    amount: 100,
+    createdAt: daysAgo(12),
+  },
+  {
+    id: 'c-10',
+    title: 'Welcome bonus',
+    source: 'challenge',
+    amount: 605,
+    createdAt: daysAgo(20),
+  },
 ];
 
 /**
@@ -182,7 +322,8 @@ export const shopItems: ShopItem[] = [
   {
     id: 'tee',
     title: 'VOKVE Training Tee',
-    description: 'Breathable training tee with the wordmark across the chest. Sizes S–XXL.',
+    description:
+      'Breathable training tee with the wordmark across the chest. Sizes S–XXL.',
     price: 79900,
     mrp: 119900,
     currency: 'INR',
@@ -982,21 +1123,111 @@ export const seedChallenges: Challenge[] = [
  * a wall of earned badges says nothing about what to do next.
  */
 export const seedAchievements: Achievement[] = [
-  { id: 'a-10k-steps', value: '10K', label: '10K Steps', metric: 'steps', achievedAt: daysAgo(2) },
-  { id: 'a-cal-burner', value: '500', label: 'Cal Burner', metric: 'calories', achievedAt: daysAgo(5) },
-  { id: 'a-active-30', value: '30', label: 'Active 30', metric: 'minutes', achievedAt: daysAgo(9) },
-  { id: 'a-7-day-streak', value: '7', label: '7 Days Streak', metric: 'days', achievedAt: daysAgo(14) },
-  { id: 'a-first-challenge', value: '1', label: 'First Challenge', metric: 'workouts', achievedAt: null },
-  { id: 'a-15k-steps', value: '15K', label: '15K Steps', metric: 'steps', achievedAt: daysAgo(21) },
-  { id: 'a-cal-crusher', value: '1K', label: 'Cal Crusher', metric: 'calories', achievedAt: null },
-  { id: 'a-active-60', value: '60', label: 'Active 60', metric: 'minutes', achievedAt: daysAgo(30) },
-  { id: 'a-30-day-streak', value: '30', label: '30 Days Streak', metric: 'days', achievedAt: null },
-  { id: 'a-ten-workouts', value: '10', label: 'Ten Workouts', metric: 'workouts', achievedAt: daysAgo(40) },
-  { id: 'a-20k-steps', value: '20K', label: '20K Steps', metric: 'steps', achievedAt: null },
-  { id: 'a-cal-machine', value: '2K', label: 'Cal Machine', metric: 'calories', achievedAt: null },
-  { id: 'a-active-120', value: '120', label: 'Active 120', metric: 'minutes', achievedAt: null },
-  { id: 'a-90-day-streak', value: '90', label: '90 Days Streak', metric: 'days', achievedAt: null },
-  { id: 'a-fifty-workouts', value: '50', label: 'Fifty Workouts', metric: 'workouts', achievedAt: null },
+  {
+    id: 'a-10k-steps',
+    value: '10K',
+    label: '10K Steps',
+    metric: 'steps',
+    achievedAt: daysAgo(2),
+  },
+  {
+    id: 'a-cal-burner',
+    value: '500',
+    label: 'Cal Burner',
+    metric: 'calories',
+    achievedAt: daysAgo(5),
+  },
+  {
+    id: 'a-active-30',
+    value: '30',
+    label: 'Active 30',
+    metric: 'minutes',
+    achievedAt: daysAgo(9),
+  },
+  {
+    id: 'a-7-day-streak',
+    value: '7',
+    label: '7 Days Streak',
+    metric: 'days',
+    achievedAt: daysAgo(14),
+  },
+  {
+    id: 'a-first-challenge',
+    value: '1',
+    label: 'First Challenge',
+    metric: 'workouts',
+    achievedAt: null,
+  },
+  {
+    id: 'a-15k-steps',
+    value: '15K',
+    label: '15K Steps',
+    metric: 'steps',
+    achievedAt: daysAgo(21),
+  },
+  {
+    id: 'a-cal-crusher',
+    value: '1K',
+    label: 'Cal Crusher',
+    metric: 'calories',
+    achievedAt: null,
+  },
+  {
+    id: 'a-active-60',
+    value: '60',
+    label: 'Active 60',
+    metric: 'minutes',
+    achievedAt: daysAgo(30),
+  },
+  {
+    id: 'a-30-day-streak',
+    value: '30',
+    label: '30 Days Streak',
+    metric: 'days',
+    achievedAt: null,
+  },
+  {
+    id: 'a-ten-workouts',
+    value: '10',
+    label: 'Ten Workouts',
+    metric: 'workouts',
+    achievedAt: daysAgo(40),
+  },
+  {
+    id: 'a-20k-steps',
+    value: '20K',
+    label: '20K Steps',
+    metric: 'steps',
+    achievedAt: null,
+  },
+  {
+    id: 'a-cal-machine',
+    value: '2K',
+    label: 'Cal Machine',
+    metric: 'calories',
+    achievedAt: null,
+  },
+  {
+    id: 'a-active-120',
+    value: '120',
+    label: 'Active 120',
+    metric: 'minutes',
+    achievedAt: null,
+  },
+  {
+    id: 'a-90-day-streak',
+    value: '90',
+    label: '90 Days Streak',
+    metric: 'days',
+    achievedAt: null,
+  },
+  {
+    id: 'a-fifty-workouts',
+    value: '50',
+    label: 'Fifty Workouts',
+    metric: 'workouts',
+    achievedAt: null,
+  },
 ];
 
 /**
@@ -1090,8 +1321,7 @@ export const hydrationHighlights = {
 };
 
 /** The line at the foot of the hydration screen. */
-export const hydrationTip =
-  "Drink water regularly; don't wait until thirsty.";
+export const hydrationTip = "Drink water regularly; don't wait until thirsty.";
 
 /**
  * Today's steps, hour by hour, midnight first.
@@ -1102,9 +1332,7 @@ export const hydrationTip =
  * did not add up to the number above it is the first thing a user would spot.
  */
 export const todayHourlySteps: number[] = [
-  0, 0, 0, 0, 0, 12,
-  120, 380, 640, 410, 260, 300,
-  520, 340, 210, 260, 380, 620,
+  0, 0, 0, 0, 0, 12, 120, 380, 640, 410, 260, 300, 520, 340, 210, 260, 380, 620,
   720, 540, 380, 90, 40, 23,
 ];
 
@@ -1302,20 +1530,141 @@ export const healthTip =
  * the one place a user can check it.
  */
 export const seedFoodEntries: FoodEntry[] = [
-  { id: 'f-b1', slot: 'breakfast', name: 'Oats with milk', portion: '', calories: 260, proteinG: 10, carbsG: 38, fiberG: 0, fatsG: 6, loggedAt: at(0, 8, 30) },
-  { id: 'f-b2', slot: 'breakfast', name: 'Banana', portion: '', calories: 90, proteinG: 1, carbsG: 18, fiberG: 0, fatsG: 0, loggedAt: at(0, 8, 35) },
-  { id: 'f-b3', slot: 'breakfast', name: 'Paneer cubes', portion: '', calories: 100, proteinG: 8, carbsG: 2, fiberG: 0, fatsG: 7, loggedAt: at(0, 8, 40) },
+  {
+    id: 'f-b1',
+    slot: 'breakfast',
+    name: 'Oats with milk',
+    portion: '',
+    calories: 260,
+    proteinG: 10,
+    carbsG: 38,
+    fiberG: 0,
+    fatsG: 6,
+    loggedAt: at(0, 8, 30),
+  },
+  {
+    id: 'f-b2',
+    slot: 'breakfast',
+    name: 'Banana',
+    portion: '',
+    calories: 90,
+    proteinG: 1,
+    carbsG: 18,
+    fiberG: 0,
+    fatsG: 0,
+    loggedAt: at(0, 8, 35),
+  },
+  {
+    id: 'f-b3',
+    slot: 'breakfast',
+    name: 'Paneer cubes',
+    portion: '',
+    calories: 100,
+    proteinG: 8,
+    carbsG: 2,
+    fiberG: 0,
+    fatsG: 7,
+    loggedAt: at(0, 8, 40),
+  },
 
-  { id: 'f-l1', slot: 'lunch', name: 'Dal tadka', portion: '', calories: 180, proteinG: 10, carbsG: 22, fiberG: 0, fatsG: 5, loggedAt: at(0, 13, 30) },
-  { id: 'f-l2', slot: 'lunch', name: 'Brown rice', portion: '', calories: 220, proteinG: 5, carbsG: 42, fiberG: 0, fatsG: 2, loggedAt: at(0, 13, 32) },
-  { id: 'f-l3', slot: 'lunch', name: 'Mixed veg sabzi', portion: '', calories: 150, proteinG: 5, carbsG: 14, fiberG: 0, fatsG: 6, loggedAt: at(0, 13, 34) },
-  { id: 'f-l4', slot: 'lunch', name: 'Curd', portion: '', calories: 100, proteinG: 6, carbsG: 12, fiberG: 0, fatsG: 4, loggedAt: at(0, 13, 36) },
+  {
+    id: 'f-l1',
+    slot: 'lunch',
+    name: 'Dal tadka',
+    portion: '',
+    calories: 180,
+    proteinG: 10,
+    carbsG: 22,
+    fiberG: 0,
+    fatsG: 5,
+    loggedAt: at(0, 13, 30),
+  },
+  {
+    id: 'f-l2',
+    slot: 'lunch',
+    name: 'Brown rice',
+    portion: '',
+    calories: 220,
+    proteinG: 5,
+    carbsG: 42,
+    fiberG: 0,
+    fatsG: 2,
+    loggedAt: at(0, 13, 32),
+  },
+  {
+    id: 'f-l3',
+    slot: 'lunch',
+    name: 'Mixed veg sabzi',
+    portion: '',
+    calories: 150,
+    proteinG: 5,
+    carbsG: 14,
+    fiberG: 0,
+    fatsG: 6,
+    loggedAt: at(0, 13, 34),
+  },
+  {
+    id: 'f-l4',
+    slot: 'lunch',
+    name: 'Curd',
+    portion: '',
+    calories: 100,
+    proteinG: 6,
+    carbsG: 12,
+    fiberG: 0,
+    fatsG: 4,
+    loggedAt: at(0, 13, 36),
+  },
 
-  { id: 'f-s1', slot: 'snack', name: 'Protein shake', portion: '', calories: 200, proteinG: 25, carbsG: 12, fiberG: 0, fatsG: 3, loggedAt: at(0, 17, 0) },
+  {
+    id: 'f-s1',
+    slot: 'snack',
+    name: 'Protein shake',
+    portion: '',
+    calories: 200,
+    proteinG: 25,
+    carbsG: 12,
+    fiberG: 0,
+    fatsG: 3,
+    loggedAt: at(0, 17, 0),
+  },
 
-  { id: 'f-d1', slot: 'dinner', name: 'Roti', portion: '', calories: 160, proteinG: 6, carbsG: 32, fiberG: 0, fatsG: 2, loggedAt: at(0, 20, 0) },
-  { id: 'f-d2', slot: 'dinner', name: 'Paneer bhurji', portion: '', calories: 150, proteinG: 8, carbsG: 5, fiberG: 0, fatsG: 9, loggedAt: at(0, 20, 5) },
-  { id: 'f-d3', slot: 'dinner', name: 'Salad', portion: '', calories: 40, proteinG: 1, carbsG: 8, fiberG: 0, fatsG: 1, loggedAt: at(0, 20, 8) },
+  {
+    id: 'f-d1',
+    slot: 'dinner',
+    name: 'Roti',
+    portion: '',
+    calories: 160,
+    proteinG: 6,
+    carbsG: 32,
+    fiberG: 0,
+    fatsG: 2,
+    loggedAt: at(0, 20, 0),
+  },
+  {
+    id: 'f-d2',
+    slot: 'dinner',
+    name: 'Paneer bhurji',
+    portion: '',
+    calories: 150,
+    proteinG: 8,
+    carbsG: 5,
+    fiberG: 0,
+    fatsG: 9,
+    loggedAt: at(0, 20, 5),
+  },
+  {
+    id: 'f-d3',
+    slot: 'dinner',
+    name: 'Salad',
+    portion: '',
+    calories: 40,
+    proteinG: 1,
+    carbsG: 8,
+    fiberG: 0,
+    fatsG: 1,
+    loggedAt: at(0, 20, 8),
+  },
 ];
 
 /** The nutrition line the AI strip shows, until a service writes one. */
@@ -1518,21 +1867,171 @@ export const dietPlanRotation: PlannedMeal[][] = [
  * to be that database. Every figure is per the portion beside it.
  */
 export const foodLibrary: FoodItem[] = [
-  { id: 'fl-oats', name: 'Oats (Cooked)', portion: '1 Cup (150 g)', emoji: '🥣', calories: 150, proteinG: 5, carbsG: 27, fatsG: 3, fiberG: 4 },
-  { id: 'fl-banana', name: 'Banana', portion: '1 Medium (118 g)', emoji: '🍌', calories: 89, proteinG: 1, carbsG: 23, fatsG: 0.3, fiberG: 2.6 },
-  { id: 'fl-egg', name: 'Boiled Egg', portion: '1 Large (50 g)', emoji: '🥚', calories: 78, proteinG: 6, carbsG: 0.6, fatsG: 5, fiberG: 0 },
-  { id: 'fl-peanut-butter', name: 'Peanut Butter', portion: '1 Tbsp (16 g)', emoji: '🥜', calories: 94, proteinG: 4, carbsG: 3, fatsG: 8, fiberG: 1 },
-  { id: 'fl-brown-rice', name: 'Brown Rice', portion: '1 Cup (150 g)', emoji: '🍚', calories: 215, proteinG: 5, carbsG: 45, fatsG: 1.8, fiberG: 3.5 },
-  { id: 'fl-dal', name: 'Dal', portion: '1 Bowl (150 g)', emoji: '🍲', calories: 180, proteinG: 10, carbsG: 22, fatsG: 5, fiberG: 6 },
-  { id: 'fl-paneer', name: 'Paneer', portion: '100 g', emoji: '🧀', calories: 265, proteinG: 18, carbsG: 6, fatsG: 20, fiberG: 0 },
-  { id: 'fl-curd', name: 'Curd', portion: '1 Bowl (150 g)', emoji: '🥛', calories: 98, proteinG: 6, carbsG: 8, fatsG: 4, fiberG: 0 },
-  { id: 'fl-roti', name: 'Roti', portion: '1 Piece (40 g)', emoji: '🫓', calories: 104, proteinG: 3, carbsG: 20, fatsG: 1.5, fiberG: 2 },
-  { id: 'fl-chicken', name: 'Grilled Chicken', portion: '100 g', emoji: '🍗', calories: 165, proteinG: 31, carbsG: 0, fatsG: 3.6, fiberG: 0 },
-  { id: 'fl-salad', name: 'Mixed Salad', portion: '1 Bowl (120 g)', emoji: '🥗', calories: 45, proteinG: 2, carbsG: 8, fatsG: 0.5, fiberG: 3 },
-  { id: 'fl-almonds', name: 'Almonds', portion: '10 pieces (12 g)', emoji: '🌰', calories: 70, proteinG: 3, carbsG: 2.5, fatsG: 6, fiberG: 1.5 },
-  { id: 'fl-apple', name: 'Apple', portion: '1 Medium (180 g)', emoji: '🍎', calories: 95, proteinG: 0.5, carbsG: 25, fatsG: 0.3, fiberG: 4.4 },
-  { id: 'fl-coffee', name: 'Black Coffee', portion: '1 Cup', emoji: '☕', calories: 5, proteinG: 0.3, carbsG: 0, fatsG: 0, fiberG: 0 },
-  { id: 'fl-protein-shake', name: 'Protein Shake', portion: '1 Scoop (30 g)', emoji: '🥤', calories: 120, proteinG: 24, carbsG: 3, fatsG: 1.5, fiberG: 0 },
+  {
+    id: 'fl-oats',
+    name: 'Oats (Cooked)',
+    portion: '1 Cup (150 g)',
+    emoji: '🥣',
+    calories: 150,
+    proteinG: 5,
+    carbsG: 27,
+    fatsG: 3,
+    fiberG: 4,
+  },
+  {
+    id: 'fl-banana',
+    name: 'Banana',
+    portion: '1 Medium (118 g)',
+    emoji: '🍌',
+    calories: 89,
+    proteinG: 1,
+    carbsG: 23,
+    fatsG: 0.3,
+    fiberG: 2.6,
+  },
+  {
+    id: 'fl-egg',
+    name: 'Boiled Egg',
+    portion: '1 Large (50 g)',
+    emoji: '🥚',
+    calories: 78,
+    proteinG: 6,
+    carbsG: 0.6,
+    fatsG: 5,
+    fiberG: 0,
+  },
+  {
+    id: 'fl-peanut-butter',
+    name: 'Peanut Butter',
+    portion: '1 Tbsp (16 g)',
+    emoji: '🥜',
+    calories: 94,
+    proteinG: 4,
+    carbsG: 3,
+    fatsG: 8,
+    fiberG: 1,
+  },
+  {
+    id: 'fl-brown-rice',
+    name: 'Brown Rice',
+    portion: '1 Cup (150 g)',
+    emoji: '🍚',
+    calories: 215,
+    proteinG: 5,
+    carbsG: 45,
+    fatsG: 1.8,
+    fiberG: 3.5,
+  },
+  {
+    id: 'fl-dal',
+    name: 'Dal',
+    portion: '1 Bowl (150 g)',
+    emoji: '🍲',
+    calories: 180,
+    proteinG: 10,
+    carbsG: 22,
+    fatsG: 5,
+    fiberG: 6,
+  },
+  {
+    id: 'fl-paneer',
+    name: 'Paneer',
+    portion: '100 g',
+    emoji: '🧀',
+    calories: 265,
+    proteinG: 18,
+    carbsG: 6,
+    fatsG: 20,
+    fiberG: 0,
+  },
+  {
+    id: 'fl-curd',
+    name: 'Curd',
+    portion: '1 Bowl (150 g)',
+    emoji: '🥛',
+    calories: 98,
+    proteinG: 6,
+    carbsG: 8,
+    fatsG: 4,
+    fiberG: 0,
+  },
+  {
+    id: 'fl-roti',
+    name: 'Roti',
+    portion: '1 Piece (40 g)',
+    emoji: '🫓',
+    calories: 104,
+    proteinG: 3,
+    carbsG: 20,
+    fatsG: 1.5,
+    fiberG: 2,
+  },
+  {
+    id: 'fl-chicken',
+    name: 'Grilled Chicken',
+    portion: '100 g',
+    emoji: '🍗',
+    calories: 165,
+    proteinG: 31,
+    carbsG: 0,
+    fatsG: 3.6,
+    fiberG: 0,
+  },
+  {
+    id: 'fl-salad',
+    name: 'Mixed Salad',
+    portion: '1 Bowl (120 g)',
+    emoji: '🥗',
+    calories: 45,
+    proteinG: 2,
+    carbsG: 8,
+    fatsG: 0.5,
+    fiberG: 3,
+  },
+  {
+    id: 'fl-almonds',
+    name: 'Almonds',
+    portion: '10 pieces (12 g)',
+    emoji: '🌰',
+    calories: 70,
+    proteinG: 3,
+    carbsG: 2.5,
+    fatsG: 6,
+    fiberG: 1.5,
+  },
+  {
+    id: 'fl-apple',
+    name: 'Apple',
+    portion: '1 Medium (180 g)',
+    emoji: '🍎',
+    calories: 95,
+    proteinG: 0.5,
+    carbsG: 25,
+    fatsG: 0.3,
+    fiberG: 4.4,
+  },
+  {
+    id: 'fl-coffee',
+    name: 'Black Coffee',
+    portion: '1 Cup',
+    emoji: '☕',
+    calories: 5,
+    proteinG: 0.3,
+    carbsG: 0,
+    fatsG: 0,
+    fiberG: 0,
+  },
+  {
+    id: 'fl-protein-shake',
+    name: 'Protein Shake',
+    portion: '1 Scoop (30 g)',
+    emoji: '🥤',
+    calories: 120,
+    proteinG: 24,
+    carbsG: 3,
+    fatsG: 1.5,
+    fiberG: 0,
+  },
 ];
 
 /** What the quick-add row offers, in the order it draws them. */

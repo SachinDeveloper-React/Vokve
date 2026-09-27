@@ -6,6 +6,15 @@
     <uses-permission android:name="android.permission.health.WRITE_STEPS"/>
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"/>
 
+    <!--
+      Taking a profile photo. The picker needs no storage permission: on
+      Android 13+ the photo picker returns one image the user chose without
+      granting the app the gallery, and below that the library's own
+      document intent does the same.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
       android:enableOnBackInvokedCallback="false"
       android:name=".MainApplication"

@@ -88,6 +88,32 @@ export const CONFIG_DEFAULTS = {
       android: 'https://play.google.com/store/apps/details?id=com.vokve',
     },
   },
+  /**
+   * The account's own knobs: how long a deletion can be called off for
+   * (RULES P5), and how often a member may ask for their data.
+   */
+  account: {
+    deletionGraceDays: 14,
+    exportCooldownHours: 24,
+    /**
+     * The biggest avatar the API will store, in kilobytes, measured on the
+     * decoded image. The app downscales to 512px before it uploads, which
+     * lands well under this; the cap is what stops a hand-rolled client
+     * posting a 12-megapixel photo.
+     */
+    avatarMaxKb: 512,
+  },
+  /** Where the About and Help screens point. Changed without a deploy, like every ⚙. */
+  support: {
+    email: 'support@vokve.app',
+    company: 'VOKVE Fitness',
+    links: {
+      privacy: 'https://vokve.app/privacy',
+      terms: 'https://vokve.app/terms',
+      licenses: 'https://vokve.app/licenses',
+      website: 'https://vokve.app',
+    },
+  },
   locale: { country: 'IN', timezone: 'Asia/Kolkata' },
 };
 

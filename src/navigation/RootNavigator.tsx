@@ -27,10 +27,16 @@ import { NutritionScreen } from '../screens/main/NutritionScreen';
 import { OrderDetailScreen } from '../screens/main/OrderDetailScreen';
 import { OrdersScreen } from '../screens/main/OrdersScreen';
 import { ReferralScreen } from '../screens/main/ReferralScreen';
+import { AboutScreen } from '../screens/main/AboutScreen';
 import { CartScreen } from '../screens/main/CartScreen';
 import { CheckoutScreen } from '../screens/main/CheckoutScreen';
+import { EditProfileScreen } from '../screens/main/EditProfileScreen';
+import { HelpSupportScreen } from '../screens/main/HelpSupportScreen';
+import { PrivacyScreen } from '../screens/main/PrivacyScreen';
 import { ProductDetailScreen } from '../screens/main/ProductDetailScreen';
 import { ReviewsScreen } from '../screens/main/ReviewsScreen';
+import { SecurityScreen } from '../screens/main/SecurityScreen';
+import { SupportTicketScreen } from '../screens/main/SupportTicketScreen';
 import { ShopBrowseScreen } from '../screens/main/ShopBrowseScreen';
 import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
 import { WishlistScreen } from '../screens/main/WishlistScreen';
@@ -235,6 +241,36 @@ export const RootNavigator = () => {
               name="WriteReview"
               component={WriteReviewScreen}
               options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="EditProfile"
+              component={EditProfileScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Security"
+              component={SecurityScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Privacy"
+              component={PrivacyScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="HelpSupport"
+              component={HelpSupportScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="SupportTicket"
+              component={SupportTicketScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="About"
+              component={AboutScreen}
+              options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen
               name="BloodPressure"

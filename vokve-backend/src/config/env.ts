@@ -14,6 +14,12 @@ const envSchema = z.object({
   /** Where a referral link points (RULES F6). The page redirects to the store until deep links exist. */
   SHARE_URL_BASE: z.string().url().default('https://vokve.app/r'),
   /**
+   * This API's own origin, used to build the absolute URLs it hands out for
+   * media it serves (RULES P10). Behind a proxy this is the public address,
+   * not the port the process listens on.
+   */
+  PUBLIC_BASE_URL: z.string().url().default('http://localhost:3000'),
+  /**
    * The Firebase service account for push (FCM), as the JSON itself or a path
    * to the file. Absent means no push channel: feed rows only, and every
    * send is logged as `push.no_provider`.

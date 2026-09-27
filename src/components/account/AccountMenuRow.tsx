@@ -40,15 +40,12 @@ export const AccountMenuRow = memo(
         onPress={onPress}
         feedback="highlight"
         accessibilityRole="button"
-        accessibilityLabel={value ? `${title}, ${value}. ${subtitle}` : `${title}. ${subtitle}`}
+        accessibilityLabel={
+          value ? `${title}, ${value}. ${subtitle}` : `${title}. ${subtitle}`
+        }
       >
         <HStack align="center" gap="base" py="md">
-          <IconBadge
-            icon={icon}
-            tint={tint}
-            size={TILE_SIZE}
-            shape="rounded"
-          />
+          <IconBadge icon={icon} tint={tint} size={TILE_SIZE} shape="rounded" />
 
           <VStack flex={1} gap="xxs">
             <AppText variant="bodyStrong" numberOfLines={1}>

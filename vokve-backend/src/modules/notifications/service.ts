@@ -8,6 +8,7 @@ import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import { sendPush } from '../../lib/push.js';
 import { DeviceModel } from '../devices/models.js';
+import { privacyAllows } from '../account/service.js';
 import { NotificationPreferencesModel, UserModel } from '../identity/models.js';
 import { NotificationModel } from './models.js';
 
@@ -94,12 +95,20 @@ export interface NotifyInput {
   preference?: PreferenceSwitch;
   /** OTP-grade messages that quiet hours must not hold back (BACKEND §5). */
   exemptFromQuietHours?: boolean;
+  /**
+   * A message aimed at this member rather than sent to everyone — a deal
+   * picked from what they browse. Honours the privacy switch as well as the
+   * notification one (RULES P7): opted out, nothing is written at all,
+   * because a feed row is targeting too.
+   */
+  personalised?: boolean;
   now?: Date;
 }
 
 export interface NotifyResult {
   id: string | null;
-  status: 'created' | 'duplicate';
+  /** `suppressed` is a targeted message the member has opted out of (RULES P7). */
+  status: 'created' | 'duplicate' | 'suppressed';
   /** Where the push went: sent now, held for quiet hours, or not wanted. */
   push: 'sent' | 'deferred' | 'no_provider' | 'category_off' | 'no_device' | 'skipped';
 }
@@ -112,6 +121,9 @@ export interface NotifyResult {
  */
 export async function notify(input: NotifyInput): Promise<NotifyResult> {
   const now = input.now ?? new Date();
+  if (input.personalised && !(await privacyAllows(input.userId, 'personalisedOffers'))) {
+    return { id: null, status: 'suppressed', push: 'skipped' };
+  }
   const id = newId('ntf');
   try {
     await NotificationModel.create({

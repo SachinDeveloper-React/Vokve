@@ -227,3 +227,46 @@ export function formatDiscount(
   const pct = Math.round(((mrp - price) / mrp) * 100);
   return pct > 0 ? `${pct}% off` : null;
 }
+
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/**
+ * `May 2025` from an ISO date — how a join date reads on a profile.
+ *
+ * Spelled out by hand rather than through `toLocaleDateString` for the same
+ * reason the thousands separator is: the rest of the app's copy is English,
+ * and a date that came back as "mai 2025" on one phone would be the only
+ * translated string on the screen.
+ */
+export function formatMonthYear(isoDate: string): string {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+/** `in 12 days` / `today` / `tomorrow` — how a deadline reads in a sentence. */
+export function formatDaysUntil(isoDate: string): string {
+  const target = new Date(isoDate);
+  if (Number.isNaN(target.getTime())) return '';
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round(
+    (startOfDay(target) - startOfDay(new Date())) / 86_400_000,
+  );
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  return `in ${days} days`;
+}

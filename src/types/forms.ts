@@ -3,7 +3,10 @@ import {
   activityLevelSchema,
   fitnessGoalSchema,
   genderSchema,
+  supportCategorySchema,
   unitSystemSchema,
+  type ActivityLevel,
+  type FitnessGoal,
   type Gender,
   type UnitSystem,
 } from './models';
@@ -340,3 +343,154 @@ export const addressFormSchema = z.object({
   isDefault: z.boolean(),
 });
 export type AddressFormValues = z.infer<typeof addressFormSchema>;
+
+/**
+ * The profile form (RULES P1, P2): everything `PATCH /me` will take, plus
+ * the units the height and weight were typed in.
+ *
+ * Height and weight are nullable here and checked after conversion, for the
+ * same reason the onboarding form does it: 175 is a sane height in
+ * centimetres and an impossible one in inches, so the bounds cannot be
+ * applied to the typed number. Both are genuinely optional — a member who
+ * would rather not say keeps the rest of their profile.
+ */
+export const editProfileSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, 'Enter your name')
+    .max(60, 'That name is too long'),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Select your date of birth')
+    .nullable(),
+  gender: genderSchema.nullable(),
+  units: unitSystemSchema,
+  height: z.number().positive('Check your height').nullable(),
+  weight: z.number().positive('Check your weight').nullable(),
+  goal: fitnessGoalSchema,
+  activityLevel: activityLevelSchema,
+  weeklyGoalWorkouts: z
+    .number()
+    .int()
+    .min(1, 'Aim for at least one session a week')
+    .max(14, 'More than twice a day is not a realistic target'),
+});
+export type EditProfileValues = z.infer<typeof editProfileSchema>;
+
+/** What `PATCH /me` takes — canonical units, the way the model stores them. */
+export interface EditProfilePayload {
+  name: string;
+  dateOfBirth: string | null;
+  gender: Gender | null;
+  units: UnitSystem;
+  heightCm: number | null;
+  weightKg: number | null;
+  goal: FitnessGoal;
+  activityLevel: ActivityLevel;
+  weeklyGoalWorkouts: number;
+}
+
+/**
+ * Converts the form to the wire, and says which measurement is out of range
+ * so the screen can put the error on the field the user typed in rather than
+ * on the form as a whole.
+ */
+export function toEditProfilePayload(values: EditProfileValues): {
+  payload: EditProfilePayload;
+  errors: Partial<Record<'height' | 'weight', string>>;
+} {
+  const isImperial = values.units === 'imperial';
+  const heightCm =
+    values.height === null
+      ? null
+      : round1(isImperial ? values.height * CM_PER_INCH : values.height);
+  const weightKg =
+    values.weight === null
+      ? null
+      : round1(isImperial ? values.weight * KG_PER_LB : values.weight);
+
+  const errors: Partial<Record<'height' | 'weight', string>> = {};
+  if (
+    heightCm !== null &&
+    (heightCm < HEIGHT_CM.min || heightCm > HEIGHT_CM.max)
+  ) {
+    errors.height = 'Check your height';
+  }
+  if (
+    weightKg !== null &&
+    (weightKg < WEIGHT_KG.min || weightKg > WEIGHT_KG.max)
+  ) {
+    errors.weight = 'Check your weight';
+  }
+
+  return {
+    payload: {
+      name: values.name,
+      dateOfBirth: values.dateOfBirth,
+      gender: values.gender,
+      units: values.units,
+      heightCm,
+      weightKg,
+      goal: values.goal,
+      activityLevel: values.activityLevel,
+      weeklyGoalWorkouts: values.weeklyGoalWorkouts,
+    },
+    errors,
+  };
+}
+
+/** The password form on the security screen: the old one, the new one, twice. */
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Enter your current password'),
+    newPassword: z
+      .string()
+      .min(8, 'Use at least 8 characters')
+      .max(72, 'That password is too long')
+      .regex(/[A-Za-z]/, 'Include at least one letter')
+      .regex(/\d/, 'Include at least one number'),
+    confirmPassword: z.string().min(1, 'Type it again'),
+  })
+  .refine(values => values.newPassword === values.confirmPassword, {
+    path: ['confirmPassword'],
+    message: 'Those do not match',
+  })
+  .refine(values => values.newPassword !== values.currentPassword, {
+    path: ['newPassword'],
+    message: 'Choose a different password',
+  });
+export type ChangePasswordValues = z.infer<typeof changePasswordSchema>;
+
+/** Moving the email: the new address, and the password that proves it is them. */
+export const changeEmailSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email('That does not look like an email address'),
+  password: z.string().min(1, 'Enter your password'),
+});
+export type ChangeEmailValues = z.infer<typeof changeEmailSchema>;
+
+export const changePhoneSchema = z.object({
+  phone: phoneSchema,
+  password: z.string().min(1, 'Enter your password'),
+});
+export type ChangePhoneValues = z.infer<typeof changePhoneSchema>;
+
+/** The support ticket form, with the server's own floors on it. */
+export const supportTicketSchema = z.object({
+  subject: z
+    .string()
+    .trim()
+    .min(4, 'Say what it is about')
+    .max(120, 'Keep the subject short'),
+  category: supportCategorySchema,
+  message: z
+    .string()
+    .trim()
+    .min(20, 'Tell us a little more — at least 20 characters')
+    .max(2000, 'Keep it under 2,000 characters'),
+});
+export type SupportTicketValues = z.infer<typeof supportTicketSchema>;

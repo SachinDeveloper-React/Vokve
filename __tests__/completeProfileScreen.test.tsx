@@ -14,6 +14,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
 import { CompleteProfileScreen } from '../src/screens/onboarding/CompleteProfileScreen';
+import { ToastProvider } from '../src/components/feedback/Toast';
 import { ThemeProvider } from '../src/theme';
 import { useAuthStore } from '../src/stores/authStore';
 
@@ -36,7 +37,10 @@ const render = async () => {
     tree = ReactTestRenderer.create(
       <SafeAreaProvider initialMetrics={metrics}>
         <ThemeProvider>
-          <CompleteProfileScreen />
+          {/* The screen's avatar picker raises toasts, as it does in the app. */}
+          <ToastProvider>
+            <CompleteProfileScreen />
+          </ToastProvider>
         </ThemeProvider>
       </SafeAreaProvider>,
     );

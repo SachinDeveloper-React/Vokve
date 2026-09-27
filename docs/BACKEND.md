@@ -72,7 +72,6 @@ Every export of `seedData.ts` is a backend feature that does not exist:
 |---|---|---|
 | `workoutTemplates` | Workouts | Template/exercise catalogue |
 | `weeklySteps`, `todayActivity`, `todayHourlySteps`, `monthlyStepsByWeek`, `yearlyStepsByMonth` | Home, Analytics, Nutrition | Step/activity history at four granularities |
-| `profileHighlights` | Account | Level, tier title, join date, achievement count, lifetime steps |
 | `seedStreak` | Streak store | Training-day history |
 | `seedCoinTransactions` | Wallet, Shop, every coin badge | The coin ledger |
 | `shopItems` | Shop | Reward catalogue |
@@ -359,6 +358,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 - **Data:** `completeProfileSchema` → `CompleteProfilePayload { name, heightCm, weightKg, units }`, rounded to 0.1. Client pre-checks 90–250 cm, 25–300 kg.
 - **Actions:** `completeProfile()` → `POST /me/complete-profile` → `User` with `profileCompletedAt` set.
 - **Backend:** re-validate ranges; this is the only endpoint that stamps `profileCompletedAt`. Also seed `vital_readings{kind:'weight'}` and derive BMI (C9, C10).
+- **Photo (RULES P10):** the same `AvatarPicker` as the edit form, sized `xl` under the wordmark. Until the name field holds something the placeholder `ProfileHeroBadge` stands in its place — the picker draws initials behind the disc and has none to draw yet — and tapping it says so rather than opening a sheet that would look broken. Adding a photo here is optional and saves immediately, so it survives whatever happens to the rest of the form.
 
 ### 5.3 Main tabs
 
@@ -432,9 +432,32 @@ Every screen in the app, what it renders, where that data comes from today, what
 - **Source today:** `addressesStore` — every write goes to the server and the list is re-read from the answer.
 
 #### Account
-- **Renders:** header, `ProfileSummaryCard` (name, avatar, level, tier title, member since, coins, streak, achievements, total steps), `AccountShortcutsRow` (Edit Profile **[no-op]**, Privacy **[no-op]**, Notifications → NotificationSettings, Appearance → local sheet, Security **[no-op]**), `PremiumUpsellCard` (Upgrade **[no-op]**), `AccountMenuList` (My Orders → Orders, My Rewards → Leaderboard, Streak Freeze & Restore → Streak, Health Data **[no-op]**, Help & Support **[no-op]**, About v1.0.0 **[no-op]**, Log Out), `DataSafetyNote`.
-- **Source today:** `profileHighlights` seed; `user` from auth store.
-- **Backend:** `GET /me/highlights` (or fold into `/me`), `PATCH /me`, `POST /me/avatar`, `GET/PUT /me/settings`, `GET /health/connections`, `DELETE /me`, `GET /me/export`, `POST /auth/sign-out`. Premium needs IAP receipt validation (out of scope for v1 — §12).
+- **Renders:** `AccountHeader` (bell with an unread dot), `EmailVerificationBanner`, `ProfileSummaryCard` (name, avatar, level badge, tier title, member since, a level bar reading "1,000 / 3,700 to level 19", rank "#412 of 18.9k", and the stat strip: coins, streak, badges earned, lifetime steps), `ProfileCompletenessCard` (percent, bar, the top three gaps with what each is worth — hidden at 100%), `AccountShortcutsRow` (Edit Profile, Privacy, Notifications, Appearance → local sheet, Security), `BadgeShelf` (earned first, locked ones keeping their place with a progress bar), `PremiumUpsellCard`, `AccountMenuList` (My Orders, Wishlist, My Rewards, Streak Freeze & Restore, Health Data → HealthCheckup, Help & Support, About v1.0.0, Log Out), `DataSafetyNote`, pull-to-refresh.
+- **Source (built):** `accountStore` — `GET /me/profile`, fetched on sign-in, refreshed on tab focus when older than 60 s, persisted so the tab paints its level and badges before the network answers. The coin balance comes from `coinsStore` instead: it changes on every spend and the wallet knows first. The `user` record (name, avatar) is the auth store's.
+- **Backend (built — `modules/account`):** `GET /me/profile` → `ProfileSummary`, everything computed on read (RULES P9): the level and its band from lifetime coins (P4), the streak from the activity rollups (today not being active does not break the run — the day is not over), the steps, workouts and minutes from aggregates, orders and referrals from counts, rank from "how many members have earned more" (no leaderboard table needed), seven badges each carrying their progress, and completeness with its unmet `gaps` (P6). A gap leads to the screen that can close it: a contact to Security, an address to the address book, everything else to the profile form.
+
+#### Edit Profile (root route `EditProfile { focus? }`)
+- **Renders:** `HistoryHeader`, an `AvatarPicker` card, About you (name, date of birth, gender), Measurements (height and weight with a unit toggle), Training (goal, activity level, weekly goal), one Save.
+- **Photo (RULES P10):** tapping the disc opens a sheet — Take a photo / Choose from library / Remove photo, the last only once there is one. `react-native-image-picker` downscales to 512px at 0.8 quality and returns base64, which goes straight to `POST /me/avatar`; the reply is the whole `User`, so `avatarUrl` updates everywhere at once. **The photo saves on its own rather than waiting for the form's Save** — it is the only field here that is not text, nothing about it is validated against the rest of the form, and a member who picks a photo and then backs out would be surprised to find it gone. The profile summary is re-read afterwards, because completeness counts the photo. A refusal is worded by code: `AVATAR_TOO_LARGE`, a denied camera pointed at Settings, a cancelled picker says nothing at all.
+- **Source:** the auth store's `user`; saved with `PATCH /me` (RULES P1 — it cannot stamp `profileCompletedAt`, so editing a weight never sends a member back through onboarding). Height and weight are typed in whichever system the member prefers and converted at the boundary, with the range checked **after** conversion (P2): 175 is a sane height in centimetres and an impossible one in inches. Tapping the unit converts what is already typed rather than clearing it. On success the profile summary is re-synced, because the level and the completeness both move with it.
+
+#### Security (root route `Security`)
+- **Renders:** the email and the phone with a verified tick or a warning and a Change each, a password row, and the devices holding a live session (make, model, OS, app version, last used, "This device"), with "Sign out N other devices" behind a confirmation.
+- **Backend (built):** `PUT /me/password` (RULES O10 — revokes every refresh token but this device's and answers with the count; `PASSWORD_INCORRECT` / `PASSWORD_UNCHANGED` 422 land on their own fields), `POST /me/email` and `POST /me/phone` (RULES O11 — password first, then a code **to the new contact**; the screen parks the challenge in the auth store and opens the OTP screen, and only `verify-otp` moves the account), `GET /me/sessions`, `POST /me/sessions/revoke-others`.
+
+#### Privacy & data (root route `Privacy`)
+- **Renders:** a deletion banner when one is scheduled, three switches, "Download my data", and "Delete my account".
+- **Switches (RULES P7):** Usage analytics, Personalised offers, Show my name to whoever invited me. Each one changes something the server actually does — there is nothing on this screen that only looks like a setting. A switch moves at once and moves back if the server refuses.
+- **Export (P8):** `GET /me/export` returns the whole account as JSON, handed to the share sheet — the app has no file browser to point at afterwards, and a member wanting their data wants it somewhere they can keep it. One a day; `EXPORT_TOO_SOON` (429) is worded with the hours left.
+- **Deletion (P5):** `POST /me/deletion` (password re-proved, optional reason) schedules it 14 days ⚙ out; `DELETE /me/deletion` calls it off; the daily `account-purge` job carries it out. While one is pending the screen leads with the way back.
+
+#### Help & Support (root routes `HelpSupport`, `SupportTicket { id }`)
+- **Renders:** a search box, six category chips, the articles as an accordion, "Open a ticket", and the member's own tickets with their reference and status. The thread screen draws the conversation as messages, with a reply box that a closed ticket loses.
+- **Backend (built):** `GET /support/faqs?q=&category=` — articles live in a collection, not the bundle, so support can answer a wave of the same question by writing one row; search matches the tags an article carries, which is how "expire" finds "Do my coins expire?". `POST /support/tickets` attaches the app version, platform, OS and device automatically (the first two things support asks for and the last two anyone wants to type), `GET /support/tickets`, `GET /support/tickets/:id`, `POST /support/tickets/:id/replies` (a `resolved` ticket reopens; a `closed` one answers `TICKET_CLOSED` 409). All rate-limited per user.
+
+#### About (root route `About`)
+- **Renders:** wordmark, an update banner when there is one, this build's version and the minimum supported, What's new from the release notes, the four legal links, and a mailto for support.
+- **Backend (built):** `GET /app/about` — the **server** judges the version rather than the app comparing strings to a constant it shipped with, so the minimum can move without a release. Exempt from the version gate along with `/health` and `/config`: this is the screen that tells a blocked build to update, and gating it would leave that build with nothing to say but "something went wrong".
 
 ### 5.4 Activity and training
 
@@ -576,19 +599,27 @@ Every screen in the app, what it renders, where that data comes from today, what
 
 `POST /auth/verify-otp` is **polymorphic on the challenge's purpose** (`signup_phone`, `verify_email`, `login`, `reset_password`, `change_phone`, `change_email`, `step_up`) and always returns `AuthResponse` (fresh tokens) so the client has one screen and one call. See §13.3.
 
-### 6.2 Profile and settings
+### 6.2 Profile, account and support
 | | Method + path | Notes |
 |---|---|---|
 | E | `GET /me` | On the launch critical path — keep < 100 ms p95 |
-| E | `PATCH /me` | Must not set `profileCompletedAt` |
+| E | `PATCH /me` | Must not set `profileCompletedAt` (P1) |
 | E | `POST /me/complete-profile` | Only setter of `profileCompletedAt` |
-| N | `GET /me/highlights` | `{ level, tierTitle, memberSince, achievementCount, lifetimeSteps }` |
-| N | `POST /me/avatar` | Pre-signed upload → `{ avatarUrl }` |
+| N | `GET /me/profile` | `ProfileSummary` — level, tier, rank, stats, badges, completeness + gaps. Computed on read (P4, P6, P9) |
 | N | `GET/PUT /me/settings` | Mirror of `settingsStore` |
 | N | `GET/PUT /me/notification-preferences` | Mirror of `notificationSettingsStore` |
+| N | `GET/PUT /me/privacy` | Analytics, personalised offers, name shared with the referrer — each enforced (P7) |
+| N | `PUT /me/password` | Revokes every other session; answers with the count (O10) |
+| N | `POST /me/email` · `POST /me/phone` | Password, then a code to the **new** contact; `verify-otp` moves it (O11) |
+| N | `GET /me/sessions` · `POST /me/sessions/revoke-others` | Devices with a live session; the current one cannot revoke itself |
+| N | `GET /me/export` | The whole account as JSON, once a day (P8) |
+| N | `GET/POST/DELETE /me/deletion` | Scheduled deletion with a 14-day ⚙ grace window (P5) |
 | N | `GET/POST/PATCH/DELETE /me/addresses` | Shipping |
-| N | `DELETE /me` | Store-mandated account deletion |
-| N | `GET /me/export` | Data export (async job → download link) |
+| N | `GET /support/faqs?q=&category=` | Help centre, searched over question, answer and tags |
+| N | `GET/POST /support/tickets` · `GET /support/tickets/:id` · `POST …/replies` | Tickets carry the app version and device automatically |
+| N | `GET /app/about` | Version, update state, release notes, legal links. Open — exempt from the version gate |
+| N | `POST /me/avatar` · `DELETE /me/avatar` | Base64 JSON, sniffed and capped at ⚙ 512 KB; answers with the whole `User` (P10) |
+| — | `GET /media/avatars/:id` | The bytes. Open, unguessable id, `immutable` for a year (P10) |
 
 ### 6.3 Activity and health data
 | | Method + path | Notes |

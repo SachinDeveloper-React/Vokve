@@ -1,5 +1,8 @@
 import type {
+  AccountDeletion,
+  AccountSession,
   Address,
+  AppAbout,
   Cart,
   CheckoutResult,
   PurchaseLine,
@@ -18,12 +21,17 @@ import type {
   NotificationCountsSummary,
   NotificationPreferences,
   Order,
+  PrivacySettings,
+  ProfileSummary,
   Referral,
   ReferralProgram,
   ShopCategory,
   ShopCategorySummary,
   ShopItem,
   ShopSort,
+  SupportCategory,
+  SupportFaq,
+  SupportTicket,
   User,
   VerificationChallenge,
   Wallet,
@@ -117,9 +125,24 @@ export interface WalletApi {
   earnRules(): Promise<EarnRule[]>;
 }
 
+/** A photo on its way up: the bytes, and what they are (RULES P10). */
+export interface AvatarUpload {
+  /** Base64, without a `data:` prefix. */
+  data: string;
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+}
+
 export interface UserApi {
   me(): Promise<User>;
   updateProfile(patch: Partial<User>): Promise<User>;
+  /**
+   * Replaces the profile photo and answers with the whole user, whose
+   * `avatarUrl` now points at it. `AVATAR_TOO_LARGE` (413) carries the cap
+   * in `details.maxKb`.
+   */
+  uploadAvatar(input: AvatarUpload): Promise<User>;
+  /** Drops the photo; the app goes back to drawing initials. */
+  removeAvatar(): Promise<User>;
   /**
    * Finishes onboarding. Separate from `updateProfile` because only this one
    * stamps `profileCompletedAt`, and that stamp is what decides whether the
@@ -337,4 +360,72 @@ export interface NotificationPreferencesApi {
   get(): Promise<NotificationPreferences>;
   /** Merges the patch and answers with the whole record as the server now holds it. */
   update(patch: NotificationPreferencesPatch): Promise<NotificationPreferences>;
+}
+
+/**
+ * The account's own surface: who the member is, what they have earned, what
+ * they have chosen, and the two things only they can do — take their data
+ * out and end the account (RULES P4–P8).
+ */
+export interface AccountApi {
+  /** Everything the account screen draws, in one call. */
+  profile(): Promise<ProfileSummary>;
+  privacy(): Promise<PrivacySettings>;
+  /** A patch of only what changed; answers with the whole record. */
+  updatePrivacy(patch: Partial<PrivacySettings>): Promise<PrivacySettings>;
+  /**
+   * Changes the password and signs every other device out.
+   * `PASSWORD_INCORRECT` / `PASSWORD_UNCHANGED` (422) are the two the form words.
+   */
+  changePassword(input: {
+    currentPassword: string;
+    newPassword: string;
+  }): Promise<{ ok: boolean; signedOutSessions: number }>;
+  /**
+   * Starts a contact change: the password proves it is them, the challenge
+   * that comes back goes to the **new** address, and only `verifyOtp` on it
+   * moves the account.
+   */
+  changeEmail(input: {
+    email: string;
+    password: string;
+  }): Promise<VerificationChallenge>;
+  changePhone(input: {
+    phone: string;
+    password: string;
+  }): Promise<VerificationChallenge>;
+  sessions(): Promise<AccountSession[]>;
+  /** Signs every device but this one out. */
+  revokeOtherSessions(): Promise<{ signedOut: number }>;
+  /** The whole account as JSON. `EXPORT_TOO_SOON` (429) carries `retryAfterSeconds`. */
+  exportData(): Promise<Record<string, unknown>>;
+  deletion(): Promise<AccountDeletion>;
+  /** Schedules it for the end of the grace window; the password is asked for again. */
+  scheduleDeletion(input: {
+    password: string;
+    reason?: string;
+  }): Promise<AccountDeletion>;
+  cancelDeletion(): Promise<AccountDeletion>;
+}
+
+export interface SupportApi {
+  /** The help centre, searched by word and narrowed by category. */
+  faqs(query?: {
+    q?: string;
+    category?: SupportCategory;
+  }): Promise<SupportFaq[]>;
+  tickets(): Promise<SupportTicket[]>;
+  ticket(id: string): Promise<SupportTicket>;
+  createTicket(input: {
+    subject: string;
+    category: SupportCategory;
+    message: string;
+  }): Promise<SupportTicket>;
+  /** Adds to a thread support has not closed (`TICKET_CLOSED`, 409). */
+  reply(id: string, message: string): Promise<SupportTicket>;
+}
+
+export interface AppApi {
+  /** Version, update state, release notes and the legal links. */
+  about(): Promise<AppAbout>;
 }

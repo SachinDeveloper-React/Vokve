@@ -95,3 +95,44 @@ export const SHOP_STOCK = SHOP_ITEMS.map(item => ({
   onHand: item._id === 'gym-towel' ? 0 : item.badge === 'limited' ? 3 : 25,
   lowStockAt: 5,
 }));
+
+/**
+ * The help centre's starting articles. Written as answers to what a member
+ * would actually type into the search box — "my coins are gone", "wrong
+ * size" — rather than as headings from our own org chart.
+ */
+export const SUPPORT_FAQS = [
+  { _id: 'faq-coins-earn', category: 'coins', question: 'How do I earn coins?', sort: 1,
+    answer: 'Walking, finishing a workout, keeping a streak, winning a challenge and inviting friends all pay coins. Steps pay a little every 100 you walk, a workout pays a fixed amount, and streak milestones pay a bonus. There is a daily ceiling across everything so one big day cannot pay forever.',
+    tags: ['earning', 'steps', 'rewards', 'points'] },
+  { _id: 'faq-coins-missing', category: 'coins', question: 'My coins did not arrive. Where are they?', sort: 2,
+    answer: 'Step coins are held briefly while we check the day looks real, and appear as "pending" in your wallet until then. If you have hit the daily cap, anything further that day pays nothing — the cap resets at midnight in your timezone. Coin History shows every credit with its reason.',
+    tags: ['missing', 'pending', 'not credited', 'cap'] },
+  { _id: 'faq-coins-expiry', category: 'coins', question: 'Do my coins expire?', sort: 3,
+    answer: 'Coins expire after 90 days without earning anything. Earning even one coin resets the whole window — spending does not. We warn you 14 days and 3 days before.',
+    tags: ['expire', 'expiry', 'lost coins'] },
+  { _id: 'faq-orders-pay', category: 'payments', question: 'How much can I pay with coins?', sort: 1,
+    answer: 'Coins cover up to 30% of the items in an order, at ₹0.25 a coin; the rest, and delivery, is paid by card or UPI. The checkout shows the exact split before you pay and you can use fewer coins if you want to save them.',
+    tags: ['discount', 'split', 'upi', 'card', 'price'] },
+  { _id: 'faq-orders-track', category: 'orders', question: 'Where is my order?', sort: 1,
+    answer: 'My Orders shows every order and where it is. Once it ships you get a tracking reference there and a notification. Most orders reach you in 2–4 working days.',
+    tags: ['tracking', 'delivery', 'shipped', 'late'] },
+  { _id: 'faq-orders-cancel', category: 'orders', question: 'Can I cancel or return an order?', sort: 2,
+    answer: 'You can cancel from the order page any time before it ships — the coins go straight back to your wallet and any money is refunded to where it came from. After it ships, open a support ticket and we will sort out a return.',
+    tags: ['cancel', 'return', 'refund'] },
+  { _id: 'faq-tracking-steps', category: 'tracking', question: 'My steps are not being counted', sort: 1,
+    answer: 'VOKVE reads steps from your phone\u2019s health service. Check that VOKVE still has permission, that battery optimisation is not stopping it in the background, and that you have opened the app at least once today. Steps sync when the app opens.',
+    tags: ['steps', 'health connect', 'permission', 'not counting', 'pedometer'] },
+  { _id: 'faq-account-email', category: 'account', question: 'How do I change my email or phone number?', sort: 1,
+    answer: 'Account \u2192 Security. Enter your password and the new address or number; we send a code to the new one and it only moves once that code passes. The old one keeps working until then.',
+    tags: ['email', 'phone', 'number', 'change', 'update'] },
+  { _id: 'faq-account-delete', category: 'account', question: 'How do I delete my account?', sort: 2,
+    answer: 'Account \u2192 Privacy \u2192 Delete account. Deletion is scheduled 14 days ahead so you can change your mind — cancel it from the same screen any time before then. After that your personal data is erased; order and payment records are kept anonymised for accounting.',
+    tags: ['delete', 'close account', 'remove', 'gdpr'] },
+  { _id: 'faq-account-data', category: 'account', question: 'Can I get a copy of my data?', sort: 3,
+    answer: 'Yes \u2014 Account \u2192 Privacy \u2192 Download my data gives you a JSON file with your profile, activity, workouts, orders, addresses and notifications. You can ask for one once a day.',
+    tags: ['export', 'download', 'copy', 'gdpr', 'data'] },
+  { _id: 'faq-other-support', category: 'other', question: 'How do I reach a human?', sort: 1,
+    answer: 'Open a ticket from Help & Support and we will reply inside the app. Tickets carry your app version and device automatically, so you do not have to describe your phone to us.',
+    tags: ['contact', 'human', 'ticket', 'email us'] },
+] as const;

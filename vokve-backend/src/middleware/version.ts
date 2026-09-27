@@ -14,12 +14,21 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
+ * The endpoints a refused build still has to reach: the health check, the
+ * remote config, and the About screen — which is where that build is told
+ * it must update and pointed at the store. Gating those would leave a
+ * blocked app with nothing to say but "something went wrong".
+ */
+const ALWAYS_ALLOWED = new Set(['/v1/health', '/v1/config', '/v1/app/about']);
+
+/**
  * Blocks builds the product has retired (RULES DV6): either below the
  * per-platform minimum, or explicitly marked `blocked` in app_releases.
  */
 export const versionGate: RequestHandler = async (req, _res, next) => {
   const { platform, appVersion, build } = req.ctx;
   if (!platform || !appVersion) return next();
+  if (ALWAYS_ALLOWED.has(req.path)) return next();
 
   const config = await getConfig();
   const min = config.app.minVersion[platform];

@@ -1,11 +1,11 @@
 /**
- * The account screen is mostly navigation, so the checks here are about the
- * three things on it that are not: the profile panel, which is the only place
- * several of these figures appear at all and the only one that compacts a
- * number before showing it; the sign-out row, which is now a list row among
- * six harmless ones and has to still call `signOut`; and the appearance
- * sheet, which is where two live preference controls went when the screen
- * became a menu — a shortcut that opened nothing would strand them.
+ * The account screen is the member's own summary plus a lot of navigation,
+ * so the checks here are about the seams: that every figure on the panel is
+ * the server's and not a seeded one, that the completeness card names what
+ * is missing and leads to the right screen for it, that the badge shelf
+ * shows locked badges with their progress, that sign-out still signs out,
+ * and that the appearance sheet — the one live control left on the screen —
+ * still opens.
  *
  * @format
  */
@@ -17,13 +17,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
 import { AccountScreen } from '../src/screens/main/AccountScreen';
 import { ThemeProvider } from '../src/theme';
+import { useAccountStore } from '../src/stores/accountStore';
 import { useAuthStore } from '../src/stores/authStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
-import { useStreakStore } from '../src/stores/streakStore';
-import { addDays, todayIso } from '../src/utils/date';
 import { config } from '../src/constants/config';
-import { profileHighlights } from '../src/constants/seedData';
-import type { User } from '../src/types/models';
+import type { ProfileSummary, User } from '../src/types/models';
 
 const mockNavigate = jest.fn();
 
@@ -31,8 +29,27 @@ const mockNavigate = jest.fn();
 // from this same module, and a blanket mock takes that down with it.
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
-  useNavigation: () => ({ navigate: mockNavigate }),
+  useNavigation: () => ({
+    navigate: mockNavigate,
+    addListener: jest.fn(() => jest.fn()),
+  }),
 }));
+
+jest.mock('../src/services/api/endpoints', () => ({
+  accountApi: { profile: jest.fn(), privacy: jest.fn(), deletion: jest.fn() },
+  walletApi: { get: jest.fn(), transactions: jest.fn(), earnRules: jest.fn() },
+  notificationApi: {
+    list: jest.fn(),
+    counts: jest.fn(),
+    markRead: jest.fn(),
+    markAllRead: jest.fn(),
+  },
+  authApi: { signOut: jest.fn() },
+}));
+
+const { accountApi } = jest.requireMock('../src/services/api/endpoints') as {
+  accountApi: { profile: jest.Mock };
+};
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -48,9 +65,69 @@ const user = {
   avatarUrl: null,
 } as unknown as User;
 
-/** A run of `length` days ending today, as the streak store records them. */
-const runEndingToday = (length: number) =>
-  Array.from({ length }, (_, i) => addDays(todayIso(), -i));
+/** Level 18 sits at 32,400 lifetime coins; the next level starts at 36,100. */
+const summary: ProfileSummary = {
+  level: 18,
+  tierTitle: 'Athlo Warrior',
+  xp: 33_400,
+  xpIntoLevel: 1_000,
+  xpForNextLevel: 3_700,
+  levelProgress: 1_000 / 3_700,
+  memberSince: '2025-05-14T00:00:00.000Z',
+  rank: 412,
+  totalMembers: 18_940,
+  stats: {
+    coins: 2_450,
+    lifetimeCoins: 33_400,
+    currentStreak: 32,
+    longestStreak: 41,
+    totalSteps: 245_600,
+    activeDays: 96,
+    totalWorkouts: 34,
+    totalWorkoutMinutes: 1_632,
+    orders: 3,
+    referrals: 2,
+  },
+  badges: [
+    {
+      id: 'streak-7',
+      label: 'Week One',
+      description: 'A seven-day streak',
+      icon: 'flame',
+      unlockedAt: '2025-06-01T00:00:00.000Z',
+      progress: 1,
+      value: 7,
+      goal: 7,
+    },
+    {
+      id: 'streak-30',
+      label: 'Month Strong',
+      description: 'A thirty-day streak',
+      icon: 'flame',
+      unlockedAt: '2025-07-01T00:00:00.000Z',
+      progress: 1,
+      value: 30,
+      goal: 30,
+    },
+    {
+      id: 'workouts-25',
+      label: 'Regular',
+      description: '25 workouts finished',
+      icon: 'dumbbell',
+      unlockedAt: null,
+      progress: 0.4,
+      value: 10,
+      goal: 25,
+    },
+  ],
+  completeness: 75,
+  gaps: [
+    { field: 'avatarUrl', label: 'Add a profile photo', weight: 10 },
+    { field: 'phone', label: 'Verify your phone', weight: 10 },
+    { field: 'address', label: 'Add a delivery address', weight: 5 },
+  ],
+  trustTier: 'normal',
+};
 
 /**
  * Torn down between tests: the screen subscribes to the coin store, so a tree
@@ -62,14 +139,17 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 beforeEach(() => {
   mockNavigate.mockClear();
   signOut.mockClear();
+  accountApi.profile.mockReset().mockResolvedValue(summary);
   useAuthStore.setState({ user, signOut, status: 'authenticated' });
   useCoinsStore.setState({ balance: 2450 });
-  // The streak on the panel is the store's, not the user record's, so the
-  // panel and the streak screen's calendar can never show different numbers.
-  useStreakStore.setState({
-    completedDays: runEndingToday(32),
-    protectedDays: [],
-    freezesAvailable: 1,
+  useAccountStore.setState({
+    profile: summary,
+    privacy: null,
+    deletion: null,
+    syncedAt: new Date().toISOString(),
+    isSyncing: false,
+    savingPrivacy: [],
+    syncError: null,
   });
 });
 
@@ -85,7 +165,7 @@ afterEach(async () => {
 
 const render = async () => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
-  await ReactTestRenderer.act(() => {
+  await ReactTestRenderer.act(async () => {
     tree = ReactTestRenderer.create(
       <SafeAreaProvider initialMetrics={metrics}>
         <ThemeProvider>
@@ -93,6 +173,7 @@ const render = async () => {
         </ThemeProvider>
       </SafeAreaProvider>,
     );
+    await Promise.resolve();
   });
   mounted = tree;
   return tree;
@@ -110,20 +191,25 @@ const press = async (
     .find(n => typeof n.props.onPress === 'function');
 
   if (!node) throw new Error(`No pressable labelled "${label}"`);
-  await ReactTestRenderer.act(() => node.props.onPress());
+  await ReactTestRenderer.act(async () => {
+    node.props.onPress();
+  });
 };
 
 describe('AccountScreen', () => {
-  test('the profile panel carries the identity and every headline figure', async () => {
+  test('every figure on the panel is the server summary, not a seeded one', async () => {
     const text = allText(await render());
 
     expect(text).toContain('Rana Jay');
-    expect(text).toContain(`Level ${profileHighlights.level}`);
-    expect(text).toContain(profileHighlights.tierTitle);
-    expect(text).toContain(`Member since ${profileHighlights.memberSince}`);
-    expect(text).toContain('2,450'); // balance, grouped
-    expect(text).toContain('32'); // streak days, counted from the store
-    expect(text).toContain(String(profileHighlights.achievements));
+    expect(text).toContain('Level 18');
+    expect(text).toContain('Athlo Warrior');
+    expect(text).toContain('Member since May 2025');
+    // The level bar reads from the band, and the rank from the whole field.
+    expect(text).toContain('1,000 / 3,700 to level 19');
+    expect(text).toContain('#412 of 18.9k');
+    expect(text).toContain('2,450'); // the wallet's balance, grouped
+    expect(text).toContain('32'); // the server's current streak
+    expect(text).toContain('2'); // badges earned
   });
 
   test('lifetime steps are compacted, with the suffix in caps', async () => {
@@ -133,6 +219,49 @@ describe('AccountScreen', () => {
     // lowercase `k` reads as a typo beside the bold figures either side of it.
     expect(text).toContain('245.6K');
     expect(text).not.toContain('245600');
+  });
+
+  test('the completeness card names what is missing and what each gap is worth', async () => {
+    const text = allText(await render());
+
+    expect(text).toContain('Finish your profile');
+    expect(text).toContain('75%');
+    expect(text).toContain('Add a profile photo');
+    expect(text).toContain('+10%');
+  });
+
+  test('a gap opens the screen that can actually close it', async () => {
+    const tree = await render();
+
+    await press(tree, 'Add a profile photo');
+    expect(mockNavigate).toHaveBeenLastCalledWith('EditProfile', {
+      focus: 'avatarUrl',
+    });
+
+    // A contact is changed under Security, and an address in the address book —
+    // neither lives on the profile form.
+    await press(tree, 'Verify your phone');
+    expect(mockNavigate).toHaveBeenLastCalledWith('Security');
+
+    await press(tree, 'Add a delivery address');
+    expect(mockNavigate).toHaveBeenLastCalledWith('Addresses');
+  });
+
+  test('a finished profile drops the card rather than congratulating forever', async () => {
+    useAccountStore.setState({
+      profile: { ...summary, completeness: 100, gaps: [] },
+    });
+
+    expect(allText(await render())).not.toContain('Finish your profile');
+  });
+
+  test('the badge shelf counts what is earned and shows a locked one with its progress', async () => {
+    const text = allText(await render());
+
+    expect(text).toContain('Achievements');
+    expect(text).toContain('2 of 3 earned');
+    expect(text).toContain('Regular'); // locked, still on the shelf
+    expect(text).toContain('10/25');
   });
 
   test('the about row states the version the app actually ships as', async () => {
@@ -161,52 +290,53 @@ describe('AccountScreen', () => {
     expect(text).toContain('kg / cm');
   });
 
-  test('the streak row opens the streak as a route of its own', async () => {
+  test('each menu row and shortcut opens its own root route', async () => {
     const tree = await render();
 
-    await press(tree, 'Streak Freeze & Restore. Manage, freeze or restore your streak');
+    const cases: [string, string][] = [
+      [
+        'Streak Freeze & Restore. Manage, freeze or restore your streak',
+        'Streak',
+      ],
+      ['Notifications, unread', 'Notifications'],
+      ['My Rewards. View and track your rewards', 'LeaderboardRewards'],
+      ['Notification Settings', 'NotificationSettings'],
+      ['Edit Profile', 'EditProfile'],
+      ['Privacy', 'Privacy'],
+      ['Security', 'Security'],
+      ['Wishlist. Everything you saved for later', 'Wishlist'],
+      ['Help & Support. Get help and find answers', 'HelpSupport'],
+      [
+        `About VOKVE, v${config.appVersion}. App info, version and more`,
+        'About',
+      ],
+      [
+        'Health Data. Your vitals and connected health sources',
+        'HealthCheckup',
+      ],
+    ];
 
-    // A bare root route: the streak is reached from Home as well as from here,
-    // so filing it under the Account tab would leave that tab showing it the
-    // next time the user tapped Account itself.
-    expect(mockNavigate).toHaveBeenCalledWith('Streak');
-  });
-
-  test('the bell opens the notification centre as a route of its own', async () => {
-    const tree = await render();
-
-    await press(tree, 'Notifications, unread');
-
-    // A bare root route, deliberately: the centre is reached from every
-    // header, and filing it under the Account tab would leave that tab
-    // showing it the next time the user tapped Account itself.
-    expect(mockNavigate).toHaveBeenCalledWith('Notifications');
-  });
-
-  test('the rewards row opens the leaderboard rewards, not the coin balance', async () => {
-    const tree = await render();
-
-    await press(tree, 'My Rewards. View and track your rewards');
-
-    // The row promises rewards; the Wallet tab it used to open is the coin
-    // balance, and the tab bar already leads there.
-    expect(mockNavigate).toHaveBeenCalledWith('LeaderboardRewards');
-  });
-
-  test('the notification shortcut opens the notification settings', async () => {
-    const tree = await render();
-
-    await press(tree, 'Notification Settings');
-
-    expect(mockNavigate).toHaveBeenCalledWith('NotificationSettings');
+    for (const [label, route] of cases) {
+      await press(tree, label);
+      expect(mockNavigate).toHaveBeenLastCalledWith(route);
+    }
   });
 
   test('a profile that has not loaded still renders a whole screen', async () => {
     useAuthStore.setState({ user: null });
+    useAccountStore.setState({ profile: null });
 
     const text = allText(await render());
 
     expect(text).toContain('Your account');
     expect(text).toContain('Manage your profile and preferences');
+    // The panel draws without a summary rather than vanishing, so the screen
+    // does not reflow the moment the first sync lands — but nothing that is
+    // only meaningful with one (the level bar, the badge shelf, the
+    // completeness card) is drawn from placeholders.
+    expect(text).toContain('Getting started');
+    expect(text).not.toContain('to level');
+    expect(text).not.toContain('earned');
+    expect(text).not.toContain('Finish your profile');
   });
 });

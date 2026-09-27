@@ -59,7 +59,21 @@ curl -s $B/orders -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev
 # save something for later, and say what you thought of what arrived
 curl -s $B/wishlist/yoga-mat -X PUT -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
 curl -s $B/shop/items/cap/reviews/me -X PUT -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"rating":5,"title":"Fits well","body":"Stays on through a run, and the peak holds its shape."}'
-# 8. see the coins expire: run the idle sweep as of 91 days from now, then read the wallet again
+# 8. the account's own surface: the profile summary, the privacy switches, the devices, and a help search
+curl -s $B/me/profile -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+curl -s $B/me/privacy -X PUT -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"analytics":false}'
+curl -s $B/me/sessions -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+curl -s "$B/support/faqs?q=expire" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+curl -s $B/app/about -H "$H"
+# a profile photo: base64 in, an absolute media URL back, served to anyone with the link
+curl -s $B/me/avatar -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" \
+  -d "{\"contentType\":\"image/jpeg\",\"data\":\"$(base64 < photo.jpg | tr -d '\n')\"}"
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' $B/media/avatars/avt_…
+# change the password (signs every other device out), then schedule a deletion and call it off
+curl -s $B/me/password -X PUT -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"currentPassword":"walk1000steps","newPassword":"newpass123"}'
+curl -s $B/me/deletion -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d '{"password":"newpass123","reason":"Taking a break"}'
+curl -s $B/me/deletion -X DELETE -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…"
+# 9. see the coins expire: run the idle sweep as of 91 days from now, then read the wallet again
 curl -s $B/dev/jobs/coin-expiry -H "$H" -H "authorization: Bearer <access>" -H "x-vokve-device-id: dev_…" -d "{\"now\":\"$(date -u -v+91d +%Y-%m-%dT%H:%M:%SZ)\"}"
 ```
 

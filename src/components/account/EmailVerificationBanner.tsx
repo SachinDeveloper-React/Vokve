@@ -30,57 +30,61 @@ interface Props {
  * button just reopens the screen; none means a new one has to be requested
  * first — the root navigator opens the screen the moment it arrives.
  */
-export const EmailVerificationBanner = memo(({ reason = 'redeem rewards' }: Props) => {
-  const { colors } = useTheme();
-  const navigation = useNavigation();
-  const isVerified = useIsEmailVerified();
-  const pending = usePendingEmailVerification();
-  const requestEmailVerification = useAuthStore(s => s.requestEmailVerification);
-  const isSubmitting = useAuthStore(s => s.isSubmitting);
-  const email = useAuthStore(s => s.user?.email);
+export const EmailVerificationBanner = memo(
+  ({ reason = 'redeem rewards' }: Props) => {
+    const { colors } = useTheme();
+    const navigation = useNavigation();
+    const isVerified = useIsEmailVerified();
+    const pending = usePendingEmailVerification();
+    const requestEmailVerification = useAuthStore(
+      s => s.requestEmailVerification,
+    );
+    const isSubmitting = useAuthStore(s => s.isSubmitting);
+    const email = useAuthStore(s => s.user?.email);
 
-  const onPress = useCallback(() => {
-    if (pending) {
-      navigation.navigate('VerifyContact');
-      return;
+    const onPress = useCallback(() => {
+      if (pending) {
+        navigation.navigate('VerifyContact');
+        return;
+      }
+      requestEmailVerification();
+    }, [navigation, pending, requestEmailVerification]);
+
+    if (isVerified) {
+      return null;
     }
-    requestEmailVerification();
-  }, [navigation, pending, requestEmailVerification]);
 
-  if (isVerified) {
-    return null;
-  }
-
-  return (
-    <Box
-      bg="card"
-      radius="xl"
-      p="base"
-      bordered
-      accessibilityRole="summary"
-      accessibilityLabel={`Verify your email to ${reason}`}
-    >
-      <HStack gap="md" align="center">
-        <Icon as={MailCheck} size="lg" tint={colors.warning} />
-        <VStack flex={1} gap="xxs">
-          <AppText variant="bodyStrong">Verify your email</AppText>
-          <AppText variant="caption" color="textSecondary" numberOfLines={2}>
-            {`You need a verified email to ${reason}. ${
-              pending ? 'We sent a code to' : 'We will send a code to'
-            } ${email ?? 'your address'}.`}
-          </AppText>
-        </VStack>
-        <Button
-          label={pending ? 'Enter code' : 'Verify'}
-          variant="brand"
-          size="sm"
-          loading={isSubmitting}
-          disabled={isSubmitting}
-          onPress={onPress}
-        />
-      </HStack>
-    </Box>
-  );
-});
+    return (
+      <Box
+        bg="card"
+        radius="xl"
+        p="base"
+        bordered
+        accessibilityRole="summary"
+        accessibilityLabel={`Verify your email to ${reason}`}
+      >
+        <HStack gap="md" align="center">
+          <Icon as={MailCheck} size="lg" tint={colors.warning} />
+          <VStack flex={1} gap="xxs">
+            <AppText variant="bodyStrong">Verify your email</AppText>
+            <AppText variant="caption" color="textSecondary" numberOfLines={2}>
+              {`You need a verified email to ${reason}. ${
+                pending ? 'We sent a code to' : 'We will send a code to'
+              } ${email ?? 'your address'}.`}
+            </AppText>
+          </VStack>
+          <Button
+            label={pending ? 'Enter code' : 'Verify'}
+            variant="brand"
+            size="sm"
+            loading={isSubmitting}
+            disabled={isSubmitting}
+            onPress={onPress}
+          />
+        </HStack>
+      </Box>
+    );
+  },
+);
 
 EmailVerificationBanner.displayName = 'EmailVerificationBanner';

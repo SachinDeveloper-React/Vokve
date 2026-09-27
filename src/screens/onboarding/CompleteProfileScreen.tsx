@@ -14,6 +14,7 @@ import {
 import {
   Alert,
   AppText,
+  AvatarPicker,
   Button,
   Center,
   FormFeetInchesField,
@@ -28,7 +29,9 @@ import {
   Wordmark,
 } from '../../components';
 import { useTheme } from '../../theme';
-import { useAuthStore } from '../../stores/authStore';
+import { useAuthStore, useCurrentUser } from '../../stores/authStore';
+import { useToast } from '../../components/feedback/Toast';
+import { Pressable } from '../../components/form/Pressable';
 import { describeAuthError } from '../../utils/authErrors';
 import type { UnitSystem } from '../../types/models';
 import {
@@ -84,6 +87,8 @@ export const CompleteProfileScreen = () => {
 
   const units = useWatch({ control, name: 'units' });
   const name = useWatch({ control, name: 'name' });
+  const avatarUrl = useCurrentUser()?.avatarUrl ?? null;
+  const toast = useToast();
 
   const unitLabels = UNITS[units ?? 'metric'];
 
@@ -117,6 +122,19 @@ export const CompleteProfileScreen = () => {
       setValue('weight', convertMeasure(weight, 'weight', next));
     }
   }, [getValues, setValue, units]);
+
+  /**
+   * A photo tapped before the name is typed. The picker itself needs a name
+   * to draw initials behind, so this route into it says what is missing
+   * rather than opening a sheet that would look broken.
+   */
+  const onPickBeforeName = useCallback(() => {
+    toast.show({
+      title: 'Add your name first',
+      message: 'Then tap the circle again to choose a photo.',
+      tone: 'info',
+    });
+  }, [toast]);
 
   const onSubmit = useCallback(
     async (values: CompleteProfileValues) => {
@@ -163,7 +181,25 @@ export const CompleteProfileScreen = () => {
           </VStack>
 
           <Center>
-            <ProfileHeroBadge />
+            {/*
+              Until there is a name to derive initials from, the placeholder
+              mark stands in for the photo; the moment the field has one, the
+              picker takes over and shows what the avatar will actually look
+              like. Either way the disc is tappable, so a member who wants to
+              add a photo here can.
+            */}
+            {isNameValid ? (
+              <AvatarPicker name={name} uri={avatarUrl} size="xl" />
+            ) : (
+              <Pressable
+                onPress={onPickBeforeName}
+                feedback="scale"
+                accessibilityRole="button"
+                accessibilityLabel="Add a profile photo"
+              >
+                <ProfileHeroBadge />
+              </Pressable>
+            )}
           </Center>
 
           <VStack align="center" gap="xs">
@@ -173,13 +209,24 @@ export const CompleteProfileScreen = () => {
             <AppText variant="body" color="textSecondary" center>
               Tell us a bit about yourself to personalize your experience
             </AppText>
+            <AppText variant="micro" color="textTertiary" center>
+              {avatarUrl
+                ? 'Tap your photo to change it.'
+                : 'Tap the circle to add a photo — you can always do it later.'}
+            </AppText>
           </VStack>
 
           {serverError ? (
             <Alert
               tone="error"
-              title={describeAuthError(serverError, 'Could not save your profile').title}
-              message={describeAuthError(serverError, 'Could not save your profile').message}
+              title={
+                describeAuthError(serverError, 'Could not save your profile')
+                  .title
+              }
+              message={
+                describeAuthError(serverError, 'Could not save your profile')
+                  .message
+              }
               onDismiss={clearError}
             />
           ) : null}

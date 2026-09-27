@@ -5,6 +5,7 @@ import { ApiError, toApiError } from '../services/api/errors';
 import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
 import { registerForPush, unregisterFromPush } from '../services/push';
+import { useAccountStore } from './accountStore';
 import { useAddressesStore } from './addressesStore';
 import { useCartStore } from './cartStore';
 import { useCheckoutStore } from './checkoutStore';
@@ -15,10 +16,7 @@ import { useOrdersStore } from './ordersStore';
 import { useReferralStore } from './referralStore';
 import { useWishlistStore } from './wishlistStore';
 import type { AuthTokens, User, VerificationChallenge } from '../types/models';
-import type {
-  CompleteProfilePayload,
-  SignUpPayload,
-} from '../types/forms';
+import type { CompleteProfilePayload, SignUpPayload } from '../types/forms';
 import { logger } from '../utils/logger';
 
 /**
@@ -73,8 +71,33 @@ interface AuthState {
   resendOtp: () => Promise<boolean>;
   /** Finishes onboarding and unlocks the main app. */
   completeProfile: (payload: CompleteProfilePayload) => Promise<boolean>;
+  /**
+   * Saves a profile edit (`PATCH /me`). Throws the `ApiError` rather than
+   * swallowing it into `error`: the edit form puts the server's field
+   * messages on its own fields, which a flat store error cannot do.
+   */
+  updateProfile: (patch: Partial<User>) => Promise<User>;
+  /**
+   * Replaces the profile photo, or drops it when passed null (RULES P10).
+   * Throws the `ApiError` so the picker can word a refusal — a photo too
+   * large is something the member can act on.
+   */
+  setAvatar: (
+    image: {
+      data: string;
+      contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+    } | null,
+  ) => Promise<User>;
+  /** True while a photo is being uploaded or removed. */
+  isSavingAvatar: boolean;
   /** Abandons the pending sign-up — going back from the OTP screen. */
   cancelVerification: () => void;
+  /**
+   * Parks a challenge another screen asked for — a contact change — so the
+   * root navigator opens the OTP screen over it and the code lands in the
+   * one place that knows how to take codes.
+   */
+  setPendingVerification: (challenge: VerificationChallenge) => void;
   /** Sends a new email code and makes it the pending challenge. */
   requestEmailVerification: () => Promise<boolean>;
   /**
@@ -108,6 +131,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   pendingVerification: null,
   pendingReset: null,
   stepUpToken: null,
+  isSavingAvatar: false,
   isSubmitting: false,
   error: null,
   notice: null,
@@ -144,9 +168,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       useAddressesStore.getState().hydrateFromServer();
       useCartStore.getState().hydrateFromServer();
       useWishlistStore.getState().hydrateFromServer();
+      useAccountStore.getState().hydrateFromServer();
     } catch (error) {
       const apiError = toApiError(error);
-      logger.warn('authStore', `Session restore failed: ${apiError.code ?? apiError.kind}`, apiError);
+      logger.warn(
+        'authStore',
+        `Session restore failed: ${apiError.code ?? apiError.kind}`,
+        apiError,
+      );
 
       // Only a rejection ends the session. The server saying "no" — the
       // refresh token revoked, the device limit hit, the account gone — means
@@ -169,7 +198,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         });
         return;
       }
-      set({ status: 'unreachable', user: null, error: apiError, isSubmitting: false });
+      set({
+        status: 'unreachable',
+        user: null,
+        error: apiError,
+        isSubmitting: false,
+      });
     }
   },
 
@@ -192,6 +226,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       useAddressesStore.getState().hydrateFromServer();
       useCartStore.getState().hydrateFromServer();
       useWishlistStore.getState().hydrateFromServer();
+      useAccountStore.getState().hydrateFromServer();
       return true;
     } catch (error) {
       set({ error: toApiError(error), isSubmitting: false });
@@ -262,6 +297,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       useAddressesStore.getState().hydrateFromServer();
       useCartStore.getState().hydrateFromServer();
       useWishlistStore.getState().hydrateFromServer();
+      useAccountStore.getState().hydrateFromServer();
       return true;
     } catch (error) {
       const apiError = toApiError(error);
@@ -313,6 +349,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   cancelVerification: () => {
     set({ pendingVerification: null, error: null });
+  },
+
+  setPendingVerification: challenge => {
+    set({ pendingVerification: challenge, error: null });
   },
 
   /**
@@ -414,6 +454,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return token;
   },
 
+  setAvatar: async image => {
+    set({ isSavingAvatar: true });
+    try {
+      const user = image
+        ? await userApi.uploadAvatar(image)
+        : await userApi.removeAvatar();
+      set({ user, isSavingAvatar: false });
+      return user;
+    } catch (error) {
+      set({ isSavingAvatar: false });
+      throw toApiError(error);
+    }
+  },
+
+  updateProfile: async patch => {
+    set({ isSubmitting: true, error: null });
+    try {
+      const user = await userApi.updateProfile(patch);
+      set({ user, isSubmitting: false });
+      return user;
+    } catch (error) {
+      set({ isSubmitting: false });
+      throw toApiError(error);
+    }
+  },
+
   completeProfile: async payload => {
     set({ isSubmitting: true, error: null });
     try {
@@ -436,7 +502,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await unregisterFromPush();
       await authApi.signOut();
     } catch (error) {
-      logger.warn('authStore', 'Server sign-out failed, clearing locally', error);
+      logger.warn(
+        'authStore',
+        'Server sign-out failed, clearing locally',
+        error,
+      );
     }
     await secureStorage.clearTokens();
     // The caches are this user's: the next sign-in hydrates its own, but
@@ -447,6 +517,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useAddressesStore.getState().reset();
     useCartStore.getState().reset();
     useWishlistStore.getState().reset();
+    useAccountStore.getState().reset();
     useCheckoutStore.getState().reset();
     useReferralStore.getState().reset();
     useNotificationSettingsStore.getState().reset();

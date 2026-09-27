@@ -1,11 +1,5 @@
 import React, { memo } from 'react';
-import {
-  Bell,
-  Lock,
-  Palette,
-  ShieldCheck,
-  UserPen,
-} from 'lucide-react-native';
+import { Bell, Lock, Palette, ShieldCheck, UserPen } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { HStack } from '../layout/Stack';
 import { Card } from '../ui/Card';

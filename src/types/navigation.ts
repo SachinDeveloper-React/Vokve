@@ -4,6 +4,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type {
   CoinSource,
   MealSlot,
+  ProfileGap,
   PurchaseLine,
   ShopCategory,
   WorkoutTemplate,
@@ -161,6 +162,20 @@ export type RootStackParamList = {
   Reviews: { itemId: string };
   /** Write or edit the reader's own review of an item. */
   WriteReview: { itemId: string };
+  /**
+   * The profile form. `focus` opens it scrolled to one field — what the
+   * completeness card's rows lead to.
+   */
+  EditProfile: { focus?: ProfileGap['field'] } | undefined;
+  /** Password, email, phone and the devices with a live session. */
+  Security: undefined;
+  /** The data choices, plus the export and the account deletion. */
+  Privacy: undefined;
+  /** The help centre and the member's own tickets. */
+  HelpSupport: undefined;
+  SupportTicket: { id: string };
+  /** Version, update state, release notes and the legal links. */
+  About: undefined;
 };
 
 export type RootStackScreenProps<T extends keyof RootStackParamList> =

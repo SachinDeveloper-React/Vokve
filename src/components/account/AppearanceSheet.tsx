@@ -1,10 +1,7 @@
 import React, { memo } from 'react';
 import { BottomSheet } from '../disclosure/BottomSheet';
 import { VStack } from '../layout/Stack';
-import {
-  SegmentedControl,
-  type Segment,
-} from '../form/SegmentedControl';
+import { SegmentedControl, type Segment } from '../form/SegmentedControl';
 import { useTheme, type ThemeMode } from '../../theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { UnitSystem } from '../../types/models';
