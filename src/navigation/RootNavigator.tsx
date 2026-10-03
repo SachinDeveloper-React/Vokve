@@ -42,10 +42,13 @@ import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
 import { WishlistScreen } from '../screens/main/WishlistScreen';
 import { WriteReviewScreen } from '../screens/main/WriteReviewScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
+import { StepSourcesScreen } from '../screens/main/StepSourcesScreen';
+import { StepTrackingScreen } from '../screens/main/StepTrackingScreen';
 import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
 import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
 import { UpgradeRequiredScreen } from '../screens/system/UpgradeRequiredScreen';
 import { useUpgradeRequired } from '../stores/appStatusStore';
+import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
@@ -93,6 +96,9 @@ export const RootNavigator = () => {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // Step counting follows the session, not any one screen.
+  useStepTrackingSession();
 
   // Once, per challenge: the moment the sign-up code passes, the server
   // hands back the challenge for the other contact and the app is already
@@ -315,6 +321,16 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="Streak"
               component={StreakScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="StepTracking"
+              component={StepTrackingScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="StepSources"
+              component={StepSourcesScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

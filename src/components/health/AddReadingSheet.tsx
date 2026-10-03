@@ -23,7 +23,14 @@ const BOUNDS: Record<VitalKind, { min: number; max: number }> = {
 /** The diastolic half has its own, lower, range. */
 const DIASTOLIC = { min: 30, max: 150 };
 
-const OPTIONS: RadioOption<VitalKind>[] = VITAL_ORDER.map(kind => ({
+/**
+ * What can be logged. BMI is not among them: it is worked out by the server
+ * from the newest weight and the height on the profile (RULES V1, V3), and a
+ * typed-in BMI could disagree with both.
+ */
+const OPTIONS: RadioOption<VitalKind>[] = VITAL_ORDER.filter(
+  kind => kind !== 'bmi',
+).map(kind => ({
   value: kind,
   label: VITAL_STYLE[kind].label,
   helper: VITAL_STYLE[kind].unit || undefined,

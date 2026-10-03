@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
@@ -20,18 +20,16 @@ import {
   MEAL_PLAN_LABEL,
   NUTRITION_GOAL_LABEL,
 } from '../../components/nutrition/nutritionLabels';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { nutritionTip, todayActivity } from '../../constants/seedData';
+import { useActivityDay } from '../../hooks/useActivity';
+import { useTip } from '../../hooks/useContent';
+import { useNutritionDay } from '../../hooks/useNutrition';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
-import {
-  useMealSummaries,
-  useNutritionGoals,
-  useNutritionPreferences,
-  useNutritionStore,
-  useNutritionTotals,
-} from '../../stores/nutritionStore';
-import { useThemedStyles, type ThemeShape } from '../../theme';
+import { useNutritionStore } from '../../stores/nutritionStore';
+import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type {
   DietType,
   MealPlan,
@@ -51,31 +49,55 @@ const PLAN_OPTIONS = Object.keys(MEAL_PLAN_LABEL) as MealPlan[];
 const GOAL_OPTIONS = Object.keys(NUTRITION_GOAL_LABEL) as NutritionGoal[];
 
 /**
- * Nutrition: what has been eaten today, against what the day was meant to be.
+ * Nutrition: what has been eaten on a day, against what the day was meant to
+ * be.
  *
  * The summary, the meal rows and the macro bars are three readings of one list
- * of food, so logging an item moves all of them at once — which is the only
- * reason the "+" belongs on this screen rather than behind a separate diary.
+ * of food — the server's day (`GET /nutrition/day`) with any meal still on its
+ * way laid over it — so logging an item moves all of them at once, which is
+ * the only reason the "+" belongs on this screen rather than behind a
+ * separate diary. The targets and preferences are the server's profile; the
+ * tip is the day's from its content.
  *
- * Calories burned come from the activity seed rather than from the plate: they
- * are the one figure here the user does not eat, and the card states it beside
- * the others rather than subtracting it from them, because burning 500
- * calories does not make room for 500 more on any honest reading of a goal.
+ * Calories burned are the server's figure for the day's activity rather than
+ * the plate's: they are the one figure here the user does not eat, and the
+ * card states it beside the others rather than subtracting it from them,
+ * because burning 500 calories does not make room for 500 more on any honest
+ * reading of a goal.
  */
 export const NutritionScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const user = useCurrentUser();
   const hasUnreadNotifications = useHasUnreadNotifications();
 
-  const goals = useNutritionGoals();
-  const totals = useNutritionTotals();
-  const meals = useMealSummaries();
-  const preferences = useNutritionPreferences();
-  const setPreferences = useNutritionStore(s => s.setPreferences);
-
   const [period, setPeriod] = useState<NutritionPeriod>('day');
   const [date, setDate] = useState<IsoDate>(todayIso());
+
+  const profile = useNutritionStore(s => s.profile);
+  const isSyncing = useNutritionStore(s => s.isSyncing);
+  const syncError = useNutritionStore(s => s.syncError);
+  const hydrateFromServer = useNutritionStore(s => s.hydrateFromServer);
+  const refreshIfStale = useNutritionStore(s => s.refreshIfStale);
+  const setPreferences = useNutritionStore(s => s.setPreferences);
+  const day = useNutritionDay(date);
+  const burned = useActivityDay(date).data?.caloriesBurned ?? 0;
+  const tip = useTip('nutrition');
+
+  useRefreshOnFocus(refreshIfStale);
+
+  const [isPulling, setPulling] = useState(false);
+  const { reload: reloadDay } = day;
+  const onRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await hydrateFromServer();
+    } finally {
+      reloadDay();
+      setPulling(false);
+    }
+  }, [hydrateFromServer, reloadDay]);
   const [isCalendarOpen, setCalendarOpen] = useState(false);
   /** Which preference picker is open, or null while none is. */
   const [editing, setEditing] = useState<PreferenceKind | null>(null);
@@ -169,6 +191,14 @@ export const NutritionScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPulling}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <NutritionHeader
           name={user?.name}
@@ -186,42 +216,64 @@ export const NutritionScreen = () => {
           onPressDate={openCalendar}
         />
 
-        <CalorieSummaryCard
-          consumed={totals.calories}
-          goal={goals.calories}
-          burned={todayActivity.caloriesBurned}
-          proteinG={totals.proteinG}
-          carbsG={totals.carbsG}
-          fatsG={totals.fatsG}
-          proteinGoalG={goals.proteinG}
-          carbsGoalG={goals.carbsG}
-          fatsGoalG={goals.fatsG}
-          onPressLearnMore={notImplemented}
-        />
+        {profile === null ? (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your targets"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        ) : (
+          <>
+            <CalorieSummaryCard
+              consumed={day.totals.calories}
+              goal={profile.goals.calories}
+              burned={burned}
+              proteinG={day.totals.proteinG}
+              carbsG={day.totals.carbsG}
+              fatsG={day.totals.fatsG}
+              proteinGoalG={profile.goals.proteinG}
+              carbsGoalG={profile.goals.carbsG}
+              fatsGoalG={profile.goals.fatsG}
+              onPressLearnMore={notImplemented}
+            />
 
-        <DailyGoalCard
-          calories={goals.calories}
-          proteinG={goals.proteinG}
-          carbsG={goals.carbsG}
-          fatsG={goals.fatsG}
-          onPressEdit={notImplemented}
-        />
+            <DailyGoalCard
+              calories={profile.goals.calories}
+              proteinG={profile.goals.proteinG}
+              carbsG={profile.goals.carbsG}
+              fatsG={profile.goals.fatsG}
+              onPressEdit={notImplemented}
+            />
+          </>
+        )}
 
-        <MealsCard
-          meals={meals}
-          tip={nutritionTip}
-          onPressAdd={onAddToMeal}
-          onPressViewAll={onOpenHistory}
-          onPressTips={notImplemented}
-        />
+        {day.loaded ? (
+          <MealsCard
+            meals={day.meals}
+            tip={tip?.text ?? null}
+            onPressAdd={onAddToMeal}
+            onPressViewAll={onOpenHistory}
+            onPressTips={notImplemented}
+          />
+        ) : (
+          <LoadState
+            loading={day.loading}
+            title="Couldn't load the day's meals"
+            message={day.error}
+            onRetry={day.reload}
+          />
+        )}
 
-        <PreferencesCard
-          dietType={DIET_LABEL[preferences.dietType]}
-          mealPlan={MEAL_PLAN_LABEL[preferences.mealPlan]}
-          goal={NUTRITION_GOAL_LABEL[preferences.goal]}
-          onPressChange={setEditing}
-          onPressManage={onOpenDietPlan}
-        />
+        {profile !== null ? (
+          <PreferencesCard
+            dietType={DIET_LABEL[profile.preferences.dietType]}
+            mealPlan={MEAL_PLAN_LABEL[profile.preferences.mealPlan]}
+            goal={NUTRITION_GOAL_LABEL[profile.preferences.goal]}
+            onPressChange={setEditing}
+            onPressManage={onOpenDietPlan}
+          />
+        ) : null}
       </ScrollView>
 
       <ActionSheet

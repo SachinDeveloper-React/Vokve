@@ -20,11 +20,11 @@ interface Band {
  * fact, and a card that said "82 — Needs work" would be worse than saying
  * nothing at all.
  */
-function bandFor(score: number, outOf: number): Band {
+function bandFor(score: number, outOf: number, word?: string): Band {
   const percent = (score / Math.max(1, outOf)) * 100;
-  if (percent >= 80) return { label: 'Good', tint: 'success' };
-  if (percent >= 60) return { label: 'Fair', tint: 'warning' };
-  return { label: 'Needs work', tint: 'destructive' };
+  if (percent >= 80) return { label: word ?? 'Good', tint: 'success' };
+  if (percent >= 60) return { label: word ?? 'Fair', tint: 'warning' };
+  return { label: word ?? 'Needs work', tint: 'destructive' };
 }
 
 /** First name only — a cheer with a full legal name reads like a form. */
@@ -35,6 +35,8 @@ function firstNameOf(name: string): string {
 interface Props {
   score: number;
   outOf: number;
+  /** The server's word for the score; the colour still follows the figure. */
+  band?: string;
   /** Null while the profile is loading — the line drops the name. */
   name?: string | null;
   onPressInfo: () => void;
@@ -51,11 +53,11 @@ interface Props {
  * choose the rules for has to be able to explain itself.
  */
 export const HealthScoreCard = memo(
-  ({ score, outOf, name, onPressInfo }: Props) => {
+  ({ score, outOf, band: word, name, onPressInfo }: Props) => {
     const { colors } = useTheme();
     const foreground = darkColors.tierForeground;
     const secondary = withAlpha(foreground, 0.68);
-    const band = bandFor(score, outOf);
+    const band = bandFor(score, outOf, word);
     const who = name ? `, ${firstNameOf(name)}` : '';
 
     return (

@@ -4,6 +4,9 @@ import { workoutSchema, workoutTemplateSchema, exerciseSchema, type Workout, typ
 import { UserModel } from '../identity/models.js';
 import { credit } from '../economy/service.js';
 import { qualifyReferral } from '../social/service.js';
+import { evaluateChallenges } from '../challenges/service.js';
+import { refreshLeaderboardScore } from '../leaderboard/service.js';
+import { markEarned } from '../streak/service.js';
 import { ActivityDailyModel } from '../activity/models.js';
 import { ExerciseModel, WorkoutModel, WorkoutTemplateModel } from './models.js';
 
@@ -104,6 +107,11 @@ export async function saveWorkout(userId: string, input: Workout, meta: SaveMeta
     // whether or not the workout itself still paid under the day's cap.
     // The referral's own idempotency means a replayed save cannot pay twice.
     await qualifyReferral(userId, localDay, meta.timezone, meta.deviceId);
+    // And it earns its day for the streak (RULES W6), paid or capped alike,
+    // and counts towards the workout challenges (RULES C3).
+    await markEarned(userId, localDay, 'workout', meta.timezone, { referenceId: input.id });
+    await evaluateChallenges(userId, localDay, meta.timezone);
+    await refreshLeaderboardScore(userId, localDay);
   }
 
   return { workout: toWorkout(doc!), reward };

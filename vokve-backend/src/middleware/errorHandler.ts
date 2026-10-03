@@ -17,6 +17,10 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     res.status(409).json({ error: { code: 'DUPLICATE', message: 'That already exists.', details: null } });
     return;
   }
+  if (err?.type === 'entity.too.large') {
+    res.status(413).json({ error: { code: 'PAYLOAD_TOO_LARGE', message: 'That is too large to send.', details: null } });
+    return;
+  }
   if (err?.type === 'entity.parse.failed') {
     res.status(400).json({ error: { code: 'BAD_JSON', message: 'The request body is not valid JSON.', details: null } });
     return;

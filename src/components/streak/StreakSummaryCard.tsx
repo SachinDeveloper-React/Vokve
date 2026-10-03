@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Flame } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { formatDateRange } from '../../utils/date';
-import type { StreakRun } from '../../stores/streakStore';
+import type { StreakMilestone, StreakRun } from '../../types/models';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
@@ -14,18 +14,32 @@ interface Props {
   currentStreak: number;
   /** Null until the first day is recorded. */
   longestStreak: StreakRun | null;
+  /** The next rung above the current run; null past the top. */
+  nextMilestone: StreakMilestone | null;
+  /** What makes a day count, in the server's words. */
+  howToEarn: string;
   onPressInfo?: () => void;
 }
 
 /** What the card says under the current figure, by how it is going. */
-function encouragementFor(streak: number): [string, string] {
+function encouragementFor(
+  streak: number,
+  next: StreakMilestone | null,
+  howToEarn: string,
+): [string, string] {
   if (streak === 0) {
-    return ['Start today 💪', 'One workout is all it takes to begin.'];
+    return ['Start today 💪', howToEarn];
   }
+  const toGo = next ? next.days - streak : 0;
+  const ahead = next
+    ? `${toGo} more ${toGo === 1 ? 'day' : 'days'} to the ${
+        next.days
+      }-day milestone.`
+    : 'Every milestone reached — keep it going.';
   if (streak < 7) {
-    return ['Good start! 🌱', 'A week is the first milestone — keep going.'];
+    return ['Good start! 🌱', ahead];
   }
-  return ["You're on fire! 🔥", 'Keep it up and unlock bigger rewards.'];
+  return ["You're on fire! 🔥", ahead];
 }
 
 /**
@@ -43,9 +57,19 @@ function encouragementFor(streak: number): [string, string] {
  * record is the target, and the accent is what makes it read as one.
  */
 export const StreakSummaryCard = memo(
-  ({ currentStreak, longestStreak, onPressInfo }: Props) => {
+  ({
+    currentStreak,
+    longestStreak,
+    nextMilestone,
+    howToEarn,
+    onPressInfo,
+  }: Props) => {
     const { colors } = useTheme();
-    const [headline, detail] = encouragementFor(currentStreak);
+    const [headline, detail] = encouragementFor(
+      currentStreak,
+      nextMilestone,
+      howToEarn,
+    );
 
     return (
       <Card radius="xl" padding="lg">

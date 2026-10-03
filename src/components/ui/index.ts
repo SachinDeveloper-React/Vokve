@@ -8,6 +8,7 @@ export { IconBadge } from './IconBadge';
 export type { IconBadgeSize, IconBadgeVariant } from './IconBadge';
 export { IconButton } from './IconButton';
 export type { IconButtonSize } from './IconButton';
+export { LoadState } from './LoadState';
 export { ProgressBar } from './ProgressBar';
 export { Screen } from './Screen';
 export { Tag } from './Tag';

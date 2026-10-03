@@ -30,6 +30,7 @@ export * from './history';
 export * from './heart';
 export * from './pressure';
 export * from './referral';
+export * from './steps';
 export { default as ErrorBoundary } from './common/ErrorBoundary';
 export { Wordmark } from './brand/Wordmark';
 export type { WordmarkSize } from './brand/Wordmark';

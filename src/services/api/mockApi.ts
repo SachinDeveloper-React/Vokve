@@ -1,27 +1,69 @@
 import { config } from '../../constants/config';
 import {
   REFERRAL_REWARD_COINS,
+  dietPlanRotation,
+  healthHighlights,
+  foodLibrary,
+  quickAddFoodIds,
+  seedFoodEntries,
+  healthTip,
+  hydrationHighlights,
+  hydrationTip,
+  nutritionTip,
+  leaderboardHighlights,
   referralCode,
   seedCoinTransactions,
   seedNotifications,
+  seedAchievements,
+  seedChallenges,
+  seedLeaderboard,
   seedReferrals,
+  seedStreak,
+  seedVitals,
   shopItems,
-  todayActivity,
-  weeklySteps,
   workoutTemplates,
 } from '../../constants/seedData';
 import {
+  achievementSchema,
+  dietPlanDaySchema,
+  healthScoreSchema,
+  nutritionDaySchema,
+  nutritionProfileSchema,
+  contentTipSchema,
+  hydrationDaySchema,
+  hydrationReminderPlanSchema,
+  hydrationStatsSchema,
+  activityConfigSchema,
+  activityRangeSchema,
   authResponseSchema,
+  challengeSchema,
   dailyActivitySchema,
+  deviceAttestationResultSchema,
+  leaderboardBoardSchema,
+  leaderboardHistorySchema,
+  leaderboardRulesSchema,
+  stepIngestResultSchema,
+  stepSourcesReportSchema,
+  streakRestoreResultSchema,
+  streakSummarySchema,
   userSchema,
+  userSettingsSchema,
   verificationChallengeSchema,
+  vitalReadingSchema,
+  vitalsLatestSchema,
   workoutSchema,
   type AccountSession,
   type Address,
   type AppNotification,
   type AuthResponse,
   type Cart,
+  type Challenge,
   type CheckoutResult,
+  type ContentTopic,
+  type FoodEntry,
+  type HydrationReminderPlan,
+  type NutritionProfile,
+  type VitalReading,
   type NotificationPreferences,
   type Order,
   type PrivacySettings,
@@ -37,7 +79,11 @@ import {
   type SupportTicket,
   type CoinTransaction,
   type DailyActivity,
+  type StepIngestResult,
+  type StreakRun,
+  type StreakSummary,
   type User,
+  type UserSettings,
   type VerificationChallenge,
   type Workout,
   type WorkoutTemplate,
@@ -52,15 +98,23 @@ import type {
   AppApi,
   AuthApi,
   CartApi,
+  ChallengeApi,
   CheckoutApi,
+  ContentApi,
+  HydrationApi,
   DeviceApi,
+  LeaderboardApi,
   NotificationApi,
   NotificationPreferencesApi,
+  NutritionApi,
   OrderApi,
   ReferralApi,
+  SettingsApi,
   ShopApi,
+  StreakApi,
   SupportApi,
   UserApi,
+  VitalsApi,
   WalletApi,
   WishlistApi,
   WorkoutApi,
@@ -489,6 +543,24 @@ export const mockAuthApi: AuthApi = {
     mockDeletion = { scheduledAt: null, purgeAt: null, reason: null };
     mockTickets = [];
     mockApplied = null;
+    mockAttestationChallenges = new Map();
+    mockAttestedKeys = new Set();
+    mockActivityDays = new Map();
+    mockNonces = new Map();
+    mockIngested = new Map();
+    mockIntegrityAt = 0;
+    mockSnapshots = new Map();
+    mockSettings = { ...MOCK_DEFAULT_SETTINGS };
+    mockStreak = mockFreshStreak();
+    mockWater = new Map();
+    mockPlan = mockDefaultPlan();
+    mockNutritionProfile = mockDefaultNutrition();
+    mockFood = new Map(seedFoodEntries.map(entry => [entry.id, entry]));
+    mockVitals = new Map(
+      seedVitals
+        .filter(reading => reading.kind !== 'bmi')
+        .map(reading => [reading.id, reading]),
+    );
     return { ok: true };
   },
 };
@@ -558,6 +630,35 @@ export const mockUserApi: UserApi = {
   },
 };
 
+/** A new account's settings, as the server creates them. */
+const MOCK_DEFAULT_SETTINGS: UserSettings = {
+  units: 'metric',
+  dailyStepGoal: 10_000,
+  dailyWaterGoalMl: 2500,
+  restTimerSeconds: 90,
+  hapticsEnabled: true,
+  workoutRemindersEnabled: true,
+  keepAwakeDuringWorkout: true,
+};
+let mockSettings: UserSettings = { ...MOCK_DEFAULT_SETTINGS };
+
+export const mockSettingsApi: SettingsApi = {
+  async get() {
+    await delay();
+    return mockSettings;
+  },
+  /** Validated by the same schema the server's clamps mirror. */
+  async update(patch) {
+    await delay();
+    const next = userSettingsSchema.safeParse({ ...mockSettings, ...patch });
+    if (!next.success) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422);
+    }
+    mockSettings = next.data;
+    return mockSettings;
+  },
+};
+
 /** Built from the same seed the workout screens already read. */
 export const mockWorkoutApi: WorkoutApi = {
   async templates(): Promise<WorkoutTemplate[]> {
@@ -580,6 +681,17 @@ export const mockWorkoutApi: WorkoutApi = {
   },
 };
 
+/**
+ * The attestation the mock holds: the challenge each device was last handed,
+ * and every key a device has proven. Keys rather than devices, because a
+ * snapshot names the key that signed it and not the device it came from.
+ */
+let mockAttestationChallenges = new Map<string, string>();
+let mockAttestedKeys = new Set<string>();
+
+/** How long a challenge or a nonce stays live, as the server keeps them. */
+const MOCK_CHALLENGE_TTL_MS = 10 * 60_000;
+
 export const mockDeviceApi: DeviceApi = {
   async register(profile) {
     await delay();
@@ -593,6 +705,40 @@ export const mockDeviceApi: DeviceApi = {
   async setPushToken() {
     await delay();
     return { ok: true };
+  },
+  async attestationChallenge(deviceId) {
+    await delay();
+    const challenge = nextId('chl');
+    mockAttestationChallenges.set(deviceId, challenge);
+    return {
+      challenge,
+      expiresAt: new Date(Date.now() + MOCK_CHALLENGE_TTL_MS).toISOString(),
+    };
+  },
+  /**
+   * Takes the key on trust: the real server checks the chain up to Google's
+   * root and finds its own challenge inside the leaf, which a mock cannot.
+   * It does insist a challenge was asked for first, so the order of the two
+   * calls is exercised.
+   */
+  async submitAttestation(deviceId, attestation) {
+    await delay();
+    if (!mockAttestationChallenges.has(deviceId)) {
+      throw new ApiError(
+        'unknown',
+        'That attestation has no challenge behind it. Ask for a new one.',
+        409,
+        null,
+        'ATTESTATION_CHALLENGE_INVALID',
+      );
+    }
+    mockAttestationChallenges.delete(deviceId);
+    mockAttestedKeys.add(attestation.keyId);
+    return deviceAttestationResultSchema.parse({
+      keyId: attestation.keyId,
+      attested: attestation.attested && attestation.certificateChain.length > 0,
+      securityLevel: attestation.securityLevel,
+    });
   },
 };
 
@@ -699,43 +845,1200 @@ export const mockWalletApi: WalletApi = {
   },
 };
 
+// ─── Challenges ────────────────────────────────────────────────────────────
+
+/** The last day of the period `date` falls in — the server's rule (RULES C6). */
+function mockPeriodEnd(cadence: Challenge['cadence'], date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  if (cadence === 'daily') return date;
+  if (cadence === 'weekly') {
+    const weekday = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+    return new Date(Date.UTC(y, m - 1, d + 6 - weekday))
+      .toISOString()
+      .slice(0, 10);
+  }
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+export const mockChallengeApi: ChallengeApi = {
+  async board(date) {
+    await delay();
+    const open = seedChallenges.filter(
+      c => c.startsAt === null || c.startsAt <= date,
+    );
+    const upcoming = seedChallenges
+      .filter(c => c.startsAt !== null && c.startsAt > date)
+      .sort((a, b) => (a.startsAt ?? '').localeCompare(b.startsAt ?? ''));
+    return [
+      ...open.map(c =>
+        challengeSchema.parse({
+          ...c,
+          startsAt: null,
+          endsOn: mockPeriodEnd(c.cadence, date),
+          completedAt: c.progress >= c.goal ? new Date().toISOString() : null,
+        }),
+      ),
+      ...upcoming.map(c =>
+        challengeSchema.parse({ ...c, progress: 0, endsOn: null }),
+      ),
+    ];
+  },
+  async achievements() {
+    await delay();
+    return seedAchievements.map(a => achievementSchema.parse(a));
+  },
+};
+
+// ─── Streak ────────────────────────────────────────────────────────────────
+
+/** The server's defaults (⚙ `streak`, `coins.streakMilestones`). */
+const MOCK_STREAK_RULES = {
+  restoreCost: 50,
+  restoreWindowDays: 7,
+  maxFreezes: 3,
+  milestones: [
+    { days: 7, coins: 50 },
+    { days: 15, coins: 150 },
+    { days: 30, coins: 300 },
+    { days: 90, coins: 1000 },
+    { days: 180, coins: 2000 },
+  ],
+} as const;
+
+const mockFreshStreak = () => ({
+  completed: new Set<string>(seedStreak.completedDays),
+  protectedDays: new Set<string>(seedStreak.protectedDays),
+  freezes: seedStreak.freezesAvailable,
+});
+
+let mockStreak = mockFreshStreak();
+
+/** Local `YYYY-MM-DD` — the mock's today, in the phone's own zone. */
+function mockToday(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate(),
+  )}`;
+}
+
+function mockStreakDayShift(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** The server's run arithmetic (RULES S2, S3, S6), on the mock's days. */
+function mockRuns(days: Set<string>, today: string) {
+  let cursor = days.has(today) ? today : mockStreakDayShift(today, -1);
+  let current = 0;
+  while (days.has(cursor)) {
+    current += 1;
+    cursor = mockStreakDayShift(cursor, -1);
+  }
+
+  const sorted = [...days].sort();
+  let longest: StreakRun | null = null;
+  let start = sorted[0];
+  let length = 0;
+  sorted.forEach((day, i) => {
+    const follows = i > 0 && mockStreakDayShift(sorted[i - 1], 1) === day;
+    start = follows ? start : day;
+    length = follows ? length + 1 : 1;
+    if (longest === null || length > longest.length) {
+      longest = { length, start, end: day };
+    }
+  });
+
+  const gap: string[] = [];
+  if (current === 0) {
+    let back = mockStreakDayShift(today, -2);
+    for (let n = 2; n <= MOCK_STREAK_RULES.restoreWindowDays; n++) {
+      if (days.has(back)) {
+        for (
+          let d = mockStreakDayShift(back, 1);
+          d < today;
+          d = mockStreakDayShift(d, 1)
+        ) {
+          gap.push(d);
+        }
+        break;
+      }
+      back = mockStreakDayShift(back, -1);
+    }
+  }
+  return { current, longest: longest as StreakRun | null, gap };
+}
+
+function mockStreakSummary(): StreakSummary {
+  const today = mockToday();
+  const all = new Set([...mockStreak.completed, ...mockStreak.protectedDays]);
+  const { current, longest, gap } = mockRuns(all, today);
+  const milestones = MOCK_STREAK_RULES.milestones.map(m => ({
+    days: m.days,
+    coins: m.coins,
+    achieved: (longest?.length ?? 0) >= m.days,
+    paid: (longest?.length ?? 0) >= m.days,
+  }));
+  return streakSummarySchema.parse({
+    today,
+    currentStreak: current,
+    longestStreak: longest,
+    completedDays: [...mockStreak.completed].sort(),
+    protectedDays: [...mockStreak.protectedDays].sort(),
+    freezesAvailable: mockStreak.freezes,
+    maxFreezes: MOCK_STREAK_RULES.maxFreezes,
+    todayCovered: all.has(today),
+    todayFrozen: mockStreak.protectedDays.has(today),
+    canRestore: gap.length > 0,
+    restoreGap: gap,
+    restoreCostCoins: MOCK_STREAK_RULES.restoreCost,
+    restoreWindowDays: MOCK_STREAK_RULES.restoreWindowDays,
+    milestones,
+    nextMilestone: milestones.find(m => m.days > current) ?? null,
+    howToEarn: `Finish a workout or walk ${mockSettings.dailyStepGoal.toLocaleString(
+      'en-IN',
+    )} steps in a day.`,
+  });
+}
+
+export const mockStreakApi: StreakApi = {
+  async get() {
+    await delay();
+    return mockStreakSummary();
+  },
+  async freeze() {
+    await delay();
+    const today = mockToday();
+    if (
+      mockStreak.completed.has(today) ||
+      mockStreak.protectedDays.has(today)
+    ) {
+      throw new ApiError(
+        'unknown',
+        'Today already counts — save the freeze for a rest day.',
+        409,
+        null,
+        'STREAK_ALREADY_COVERED',
+      );
+    }
+    if (mockStreak.freezes <= 0) {
+      throw new ApiError(
+        'unknown',
+        'No freezes left. Keep your streak going to earn another.',
+        409,
+        null,
+        'NO_FREEZES_LEFT',
+      );
+    }
+    mockStreak.freezes -= 1;
+    mockStreak.protectedDays.add(today);
+    return mockStreakSummary();
+  },
+  async restore() {
+    await delay();
+    const summary = mockStreakSummary();
+    if (!summary.canRestore) {
+      throw new ApiError(
+        'validation',
+        summary.currentStreak > 0
+          ? 'Your streak is intact. Keep it going!'
+          : 'Your last streak ended too long ago to bring back.',
+        422,
+        null,
+        'NOTHING_TO_RESTORE',
+      );
+    }
+    const balance = currentBalance();
+    if (balance < MOCK_STREAK_RULES.restoreCost) {
+      throw new ApiError(
+        'validation',
+        `You need ${
+          MOCK_STREAK_RULES.restoreCost - balance
+        } more coins for this.`,
+        422,
+        { required: MOCK_STREAK_RULES.restoreCost, balance },
+        'INSUFFICIENT_COINS',
+      );
+    }
+    mockBalance = balance - MOCK_STREAK_RULES.restoreCost;
+    summary.restoreGap.forEach(day => mockStreak.protectedDays.add(day));
+    return streakRestoreResultSchema.parse({
+      streak: mockStreakSummary(),
+      balance: mockBalance,
+    });
+  },
+};
+
+// ─── Leaderboard ───────────────────────────────────────────────────────────
+
+/** The server's default prize tiers (⚙ `leaderboard.tiers`). */
+const MOCK_TIERS = [
+  {
+    fromRank: 1,
+    toRank: 1,
+    coins: 5000,
+    perks: ['Premium T-Shirt', 'Water Bottle'],
+  },
+  {
+    fromRank: 2,
+    toRank: 3,
+    coins: 3000,
+    perks: ['Premium T-Shirt', 'Fitness Mat'],
+  },
+  { fromRank: 4, toRank: 10, coins: 1000, perks: ['Fitness Mat'] },
+];
+
+export const mockLeaderboardApi: LeaderboardApi = {
+  async board() {
+    await delay();
+    const today = mockToday();
+    const [y, m, d] = today.split('-').map(Number);
+    const weekday = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+    const start = mockStreakDayShift(today, -weekday);
+    const end = mockStreakDayShift(start, 6);
+    return leaderboardBoardSchema.parse({
+      period: {
+        id: start,
+        start,
+        end,
+        resetsAt: new Date(
+          `${mockStreakDayShift(end, 1)}T00:00:00`,
+        ).toISOString(),
+        country: 'IN',
+        status: 'live',
+      },
+      entries: seedLeaderboard,
+      me: { rank: 12, score: 1_240, coins: 0, percentile: 88 },
+      ranked: 96,
+    });
+  },
+  async history() {
+    await delay();
+    const {
+      bestRank,
+      bestRankAchievedOn,
+      topTenFinishes,
+      rewardCoinsEarned,
+      rewardsWon,
+    } = leaderboardHighlights;
+    return leaderboardHistorySchema.parse({
+      bestRank,
+      bestRankAchievedOn,
+      topTenFinishes,
+      rewardCoinsEarned,
+      rewardsWon,
+      periods: [],
+    });
+  },
+  async rules() {
+    await delay();
+    return leaderboardRulesSchema.parse({
+      scope: 'India',
+      tiers: MOCK_TIERS.map(t => ({
+        id: `rank-${t.fromRank}-${t.toRank}`,
+        ...t,
+        label:
+          t.fromRank === t.toRank
+            ? `Rank ${t.fromRank}`
+            : `Rank ${t.fromRank} – ${t.toRank}`,
+      })),
+      howItWorks: [
+        {
+          title: 'Compete every week',
+          detail:
+            'Verified steps, workouts and completed challenges all count: a point for every 100 steps, 50 for a workout and 100 for a challenge. The week runs Monday to Sunday.',
+        },
+        {
+          title: 'Climb your country board',
+          detail:
+            'You are ranked against everyone in India, so a place is won against people in the same week as you. A tie goes to whoever reached the score first.',
+        },
+        {
+          title: 'Finish in the top 10',
+          detail:
+            'Place 1 takes 5,000 coins and Premium T-Shirt + Water Bottle; places 2–3 take 3,000 coins and Premium T-Shirt + Fitness Mat; places 4–10 take 1,000 coins and Fitness Mat.',
+        },
+        {
+          title: 'Rewards land on Monday',
+          detail:
+            'Coins are credited to your wallet automatically once the week closes. We will be in touch about any gear.',
+        },
+      ],
+      note: 'Rewards are given every week based on leaderboard ranking.',
+    });
+  },
+};
+
+// ─── Hydration ─────────────────────────────────────────────────────────────
+
+/** The server's default reminder plan (⚙ `hydration.defaultPlan`). */
+function mockDefaultPlan(): HydrationReminderPlan {
+  const times: [
+    HydrationReminderPlan['reminders'][number]['slot'],
+    string[],
+  ][] = [
+    ['morning', ['07:00', '08:30', '10:00']],
+    ['afternoon', ['13:00', '15:30']],
+    ['evening', ['18:00', '20:00']],
+  ];
+  return {
+    enabled: true,
+    sound: 'Default',
+    vibration: true,
+    repeatDays: [0, 1, 2, 3, 4, 5, 6],
+    reminders: times.flatMap(([slot, list]) =>
+      list.map(time => ({ id: `${slot}-${time}`, time, slot, enabled: true })),
+    ),
+  };
+}
+
+let mockWater = new Map<string, { ml: number; at: string; day: string }>();
+let mockPlan: HydrationReminderPlan = mockDefaultPlan();
+
+/** The phone's own local day of an instant — the mock's stand-in for the server's zone. */
+function mockLocalDay(at: string): string {
+  const date = new Date(at);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}`;
+}
+
+function mockWaterDay(day: string) {
+  const entries = [...mockWater.entries()]
+    .filter(([, drink]) => drink.day === day)
+    .map(([id, drink]) => ({ id, ml: drink.ml, at: drink.at }))
+    .sort((a, b) => b.at.localeCompare(a.at));
+  return hydrationDaySchema.parse({
+    date: day,
+    consumedMl: entries.reduce((sum, entry) => sum + entry.ml, 0),
+    goalMl: mockSettings.dailyWaterGoalMl,
+    entries,
+  });
+}
+
+export const mockHydrationApi: HydrationApi = {
+  async today() {
+    await delay();
+    return mockWaterDay(mockToday());
+  },
+  async log(entry) {
+    await delay();
+    if (entry.ml < 10 || entry.ml > 3000) {
+      throw new ApiError(
+        'validation',
+        'Log between 10 and 3000 ml.',
+        422,
+        { ml: 'Log between 10 and 3000 ml.' },
+        'VALIDATION_FAILED',
+      );
+    }
+    const day = mockLocalDay(entry.at);
+    if (!mockWater.has(entry.id)) {
+      mockWater.set(entry.id, { ml: entry.ml, at: entry.at, day });
+    }
+    return mockWaterDay(mockWater.get(entry.id)!.day);
+  },
+  async remove(id) {
+    await delay();
+    const drink = mockWater.get(id);
+    if (!drink) {
+      throw notFound('That drink');
+    }
+    mockWater.delete(id);
+    return mockWaterDay(drink.day);
+  },
+  async stats() {
+    await delay();
+    return hydrationStatsSchema.parse({
+      bestStreakDays: hydrationHighlights.bestStreakDays,
+      dailyAverageMl: hydrationHighlights.dailyAverageMl,
+      goalHitRatePercent: hydrationHighlights.goalHitRatePercent,
+      reminderCount: mockPlan.enabled
+        ? mockPlan.reminders.filter(r => r.enabled).length
+        : 0,
+    });
+  },
+  async days(from, to) {
+    await delay();
+    const days = [];
+    for (let day = from; day <= to; day = mockStreakDayShift(day, 1)) {
+      const { consumedMl, goalMl } = mockWaterDay(day);
+      days.push({ date: day, consumedMl, goalMl });
+    }
+    return days;
+  },
+  async reminders() {
+    await delay();
+    return hydrationReminderPlanSchema.parse(mockPlan);
+  },
+  async saveReminders(plan) {
+    await delay();
+    const seen = new Set<string>();
+    mockPlan = hydrationReminderPlanSchema.parse({
+      ...plan,
+      reminders: plan.reminders.filter(r => {
+        const key = `${r.time}|${r.slot}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }),
+      repeatDays: [...new Set(plan.repeatDays)].sort((a, b) => a - b),
+    });
+    return mockPlan;
+  },
+};
+
+// ─── Nutrition ─────────────────────────────────────────────────────────────
+
+/** The server's defaults (⚙ `nutrition.default*`, RULES N4). */
+const mockDefaultNutrition = (): NutritionProfile => ({
+  goals: { calories: 2200, proteinG: 120, carbsG: 300, fatsG: 70 },
+  preferences: {
+    dietType: 'vegetarian',
+    mealPlan: 'balanced',
+    goal: 'gain_weight',
+  },
+});
+
+let mockNutritionProfile = mockDefaultNutrition();
+/** The diary, by id — today's plate from the seed to start with. */
+let mockFood = new Map<string, FoodEntry>(
+  seedFoodEntries.map(entry => [entry.id, entry]),
+);
+
+function mockFoodDay(date: string) {
+  const entries = [...mockFood.values()]
+    .filter(entry => mockLocalDay(entry.loggedAt) === date)
+    .sort((a, b) => a.loggedAt.localeCompare(b.loggedAt));
+  const sum = (key: 'calories' | 'proteinG' | 'carbsG' | 'fatsG' | 'fiberG') =>
+    Math.round(entries.reduce((total, entry) => total + entry[key], 0) * 10) /
+    10;
+  return nutritionDaySchema.parse({
+    date,
+    entries,
+    totals: {
+      calories: sum('calories'),
+      proteinG: sum('proteinG'),
+      carbsG: sum('carbsG'),
+      fatsG: sum('fatsG'),
+      fiberG: sum('fiberG'),
+    },
+    goals: mockNutritionProfile.goals,
+  });
+}
+
+function mockPlanFor(date: string) {
+  const cycle = dietPlanRotation.length;
+  const days = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
+  return dietPlanRotation[((days % cycle) + cycle) % cycle];
+}
+
+export const mockNutritionApi: NutritionApi = {
+  async profile() {
+    await delay();
+    return nutritionProfileSchema.parse(mockNutritionProfile);
+  },
+  async updateProfile(patch) {
+    await delay();
+    mockNutritionProfile = nutritionProfileSchema.parse({
+      goals: { ...mockNutritionProfile.goals, ...patch.goals },
+      preferences: {
+        ...mockNutritionProfile.preferences,
+        ...patch.preferences,
+      },
+    });
+    return mockNutritionProfile;
+  },
+  async day(date) {
+    await delay();
+    return mockFoodDay(date);
+  },
+  async days(from, to) {
+    await delay();
+    const days = [];
+    for (let day = from; day <= to; day = mockStreakDayShift(day, 1)) {
+      const { entries, totals } = mockFoodDay(day);
+      days.push({
+        date: day,
+        items: entries.length,
+        calories: totals.calories,
+        proteinG: totals.proteinG,
+        carbsG: totals.carbsG,
+        fatsG: totals.fatsG,
+      });
+    }
+    return days;
+  },
+  async log(entries) {
+    await delay();
+    for (const entry of entries) {
+      if (entry.name.trim().length === 0) {
+        throw new ApiError(
+          'validation',
+          'Say what it was.',
+          422,
+          { name: 'Say what it was.' },
+          'VALIDATION_FAILED',
+        );
+      }
+      if (!mockFood.has(entry.id)) {
+        mockFood.set(entry.id, { ...entry, name: entry.name.trim() });
+      }
+    }
+    return mockFoodDay(mockLocalDay(entries[0].loggedAt));
+  },
+  async remove(id) {
+    await delay();
+    const entry = mockFood.get(id);
+    if (!entry) {
+      throw notFound('That food');
+    }
+    mockFood.delete(id);
+    return mockFoodDay(mockLocalDay(entry.loggedAt));
+  },
+  async searchFoods(query) {
+    await delay();
+    const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return foodLibrary.filter(item =>
+      words.every(word =>
+        item.name
+          .toLowerCase()
+          .split(/[\s(]+/)
+          .some(part => part.startsWith(word)),
+      ),
+    );
+  },
+  async quickAddFoods() {
+    await delay();
+    return quickAddFoodIds
+      .map(id => foodLibrary.find(item => item.id === id))
+      .filter((item): item is (typeof foodLibrary)[number] => !!item);
+  },
+  async plan(date) {
+    await delay();
+    const meals = mockPlanFor(date);
+    return dietPlanDaySchema.parse({
+      date,
+      meals,
+      totals: {
+        calories: meals.reduce((sum, m) => sum + m.calories, 0),
+        proteinG: meals.reduce((sum, m) => sum + m.proteinG, 0),
+        carbsG: meals.reduce((sum, m) => sum + m.carbsG, 0),
+        fatsG: meals.reduce((sum, m) => sum + m.fatsG, 0),
+        fiberG: 0,
+      },
+      cycleLength: dietPlanRotation.length,
+      basis: 'Vegetarian · Balanced',
+    });
+  },
+  async planDays(from, to) {
+    await delay();
+    const days = [];
+    for (let day = from; day <= to; day = mockStreakDayShift(day, 1)) {
+      const meals = mockPlanFor(day);
+      days.push({
+        date: day,
+        meals: meals.length,
+        calories: meals.reduce((sum, m) => sum + m.calories, 0),
+      });
+    }
+    return days;
+  },
+};
+
+// ─── Vitals ────────────────────────────────────────────────────────────────
+
+const MOCK_DISCLAIMER =
+  'VOKVE is not a medical device. These figures are for general wellness, not medical advice.';
+
+let mockVitals = new Map<string, VitalReading>(
+  seedVitals
+    .filter(reading => reading.kind !== 'bmi')
+    .map(reading => [reading.id, reading]),
+);
+
+const mockVitalsNewestFirst = () =>
+  [...mockVitals.values()].sort((a, b) =>
+    b.recordedAt.localeCompare(a.recordedAt),
+  );
+
+export const mockVitalsApi: VitalsApi = {
+  async list({ kind, limit = 20 }) {
+    await delay();
+    return mockVitalsNewestFirst()
+      .filter(reading => kind === undefined || reading.kind === kind)
+      .slice(0, limit);
+  },
+  async latest() {
+    await delay();
+    const newest = (kind: VitalReading['kind']) =>
+      mockVitalsNewestFirst().find(reading => reading.kind === kind) ?? null;
+    const weight = newest('weight');
+    const heightCm = currentUser?.heightCm ?? 175;
+    return vitalsLatestSchema.parse({
+      heart_rate: newest('heart_rate'),
+      blood_pressure: newest('blood_pressure'),
+      weight,
+      bmi: weight
+        ? {
+            id: 'bmi',
+            kind: 'bmi',
+            value: Math.round((weight.value / (heightCm / 100) ** 2) * 10) / 10,
+            secondary: null,
+            recordedAt: weight.recordedAt,
+          }
+        : null,
+      disclaimer: MOCK_DISCLAIMER,
+    });
+  },
+  async log(reading) {
+    await delay();
+    if (reading.kind === 'bmi') {
+      throw new ApiError(
+        'validation',
+        'BMI is worked out from your weight and height.',
+        422,
+        { kind: 'BMI is worked out from your weight and height.' },
+        'VALIDATION_FAILED',
+      );
+    }
+    if (!mockVitals.has(reading.id)) {
+      mockVitals.set(reading.id, vitalReadingSchema.parse(reading));
+    }
+    return mockVitals.get(reading.id)!;
+  },
+  async remove(id) {
+    await delay();
+    if (!mockVitals.delete(id)) {
+      throw notFound('That reading');
+    }
+    return { ok: true };
+  },
+  async score() {
+    await delay();
+    return healthScoreSchema.parse({
+      score: healthHighlights.score,
+      outOf: healthHighlights.outOf,
+      band: 'Good',
+      factors: [
+        {
+          id: 'activity',
+          label: 'Activity',
+          weight: 30,
+          points: 24,
+          detail:
+            'A 7-day average of 8,000 verified steps against your 10,000 goal.',
+        },
+        {
+          id: 'hydration',
+          label: 'Hydration',
+          weight: 20,
+          points: 17,
+          detail: 'Your water goal was reached on 6 of the last 7 days.',
+        },
+        {
+          id: 'vitals',
+          label: 'Vitals',
+          weight: 20,
+          points: 20,
+          detail: 'Heart rate normal, blood pressure normal.',
+        },
+        {
+          id: 'bmi',
+          label: 'BMI',
+          weight: 15,
+          points: 15,
+          detail: 'BMI 22.9 — healthy.',
+        },
+        {
+          id: 'consistency',
+          label: 'Consistency',
+          weight: 15,
+          points: 6,
+          detail: 'A current streak of 3 days, of the 7 that count in full.',
+        },
+      ],
+      disclaimer: MOCK_DISCLAIMER,
+    });
+  },
+};
+
+// ─── Content ───────────────────────────────────────────────────────────────
+
+const MOCK_TIPS: Record<ContentTopic, { title: string | null; text: string }> =
+  {
+    motivation: {
+      title: null,
+      text: 'Small steps every day lead to big results.',
+    },
+    hydration: { title: null, text: hydrationTip },
+    reminders: {
+      title: 'Small sips, big difference',
+      text: 'A glass every couple of hours beats a litre in one go — your body can only take in so much at a time.',
+    },
+    nutrition: { title: null, text: nutritionTip },
+    health: { title: null, text: healthTip },
+    heart_rate: {
+      title: 'Keep Your Heart Healthy',
+      text: 'Regular exercise, good sleep and a balanced diet',
+    },
+    blood_pressure: {
+      title: 'Keep Your BP In Check',
+      text: 'Stay active, sleep well and monitor regularly',
+    },
+  };
+
+export const mockContentApi: ContentApi = {
+  async tip(topic) {
+    await delay();
+    return contentTipSchema.parse({
+      id: `${topic}-1`,
+      topic,
+      ...MOCK_TIPS[topic],
+    });
+  },
+};
+
+/**
+ * The days the mock has been sent, by date — what `today` and `weekly`
+ * answer from, so the server's side of a synced day is the one that was
+ * synced and an unsynced day is honestly empty.
+ */
+let mockActivityDays = new Map<string, DailyActivity>();
+let mockNonces = new Map<string, number>();
+/** Every snapshot taken, by hash, with the answer it got. */
+let mockIngested = new Map<string, StepIngestResult>();
+/** The latest snapshot of each day, and when it came — what `sources` explains. */
+let mockSnapshots = new Map<
+  string,
+  { payload: MockSnapshotPayload; at: string }
+>();
+/** When a Play Integrity verdict last arrived; 0 before the first. */
+let mockIntegrityAt = 0;
+
+/** The server's idea of a fresh verdict: older than this and it asks again. */
+const MOCK_INTEGRITY_FRESH_MS = 6 * 3_600_000;
+/**
+ * Stands in for the project the server decodes tokens with. Not a real one,
+ * so a debug build's token request fails and reports why — the path a phone
+ * without the Play Store takes.
+ */
+export const MOCK_CLOUD_PROJECT_NUMBER = 123_456_789_012;
+/** How far back a day can still be sent, as the server bounds it. */
+const MOCK_INGEST_MAX_AGE_DAYS = 7;
+/** Steps in a minute that make it an active one. */
+const MOCK_ACTIVE_MINUTE_STEPS = 60;
+
+/** Local `YYYY-MM-DD`, `days` before today. */
+function mockDateDaysAgo(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}`;
+}
+
+const emptyDay = (date: string): DailyActivity =>
+  dailyActivitySchema.parse({ date });
+
+/** The parts of a signed snapshot the mock reads. */
+interface MockSnapshotPayload {
+  date?: unknown;
+  nonce?: unknown;
+  deviceSteps?: unknown;
+  recoveredSteps?: unknown;
+  suspectSteps?: unknown;
+  resolved?: { steps?: unknown; usedExternal?: unknown };
+  minutes?: { steps?: unknown }[];
+  sources?: {
+    packageName?: unknown;
+    appName?: unknown;
+    kind?: unknown;
+    steps?: unknown;
+    manualSteps?: unknown;
+    isWearable?: unknown;
+    isPlatform?: unknown;
+    isSelf?: unknown;
+  }[];
+}
+
+/** The tracker set-up the mock hands out — the real server's defaults. */
+const MOCK_ACTIVITY_CONFIG = {
+  tracker: {
+    healthConnectReadTypes: ['steps', 'distance'],
+    healthConnectWriteEnabled: false,
+    healthConnectIgnoreManualEntries: true,
+    wearableTrust: 'catalog',
+    wearableAllowlist: ['com.google.android.apps.fitness'],
+    gapRecovery: 'split',
+    historyRetentionDays: 400,
+    motionWindowRetention: 864,
+    fraudDetection: { enabled: true, mode: 'flag' },
+    motionSampling: { enabled: true, windowSeconds: 10, intervalMinutes: 5 },
+    privacyPolicyUrl: 'https://vokve.app/privacy',
+  },
+  sync: {
+    intervalMinutes: 5,
+    minGapSeconds: 120,
+    maxAgeDays: 7,
+    include: ['minutes', 'motionWindows', 'healthConnectRecords'],
+    healthConnectRecordTypes: ['steps', 'distance'],
+  },
+};
+
+/** `YYYY-MM-DD` arithmetic on local calendar days. */
+function mockAddDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const date = new Date(y, m - 1, d + days);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}`;
+}
+
+/** The days of a range grouped as the server groups them. */
+function mockBuckets(
+  from: string,
+  to: string,
+  granularity: 'day' | 'week' | 'month',
+): { start: string; end: string; days: string[] }[] {
+  const days: string[] = [];
+  for (let day = from; day <= to; day = mockAddDays(day, 1)) days.push(day);
+  if (granularity === 'day') {
+    return days.map(day => ({ start: day, end: day, days: [day] }));
+  }
+  const out: { start: string; end: string; days: string[] }[] = [];
+  days.forEach((day, index) => {
+    const last = out[out.length - 1];
+    const startsNew =
+      granularity === 'week'
+        ? index % 7 === 0
+        : !last || last.start.slice(0, 7) !== day.slice(0, 7);
+    if (startsNew || !last) {
+      out.push({ start: day, end: day, days: [day] });
+    } else {
+      last.days.push(day);
+      last.end = day;
+    }
+  });
+  return out;
+}
+
+const num = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+/**
+ * The day a snapshot describes, judged the simple way: the phone's own count
+ * less what it recovered in one go or flagged is what verifies. The real
+ * server weighs a trusted watch, the motion windows and the device's
+ * history as well; this is enough for every screen to have a number.
+ */
+function mockDayFrom(
+  date: string,
+  payload: MockSnapshotPayload,
+): DailyActivity {
+  const steps = Math.max(0, Math.round(num(payload.resolved?.steps)));
+  const clean =
+    num(payload.deviceSteps) -
+    num(payload.recoveredSteps) -
+    num(payload.suspectSteps);
+  const verifiedSteps = Math.max(0, Math.min(steps, Math.round(clean)));
+  const activeMinutes = (payload.minutes ?? []).filter(
+    minute => num(minute.steps) >= MOCK_ACTIVE_MINUTE_STEPS,
+  ).length;
+  return dailyActivitySchema.parse({
+    date,
+    steps,
+    verifiedSteps,
+    distanceKm: Math.round(steps * 0.00075 * 100) / 100,
+    activeMinutes,
+    caloriesBurned: Math.round(steps * 0.04),
+    source:
+      payload.resolved?.usedExternal === true ? 'health_connect' : 'device',
+    verified: verifiedSteps > 0,
+  });
+}
+
 export const mockActivityApi: ActivityApi = {
   async today(): Promise<DailyActivity> {
     await delay();
-    return dailyActivitySchema.parse({
-      date: new Date().toISOString().slice(0, 10),
-      steps: todayActivity.steps,
-      verifiedSteps: todayActivity.steps,
-      distanceKm: todayActivity.distanceKm,
-      activeMinutes: todayActivity.activeMinutes,
-      caloriesBurned: todayActivity.caloriesBurned,
-      source: 'manual',
-      verified: false,
-    });
+    const date = mockDateDaysAgo(0);
+    return mockActivityDays.get(date) ?? emptyDay(date);
   },
 
   async weekly(): Promise<DailyActivity[]> {
     await delay();
-
-    const today = new Date();
-    return weeklySteps.map((day, index) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() - (weeklySteps.length - 1 - index));
-
-      return dailyActivitySchema.parse({
-        date: date.toISOString().slice(0, 10),
-        steps: day.steps,
-        // Scaled off the step count so the week reads as one consistent story
-        // rather than four unrelated random series.
-        activeMinutes: Math.round(
-          (day.steps / todayActivity.steps) * todayActivity.activeMinutes,
-        ),
-        caloriesBurned: Math.round(
-          (day.steps / todayActivity.steps) * todayActivity.caloriesBurned,
-        ),
-        workoutsCompleted: day.steps > 8000 ? 1 : 0,
-      });
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = mockDateDaysAgo(6 - index);
+      return mockActivityDays.get(date) ?? emptyDay(date);
     });
+  },
+
+  async day(date) {
+    await delay();
+    return mockActivityDays.get(date) ?? emptyDay(date);
+  },
+
+  async config() {
+    await delay();
+    return activityConfigSchema.parse({
+      ...MOCK_ACTIVITY_CONFIG,
+      playIntegrity: { cloudProjectNumber: MOCK_CLOUD_PROJECT_NUMBER },
+    });
+  },
+
+  /** The real range's arithmetic, over the days the mock has been sent. */
+  async range({ from, to, granularity }) {
+    await delay();
+    if (from > to || (granularity === 'hour' && from !== to)) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422);
+    }
+    const dayOf = (date: string) =>
+      mockActivityDays.get(date) ?? emptyDay(date);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    let points;
+    if (granularity === 'hour') {
+      // The mock keeps no hours; a synced day's steps are put at noon.
+      const day = dayOf(from);
+      points = Array.from({ length: 24 }, (_, hour) => ({
+        start: `${from}T${pad(hour)}:00`,
+        end: `${from}T${pad(hour)}:59`,
+        steps: hour === 12 ? day.steps : 0,
+        verifiedSteps: hour === 12 ? day.verifiedSteps : 0,
+      }));
+    } else {
+      points = mockBuckets(from, to, granularity).map(bucket => ({
+        start: bucket.start,
+        end: bucket.end,
+        steps: bucket.days.reduce((sum, date) => sum + dayOf(date).steps, 0),
+        verifiedSteps: bucket.days.reduce(
+          (sum, date) => sum + dayOf(date).verifiedSteps,
+          0,
+        ),
+      }));
+    }
+    const days = [...mockActivityDays.values()].filter(
+      day => day.date >= from && day.date <= to,
+    );
+    const best = days.reduce<{ date: string; steps: number } | null>(
+      (top, day) =>
+        day.steps > (top?.steps ?? 0)
+          ? { date: day.date, steps: day.steps }
+          : top,
+      null,
+    );
+    return activityRangeSchema.parse({
+      from,
+      to,
+      granularity,
+      points,
+      totals: {
+        steps: days.reduce((sum, day) => sum + day.steps, 0),
+        verifiedSteps: days.reduce((sum, day) => sum + day.verifiedSteps, 0),
+        distanceKm: days.reduce((sum, day) => sum + day.distanceKm, 0),
+        caloriesBurned: days.reduce((sum, day) => sum + day.caloriesBurned, 0),
+        activeMinutes: days.reduce((sum, day) => sum + day.activeMinutes, 0),
+        activeDays: days.filter(day => day.steps > 0).length,
+      },
+      best,
+    });
+  },
+
+  /**
+   * The day's latest snapshot, explained the simple way the mock judges it:
+   * the phone's own count less what it recovered or flagged. Every Health
+   * Connect source is listed and none of them is used — the real server's
+   * matching is what the sources page exists to show.
+   */
+  async sources(date) {
+    await delay();
+    const day = mockActivityDays.get(date) ?? emptyDay(date);
+    const latest = mockSnapshots.get(date);
+    if (!latest) {
+      return stepSourcesReportSchema.parse({
+        date,
+        scoredAt: null,
+        day,
+        explanation: ['Nothing has been synced for this day yet.'],
+        devices: [],
+        records: [],
+        uploads: [],
+        checks: null,
+      });
+    }
+    const { payload, at } = latest;
+    const counted = Math.round(num(payload.deviceSteps));
+    const recovered = Math.round(num(payload.recoveredSteps));
+    const flagged = Math.round(num(payload.suspectSteps));
+    const clean = Math.max(0, counted - recovered - flagged);
+    const sources = (payload.sources ?? [])
+      .filter(source => source.isSelf !== true)
+      .map(source => {
+        const steps = Math.max(0, Math.round(num(source.steps)));
+        const manualSteps = Math.max(0, Math.round(num(source.manualSteps)));
+        const countable = Math.max(0, steps - manualSteps);
+        return {
+          packageName: String(source.packageName ?? 'unknown'),
+          appName: String(source.appName ?? source.packageName ?? 'Unknown'),
+          kind: String(source.kind ?? 'app'),
+          isWearable: source.isWearable === true,
+          isPlatform: source.isPlatform === true,
+          steps,
+          manualSteps,
+          countable,
+          ratioToPhone:
+            counted > 0 ? Math.round((countable / counted) * 100) / 100 : null,
+          status: 'lower' as const,
+          note: 'Listed by the mock backend, which counts the phone alone.',
+        };
+      });
+    return stepSourcesReportSchema.parse({
+      date,
+      scoredAt: at,
+      day,
+      explanation: [
+        `This phone counted ${counted.toLocaleString('en-IN')} steps.`,
+        `${clean.toLocaleString(
+          'en-IN',
+        )} of them count, once steps added in one go or flagged are left out.`,
+      ],
+      devices: [
+        {
+          deviceId: 'dev_mock',
+          name: 'This phone',
+          isCurrent: true,
+          answeredForDay: true,
+          syncedAt: at,
+          phone: { counted, recovered, flagged, clean },
+          counted: clean,
+          source: 'device',
+          verified: day.verified,
+          sourcesNote: null,
+          sources,
+          proof: { keyAttested: true, bootVerified: true, playIntegrity: null },
+        },
+      ],
+      records: [],
+      uploads: [
+        {
+          at,
+          deviceName: 'This phone',
+          phoneSteps: counted,
+          shownSteps: Math.round(num(payload.resolved?.steps)),
+          playIntegrity: null,
+        },
+      ],
+      checks: null,
+    });
+  },
+
+  async ingestNonce() {
+    await delay();
+    const nonce = nextId('nonce');
+    const expiresAt = Date.now() + MOCK_CHALLENGE_TTL_MS;
+    mockNonces.set(nonce, expiresAt);
+    return { nonce, expiresAt: new Date(expiresAt).toISOString() };
+  },
+
+  /**
+   * The real ingest's checks, in its order: a snapshot seen before is
+   * answered as it was the first time; then the key, the nonce and the
+   * integrity verdict, every one of them before the nonce is spent — so a
+   * refusal can be answered with the same snapshot.
+   */
+  async ingest(payload) {
+    await delay();
+    if (!currentUser) {
+      throw new ApiError('unauthorized', 'Your session has expired.', 401);
+    }
+
+    const seen = mockIngested.get(payload.snapshot.payloadSha256);
+    if (seen) {
+      return { ...seen, duplicate: true };
+    }
+
+    let signed: MockSnapshotPayload;
+    try {
+      signed = JSON.parse(
+        payload.snapshot.signedPayload,
+      ) as MockSnapshotPayload;
+    } catch {
+      throw new ApiError(
+        'validation',
+        'That step snapshot could not be read.',
+        422,
+        null,
+        'SNAPSHOT_INVALID',
+      );
+    }
+
+    if (!mockAttestedKeys.has(payload.snapshot.keyId)) {
+      throw new ApiError(
+        'forbidden',
+        'This phone needs to confirm it is genuine before steps can sync.',
+        403,
+        null,
+        'ATTESTATION_REQUIRED',
+      );
+    }
+
+    const nonce = typeof signed.nonce === 'string' ? signed.nonce : '';
+    const nonceExpiresAt = mockNonces.get(nonce);
+    if (nonceExpiresAt === undefined || nonceExpiresAt < Date.now()) {
+      throw new ApiError(
+        'unknown',
+        'That sync ran out of time. Trying again.',
+        409,
+        null,
+        'NONCE_INVALID',
+      );
+    }
+
+    if (
+      !payload.integrity &&
+      Date.now() - mockIntegrityAt > MOCK_INTEGRITY_FRESH_MS
+    ) {
+      throw new ApiError(
+        'forbidden',
+        'This phone needs a fresh integrity check.',
+        403,
+        { cloudProjectNumber: MOCK_CLOUD_PROJECT_NUMBER },
+        'INTEGRITY_REQUIRED',
+      );
+    }
+    if (payload.integrity) {
+      mockIntegrityAt = Date.now();
+    }
+
+    mockNonces.delete(nonce);
+
+    const oldest = mockDateDaysAgo(MOCK_INGEST_MAX_AGE_DAYS);
+    const today = mockDateDaysAgo(0);
+    if (
+      signed.date !== payload.date ||
+      payload.date < oldest ||
+      payload.date > today
+    ) {
+      throw new ApiError(
+        'validation',
+        'That day can no longer be synced.',
+        422,
+        null,
+        'SNAPSHOT_DATE_OUT_OF_RANGE',
+      );
+    }
+
+    const day = mockDayFrom(payload.date, signed);
+    mockActivityDays.set(payload.date, day);
+    mockSnapshots.set(payload.date, {
+      payload: signed,
+      at: new Date().toISOString(),
+    });
+    const result = stepIngestResultSchema.parse({ day });
+    mockIngested.set(payload.snapshot.payloadSha256, result);
+    return result;
   },
 };
 
@@ -1745,7 +3048,8 @@ function daysAgoIso(days: number): string {
 
 /**
  * The same shape the server computes, on the mock's own figures: the level
- * from the seeded ledger, the badges from the seeded streak and steps. It
+ * from the seeded ledger, the badges from the seeded streak and the synced
+ * steps. It
  * is deliberately a *calculation* rather than a fixture — a screen that
  * only ever sees one hand-written profile never exercises its own maths.
  */
@@ -1764,7 +3068,11 @@ function mockProfile(): ProfileSummary {
     'Athlo Champion',
     'Athlo Legend',
   ];
-  const totalSteps = weeklySteps.reduce((sum, day) => sum + day.steps, 0) * 12;
+  // Only what this phone has synced: the mock has no history before that.
+  const totalSteps = [...mockActivityDays.values()].reduce(
+    (sum, day) => sum + day.steps,
+    0,
+  );
   const streak = 12;
   const workouts = 34;
   const badge = (

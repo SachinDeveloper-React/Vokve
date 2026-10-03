@@ -8,7 +8,7 @@ import { withAlpha } from '../../utils/color';
 import { VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
-import { METRIC_STYLE } from './metrics';
+import { METRIC_STYLE, formatBadgeValue } from './metrics';
 
 /** The ring's outer diameter at the 375pt baseline; five share a row. */
 const RING = moderateScale(48);
@@ -57,7 +57,7 @@ export const AchievementBadge = memo(({ achievement }: Props) => {
       >
         {achieved ? (
           <AppText variant="bodyStrong" numberOfLines={1} style={{ color: tint }}>
-            {achievement.value}
+            {formatBadgeValue(achievement.value)}
           </AppText>
         ) : (
           <Icon as={Lock} size="sm" color="textTertiary" />

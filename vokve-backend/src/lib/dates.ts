@@ -34,3 +34,35 @@ export function isValidTimeZone(tz: string): boolean {
     return false;
   }
 }
+
+/** How far `timeZone`'s wall clock is ahead of UTC at `at`, in milliseconds. */
+function zoneOffsetMs(at: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
+  const wall = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  return wall - Math.floor(at.getTime() / 1000) * 1000;
+}
+
+/** The instant a local day begins in `timeZone` — 00:00 on its wall clock. */
+export function localMidnightUtc(day: IsoDate, timeZone: string): Date {
+  const [y, m, d] = day.split('-').map(Number);
+  const wall = Date.UTC(y, m - 1, d);
+  // Twice: the first guess can sit across a DST change from the answer.
+  const first = wall - zoneOffsetMs(new Date(wall), timeZone);
+  return new Date(wall - zoneOffsetMs(new Date(first), timeZone));
+}
+
+/** The hour on `timeZone`'s wall clock at `at`, 0–23. */
+export function localHourOf(at: Date, timeZone: string): number {
+  const hour = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(at);
+  return Number(hour) % 24;
+}

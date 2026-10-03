@@ -2,8 +2,11 @@ import { getKV } from '../db/redis.js';
 import { logger } from '../lib/logger.js';
 import { purgeScheduledDeletions } from '../modules/account/service.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
+import { releaseDueHolds } from '../modules/economy/holds.service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
 import { flushDeferredPushes } from '../modules/notifications/service.js';
+import { warnStreaksAtRisk } from '../modules/streak/service.js';
+import { closeDueWeeks } from '../modules/leaderboard/service.js';
 
 /**
  * The daily jobs (BACKEND §9), run from inside the API process.
@@ -44,6 +47,15 @@ const DAILY_JOBS: readonly DailyJob[] = [
 const HOURLY_JOBS: readonly DailyJob[] = [
   { name: 'flush-deferred-pushes', run: () => flushDeferredPushes() },
   { name: 'expire-unpaid-orders', run: () => expireUnpaidOrders() },
+  // Step coins out of escrow once their window has passed (RULES E15). A
+  // hold is moved by a conditional update, so two instances split the work.
+  { name: 'release-holds', run: () => releaseDueHolds() },
+  // The evening nudge for a streak not yet covered today (RULES S10): each
+  // user in the hour that is 19:00 for them, told once a day.
+  { name: 'streak-at-risk', run: () => warnStreaksAtRisk() },
+  // Last week's board, frozen and paid a few hours into Monday in each
+  // country's zone (RULES L6, L10). A week already closed is skipped.
+  { name: 'leaderboard-close', run: () => closeDueWeeks() },
 ];
 
 /** `YYYY-MM-DD` in UTC — the calendar the claim keys live on. */

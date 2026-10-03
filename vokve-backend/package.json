@@ -18,11 +18,15 @@
     "dev:memory": "tsx src/dev-memory.ts"
   },
   "dependencies": {
+    "@peculiar/asn1-android": "^2.10.0",
+    "@peculiar/asn1-schema": "^2.10.0",
+    "@peculiar/asn1-x509": "^2.10.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "firebase-admin": "^13.10.0",
+    "google-auth-library": "^10.9.1",
     "helmet": "^8.1.0",
     "ioredis": "^5.7.0",
     "jsonwebtoken": "^9.0.2",

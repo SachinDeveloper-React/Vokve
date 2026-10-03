@@ -10,7 +10,10 @@ import { ReminderHeroCard } from '../../components/reminders/ReminderHeroCard';
 import { ReminderPlanCard } from '../../components/reminders/ReminderPlanCard';
 import { ReminderSettingsCard } from '../../components/reminders/ReminderSettingsCard';
 import { ReminderTipCard } from '../../components/reminders/ReminderTipCard';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { useTip } from '../../hooks/useContent';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import {
@@ -60,6 +63,10 @@ function repeatLabelFor(days: number[]): string {
  * reminder line in the same frame — which is the only way a settings screen
  * this long stays trustworthy.
  *
+ * The plan is the server's (`GET/PUT /hydration/reminders`), so a new phone
+ * opens on the same one; until it has answered the screen says it is
+ * loading rather than drawing a plan the user never made.
+ *
  * Nothing here schedules an OS notification yet; the store holds the plan a
  * scheduler will read once the native side lands. That is deliberate rather
  * than missing: the plan is the part the user owns, and it has to survive
@@ -70,6 +77,14 @@ export const HydrationReminderScreen = () => {
   const navigation = useNavigation();
   const user = useCurrentUser();
   const hasUnreadNotifications = useHasUnreadNotifications();
+
+  const plan = useRemindersStore(s => s.plan);
+  const isSyncing = useRemindersStore(s => s.isSyncing);
+  const syncError = useRemindersStore(s => s.syncError);
+  const hydrateFromServer = useRemindersStore(s => s.hydrateFromServer);
+  const refreshIfStale = useRemindersStore(s => s.refreshIfStale);
+  const tip = useTip('reminders');
+  useRefreshOnFocus(refreshIfStale);
 
   const enabled = useRemindersEnabled();
   const activeCount = useActiveReminderCount();
@@ -172,47 +187,60 @@ export const HydrationReminderScreen = () => {
           onPressAvatar={onOpenAccount}
         />
 
-        <ReminderHeroCard
-          enabled={enabled}
-          activeCount={activeCount}
-          nextTime={nextTime}
-          onChange={setEnabled}
-        />
+        {plan === null ? (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your reminders"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        ) : (
+          <>
+            <ReminderHeroCard
+              enabled={enabled}
+              activeCount={activeCount}
+              nextTime={nextTime}
+              onChange={setEnabled}
+            />
 
-        <ReminderPlanCard
-          activeCount={activeCount}
-          repeatLabel={repeatLabel}
-          dailyGoalMl={goalMl}
-          nextTime={nextTime}
-        />
+            <ReminderPlanCard
+              activeCount={activeCount}
+              repeatLabel={repeatLabel}
+              dailyGoalMl={goalMl}
+              nextTime={nextTime}
+            />
 
-        <PresetTimesSection
-          morning={morning}
-          afternoon={afternoon}
-          evening={evening}
-          onToggle={toggleReminder}
-          onPressAdd={openPicker}
-          onPressViewAll={notImplemented}
-        />
+            <PresetTimesSection
+              morning={morning}
+              afternoon={afternoon}
+              evening={evening}
+              onToggle={toggleReminder}
+              onPressAdd={openPicker}
+              onPressViewAll={notImplemented}
+            />
 
-        <CustomTimesCard
-          reminders={custom}
-          repeatLabel={repeatLabel}
-          onToggle={toggleReminder}
-          onPressMore={setMenuId}
-          onPressAdd={openCustomPicker}
-        />
+            <CustomTimesCard
+              reminders={custom}
+              repeatLabel={repeatLabel}
+              onToggle={toggleReminder}
+              onPressMore={setMenuId}
+              onPressAdd={openCustomPicker}
+            />
 
-        <ReminderSettingsCard
-          sound={sound}
-          vibration={vibration}
-          repeatDays={repeatDays}
-          onPressSound={notImplemented}
-          onChangeVibration={setVibration}
-          onToggleDay={toggleRepeatDay}
-        />
+            <ReminderSettingsCard
+              sound={sound}
+              vibration={vibration}
+              repeatDays={repeatDays}
+              onPressSound={notImplemented}
+              onChangeVibration={setVibration}
+              onToggleDay={toggleRepeatDay}
+            />
+          </>
+        )}
 
-        <ReminderTipCard />
+        {tip ? (
+          <ReminderTipCard title={tip.title ?? 'Tip'} message={tip.text} />
+        ) : null}
       </ScrollView>
 
       <TimePickerSheet

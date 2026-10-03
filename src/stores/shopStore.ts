@@ -1,6 +1,6 @@
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { shopItems as seedShopItems } from '../constants/seedData';
 import { shopApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import type {
@@ -14,23 +14,6 @@ import { mmkvStorage } from './index';
 /** How old a synced catalogue may be before opening the shop fetches it again. */
 export const SHOP_STALE_AFTER_MS = 5 * 60_000;
 
-/**
- * The till's rules before the first sync — the server's defaults, so a
- * price split drawn on the first frame matches what the first sync says.
- * Replaced, never merged: a share the server has changed must win whole.
- */
-export const DEFAULT_SHOP_CONFIG: ShopConfig = {
-  currency: 'INR',
-  coinValuePaise: 25,
-  coinShareMax: 0.3,
-  shippingFeePaise: 4900,
-  freeShippingAbovePaise: 99900,
-  maxQuantityPerLine: 5,
-  paymentProvider: 'mock',
-  paymentKeyId: null,
-  stepUpThreshold: 1000,
-};
-
 interface ShopState {
   /**
    * The home shelf: the whole catalogue in "popular" order, with `inStock`
@@ -40,10 +23,16 @@ interface ShopState {
   items: ShopItem[];
   /** What each shelf holds, for the tiles' counts; null until the first sync. */
   categories: ShopCategorySummary[] | null;
-  /** The till's rules (RULES R11–R13): coin value, coin share, shipping. */
-  config: ShopConfig;
+  /**
+   * The till's rules (RULES R11–R13): coin value, coin share, shipping.
+   * Null until the first sync — the app keeps no copy of them, so a price
+   * split is only ever drawn with the rules the server is selling under.
+   */
+  config: ShopConfig | null;
   syncedAt: string | null;
   isSyncing: boolean;
+  /** Why the last sync failed; cleared by the next one that succeeds. */
+  syncError: string | null;
 
   hydrateFromServer: () => Promise<void>;
   refreshIfStale: () => Promise<void>;
@@ -52,22 +41,28 @@ interface ShopState {
   reset: () => void;
 }
 
+/** The shop before the first sync: nothing on the shelf the server has not put there. */
+const EMPTY_SHOP = {
+  items: [] as ShopItem[],
+  categories: null,
+  config: null,
+  syncedAt: null,
+} satisfies Partial<ShopState>;
+
 /**
  * The catalogue and the rules it is sold under.
  *
- * Items are a cache of `GET /shop/items`, seeded with the same catalogue the
- * screens were built against so the shop paints before the network answers
- * and stock arrives with the first sync. Buying lives in `checkoutStore`,
- * the basket in `cartStore`: this store only ever reads.
+ * Items are a cache of `GET /shop/items`; until the first sync there are
+ * none, and the shop says it is loading rather than showing a shelf the
+ * server never stocked. Buying lives in `checkoutStore`, the basket in
+ * `cartStore`: this store only ever reads.
  */
 export const useShopStore = create<ShopState>()(
   persist(
     (set, get) => ({
-      items: seedShopItems,
-      categories: null,
-      config: DEFAULT_SHOP_CONFIG,
-      syncedAt: null,
+      ...EMPTY_SHOP,
       isSyncing: false,
+      syncError: null,
 
       hydrateFromServer: async () => {
         if (get().isSyncing) {
@@ -86,10 +81,12 @@ export const useShopStore = create<ShopState>()(
             config,
             syncedAt: new Date().toISOString(),
             isSyncing: false,
+            syncError: null,
           });
         } catch (error) {
-          logger.warn('shopStore', 'Catalogue sync failed', toApiError(error));
-          set({ isSyncing: false });
+          const apiError = toApiError(error);
+          logger.warn('shopStore', 'Catalogue sync failed', apiError);
+          set({ isSyncing: false, syncError: apiError.message });
         }
       },
 
@@ -114,27 +111,19 @@ export const useShopStore = create<ShopState>()(
             : [...state.items, item],
         })),
 
-      reset: () =>
-        set({
-          items: seedShopItems,
-          categories: null,
-          config: DEFAULT_SHOP_CONFIG,
-          syncedAt: null,
-          isSyncing: false,
-        }),
+      reset: () => set({ ...EMPTY_SHOP, isSyncing: false, syncError: null }),
     }),
     {
       name: 'vokve.shop',
       storage: createJSONStorage(() => mmkvStorage),
-      // v2: prices in paise with a money side; the coins-only catalogue
-      // cannot be read as this one, so a stored v1 is dropped for the seed.
-      version: 2,
-      migrate: () => ({
-        items: seedShopItems,
-        categories: null,
-        config: DEFAULT_SHOP_CONFIG,
-        syncedAt: null,
-      }),
+      // v2: prices in paise with a money side. v3: no placeholder catalogue —
+      // a stored v2 shop that never synced was that placeholder, and goes; a
+      // v1 shop cannot be read as this one at all.
+      version: 3,
+      migrate: (persisted, version) => {
+        const stored = persisted as Partial<ShopState> | null;
+        return version >= 2 && stored?.syncedAt ? stored : EMPTY_SHOP;
+      },
       partialize: state => ({
         items: state.items,
         categories: state.categories,
@@ -147,6 +136,21 @@ export const useShopStore = create<ShopState>()(
 
 export const useShopItems = () => useShopStore(s => s.items);
 export const useShopCategories = () => useShopStore(s => s.categories);
-export const useShopConfig = () => useShopStore(s => s.config);
+
+/**
+ * The till's rules, or null while they have not arrived. A screen that needs
+ * them — a product page opened from the basket, say, before the shop tab has
+ * ever synced — asks for them here rather than drawing a split from rules
+ * the app made up.
+ */
+export const useShopConfig = (): ShopConfig | null => {
+  const config = useShopStore(s => s.config);
+  useEffect(() => {
+    if (config === null) {
+      useShopStore.getState().refreshIfStale();
+    }
+  }, [config]);
+  return config;
+};
 export const useShopItem = (id: string) =>
   useShopStore(s => s.items.find(item => item.id === id) ?? null);

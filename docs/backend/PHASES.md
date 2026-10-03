@@ -63,9 +63,9 @@ P0 Foundations ─► P1 Existing contracts ─► P2 Steps (observe) ─► P3 
 **Goal:** real step data flows from Android devices into `activity_daily`, is provenance-checked and plausibility-scored, and is visible in the app — **without minting a single coin**.
 
 **Work**
-- **Client (Android):** wire `react-native-health-connect` — permission request flow (rationale activity exists), read steps/distance/active-calories since cursor with full metadata, batch, queue offline, `POST /activity/ingest` on foreground + 15-min background task. Play Integrity token attached.
+- **Client (Android):** ~~wire `react-native-health-connect`~~ → **react-native-step-tracker-pro** (D-35, built 2026-10-02): the phone's step counter in a foreground service, Health Connect read-only, one signed snapshot per day (D-36) queued offline and sent on foreground, every 15 min while open, at midnight and on backfill; Play Integrity token when the server asks (D-37).
 - **Client (both):** read the OS pedometer counter for the same window (L3) and sample accelerometer features 10 s per 5 min while steps accrue (L4) — features only.
-- **Server:** `POST /activity/ingest` per ARCHITECTURE §5.3: attestation verify (permissive flag) + device signals (L0), dedupe, provenance allow/deny lists (L1), raw `activity_samples`, `motion_windows`, debounced rollup job → `activity_daily` (with `pedometerSteps`, hourly).
+- **Server:** `POST /activity/ingest` per ARCHITECTURE §5.3: attestation verify (permissive flag) + device signals (L0), dedupe, provenance allow/deny lists (L1), raw `activity_samples`, `motion_windows`, debounced rollup job → `activity_daily` (with `pedometerSteps`, hourly). *Built 2026-10-02 with key attestation, signed snapshots and an inline rollup — see MEMORY §1a.*
 - **All eight fraud layers** (RULES A14–A20) computing per-layer scores, `plausibility` and `flags`; trust score + tier (RULES §T) — **shadow mode**: stored, dashboarded, not enforced.
 - `GET /activity/today`, `/weekly`, `/range?granularity=hour|day|week|month` — replaces `todayActivity`, `weeklySteps`, `todayHourlySteps`, `monthlyStepsByWeek`, `yearlyStepsByMonth`. Home and Analytics go live.
 - `health_connections` CRUD; Account → "Health Data" row gets a screen.

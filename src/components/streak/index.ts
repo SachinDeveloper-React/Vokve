@@ -8,7 +8,7 @@ export { CalendarDay } from './CalendarDay';
 export type { DayStatus } from './CalendarDay';
 export { CalendarLegend } from './CalendarLegend';
 export { MonthNav } from './MonthNav';
-export { StreakBenefitsCard, STREAK_MILESTONES } from './StreakBenefitsCard';
+export { StreakBenefitsCard } from './StreakBenefitsCard';
 export { StreakMilestone } from './StreakMilestone';
 export { StreakToolsCard } from './StreakToolsCard';
 export { StreakToolRow } from './StreakToolRow';

@@ -76,3 +76,28 @@ export function formatDateRange(from: IsoDate, to: IsoDate): string {
   }
   return `${formatLongDate(from)} – ${formatLongDate(to)}`;
 }
+
+const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** "Mon" for a day. */
+export function formatWeekdayShort(iso: IsoDate): string {
+  return WEEKDAYS_SHORT[fromIsoDate(iso).getDay()];
+}
+
+/** "Jan" for a day's month. */
+export function formatMonthShort(iso: IsoDate): string {
+  return MONTHS[fromIsoDate(iso).getMonth()].slice(0, 3);
+}
+
+/** The Monday of the week a day falls in — weeks run Monday to Sunday. */
+export function mondayOf(iso: IsoDate): IsoDate {
+  return addDays(iso, -((fromIsoDate(iso).getDay() + 6) % 7));
+}
+
+/** The first and last day of the month a day falls in. */
+export function monthBounds(iso: IsoDate): { first: IsoDate; last: IsoDate } {
+  const date = fromIsoDate(iso);
+  const first = toIsoDate(new Date(date.getFullYear(), date.getMonth(), 1));
+  const last = toIsoDate(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+  return { first, last };
+}

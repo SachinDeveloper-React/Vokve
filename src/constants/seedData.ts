@@ -169,28 +169,6 @@ export const workoutTemplates: WorkoutTemplate[] = [
   },
 ];
 
-/**
- * Placeholder step history, shown until a health data source is connected.
- * Replace the whole export once HealthKit / Health Connect is wired up.
- */
-export const weeklySteps = [
-  { day: 'Mon', steps: 4200 },
-  { day: 'Tue', steps: 7856 },
-  { day: 'Wed', steps: 10245 },
-  { day: 'Thu', steps: 8650 },
-  { day: 'Fri', steps: 6321 },
-  { day: 'Sat', steps: 9125 },
-  { day: 'Sun', steps: 6245 },
-];
-
-/** Today's figures, matching the last entry above. */
-export const todayActivity = {
-  steps: 6245,
-  distanceKm: 4.2,
-  activeMinutes: 48,
-  caloriesBurned: 358,
-};
-
 /** Local `YYYY-MM-DD` for `days` days before today. */
 function dateDaysAgo(days: number): string {
   const date = new Date();
@@ -1007,6 +985,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 200,
     rewardsBadge: true,
     startsAt: null,
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-burn-500',
@@ -1020,6 +1000,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 150,
     rewardsBadge: true,
     startsAt: null,
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-30-min-active',
@@ -1033,6 +1015,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 100,
     rewardsBadge: true,
     startsAt: null,
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-week-step-master',
@@ -1046,6 +1030,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 800,
     rewardsBadge: true,
     startsAt: null,
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-month-mover',
@@ -1059,6 +1045,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 2_000,
     rewardsBadge: true,
     startsAt: null,
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-15k-steps',
@@ -1072,6 +1060,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 300,
     rewardsBadge: false,
     startsAt: inDays(1),
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-7-day-consistency',
@@ -1085,6 +1075,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 500,
     rewardsBadge: true,
     startsAt: inDays(2),
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-weekend-warrior',
@@ -1098,6 +1090,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 200,
     rewardsBadge: false,
     startsAt: inDays(5),
+    endsOn: null,
+    completedAt: null,
   },
   {
     id: 'ch-monthly-marathon',
@@ -1111,6 +1105,8 @@ export const seedChallenges: Challenge[] = [
     rewardCoins: 1_500,
     rewardsBadge: true,
     startsAt: inDays(9),
+    endsOn: null,
+    completedAt: null,
   },
 ];
 
@@ -1125,105 +1121,105 @@ export const seedChallenges: Challenge[] = [
 export const seedAchievements: Achievement[] = [
   {
     id: 'a-10k-steps',
-    value: '10K',
+    value: 10_000,
     label: '10K Steps',
     metric: 'steps',
     achievedAt: daysAgo(2),
   },
   {
     id: 'a-cal-burner',
-    value: '500',
+    value: 500,
     label: 'Cal Burner',
     metric: 'calories',
     achievedAt: daysAgo(5),
   },
   {
     id: 'a-active-30',
-    value: '30',
+    value: 30,
     label: 'Active 30',
     metric: 'minutes',
     achievedAt: daysAgo(9),
   },
   {
     id: 'a-7-day-streak',
-    value: '7',
+    value: 7,
     label: '7 Days Streak',
     metric: 'days',
     achievedAt: daysAgo(14),
   },
   {
     id: 'a-first-challenge',
-    value: '1',
+    value: 1,
     label: 'First Challenge',
     metric: 'workouts',
     achievedAt: null,
   },
   {
     id: 'a-15k-steps',
-    value: '15K',
+    value: 15_000,
     label: '15K Steps',
     metric: 'steps',
     achievedAt: daysAgo(21),
   },
   {
     id: 'a-cal-crusher',
-    value: '1K',
+    value: 1_000,
     label: 'Cal Crusher',
     metric: 'calories',
     achievedAt: null,
   },
   {
     id: 'a-active-60',
-    value: '60',
+    value: 60,
     label: 'Active 60',
     metric: 'minutes',
     achievedAt: daysAgo(30),
   },
   {
     id: 'a-30-day-streak',
-    value: '30',
+    value: 30,
     label: '30 Days Streak',
     metric: 'days',
     achievedAt: null,
   },
   {
     id: 'a-ten-workouts',
-    value: '10',
+    value: 10,
     label: 'Ten Workouts',
     metric: 'workouts',
     achievedAt: daysAgo(40),
   },
   {
     id: 'a-20k-steps',
-    value: '20K',
+    value: 20_000,
     label: '20K Steps',
     metric: 'steps',
     achievedAt: null,
   },
   {
     id: 'a-cal-machine',
-    value: '2K',
+    value: 2_000,
     label: 'Cal Machine',
     metric: 'calories',
     achievedAt: null,
   },
   {
     id: 'a-active-120',
-    value: '120',
+    value: 120,
     label: 'Active 120',
     metric: 'minutes',
     achievedAt: null,
   },
   {
     id: 'a-90-day-streak',
-    value: '90',
+    value: 90,
     label: '90 Days Streak',
     metric: 'days',
     achievedAt: null,
   },
   {
     id: 'a-fifty-workouts',
-    value: '50',
+    value: 50,
     label: 'Fifty Workouts',
     metric: 'workouts',
     achievedAt: null,
@@ -1248,6 +1244,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     perk: 'T-Shirt + Bottle',
     avatarUrl: null,
     isCurrentUser: false,
+    score: 2_480,
   },
   {
     id: 'lb-2',
@@ -1258,6 +1255,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     perk: 'T-Shirt + Mat',
     avatarUrl: null,
     isCurrentUser: false,
+    score: 2_215,
   },
   {
     id: 'lb-3',
@@ -1268,6 +1266,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     perk: 'T-Shirt + Mat',
     avatarUrl: null,
     isCurrentUser: false,
+    score: 2_190,
   },
   {
     id: 'lb-4',
@@ -1278,6 +1277,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     perk: 'Fitness Mat',
     avatarUrl: null,
     isCurrentUser: false,
+    score: 1_960,
   },
   {
     id: 'lb-5',
@@ -1288,6 +1288,7 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     perk: 'Fitness Mat',
     avatarUrl: null,
     isCurrentUser: false,
+    score: 1_875,
   },
 ];
 
@@ -1300,8 +1301,8 @@ export const seedLeaderboard: LeaderboardEntry[] = [
  */
 export const leaderboardHighlights = {
   bestRank: 7,
-  /** Already formatted for display — the API has no date to derive it from. */
-  bestRankAchievedOn: '12 May 2025',
+  /** The last day of the week it was won, `YYYY-MM-DD`. */
+  bestRankAchievedOn: dateDaysAgo(40),
   topTenFinishes: 3,
   rewardCoinsEarned: 2_350,
   rewardsWon: 1,
@@ -1322,50 +1323,6 @@ export const hydrationHighlights = {
 
 /** The line at the foot of the hydration screen. */
 export const hydrationTip = "Drink water regularly; don't wait until thirsty.";
-
-/**
- * Today's steps, hour by hour, midnight first.
- *
- * The twenty-four figures add up to `todayActivity.steps` exactly, which is
- * the point of seeding them rather than generating them: the analytics screen
- * draws this series under a total taken from `todayActivity`, and a chart that
- * did not add up to the number above it is the first thing a user would spot.
- */
-export const todayHourlySteps: number[] = [
-  0, 0, 0, 0, 0, 12, 120, 380, 640, 410, 260, 300, 520, 340, 210, 260, 380, 620,
-  720, 540, 380, 90, 40, 23,
-];
-
-/**
- * This month's steps in weekly buckets, and this year's by month.
- *
- * Buckets rather than raw days: a month of daily bars is thirty columns on a
- * 375pt screen, which is a texture rather than a chart. The analytics range
- * switches between these four series, so each one is already at the grain its
- * own period can be read at.
- */
-export const monthlyStepsByWeek = [
-  { label: 'W1', steps: 48_200 },
-  { label: 'W2', steps: 52_640 },
-  { label: 'W3', steps: 44_310 },
-  { label: 'W4', steps: 57_480 },
-  { label: 'W5', steps: 21_905 },
-];
-
-export const yearlyStepsByMonth = [
-  { label: 'Jan', steps: 186_400 },
-  { label: 'Feb', steps: 172_300 },
-  { label: 'Mar', steps: 201_850 },
-  { label: 'Apr', steps: 195_600 },
-  { label: 'May', steps: 224_535 },
-  { label: 'Jun', steps: 189_200 },
-  { label: 'Jul', steps: 176_900 },
-  { label: 'Aug', steps: 198_450 },
-  { label: 'Sep', steps: 207_310 },
-  { label: 'Oct', steps: 193_720 },
-  { label: 'Nov', steps: 181_640 },
-  { label: 'Dec', steps: 165_980 },
-];
 
 /**
  * The vitals the checkup screen opens with, newest first.

@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import {
+  Footprints,
   Gift,
   Heart,
   HeartPulse,
@@ -22,6 +23,7 @@ interface Props {
   onPressWishlist: () => void;
   onPressRewards: () => void;
   onPressStreakFreeze: () => void;
+  onPressStepTracking: () => void;
   onPressHealthData: () => void;
   onPressHelp: () => void;
   onPressAbout: () => void;
@@ -49,6 +51,7 @@ export const AccountMenuList = memo(
     onPressWishlist,
     onPressRewards,
     onPressStreakFreeze,
+    onPressStepTracking,
     onPressHealthData,
     onPressHelp,
     onPressAbout,
@@ -100,10 +103,20 @@ export const AccountMenuList = memo(
           <Divider />
 
           <AccountMenuRow
+            icon={Footprints}
+            tint={colors.brandAccent}
+            title="Step Tracking"
+            subtitle="Step counting, Health Connect and sync"
+            onPress={onPressStepTracking}
+          />
+
+          <Divider />
+
+          <AccountMenuRow
             icon={HeartPulse}
             tint={colors.avatarPink}
             title="Health Data"
-            subtitle="Your vitals and connected health sources"
+            subtitle="Your vitals and health check up"
             onPress={onPressHealthData}
           />
 

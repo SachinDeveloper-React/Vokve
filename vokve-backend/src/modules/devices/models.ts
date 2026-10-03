@@ -20,6 +20,38 @@ const deviceSchema = new Schema(
     app: { version: String, build: String, bundleId: String, firstVersion: String },
     push: { token: String, provider: { type: String, default: 'fcm' }, updatedAt: Date, invalidAt: Date },
     integrity: { provider: String, keyId: String, verdict: String, checkedAt: Date, raw: Schema.Types.Mixed },
+    /**
+     * The Keystore key this install signs step snapshots with, as accepted
+     * by `POST /devices/:id/attestation` (RULES DV2): its public half, and
+     * what its certificate chain proved. Kept apart from `integrity`, which
+     * every registration rewrites.
+     */
+    attestation: {
+      keyId: String,
+      publicKey: String,
+      algorithm: String,
+      attested: Boolean,
+      failure: String,
+      securityLevel: String,
+      verifiedBootState: String,
+      deviceLocked: Boolean,
+      attestationVersion: Number,
+      packageNames: { type: [String], default: undefined },
+      signatureDigests: { type: [String], default: undefined },
+      revocationChecked: Boolean,
+      verifiedAt: Date,
+    },
+    /** The challenge the next key must carry. Single use, and short-lived. */
+    attestationChallenge: { value: String, expiresAt: Date },
+    /** The latest Play Integrity verdict a snapshot from this install carried. */
+    playIntegrity: {
+      verdict: String,
+      reasons: { type: [String], default: undefined },
+      deviceRecognition: { type: [String], default: undefined },
+      appRecognition: String,
+      licensing: String,
+      checkedAt: Date,
+    },
     signals: { rooted: Boolean, emulator: Boolean, debugBuild: Boolean, hookingFramework: Boolean, mockLocation: Boolean, developerMode: Boolean },
     trust: { score: Number, tier: String },
     firstSeenAt: { type: Date, default: Date.now },
@@ -32,6 +64,7 @@ deviceSchema.index({ userId: 1, installId: 1 }, { unique: true });
 deviceSchema.index({ installId: 1 });
 deviceSchema.index({ vendorId: 1 }, { sparse: true });
 deviceSchema.index({ 'integrity.keyId': 1 }, { sparse: true });
+deviceSchema.index({ 'attestation.keyId': 1 }, { sparse: true });
 deviceSchema.index({ 'push.token': 1 }, { sparse: true });
 deviceSchema.index({ lastSeenAt: -1 });
 deviceSchema.index({ 'app.version': 1, platform: 1 });

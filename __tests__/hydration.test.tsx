@@ -11,8 +11,17 @@ import { HydrationCard } from '../src/components/fitness/HydrationCard';
 import { MotivationCard } from '../src/components/home/MotivationCard';
 import { MOTIVATION_EMOJIS } from '../src/components/home/MotivationArt';
 import { QuickActionsRow } from '../src/components/home/QuickActionsRow';
-import { useHydrationStore } from '../src/stores/hydrationStore';
+import { ApiError } from '../src/services/api/errors';
+import {
+  useHydrationStore,
+  useTodayHydrationView,
+} from '../src/stores/hydrationStore';
 import { ThemeProvider } from '../src/theme';
+import { todayIso } from '../src/utils/date';
+
+jest.mock('../src/services/api/endpoints', () => ({
+  hydrationApi: { today: jest.fn(), log: jest.fn(), remove: jest.fn() },
+}));
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -40,80 +49,151 @@ const byLabel = (tree: ReactTestRenderer.ReactTestRenderer, label: string) =>
     .find(n => typeof n.props.onPress === 'function');
 
 describe('hydration store', () => {
+  const { hydrationApi } = jest.requireMock('../src/services/api/endpoints') as {
+    hydrationApi: { today: jest.Mock; log: jest.Mock; remove: jest.Mock };
+  };
+
+  const day = (
+    entries: { id: string; ml: number; at: string }[],
+    date = todayIso(),
+  ) => ({
+    date,
+    consumedMl: entries.reduce((sum, e) => sum + e.ml, 0),
+    goalMl: 2500,
+    entries,
+  });
+
+  /** Lets the background flush run. */
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+  /** Reads the view hook once, the way a screen would. */
+  const readView = async () => {
+    let view!: ReturnType<typeof useTodayHydrationView>;
+    const Probe = () => {
+      view = useTodayHydrationView();
+      return null;
+    };
+    await render(<Probe />);
+    return view;
+  };
+
   beforeEach(() => {
     useHydrationStore.getState().reset();
+    hydrationApi.today.mockReset();
+    hydrationApi.log.mockReset();
+    hydrationApi.remove.mockReset();
   });
 
-  test('accumulates what was logged today', () => {
-    const { add } = useHydrationStore.getState();
-    add(200);
-    add(500);
-
-    expect(useHydrationStore.getState().todayMl()).toBe(700);
+  test('a new store has no day until the server answers', async () => {
+    const view = await readView();
+    expect(view).toEqual({ synced: false, consumedMl: 0, entries: [] });
   });
 
-  test("yesterday's total does not carry into today", () => {
-    useHydrationStore.setState({ date: '2020-01-01', consumedMl: 2000 });
+  test("a drink shows at once, is sent under its own id, and the server's day replaces the cache", async () => {
+    hydrationApi.log.mockImplementation(async (entry: { id: string; ml: number; at: string }) =>
+      day([entry]),
+    );
 
-    // The stored day has passed, so the count reads as zero rather than
-    // showing the morning as already complete.
-    expect(useHydrationStore.getState().todayMl()).toBe(0);
-  });
-
-  test('logging after a rollover starts from zero, not from the old total', () => {
-    useHydrationStore.setState({ date: '2020-01-01', consumedMl: 2000 });
     useHydrationStore.getState().add(250);
+    const pending = useHydrationStore.getState().outbox;
+    expect(pending).toHaveLength(1);
+    expect((await readView()).consumedMl).toBe(250);
 
-    expect(useHydrationStore.getState().todayMl()).toBe(250);
+    await settle();
+    const sent = (pending[0] as { entry: { id: string } }).entry;
+    expect(hydrationApi.log).toHaveBeenCalledWith(
+      expect.objectContaining({ id: sent.id, ml: 250 }),
+      { idempotencyKey: `drink:${sent.id}` },
+    );
+    expect(useHydrationStore.getState().outbox).toEqual([]);
+    expect(useHydrationStore.getState().day?.consumedMl).toBe(250);
+    expect(await readView()).toMatchObject({ synced: true, consumedMl: 250 });
   });
 
-  test('adding logs a row as well as raising the total', () => {
-    useHydrationStore.getState().add(250);
-    useHydrationStore.getState().add(500);
-
-    const { consumedMl, entries } = useHydrationStore.getState();
-    expect(consumedMl).toBe(750);
-    // Newest first, so the log reads as a day being added to from the top.
-    expect(entries.map(entry => entry.ml)).toEqual([500, 250]);
-  });
-
-  test('removing a row takes exactly its millilitres off the total', () => {
-    useHydrationStore.getState().add(250);
-    useHydrationStore.getState().add(500);
-    const [newest] = useHydrationStore.getState().entries;
-
-    useHydrationStore.getState().remove(newest.id);
-
-    expect(useHydrationStore.getState().consumedMl).toBe(250);
-    expect(useHydrationStore.getState().entries).toHaveLength(1);
-  });
-
-  test('removing a row that has already gone changes nothing', () => {
-    useHydrationStore.getState().add(250);
-
-    useHydrationStore.getState().remove('not-a-row');
-
-    expect(useHydrationStore.getState().consumedMl).toBe(250);
-    expect(useHydrationStore.getState().entries).toHaveLength(1);
-  });
-
-  test('undo drops the newest drink of that size from the log', () => {
-    useHydrationStore.getState().add(250);
-    useHydrationStore.getState().add(500);
-
-    useHydrationStore.getState().undo(500);
-
-    expect(useHydrationStore.getState().consumedMl).toBe(250);
-    expect(
-      useHydrationStore.getState().entries.map(entry => entry.ml),
-    ).toEqual([250]);
-  });
-
-  test('undo never takes the total below zero', () => {
+  test('a drink that cannot be sent waits, in order, and goes on the next flush', async () => {
+    hydrationApi.log.mockRejectedValue(
+      new ApiError('network', 'No connection. Check your internet and try again.'),
+    );
     useHydrationStore.getState().add(200);
-    useHydrationStore.getState().undo(500);
+    useHydrationStore.getState().add(300);
+    await settle();
+    expect(useHydrationStore.getState().outbox).toHaveLength(2);
+    expect(hydrationApi.log).toHaveBeenCalledTimes(1);
 
-    expect(useHydrationStore.getState().todayMl()).toBe(0);
+    hydrationApi.log.mockImplementation(async (entry: { id: string; ml: number; at: string }) =>
+      day([entry]),
+    );
+    await useHydrationStore.getState().flush();
+    expect(useHydrationStore.getState().outbox).toEqual([]);
+    expect(hydrationApi.log.mock.calls.slice(1).map(call => call[0].ml)).toEqual([200, 300]);
+  });
+
+  test('a drink the server refuses for good is dropped, not retried forever', async () => {
+    hydrationApi.log.mockRejectedValue(
+      new ApiError('validation', 'Log between 10 and 3000 ml.', 422),
+    );
+    useHydrationStore.getState().add(5);
+    await settle();
+
+    expect(useHydrationStore.getState().outbox).toEqual([]);
+  });
+
+  test('taking back a drink still waiting sends nothing; taking back a sent one asks the server', async () => {
+    hydrationApi.log.mockRejectedValue(new ApiError('network', 'offline'));
+    useHydrationStore.getState().add(200);
+    useHydrationStore.getState().add(300);
+    await settle();
+    const second = useHydrationStore.getState().outbox[1] as {
+      entry: { id: string };
+    };
+
+    useHydrationStore.getState().remove(second.entry.id);
+    expect(useHydrationStore.getState().outbox).toHaveLength(1);
+    // The flush that removal set off finds the network still down.
+    await settle();
+
+    useHydrationStore.setState({
+      day: day([{ id: 'srv-1', ml: 500, at: new Date().toISOString() }]),
+      outbox: [],
+    });
+    hydrationApi.remove.mockResolvedValue(day([]));
+    useHydrationStore.getState().remove('srv-1');
+    expect((await readView()).consumedMl).toBe(0);
+    await settle();
+    expect(hydrationApi.remove).toHaveBeenCalledWith('srv-1', {
+      idempotencyKey: 'drink-remove:srv-1',
+    });
+    expect(useHydrationStore.getState().day?.entries).toEqual([]);
+  });
+
+  test("yesterday's day does not show as today's", async () => {
+    useHydrationStore.setState({
+      day: day([{ id: 'old', ml: 2000, at: '2020-01-01T08:00:00.000Z' }], '2020-01-01'),
+    });
+
+    expect(await readView()).toEqual({ synced: false, consumedMl: 0, entries: [] });
+  });
+
+  test("an older build's drinks from today are sent on; older ones go", () => {
+    const migrate = useHydrationStore.persist.getOptions().migrate!;
+    const entries = [
+      { id: 'b', ml: 500, at: new Date().toISOString() },
+      { id: 'a', ml: 250, at: new Date().toISOString() },
+    ];
+
+    expect(migrate({ date: todayIso(), consumedMl: 750, entries }, 2)).toEqual({
+      day: null,
+      outbox: [
+        { kind: 'add', entry: entries[1] },
+        { kind: 'add', entry: entries[0] },
+      ],
+      syncedAt: null,
+    });
+    expect(migrate({ date: '2020-01-01', consumedMl: 750, entries }, 2)).toEqual({
+      day: null,
+      outbox: [],
+      syncedAt: null,
+    });
   });
 });
 

@@ -6,14 +6,20 @@ import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
 import { AppText } from '../ui/AppText';
 
+interface Props {
+  title: string;
+  message: string;
+}
+
 /**
- * The line at the foot of the reminder plan.
+ * The line at the foot of the reminder plan, in the server's words (the
+ * day's `reminders` tip).
  *
  * It argues for the setting above it rather than describing it: a user who has
  * just switched seven reminders on wants to know that is a reasonable number,
  * not to be told again what a reminder does.
  */
-export const ReminderTipCard = memo(() => {
+export const ReminderTipCard = memo(({ title, message }: Props) => {
   const { colors, isDark } = useTheme();
 
   return (
@@ -27,11 +33,10 @@ export const ReminderTipCard = memo(() => {
 
         <VStack flex={1} gap="xxs">
           <AppText variant="bodyStrong" numberOfLines={1}>
-            Small sips, big difference
+            {title}
           </AppText>
           <AppText variant="micro" color="textSecondary" numberOfLines={2}>
-            A glass every couple of hours beats a litre in one go — your body
-            can only take in so much at a time.
+            {message}
           </AppText>
         </VStack>
       </HStack>

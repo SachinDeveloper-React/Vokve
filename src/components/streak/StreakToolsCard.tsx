@@ -11,6 +11,8 @@ import { StreakToolRow } from './StreakToolRow';
 interface Props {
   freezesAvailable: number;
   restoreCostCoins: number;
+  /** The tool whose request is in flight; both rows wait until it answers. */
+  pendingAction?: 'freeze' | 'restore' | null;
   onPressFreeze: () => void;
   onPressRestore: () => void;
 }
@@ -24,13 +26,21 @@ interface Props {
  * one, and that is the moment a user is most likely to give the whole thing
  * up; the row is lit so it is the first thing they see.
  *
- * Neither row is disabled here. The store decides whether a freeze or a
- * restore can actually happen and the screen explains the answer in a toast;
- * a greyed-out row would leave "why?" unanswered.
+ * Neither row is disabled for being unusable. The server decides whether a
+ * freeze or a restore can actually happen and the screen explains the answer
+ * in a toast; a greyed-out row would leave "why?" unanswered. They wait only
+ * while one is being asked, so a second tap cannot ask twice.
  */
 export const StreakToolsCard = memo(
-  ({ freezesAvailable, restoreCostCoins, onPressFreeze, onPressRestore }: Props) => {
+  ({
+    freezesAvailable,
+    restoreCostCoins,
+    pendingAction = null,
+    onPressFreeze,
+    onPressRestore,
+  }: Props) => {
     const { colors } = useTheme();
+    const busy = pendingAction !== null;
 
     return (
       <Card radius="xl" padding="md">
@@ -45,7 +55,12 @@ export const StreakToolsCard = memo(
             tint={colors.primary}
             title="Streak Freeze"
             subtitle="Protect your streak for 24 hours."
-            value={`${freezesAvailable} Available`}
+            value={
+              pendingAction === 'freeze'
+                ? 'Freezing…'
+                : `${freezesAvailable} Available`
+            }
+            disabled={busy}
             onPress={onPressFreeze}
           />
 
@@ -54,8 +69,13 @@ export const StreakToolsCard = memo(
             tint={colors.brandAccent}
             title="Streak Restore"
             subtitle="Missed a day? Restore your streak."
-            value={`${formatCoins(restoreCostCoins)} Coins`}
+            value={
+              pendingAction === 'restore'
+                ? 'Restoring…'
+                : `${formatCoins(restoreCostCoins)} Coins`
+            }
             highlighted
+            disabled={busy}
             onPress={onPressRestore}
           />
         </VStack>

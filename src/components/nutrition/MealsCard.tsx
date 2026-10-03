@@ -11,7 +11,8 @@ import { NutritionTipStrip } from './NutritionTipStrip';
 
 interface Props {
   meals: MealSummary[];
-  tip: string;
+  /** The day's nutrition tip; the strip waits for it rather than inventing one. */
+  tip: string | null;
   onPressAdd: (slot: MealSlot) => void;
   onPressViewAll: () => void;
   onPressTips: () => void;
@@ -60,7 +61,7 @@ export const MealsCard = memo(
           ))}
         </VStack>
 
-        <NutritionTipStrip tip={tip} onPressTips={onPressTips} />
+        {tip ? <NutritionTipStrip tip={tip} onPressTips={onPressTips} /> : null}
       </VStack>
     </Card>
   ),

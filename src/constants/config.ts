@@ -10,7 +10,7 @@ import { Platform } from 'react-native';
  * emulator reaches the host machine at 10.0.2.2, not localhost; a physical
  * device needs the machine's LAN address instead (D-31: staging comes later).
  */
-const LOCAL_API_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const LOCAL_API_HOST = Platform.OS === 'android' ? '192.168.1.35' : 'localhost';
 
 export const config = {
   apiBaseUrl: __DEV__
@@ -45,6 +45,16 @@ export const config = {
    * short version is that the OTP is always `123456`.
    */
   useMockApi: false,
+
+  /**
+   * Writes today's steps as the phone sees them to the console on every
+   * foreground and every "sync now": the tracker's set-up, Health Connect's
+   * grants, every app and raw record there, which number is shown and why,
+   * hour by hour, and the server's day (`services/stepsDebug`). Combined
+   * with `__DEV__` there — these are health data, and a release build never
+   * logs them.
+   */
+  logStepSources: true,
 
   /**
    * The version shown on the account screen's "About VOKVE" row.

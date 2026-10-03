@@ -23,21 +23,25 @@ import { useAuthStore } from '../src/stores/authStore';
 import { useCartStore } from '../src/stores/cartStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
 import { useOrdersStore } from '../src/stores/ordersStore';
-import { DEFAULT_SHOP_CONFIG, useShopStore } from '../src/stores/shopStore';
+import { useShopStore } from '../src/stores/shopStore';
+import { SHOP_CONFIG, stockShop } from './helpers/shop';
 import { useWishlistStore } from '../src/stores/wishlistStore';
 import { shopItems } from '../src/constants/seedData';
 import type { Cart, CoinTransaction, ShopItem } from '../src/types/models';
 
 const mockNavigate = jest.fn();
+// One object for every render, as the real hook gives: the screen's focus
+// effect depends on it, and a fresh one each render would re-run it.
+const mockNavigation = {
+  navigate: mockNavigate,
+  addListener: jest.fn(() => jest.fn()),
+};
 
 // Only `useNavigation` is replaced: the theme layer imports `DefaultTheme`
 // from this same module, and a blanket mock takes that down with it.
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
-  useNavigation: () => ({
-    navigate: mockNavigate,
-    addListener: jest.fn(() => jest.fn()),
-  }),
+  useNavigation: () => mockNavigation,
 }));
 
 // The basket and the wishlist talk to the server; every endpoint the
@@ -179,7 +183,7 @@ beforeEach(() => {
       total: shopItems.length,
     });
   shopApi.categories.mockReset().mockResolvedValue([]);
-  shopApi.config.mockReset().mockResolvedValue(DEFAULT_SHOP_CONFIG);
+  shopApi.config.mockReset().mockResolvedValue(SHOP_CONFIG);
   cartApi.get.mockReset().mockRejectedValue(new Error('offline'));
   cartApi.setLine.mockReset();
   wishlistApi.add.mockReset().mockResolvedValue({ ok: true });
@@ -188,6 +192,7 @@ beforeEach(() => {
   walletApi.transactions.mockReset().mockRejectedValue(new Error('offline'));
   walletApi.earnRules.mockReset().mockRejectedValue(new Error('offline'));
   useShopStore.getState().reset();
+  stockShop();
   useOrdersStore.getState().reset();
   useAddressesStore.getState().reset();
   useCartStore.getState().reset();
@@ -276,6 +281,38 @@ const tee = shopItems.find(i => i.id === 'tee')!;
 const shaker = shopItems.find(i => i.id === 'shaker')!;
 
 describe('ShopScreen', () => {
+  test('before the first sync the shelf says it is loading, not that the shop is empty', async () => {
+    useShopStore.getState().reset();
+    shopApi.items.mockReturnValue(new Promise(() => {}));
+    seed(5000);
+
+    const tree = await render();
+
+    expect(
+      tree.root.findAll(n => n.props?.accessibilityLabel === 'Loading').length,
+    ).toBeGreaterThan(0);
+    expect(allText(tree)).not.toContain(tee.title);
+  });
+
+  test('a first sync that failed offers to try again, and the retry fills the shelf', async () => {
+    useShopStore.getState().reset();
+    shopApi.items.mockRejectedValueOnce(new Error('offline'));
+    seed(5000);
+
+    const tree = await render();
+    await settle();
+    expect(allText(tree)).toContain("Couldn't load the shop");
+
+    const retry = tree.root
+      .findAll(n => n.props?.label === 'Try again')
+      .find(n => typeof n.props.onPress === 'function');
+    if (!retry) throw new Error('No retry button');
+    await ReactTestRenderer.act(async () => retry.props.onPress());
+    await settle();
+
+    expect(allText(tree)).toContain(tee.title);
+  });
+
   test('the shelf opens on the whole catalogue, sold-out items included', async () => {
     seed(5000);
     const text = allText(await render());

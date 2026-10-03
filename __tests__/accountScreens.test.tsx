@@ -87,6 +87,19 @@ jest.mock('../src/services/api/endpoints', () => ({
     removeAvatar: jest.fn(),
   },
   walletApi: { get: jest.fn(), transactions: jest.fn(), earnRules: jest.fn() },
+  settingsApi: {
+    get: jest.fn().mockRejectedValue(new Error('offline')),
+    update: jest.fn(async (patch: Record<string, unknown>) => ({
+      units: 'metric',
+      dailyStepGoal: 10000,
+      dailyWaterGoalMl: 2500,
+      restTimerSeconds: 90,
+      hapticsEnabled: true,
+      workoutRemindersEnabled: true,
+      keepAwakeDuringWorkout: true,
+      ...patch,
+    })),
+  },
   notificationApi: {
     list: jest.fn(),
     counts: jest.fn(),

@@ -19,6 +19,7 @@ import { config } from '../src/constants/config';
 import { ApiError } from '../src/services/api/errors';
 import { shouldUseMockApi } from '../src/services/api/endpoints';
 import {
+  MOCK_CLOUD_PROJECT_NUMBER,
   MOCK_RULES,
   MOCK_STEP_UP_THRESHOLD,
   mockActivityApi,
@@ -26,10 +27,13 @@ import {
   mockAuthApi,
   mockCartApi,
   mockCheckoutApi,
+  mockDeviceApi,
   mockNotificationApi,
   mockOrderApi,
   mockReferralApi,
+  mockSettingsApi,
   mockShopApi,
+  mockStreakApi,
   mockUserApi,
   mockWalletApi,
   mockWishlistApi,
@@ -42,6 +46,7 @@ import {
   seedNotifications,
 } from '../src/constants/seedData';
 import type { SignUpPayload } from '../src/types/forms';
+import { addDays, todayIso } from '../src/utils/date';
 
 const PAYLOAD: SignUpPayload = {
   email: 'sachin@example.com',
@@ -241,17 +246,221 @@ describe('mock app data', () => {
     await expect(mockWorkoutApi.history()).resolves.toEqual({ data: [], nextCursor: null });
   });
 
-  test('returns a full week of activity, dated and consistent', async () => {
+  test('returns a full week of activity, dated, and empty until a day is synced', async () => {
     const week = await mockActivityApi.weekly();
 
     expect(week).toHaveLength(7);
     for (const day of week) {
       expect(day.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(day.steps).toBeGreaterThan(0);
-      expect(day.caloriesBurned).toBeGreaterThan(0);
+      expect(day.steps).toBe(0);
     }
-    // Last entry is today, which is what the Today screen assumes.
-    expect(week[6].date).toBe(new Date().toISOString().slice(0, 10));
+    // Last entry is today — the phone's local day, not UTC's.
+    expect(week[6].date).toBe(todayIso());
+  });
+});
+
+describe('mock step sync', () => {
+  const DEVICE = 'dev_mock_test';
+
+  /** A snapshot the way the tracker signs one: the payload is the evidence. */
+  const signed = (nonce: string, payload: Record<string, unknown> = {}) => ({
+    keyId: 'key-1',
+    algorithm: 'SHA256withECDSA',
+    value: 'c2lnbmF0dXJl',
+    attested: true,
+    signedPayload: JSON.stringify({
+      date: todayIso(),
+      nonce,
+      deviceSteps: 6400,
+      recoveredSteps: 200,
+      suspectSteps: 100,
+      resolved: { steps: 6400, usedExternal: false },
+      minutes: [{ steps: 90 }, { steps: 20 }, { steps: 61 }],
+      ...payload,
+    }),
+    payloadSha256: `sha-${nonce}`,
+  });
+
+  const attest = async () => {
+    await mockDeviceApi.attestationChallenge(DEVICE);
+    await mockDeviceApi.submitAttestation(DEVICE, {
+      keyId: 'key-1',
+      algorithm: 'SHA256withECDSA',
+      publicKey: 'cHVibGlj',
+      certificateChain: ['bGVhZg=='],
+      attested: true,
+      securityLevel: 'tee',
+      createdAt: Date.now(),
+    });
+  };
+
+  const key = () => ({ idempotencyKey: `${Math.random()}` });
+
+  const codeOf = async (run: () => Promise<unknown>) =>
+    run().then(
+      () => null,
+      error => (error as ApiError).code,
+    );
+
+  beforeEach(async () => {
+    await mockAuthApi.signIn('a@b.com', 'secret');
+  });
+
+  test('takes an attestation only against a challenge it handed out', async () => {
+    const code = await codeOf(() =>
+      mockDeviceApi.submitAttestation(DEVICE, {
+        keyId: 'key-1',
+        algorithm: 'SHA256withECDSA',
+        publicKey: 'cHVibGlj',
+        certificateChain: [],
+        attested: false,
+        securityLevel: 'software',
+        createdAt: Date.now(),
+      }),
+    );
+    expect(code).toBe('ATTESTATION_CHALLENGE_INVALID');
+  });
+
+  test('asks for attestation, then for an integrity verdict, before it spends the nonce', async () => {
+    const { nonce } = await mockActivityApi.ingestNonce();
+    const payload = { date: todayIso(), snapshot: signed(nonce) };
+
+    expect(await codeOf(() => mockActivityApi.ingest(payload, key()))).toBe(
+      'ATTESTATION_REQUIRED',
+    );
+
+    await attest();
+    const refusal = await mockActivityApi.ingest(payload, key()).catch(
+      error => error as ApiError,
+    );
+    expect((refusal as ApiError).code).toBe('INTEGRITY_REQUIRED');
+    expect((refusal as ApiError).details).toEqual({
+      cloudProjectNumber: MOCK_CLOUD_PROJECT_NUMBER,
+    });
+
+    // The same snapshot, now with what Play said: the nonce is still good.
+    const result = await mockActivityApi.ingest(
+      { ...payload, integrity: { error: 'PLAY_STORE_NOT_FOUND', retryable: false } },
+      key(),
+    );
+    expect(result.day.steps).toBe(6400);
+    // The phone's own count, less what it recovered in one go or flagged.
+    expect(result.day.verifiedSteps).toBe(6100);
+    expect(result.day.activeMinutes).toBe(2);
+    expect(result.day.source).toBe('device');
+    await expect(mockActivityApi.today()).resolves.toMatchObject({
+      steps: 6400,
+    });
+  });
+
+  test('answers a snapshot it already has as it did the first time', async () => {
+    await attest();
+    const { nonce } = await mockActivityApi.ingestNonce();
+    const payload = {
+      date: todayIso(),
+      snapshot: signed(nonce),
+      integrity: { token: 'play-token' },
+    };
+
+    const first = await mockActivityApi.ingest(payload, key());
+    const again = await mockActivityApi.ingest(payload, key());
+
+    expect(first.duplicate).toBe(false);
+    expect(again.duplicate).toBe(true);
+    expect(again.day).toEqual(first.day);
+  });
+
+  test('refuses a spent nonce and a day too old to send', async () => {
+    await attest();
+    const { nonce } = await mockActivityApi.ingestNonce();
+    await mockActivityApi.ingest(
+      { date: todayIso(), snapshot: signed(nonce), integrity: { token: 't' } },
+      key(),
+    );
+
+    // A new snapshot, the old nonce.
+    const replay = signed(nonce, { deviceSteps: 9000 });
+    expect(
+      await codeOf(() =>
+        mockActivityApi.ingest(
+          { date: todayIso(), snapshot: { ...replay, payloadSha256: 'other' } },
+          key(),
+        ),
+      ),
+    ).toBe('NONCE_INVALID');
+
+    const old = addDays(todayIso(), -8);
+    const fresh = await mockActivityApi.ingestNonce();
+    expect(
+      await codeOf(() =>
+        mockActivityApi.ingest(
+          { date: old, snapshot: signed(fresh.nonce, { date: old }) },
+          key(),
+        ),
+      ),
+    ).toBe('SNAPSHOT_DATE_OUT_OF_RANGE');
+  });
+
+  test('reads synced days back by day, hour and range, and explains where they came from', async () => {
+    await attest();
+    const { nonce } = await mockActivityApi.ingestNonce();
+    await mockActivityApi.ingest(
+      { date: todayIso(), snapshot: signed(nonce), integrity: { token: 't' } },
+      key(),
+    );
+
+    await expect(mockActivityApi.day(todayIso())).resolves.toMatchObject({
+      steps: 6400,
+    });
+    const week = await mockActivityApi.range({
+      from: addDays(todayIso(), -6),
+      to: todayIso(),
+      granularity: 'day',
+    });
+    expect(week.points).toHaveLength(7);
+    expect(week.totals).toMatchObject({ steps: 6400, activeDays: 1 });
+    expect(week.best).toEqual({ date: todayIso(), steps: 6400 });
+
+    const hours = await mockActivityApi.range({
+      from: todayIso(),
+      to: todayIso(),
+      granularity: 'hour',
+    });
+    expect(hours.points).toHaveLength(24);
+
+    const report = await mockActivityApi.sources(todayIso());
+    expect(report.devices[0].phone).toEqual({
+      counted: 6400,
+      recovered: 200,
+      flagged: 100,
+      clean: 6100,
+    });
+    expect(report.uploads).toHaveLength(1);
+
+    const empty = await mockActivityApi.sources(addDays(todayIso(), -3));
+    expect(empty.devices).toEqual([]);
+  });
+
+  test('hands out the tracker set-up the real server does', async () => {
+    const setup = await mockActivityApi.config();
+    expect(setup.tracker.healthConnectReadTypes).toEqual(['steps', 'distance']);
+    expect(setup.playIntegrity.cloudProjectNumber).toBe(
+      MOCK_CLOUD_PROJECT_NUMBER,
+    );
+  });
+});
+
+describe('mock settings', () => {
+  test('keeps a goal and refuses one outside the clamps', async () => {
+    await expect(
+      mockSettingsApi.update({ dailyStepGoal: 12000 }),
+    ).resolves.toMatchObject({ dailyStepGoal: 12000 });
+    await expect(mockSettingsApi.get()).resolves.toMatchObject({
+      dailyStepGoal: 12000,
+    });
+    await expect(
+      mockSettingsApi.update({ dailyStepGoal: 500 }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });
 
@@ -570,5 +779,27 @@ describe('the referral programme', () => {
     // Sign-out forgets it, like the rest of the mock's state.
     await mockAuthApi.signOut();
     expect((await mockReferralApi.me()).applied).toBeNull();
+  });
+});
+
+describe('the streak', () => {
+  test("answers with the server's figures for the seeded days", async () => {
+    const streak = await mockStreakApi.get();
+    expect(streak.currentStreak).toBe(7);
+    expect(streak.longestStreak?.length).toBe(15);
+    expect(streak.milestones.filter(m => m.achieved).map(m => m.days)).toEqual([7, 15]);
+    expect(streak).toMatchObject({ todayCovered: true, canRestore: false, restoreCostCoins: 50 });
+  });
+
+  test('refuses a freeze on a day already earned, with the server code', async () => {
+    await expect(mockStreakApi.freeze({ idempotencyKey: 'k1' })).rejects.toMatchObject({
+      code: 'STREAK_ALREADY_COVERED',
+    });
+  });
+
+  test('refuses a restore with nothing to bridge', async () => {
+    await expect(mockStreakApi.restore({ idempotencyKey: 'k2' })).rejects.toMatchObject({
+      code: 'NOTHING_TO_RESTORE',
+    });
   });
 });

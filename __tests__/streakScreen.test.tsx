@@ -1,10 +1,11 @@
 /**
  * The streak screen is where a user finds out whether yesterday counted, so
  * the checks here are about the two numbers it leads with and the two tools
- * that can change them: that the figures come from the day list, that the
- * calendar marks the same days the figures were counted from, that a
- * milestone the record has passed shows as earned, and that a restore
- * charges coins only when there is a gap to bridge.
+ * that can change them. Every figure is the server's: the checks are that the
+ * screen shows what `GET /streak` said, that the calendar marks the same days
+ * the figures were counted from, that a freeze and a restore are asked of the
+ * server and their answers shown, and that nothing is invented before the
+ * first answer arrives.
  *
  * @format
  */
@@ -17,28 +18,42 @@ import { textOf } from './helpers/text';
 import { StreakScreen } from '../src/screens/main/StreakScreen';
 import { ToastProvider } from '../src/components/feedback/Toast';
 import { ThemeProvider } from '../src/theme';
+import { ApiError } from '../src/services/api/errors';
 import { useAuthStore } from '../src/stores/authStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
-import {
-  STREAK_RESTORE_COST,
-  useStreakStore,
-} from '../src/stores/streakStore';
+import { useStreakStore } from '../src/stores/streakStore';
 import { addDays, formatLongDate, todayIso } from '../src/utils/date';
-import type { User } from '../src/types/models';
+import type { StreakRun, StreakSummary, User } from '../src/types/models';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+// One object for every render, as the real hook gives: the focus refresh
+// depends on it.
+const mockNavigation = {
+  navigate: mockNavigate,
+  goBack: mockGoBack,
+  canGoBack: () => true,
+  addListener: jest.fn(() => jest.fn()),
+};
 
 // Only `useNavigation` is replaced: the theme layer imports `DefaultTheme`
 // from this same module, and a blanket mock takes that down with it.
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
-  useNavigation: () => ({
-    navigate: mockNavigate,
-    goBack: mockGoBack,
-    canGoBack: () => true,
-  }),
+  useNavigation: () => mockNavigation,
 }));
+
+jest.mock('../src/services/api/endpoints', () => ({
+  streakApi: { get: jest.fn(), freeze: jest.fn(), restore: jest.fn() },
+  walletApi: { get: jest.fn(), transactions: jest.fn(), earnRules: jest.fn() },
+}));
+
+const { streakApi, walletApi } = jest.requireMock(
+  '../src/services/api/endpoints',
+) as {
+  streakApi: { get: jest.Mock; freeze: jest.Mock; restore: jest.Mock };
+  walletApi: { get: jest.Mock; transactions: jest.Mock; earnRules: jest.Mock };
+};
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -57,18 +72,102 @@ const d = (daysAgo: number) => addDays(TODAY, -daysAgo);
 const run = (from: number, to: number) =>
   Array.from({ length: from - to + 1 }, (_, i) => d(from - i));
 
-const seedStreak = (completedDays: string[], freezesAvailable = 1) =>
-  useStreakStore.setState({ completedDays, protectedDays: [], freezesAvailable });
+const LADDER = [
+  { days: 7, coins: 50 },
+  { days: 15, coins: 150 },
+  { days: 30, coins: 300 },
+  { days: 90, coins: 1000 },
+  { days: 180, coins: 2000 },
+];
 
-const seedCoins = (balance: number) =>
-  useCoinsStore.setState({ balance, lifetimeEarned: balance, transactions: [] });
+/** What the server would answer for these earned days — its arithmetic, in brief. */
+const summaryOf = (
+  completed: string[],
+  over: Partial<StreakSummary> = {},
+): StreakSummary => {
+  const days = new Set(completed);
+  let cursor = days.has(TODAY) ? TODAY : d(1);
+  let current = 0;
+  while (days.has(cursor)) {
+    current += 1;
+    cursor = addDays(cursor, -1);
+  }
+  const sorted = [...days].sort();
+  let longest: StreakRun | null = null;
+  let start = '';
+  let length = 0;
+  sorted.forEach((day, i) => {
+    const follows = i > 0 && addDays(sorted[i - 1], 1) === day;
+    start = follows ? start : day;
+    length = follows ? length + 1 : 1;
+    if (!longest || length > longest.length) {
+      longest = { length, start, end: day };
+    }
+  });
+  const best = (longest as StreakRun | null)?.length ?? 0;
+  const milestones = LADDER.map(m => ({
+    ...m,
+    achieved: best >= m.days,
+    paid: best >= m.days,
+  }));
+  return {
+    today: TODAY,
+    currentStreak: current,
+    longestStreak: longest,
+    completedDays: sorted,
+    protectedDays: [],
+    freezesAvailable: 1,
+    maxFreezes: 3,
+    todayCovered: days.has(TODAY),
+    todayFrozen: false,
+    canRestore: false,
+    restoreGap: [],
+    restoreCostCoins: 50,
+    restoreWindowDays: 7,
+    milestones,
+    nextMilestone: milestones.find(m => m.days > current) ?? null,
+    howToEarn: 'Finish a workout or walk 10,000 steps in a day.',
+    ...over,
+  };
+};
+
+/** The streak as a finished sync leaves it. */
+const showStreak = (summary: StreakSummary) =>
+  useStreakStore.setState({
+    summary,
+    syncedAt: new Date().toISOString(),
+    isSyncing: false,
+    syncError: null,
+    pendingAction: null,
+  });
+
+const seedWallet = (balance: number, synced = true) =>
+  useCoinsStore.setState({
+    balance,
+    lifetimeEarned: balance,
+    transactions: [],
+    syncedAt: synced ? new Date().toISOString() : null,
+  });
+
+const RESTORE_LABEL =
+  'Streak Restore, 50 Coins. Missed a day? Restore your streak.';
+const FREEZE_LABEL =
+  'Streak Freeze, 1 Available. Protect your streak for 24 hours.';
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
 beforeEach(() => {
   mockNavigate.mockClear();
+  mockGoBack.mockClear();
+  streakApi.get.mockReset();
+  streakApi.freeze.mockReset();
+  streakApi.restore.mockReset();
+  walletApi.get.mockReset().mockRejectedValue(new Error('offline'));
+  walletApi.transactions.mockReset().mockRejectedValue(new Error('offline'));
+  walletApi.earnRules.mockReset().mockRejectedValue(new Error('offline'));
   useAuthStore.setState({ user, status: 'authenticated' });
-  seedCoins(1000);
+  useStreakStore.getState().reset();
+  seedWallet(1000);
 });
 
 afterEach(async () => {
@@ -115,12 +214,46 @@ const press = async (
     .find(n => typeof n.props.onPress === 'function');
 
   if (!node) throw new Error(`No pressable labelled "${label}"`);
-  await ReactTestRenderer.act(() => node.props.onPress());
+  await ReactTestRenderer.act(async () => {
+    await node.props.onPress();
+  });
 };
 
 describe('StreakScreen', () => {
+  test('before the first answer it says it is loading, and invents no streak', async () => {
+    streakApi.get.mockReturnValue(new Promise(() => {}));
+
+    const tree = await render();
+
+    expect(labelsOf(tree)).toContain('Loading');
+    expect(allText(tree)).not.toContain('Longest Streak');
+    expect(streakApi.get).toHaveBeenCalledTimes(1);
+  });
+
+  test('a first answer that failed offers to try again', async () => {
+    streakApi.get.mockRejectedValueOnce(
+      new ApiError(
+        'network',
+        'No connection. Check your internet and try again.',
+      ),
+    );
+    const tree = await render();
+    expect(allText(tree)).toContain("Couldn't load your streak");
+
+    streakApi.get.mockResolvedValue(summaryOf(run(6, 0)));
+    const retry = tree.root
+      .findAll(n => n.props?.label === 'Try again')
+      .find(n => typeof n.props.onPress === 'function');
+    if (!retry) throw new Error('No retry button');
+    await ReactTestRenderer.act(async () => {
+      await retry.props.onPress();
+    });
+
+    expect(allText(tree)).toContain('Longest Streak');
+  });
+
   test('leads with the current run and the record, dated', async () => {
-    seedStreak([...run(25, 11), ...run(6, 0)]);
+    showStreak(summaryOf([...run(25, 11), ...run(6, 0)]));
     const text = allText(await render());
 
     expect(text).toContain('7');
@@ -128,20 +261,38 @@ describe('StreakScreen', () => {
     expect(text).toContain("You're on fire!");
     // The record's dates, not the current run's.
     expect(text).toContain('Achieved on');
+    // Towards the next rung, in the server's ladder.
+    expect(text).toContain('8 more days to the 15-day milestone.');
+  });
+
+  test("with no streak it says how to start, in the server's words", async () => {
+    showStreak(summaryOf([]));
+    const text = allText(await render());
+
+    expect(text).toContain('Start today');
+    expect(text).toContain('Finish a workout or walk 10,000 steps in a day.');
   });
 
   test('the calendar marks the days the figures were counted from', async () => {
-    seedStreak(run(2, 0));
+    const days = run(2, 0);
+    showStreak(summaryOf(days));
     const labels = labelsOf(await render());
 
-    expect(labels).toContain(`${formatLongDate(TODAY)}, completed, current streak`);
-    expect(labels).toContain(`${formatLongDate(d(2))}, completed, current streak`);
-    // Three days ago was not trained, and is not in the run.
-    expect(labels).toContain(`${formatLongDate(d(3))}, missed`);
+    // Only this month's days are on the page the calendar opens on.
+    const thisMonth = (iso: string) => iso.slice(0, 7) === TODAY.slice(0, 7);
+    for (const day of days.filter(thisMonth)) {
+      expect(labels).toContain(
+        `${formatLongDate(day)}, completed, current streak`,
+      );
+    }
+    if (thisMonth(d(3))) {
+      // Three days ago was not earned, and is not in the run.
+      expect(labels).toContain(`${formatLongDate(d(3))}, missed`);
+    }
   });
 
-  test('a milestone the record has passed shows as earned', async () => {
-    seedStreak(run(6, 0)); // exactly seven days
+  test("a milestone the record has passed shows as earned, from the server's ladder", async () => {
+    showStreak(summaryOf(run(6, 0))); // exactly seven days
     const labels = labelsOf(await render());
 
     expect(labels).toContain('7 days, 50 coins, achieved');
@@ -149,53 +300,138 @@ describe('StreakScreen', () => {
     expect(labels).not.toContain('15 days, 150 coins, achieved');
   });
 
-  test('a freeze covers today, is used up, and says so', async () => {
-    seedStreak(run(6, 1), 1); // yesterday done, today not yet
+  test('a freeze is asked of the server, and its answer is shown', async () => {
+    const before = summaryOf(run(6, 1)); // yesterday done, today not yet
+    showStreak(before);
+    streakApi.freeze.mockResolvedValue({
+      ...before,
+      protectedDays: [TODAY],
+      todayCovered: true,
+      todayFrozen: true,
+      freezesAvailable: 0,
+      currentStreak: 7,
+    });
     const tree = await render();
 
-    await press(tree, 'Streak Freeze, 1 Available. Protect your streak for 24 hours.');
+    await press(tree, FREEZE_LABEL);
 
-    expect(useStreakStore.getState().freezesAvailable).toBe(0);
-    expect(useStreakStore.getState().protectedDays).toEqual([TODAY]);
-    expect(allText(tree)).toContain('Streak Freeze active today');
+    expect(streakApi.freeze).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String),
+    });
+    expect(useStreakStore.getState().summary?.freezesAvailable).toBe(0);
+    const text = allText(tree);
+    expect(text).toContain('Streak Freeze active today');
+    expect(text).toContain('Today is covered.');
   });
 
-  test('a restore charges the coins and bridges the gap', async () => {
-    seedStreak(run(10, 3)); // ran until three days ago, missed two since
+  test("a freeze the server refuses says why, in the server's words", async () => {
+    showStreak(summaryOf(run(6, 1)));
+    streakApi.freeze.mockRejectedValue(
+      new ApiError(
+        'unknown',
+        'No freezes left. Keep your streak going to earn another.',
+        409,
+        null,
+        'NO_FREEZES_LEFT',
+      ),
+    );
+    streakApi.get.mockResolvedValue(
+      summaryOf(run(6, 1), { freezesAvailable: 0 }),
+    );
+    const tree = await render();
+
+    await press(tree, FREEZE_LABEL);
+
+    const text = allText(tree);
+    expect(text).toContain('No freezes left');
+    expect(text).toContain('Keep your streak going to earn another.');
+    // The refusal means the cache was behind; it is asked again.
+    expect(streakApi.get).toHaveBeenCalled();
+  });
+
+  test('a restore is paid for on the server, and the wallet takes its answer', async () => {
+    const broken = summaryOf(run(10, 3), {
+      canRestore: true,
+      restoreGap: [d(2), d(1)],
+    });
+    showStreak(broken);
+    streakApi.restore.mockResolvedValue({
+      streak: summaryOf([...run(10, 3)], {
+        protectedDays: [d(2), d(1)],
+        currentStreak: 10,
+      }),
+      balance: 950,
+    });
     const tree = await render();
     expect(allText(tree)).toContain('0'); // the run is broken
 
-    await press(tree, `Streak Restore, ${STREAK_RESTORE_COST} Coins. Missed a day? Restore your streak.`);
+    await press(tree, RESTORE_LABEL);
 
-    expect(useCoinsStore.getState().balance).toBe(1000 - STREAK_RESTORE_COST);
-    expect(useStreakStore.getState().protectedDays).toEqual([d(2), d(1)]);
-    // Bridged: the run now reaches yesterday, so it is 10 - 3 + 1 + 2 = 10 long.
+    expect(streakApi.restore).toHaveBeenCalledWith({
+      idempotencyKey: expect.any(String),
+    });
+    expect(useCoinsStore.getState().balance).toBe(950);
+    expect(useStreakStore.getState().summary?.protectedDays).toEqual([
+      d(2),
+      d(1),
+    ]);
     expect(allText(tree)).toContain('Streak restored');
   });
 
-  test('a restore with nothing to bridge charges nothing', async () => {
-    seedStreak(run(6, 0)); // alive
+  test('a restore with nothing to bridge is not even asked', async () => {
+    showStreak(summaryOf(run(6, 0))); // alive
     const tree = await render();
 
-    await press(tree, `Streak Restore, ${STREAK_RESTORE_COST} Coins. Missed a day? Restore your streak.`);
+    await press(tree, RESTORE_LABEL);
 
+    expect(streakApi.restore).not.toHaveBeenCalled();
     expect(useCoinsStore.getState().balance).toBe(1000);
     expect(allText(tree)).toContain('Nothing to restore');
   });
 
-  test('a restore the balance cannot cover is refused before anything changes', async () => {
-    seedStreak(run(10, 3));
-    seedCoins(STREAK_RESTORE_COST - 1);
+  test('a restore the synced balance cannot cover is not asked either', async () => {
+    showStreak(
+      summaryOf(run(10, 3), { canRestore: true, restoreGap: [d(2), d(1)] }),
+    );
+    seedWallet(49);
     const tree = await render();
 
-    await press(tree, `Streak Restore, ${STREAK_RESTORE_COST} Coins. Missed a day? Restore your streak.`);
+    await press(tree, RESTORE_LABEL);
 
-    expect(useStreakStore.getState().protectedDays).toEqual([]);
+    expect(streakApi.restore).not.toHaveBeenCalled();
     expect(allText(tree)).toContain('Not enough coins');
   });
 
+  test('a restore the server refuses for coins says so, and changes nothing here', async () => {
+    showStreak(
+      summaryOf(run(10, 3), { canRestore: true, restoreGap: [d(2), d(1)] }),
+    );
+    // The wallet has not synced, so the server is the one to say.
+    seedWallet(0, false);
+    streakApi.restore.mockRejectedValue(
+      new ApiError(
+        'validation',
+        'You need 30 more coins for this.',
+        422,
+        { required: 50, balance: 20 },
+        'INSUFFICIENT_COINS',
+      ),
+    );
+    streakApi.get.mockResolvedValue(
+      summaryOf(run(10, 3), { canRestore: true, restoreGap: [d(2), d(1)] }),
+    );
+    const tree = await render();
+
+    await press(tree, RESTORE_LABEL);
+
+    const text = allText(tree);
+    expect(text).toContain('Not enough coins');
+    expect(text).toContain('You need 30 more coins for this.');
+    expect(useStreakStore.getState().summary?.protectedDays).toEqual([]);
+  });
+
   test('the chevron returns to whatever opened the streak', async () => {
-    seedStreak(run(3, 0));
+    showStreak(summaryOf(run(3, 0)));
 
     await press(await render(), 'Back');
 
@@ -205,7 +441,7 @@ describe('StreakScreen', () => {
   });
 
   test('the month can be paged back but not past today', async () => {
-    seedStreak(run(6, 0));
+    showStreak(summaryOf(run(6, 0)));
     const tree = await render();
 
     const next = tree.root

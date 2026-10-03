@@ -4,7 +4,7 @@ import type { ThemeColors } from '../../constants/colors';
 import { useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import type { LeaderboardEntry } from '../../types/models';
-import { formatCoins } from '../../utils/format';
+import { formatCoins, formatGrouped } from '../../utils/format';
 import { HStack, VStack } from '../layout/Stack';
 import { Avatar } from '../media/Avatar';
 import { AppText } from '../ui/AppText';
@@ -49,11 +49,11 @@ export const LeaderboardEntryRow = memo(({ entry }: Props) => {
       gap="sm"
       py="sm"
       accessible
-      accessibilityLabel={`Rank ${entry.rank}, ${entry.name}, ${
-        entry.location
-      }, ${formatCoins(entry.coins)} coins${
-        entry.perk ? ` plus ${entry.perk}` : ''
-      }`}
+      accessibilityLabel={`Rank ${entry.rank}, ${entry.name}${
+        entry.isCurrentUser ? ' (you)' : ''
+      }, ${entry.location}, ${formatGrouped(entry.score)} points, ${formatCoins(
+        entry.coins,
+      )} coins${entry.perk ? ` plus ${entry.perk}` : ''}`}
     >
       <AppText
         variant="bodyStrong"
@@ -66,10 +66,10 @@ export const LeaderboardEntryRow = memo(({ entry }: Props) => {
 
       <VStack flex={1} gap="xxs">
         <AppText variant="bodyStrong" numberOfLines={1}>
-          {entry.name}
+          {entry.isCurrentUser ? `${entry.name} (you)` : entry.name}
         </AppText>
         <AppText variant="miniMicro" color="textSecondary" numberOfLines={1}>
-          {entry.location}
+          {`${entry.location} · ${formatGrouped(entry.score)} pts`}
         </AppText>
       </VStack>
 

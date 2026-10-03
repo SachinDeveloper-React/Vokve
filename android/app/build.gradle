@@ -112,6 +112,10 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+    // Play Integrity for react-native-step-tracker-pro's requestIntegrityToken():
+    // the library declares it compile-only, so the app that wants tokens ships it.
+    implementation("com.google.android.play:integrity:1.4.0")
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {

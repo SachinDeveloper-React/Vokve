@@ -99,6 +99,14 @@ export type RootStackParamList = {
   HydrationReminder: undefined;
   /** Opened from the dashboard's "Analysis" metric tile. */
   Analytics: undefined;
+  /**
+   * Counting steps: turning it on, Health Connect, keeping it alive in the
+   * background, and the sync. From the dashboard's step card and the
+   * account's menu.
+   */
+  StepTracking: undefined;
+  /** Where a day's steps came from and how they were matched — from the step tracking screen. */
+  StepSources: undefined;
   /** Opened from the dashboard's "Health check up" shortcut. */
   HealthCheckup: undefined;
   /** Opened from the dashboard's "Nutrition & goal" shortcut. */

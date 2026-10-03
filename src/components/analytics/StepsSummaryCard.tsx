@@ -45,8 +45,10 @@ SummaryFigure.displayName = 'SummaryFigure';
 interface Props {
   steps: number;
   goal: number;
-  /** Yesterday's count, for the line under the figure. Null when unknown. */
+  /** The day before's count, for the line under the figure. Null when unknown. */
   previousSteps: number | null;
+  /** What that day is called in the line — "yesterday" unless the card shows an earlier day. */
+  comparedWith?: string;
   caloriesBurned: number;
   distanceKm: number;
   activeMinutes: number;
@@ -61,7 +63,7 @@ function formatActiveTime(minutes: number): string {
 }
 
 /**
- * Today's step count, what it is worth against the goal, and the four figures
+ * A day's step count, what it is worth against the goal, and the four figures
  * that come with it.
  *
  * The comparison line reads in whichever direction the day actually went. A
@@ -74,6 +76,7 @@ export const StepsSummaryCard = memo(
     steps,
     goal,
     previousSteps,
+    comparedWith = 'yesterday',
     caloriesBurned,
     distanceKm,
     activeMinutes,
@@ -90,6 +93,7 @@ export const StepsSummaryCard = memo(
         ? null
         : Math.round(((steps - previousSteps) / previousSteps) * 100);
     const isUp = (delta ?? 0) >= 0;
+    const direction = isUp ? 'more' : 'less';
 
     return (
       <View style={[styles.panel, { backgroundColor: colors.tierBackground }]}>
@@ -120,7 +124,7 @@ export const StepsSummaryCard = memo(
                   numberOfLines={1}
                   style={{ color: isUp ? darkColors.success : darkColors.destructive }}
                 >
-                  {`${Math.abs(delta)}% ${isUp ? 'more' : 'less'} than yesterday`}
+                  {`${Math.abs(delta)}% ${direction} than ${comparedWith}`}
                 </AppText>
               </HStack>
             )}

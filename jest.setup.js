@@ -26,6 +26,12 @@ jest.mock('react-native-device-info', () =>
   require('react-native-device-info/jest/react-native-device-info-mock'),
 );
 
+// The step tracker is a native module too. Its shipped mock resolves every
+// call with an empty day and fires listeners through `__emit`.
+jest.mock('react-native-step-tracker-pro', () =>
+  require('react-native-step-tracker-pro/jest'),
+);
+
 // The clipboard ships a mock object but does not register it either.
 jest.mock('@react-native-clipboard/clipboard', () =>
   require('@react-native-clipboard/clipboard/jest/clipboard-mock.js'),

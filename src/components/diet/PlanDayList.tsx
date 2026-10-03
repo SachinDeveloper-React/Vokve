@@ -1,7 +1,7 @@
 import React, { Fragment, memo, useCallback } from 'react';
 import { ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../theme';
-import { dietPlanForDate, totalsOf } from '../../stores/dietPlanStore';
+import type { DietPlanDaySummary } from '../../types/models';
 import { formatGrouped } from '../../utils/format';
 import { formatLongDate, fromIsoDate, type IsoDate } from '../../utils/date';
 import { Divider } from '../layout/Divider';
@@ -14,15 +14,14 @@ import { Pressable } from '../form/Pressable';
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 interface RowProps {
-  date: IsoDate;
+  day: DietPlanDaySummary;
   selected: boolean;
   onPress: (date: IsoDate) => void;
 }
 
-const DayRow = memo(({ date, selected, onPress }: RowProps) => {
+const DayRow = memo(({ day, selected, onPress }: RowProps) => {
   const { colors } = useTheme();
-  const meals = dietPlanForDate(date);
-  const { calories } = totalsOf(meals);
+  const { date, meals, calories } = day;
   const press = useCallback(() => onPress(date), [date, onPress]);
 
   return (
@@ -31,9 +30,9 @@ const DayRow = memo(({ date, selected, onPress }: RowProps) => {
       feedback="highlight"
       accessibilityRole="button"
       accessibilityState={{ selected }}
-      accessibilityLabel={`${formatLongDate(date)}, ${
-        meals.length
-      } meals, ${formatGrouped(calories)} calories`}
+      accessibilityLabel={`${formatLongDate(
+        date,
+      )}, ${meals} meals, ${formatGrouped(calories)} calories`}
     >
       <HStack align="center" gap="md" py="sm">
         <VStack gap="none">
@@ -49,7 +48,7 @@ const DayRow = memo(({ date, selected, onPress }: RowProps) => {
         </VStack>
 
         <AppText variant="micro" color="textSecondary" numberOfLines={1}>
-          {`${meals.length} meals`}
+          {`${meals} meals`}
         </AppText>
 
         <HStack flex={1} align="center" justify="end" gap="sm">
@@ -66,8 +65,8 @@ const DayRow = memo(({ date, selected, onPress }: RowProps) => {
 DayRow.displayName = 'DayRow';
 
 interface Props {
-  /** The days to list, in order. */
-  dates: IsoDate[];
+  /** The days to list, in order, as the server planned them. */
+  days: DietPlanDaySummary[];
   selected: IsoDate;
   title: string;
   caption: string;
@@ -85,7 +84,7 @@ interface Props {
  * heavy Thursday is one tap from the meals that made it heavy.
  */
 export const PlanDayList = memo(
-  ({ dates, selected, title, caption, onPressDay }: Props) => (
+  ({ days, selected, title, caption, onPressDay }: Props) => (
     <VStack gap="sm">
       <VStack gap="xxs">
         <AppText variant="h3">{title}</AppText>
@@ -96,12 +95,12 @@ export const PlanDayList = memo(
 
       <Card radius="xl" padding="base">
         <VStack>
-          {dates.map((date, index) => (
-            <Fragment key={date}>
+          {days.map((day, index) => (
+            <Fragment key={day.date}>
               {index > 0 ? <Divider /> : null}
               <DayRow
-                date={date}
-                selected={date === selected}
+                day={day}
+                selected={day.date === selected}
                 onPress={onPressDay}
               />
             </Fragment>

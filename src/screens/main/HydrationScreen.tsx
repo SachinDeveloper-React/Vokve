@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { CustomAmountSheet } from '../../components/hydration/CustomAmountSheet';
 import { HydrationHeader } from '../../components/hydration/HydrationHeader';
@@ -8,15 +8,17 @@ import { HydrationProgressCard } from '../../components/hydration/HydrationProgr
 import { HydrationStatsCard } from '../../components/hydration/HydrationStatsCard';
 import { HydrationTipCard } from '../../components/hydration/HydrationTipCard';
 import { QuickAddRow } from '../../components/hydration/QuickAddRow';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { hydrationHighlights, hydrationTip } from '../../constants/seedData';
+import { useTip } from '../../hooks/useContent';
+import { useHydrationStats } from '../../hooks/useHydration';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import {
   useHydrationStore,
-  useTodayHydration,
-  useTodayHydrationEntries,
+  useTodayHydrationView,
 } from '../../stores/hydrationStore';
 import { useDailyWaterGoalMl } from '../../stores/settingsStore';
-import { useThemedStyles, type ThemeShape } from '../../theme';
+import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -27,25 +29,46 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * The day's water: how much has gone in, the ways to log more, and what was
  * logged so far.
  *
- * Everything on it is live from the hydration store — the figure at the top,
- * the glass, and the rows at the bottom are three views of one number, so a
- * tap on a quick-add moves all three at once. That is the whole argument for
- * the screen existing alongside the dashboard's hydration card: the card can
- * add water, but only this screen can take a mistaken tap back out.
+ * The figure at the top, the glass and the rows at the bottom are three
+ * views of one number — the server's day with this phone's unsent drinks
+ * laid over it — so a tap on a quick-add moves all three at once, before the
+ * network has answered. That is the whole argument for the screen existing
+ * alongside the dashboard's hydration card: the card can add water, but only
+ * this screen can take a mistaken tap back out.
  *
- * The streak, average and hit rate come from the seed rather than the store,
- * because they need a history of days and the store keeps only today. They are
- * the one part of the screen a real endpoint will replace wholesale.
+ * The best run, average and hit rate are the server's (`GET
+ * /hydration/stats`), asked again whenever it confirms a drink; the tip is
+ * the day's from the server's content.
  */
 export const HydrationScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const navigation = useNavigation();
 
-  const consumedMl = useTodayHydration();
-  const entries = useTodayHydrationEntries();
+  const today = useTodayHydrationView();
   const goalMl = useDailyWaterGoalMl();
   const addWater = useHydrationStore(s => s.add);
   const removeEntry = useHydrationStore(s => s.remove);
+  const isSyncing = useHydrationStore(s => s.isSyncing);
+  const syncError = useHydrationStore(s => s.syncError);
+  const hydrateFromServer = useHydrationStore(s => s.hydrateFromServer);
+  const refreshIfStale = useHydrationStore(s => s.refreshIfStale);
+  const stats = useHydrationStats();
+  const tip = useTip('hydration');
+
+  useRefreshOnFocus(refreshIfStale);
+
+  const [isPulling, setPulling] = useState(false);
+  const { reload: reloadStats } = stats;
+  const onRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await hydrateFromServer();
+    } finally {
+      reloadStats();
+      setPulling(false);
+    }
+  }, [hydrateFromServer, reloadStats]);
 
   const [isCustomOpen, setCustomOpen] = useState(false);
   const openCustom = useCallback(() => setCustomOpen(true), []);
@@ -74,30 +97,61 @@ export const HydrationScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPulling}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <HydrationHeader
           onPressBack={onPressBack}
           onPressReminders={onOpenReminders}
         />
 
-        <HydrationProgressCard consumedMl={consumedMl} goalMl={goalMl} />
+        {today.synced ? (
+          <HydrationProgressCard
+            consumedMl={today.consumedMl}
+            goalMl={goalMl}
+          />
+        ) : (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load today's water"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        )}
 
         <QuickAddRow onAdd={addWater} onPressCustom={openCustom} />
 
-        <HydrationStatsCard
-          bestStreakDays={hydrationHighlights.bestStreakDays}
-          dailyAverageMl={hydrationHighlights.dailyAverageMl}
-          goalHitRatePercent={hydrationHighlights.goalHitRatePercent}
-          dailyReminders={hydrationHighlights.dailyReminders}
-        />
+        {stats.data ? (
+          <HydrationStatsCard
+            bestStreakDays={stats.data.bestStreakDays}
+            dailyAverageMl={stats.data.dailyAverageMl}
+            goalHitRatePercent={stats.data.goalHitRatePercent}
+            dailyReminders={stats.data.reminderCount}
+          />
+        ) : (
+          <LoadState
+            loading={stats.loading}
+            title="Couldn't load your water habit"
+            message={stats.error}
+            onRetry={stats.reload}
+          />
+        )}
 
-        <HydrationLogCard
-          entries={entries}
-          onRemove={removeEntry}
-          onPressHistory={notImplemented}
-        />
+        {today.synced ? (
+          <HydrationLogCard
+            entries={today.entries}
+            onRemove={removeEntry}
+            onPressHistory={notImplemented}
+          />
+        ) : null}
 
-        <HydrationTipCard tip={hydrationTip} />
+        {tip ? <HydrationTipCard tip={tip.text} /> : null}
       </ScrollView>
 
       <CustomAmountSheet

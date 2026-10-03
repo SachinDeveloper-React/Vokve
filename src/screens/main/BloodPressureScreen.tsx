@@ -10,8 +10,15 @@ import { VitalTipCard } from '../../components/health/VitalTipCard';
 import { BloodPressureHeroCard } from '../../components/pressure/BloodPressureHeroCard';
 import { BloodPressureTrendCard } from '../../components/pressure/BloodPressureTrendCard';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { useReadingsOfKind, useVitalsStore } from '../../stores/vitalsStore';
+import { useTip } from '../../hooks/useContent';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
+import {
+  useReadingsOfKind,
+  useVitalsStore,
+  useVitalsSynced,
+} from '../../stores/vitalsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
@@ -44,6 +51,12 @@ export const BloodPressureScreen = () => {
   const readings = useReadingsOfKind('blood_pressure', TREND_POINTS);
   const pulses = useReadingsOfKind('heart_rate', 1);
   const addReading = useVitalsStore(s => s.addReading);
+  const synced = useVitalsSynced();
+  const isSyncing = useVitalsStore(s => s.isSyncing);
+  const syncError = useVitalsStore(s => s.syncError);
+  const hydrateFromServer = useVitalsStore(s => s.hydrateFromServer);
+  const tip = useTip('blood_pressure');
+  useRefreshOnFocus(useVitalsStore.getState().refreshIfStale);
 
   const [isLogOpen, setLogOpen] = useState(false);
   const openLog = useCallback(() => setLogOpen(true), []);
@@ -81,7 +94,14 @@ export const BloodPressureScreen = () => {
           onPressInfo={notImplemented}
         />
 
-        {latest ? (
+        {!synced ? (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your readings"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        ) : latest ? (
           <BloodPressureHeroCard
             systolic={latest.value}
             diastolic={latest.secondary ?? 0}
@@ -115,12 +135,14 @@ export const BloodPressureScreen = () => {
           onPressViewAll={notImplemented}
         />
 
-        <VitalTipCard
-          title="Keep Your BP In Check"
-          message="Stay active, sleep well and monitor regularly"
-          tint={colors.primary}
-          onPress={notImplemented}
-        />
+        {tip ? (
+          <VitalTipCard
+            title={tip.title ?? 'Tip'}
+            message={tip.text}
+            tint={colors.primary}
+            onPress={notImplemented}
+          />
+        ) : null}
       </ScrollView>
 
       <AddReadingSheet

@@ -16,6 +16,8 @@ import { HealthCheckupScreen } from '../src/screens/main/HealthCheckupScreen';
 import { statusOf } from '../src/components/health/vitals';
 import { ThemeProvider } from '../src/theme';
 import { useVitalsStore } from '../src/stores/vitalsStore';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import { stockVitals } from './helpers/vitals';
 import type { VitalReading } from '../src/types/models';
 
 const mockNavigate = jest.fn();
@@ -31,6 +33,32 @@ jest.mock('@react-navigation/native', () => ({
     canGoBack: () => true,
   }),
 }));
+
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+// The mock backend's own readings, score and tips, behind spies.
+jest.mock('../src/services/api/endpoints', () => {
+  const api = jest.requireActual('../src/services/api/mockApi');
+  return {
+    vitalsApi: {
+      list: jest.fn((query: unknown) => api.mockVitalsApi.list(query)),
+      latest: jest.fn(() => api.mockVitalsApi.latest()),
+      log: jest.fn((reading: unknown, options: unknown) =>
+        api.mockVitalsApi.log(reading, options),
+      ),
+      score: jest.fn(() => api.mockVitalsApi.score()),
+    },
+    contentApi: {
+      tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
+    },
+  };
+});
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -54,8 +82,17 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 beforeEach(() => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
+  clearServerReads();
   useVitalsStore.getState().reset();
+  stockVitals();
 });
+
+/** Lets the server's answers land. */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
 
 afterEach(async () => {
   const tree = mounted;
@@ -79,6 +116,7 @@ const render = async () => {
     );
   });
   mounted = tree;
+  await settle();
   return tree;
 };
 
@@ -160,8 +198,23 @@ describe('HealthCheckupScreen', () => {
     );
   });
 
-  test('the score carries the band that goes with it', async () => {
-    expect(allText(await render())).toContain('Good');
+  test("the score is the server's, with the band that goes with it", async () => {
+    const text = allText(await render());
+    expect(text).toContain('82');
+    expect(text).toContain('Good');
+  });
+
+  test('before the server has answered it says so, and invents no reading', async () => {
+    useVitalsStore.getState().reset();
+    const text = allText(await render());
+
+    expect(text).not.toContain('118 / 76');
+  });
+
+  test("the day's tip is the server's", async () => {
+    expect(allText(await render())).toContain(
+      'Drink enough water, eat balanced meals and sleep well.',
+    );
   });
 
   test('a new reading replaces the tile and heads the history', async () => {
@@ -177,12 +230,12 @@ describe('HealthCheckupScreen', () => {
 
   test('the add control opens a sheet instead of logging something', async () => {
     const tree = await render();
-    const before = useVitalsStore.getState().readings.length;
 
     press(tree, 'Add a new reading');
 
     expect(allText(tree)).toContain('Add a reading');
-    expect(useVitalsStore.getState().readings).toHaveLength(before);
+    // Nothing logged, so nothing waiting to be sent.
+    expect(useVitalsStore.getState().outbox).toEqual([]);
   });
 
   test('the heart rate tile opens its own screen', async () => {

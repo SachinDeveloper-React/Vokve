@@ -1,8 +1,10 @@
 /**
- * Every figure on the nutrition screen is counted from one list of food, so
- * the checks here are that the sums hold: the summary, the macro bars and the
- * four meal rows all have to move together when an item is logged, and the
- * verdict at the foot has to turn when the goal is passed.
+ * Every figure on the nutrition screen is counted from one list of food — the
+ * server's day with any meal still on its way laid over it — so the checks
+ * here are that the sums hold: the summary, the macro bars and the four meal
+ * rows all have to move together when an item is logged, before the server
+ * has answered, and the verdict at the foot has to turn when the goal is
+ * passed. The API is the mock backend's own, served without latency.
  *
  * @format
  */
@@ -16,7 +18,8 @@ import { NutritionScreen } from '../src/screens/main/NutritionScreen';
 import { ThemeProvider } from '../src/theme';
 import { useNutritionStore } from '../src/stores/nutritionStore';
 import { seedFoodEntries } from '../src/constants/seedData';
-import { todayIso } from '../src/utils/date';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import { mockAuthApi, mockNutritionApi } from '../src/services/api/mockApi';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -32,6 +35,52 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+// The mock backend's own diary, profile and tips, behind spies.
+jest.mock('../src/services/api/endpoints', () => {
+  const api = jest.requireActual('../src/services/api/mockApi');
+  return {
+    nutritionApi: {
+      profile: jest.fn(() => api.mockNutritionApi.profile()),
+      updateProfile: jest.fn((patch: unknown, options: unknown) =>
+        api.mockNutritionApi.updateProfile(patch, options),
+      ),
+      day: jest.fn((date: string) => api.mockNutritionApi.day(date)),
+      log: jest.fn((entries: unknown, options: unknown) =>
+        api.mockNutritionApi.log(entries, options),
+      ),
+      remove: jest.fn((id: string, options: unknown) =>
+        api.mockNutritionApi.remove(id, options),
+      ),
+    },
+    activityApi: {
+      day: jest.fn(async (date: string) => ({
+        date,
+        steps: 0,
+        verifiedSteps: 0,
+        distanceKm: 0,
+        activeMinutes: 0,
+        caloriesBurned: 320,
+        workoutsCompleted: 0,
+        source: null,
+        verified: false,
+      })),
+    },
+    contentApi: { tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)) },
+  };
+});
+
+const { nutritionApi } = jest.requireMock('../src/services/api/endpoints') as {
+  nutritionApi: { log: jest.Mock; updateProfile: jest.Mock };
+};
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -39,11 +88,27 @@ const metrics = {
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
+  clearServerReads();
+  // Signing out is the mock backend's own reset: today's plate is back.
+  await mockAuthApi.signOut();
+  nutritionApi.log.mockClear();
+  nutritionApi.updateProfile.mockClear();
   useNutritionStore.getState().reset();
+  useNutritionStore.setState({
+    profile: await mockNutritionApi.profile(),
+    syncedAt: new Date().toISOString(),
+  });
 });
+
+/** Lets the server's answers land. */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
 
 afterEach(async () => {
   const tree = mounted;
@@ -67,6 +132,7 @@ const render = async () => {
     );
   });
   mounted = tree;
+  await settle();
   return tree;
 };
 
@@ -94,11 +160,21 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
   ReactTestRenderer.act(() => node.props.onPress());
 };
 
-/** The food the store holds for today, whatever day the tests run on. */
-const todaysEntries = () =>
-  useNutritionStore.getState().entriesByDate[todayIso()] ?? [];
-
 describe('NutritionScreen', () => {
+  test('before the targets arrive it says so, and invents no goal', async () => {
+    useNutritionStore.getState().reset();
+    const text = allText(await render());
+
+    expect(text).not.toContain('of 300 grams');
+  });
+
+  test("the day's tip and calories burned are the server's", async () => {
+    const text = allText(await render());
+
+    expect(text).toContain('Add more protein to your dinner');
+    expect(text).toContain('320');
+  });
+
   test("the day's calories are the sum of what is on the plate", async () => {
     const plate = seedFoodEntries.reduce(
       (sum, entry) => sum + entry.calories,
@@ -131,22 +207,32 @@ describe('NutritionScreen', () => {
     const tree = await render();
 
     ReactTestRenderer.act(() =>
-      useNutritionStore.getState().addEntry({
-        slot: 'dinner',
-        name: 'Grilled paneer',
-        calories: 200,
-        proteinG: 14,
-        carbsG: 6,
-        fatsG: 12,
-      }),
+      useNutritionStore.getState().addEntries([
+        {
+          slot: 'dinner',
+          name: 'Grilled paneer',
+          calories: 200,
+          proteinG: 14,
+          carbsG: 6,
+          fatsG: 12,
+        },
+      ]),
     );
 
+    // At once, before the server has answered.
     const text = allText(tree);
     expect(text).toContain('1,850'); // 1,650 + 200
     expect(text).toContain('550 kcal'); // dinner, 350 + 200
     expect(labels(tree)).toEqual(
       expect.arrayContaining(['Protein, 99 of 120 grams']),
     );
+
+    await settle();
+    expect(nutritionApi.log).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: 'Grilled paneer', slot: 'dinner' })],
+      { idempotencyKey: expect.stringMatching(/^meal:/) },
+    );
+    expect(allText(tree)).toContain('1,850');
   });
 
   test('the verdict turns once the goal is passed', async () => {
@@ -154,14 +240,16 @@ describe('NutritionScreen', () => {
     expect(allText(tree)).toContain("within your daily calorie goal");
 
     ReactTestRenderer.act(() =>
-      useNutritionStore.getState().addEntry({
-        slot: 'dinner',
-        name: 'Late night biryani',
-        calories: 900,
-        proteinG: 20,
-        carbsG: 90,
-        fatsG: 30,
-      }),
+      useNutritionStore.getState().addEntries([
+        {
+          slot: 'dinner',
+          name: 'Late night biryani',
+          calories: 900,
+          proteinG: 20,
+          carbsG: 90,
+          fatsG: 30,
+        },
+      ]),
     );
 
     expect(allText(tree)).toContain('350 kcal over');
@@ -169,14 +257,13 @@ describe('NutritionScreen', () => {
 
   test('the plus opens the add-meal screen for the meal it belongs to', async () => {
     const tree = await render();
-    const before = todaysEntries().length;
 
     press(tree, 'Add food to Evening Snack');
 
     // A screen rather than a sheet: a meal is several foods, each with a
     // portion and four macros.
     expect(mockNavigate).toHaveBeenCalledWith('AddMeal', { slot: 'snack' });
-    expect(todaysEntries()).toHaveLength(before);
+    expect(useNutritionStore.getState().outbox).toEqual([]);
   });
 
   test('a preference can be changed from its own tile', async () => {
@@ -186,8 +273,14 @@ describe('NutritionScreen', () => {
     press(tree, 'Diet Type, Vegetarian');
     press(tree, 'Vegan');
 
-    expect(useNutritionStore.getState().preferences.dietType).toBe('vegan');
+    expect(useNutritionStore.getState().profile?.preferences.dietType).toBe(
+      'vegan',
+    );
     expect(allText(tree)).toContain('Vegan');
+    expect(nutritionApi.updateProfile).toHaveBeenCalledWith(
+      { preferences: { dietType: 'vegan' } },
+      { idempotencyKey: expect.any(String) },
+    );
   });
 
   test('Manage opens the diet plan behind the preferences', async () => {

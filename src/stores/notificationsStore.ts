@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { seedNotifications } from '../constants/seedData';
 import { notificationApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import type {
@@ -62,9 +61,11 @@ interface NotificationsState {
    * hooks fall back to counting what is here.
    */
   counts: NotificationCountsSummary | null;
-  /** When the server last confirmed the feed; null while still seeded. */
+  /** When the server last confirmed the feed; null until it first has. */
   syncedAt: string | null;
   isSyncing: boolean;
+  /** Why the last sync failed; cleared by the next one that succeeds. */
+  syncError: string | null;
   isLoadingMore: boolean;
 
   /**
@@ -90,6 +91,14 @@ interface NotificationsState {
   reset: () => void;
 }
 
+/** The feed before the first sync: nothing the server has not sent. */
+const EMPTY_FEED = {
+  notifications: [] as AppNotification[],
+  nextCursor: null,
+  counts: null,
+  syncedAt: null,
+} satisfies Partial<NotificationsState>;
+
 /**
  * The notification centre's feed.
  *
@@ -101,11 +110,9 @@ interface NotificationsState {
 export const useNotificationsStore = create<NotificationsState>()(
   persist(
     (set, get) => ({
-      notifications: seedNotifications,
-      nextCursor: null,
-      counts: null,
-      syncedAt: null,
+      ...EMPTY_FEED,
       isSyncing: false,
+      syncError: null,
       isLoadingMore: false,
 
       hydrateFromServer: async () => {
@@ -124,14 +131,12 @@ export const useNotificationsStore = create<NotificationsState>()(
             counts,
             syncedAt: new Date().toISOString(),
             isSyncing: false,
+            syncError: null,
           });
         } catch (error) {
-          logger.warn(
-            'notificationsStore',
-            'Feed sync failed',
-            toApiError(error),
-          );
-          set({ isSyncing: false });
+          const apiError = toApiError(error);
+          logger.warn('notificationsStore', 'Feed sync failed', apiError);
+          set({ isSyncing: false, syncError: apiError.message });
         }
       },
 
@@ -191,17 +196,13 @@ export const useNotificationsStore = create<NotificationsState>()(
             unread: Math.max(0, state.counts.unread - 1),
           },
         }));
-        // Only a synced feed has rows the server knows about; a seeded id
-        // would 404 for nothing.
-        if (get().syncedAt !== null) {
-          notificationApi.markRead(id).catch(error => {
-            logger.warn(
-              'notificationsStore',
-              'Could not mark read on the server',
-              toApiError(error),
-            );
-          });
-        }
+        notificationApi.markRead(id).catch(error => {
+          logger.warn(
+            'notificationsStore',
+            'Could not mark read on the server',
+            toApiError(error),
+          );
+        });
       },
 
       markAllRead: () => {
@@ -220,31 +221,33 @@ export const useNotificationsStore = create<NotificationsState>()(
           ),
           counts: state.counts && { ...state.counts, unread: 0 },
         }));
-        if (get().syncedAt !== null) {
-          notificationApi.markAllRead().catch(error => {
-            logger.warn(
-              'notificationsStore',
-              'Could not mark all read on the server',
-              toApiError(error),
-            );
-          });
-        }
+        notificationApi.markAllRead().catch(error => {
+          logger.warn(
+            'notificationsStore',
+            'Could not mark all read on the server',
+            toApiError(error),
+          );
+        });
       },
 
       reset: () =>
         set({
-          notifications: seedNotifications,
-          nextCursor: null,
-          counts: null,
-          syncedAt: null,
+          ...EMPTY_FEED,
           isSyncing: false,
+          syncError: null,
           isLoadingMore: false,
         }),
     }),
     {
       name: 'vokve.notifications',
       storage: createJSONStorage(() => mmkvStorage),
-      version: 1,
+      // v2: the placeholder feed is gone. A stored feed that never synced was
+      // that placeholder, and is dropped; a synced one is the server's.
+      version: 2,
+      migrate: persisted => {
+        const stored = persisted as Partial<NotificationsState> | null;
+        return stored?.syncedAt ? stored : EMPTY_FEED;
+      },
       partialize: state => ({
         notifications: state.notifications,
         nextCursor: state.nextCursor,

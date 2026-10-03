@@ -136,3 +136,115 @@ export const SUPPORT_FAQS = [
     answer: 'Open a ticket from Help & Support and we will reply inside the app. Tickets carry your app version and device automatically, so you do not have to describe your phone to us.',
     tags: ['contact', 'human', 'ticket', 'email us'] },
 ] as const;
+
+/**
+ * The challenge catalogue (RULES §C), from the board the app was designed
+ * around. The rewards are the inherited ones (D-32 — the owner rebalances
+ * them in `challenge_definitions`; the daily ceiling applies regardless).
+ * `startsInDays` sets a challenge's opening day the first time it is seeded,
+ * relative to that day; a re-seed never moves it.
+ */
+export const CHALLENGES = [
+  { _id: 'ch-10k-steps', title: '10K Steps Challenge', description: 'Walk 10,000 steps in a day', emoji: '👟', metric: 'steps', cadence: 'daily', goal: 10_000, rewardCoins: 200, rewardsBadge: true, badgeId: 'a-10k-steps', sort: 1, startsInDays: null },
+  { _id: 'ch-burn-500', title: 'Burn 500 Calories', description: 'Burn 500 calories in a day', emoji: '🔥', metric: 'calories', cadence: 'daily', goal: 500, rewardCoins: 150, rewardsBadge: true, badgeId: 'a-cal-burner', sort: 2, startsInDays: null },
+  { _id: 'ch-30-min-active', title: '30 Min Active Time', description: 'Be active for 30 minutes', emoji: '⏱️', metric: 'minutes', cadence: 'daily', goal: 30, rewardCoins: 100, rewardsBadge: true, badgeId: 'a-active-30', sort: 3, startsInDays: null },
+  { _id: 'ch-week-step-master', title: 'Weekly Step Master', description: 'Walk 70,000 steps this week', emoji: '🚶', metric: 'steps', cadence: 'weekly', goal: 70_000, rewardCoins: 800, rewardsBadge: true, badgeId: 'a-step-master', sort: 4, startsInDays: null },
+  { _id: 'ch-month-mover', title: 'Monthly Mover', description: 'Log 900 active minutes this month', emoji: '🗓️', metric: 'minutes', cadence: 'monthly', goal: 900, rewardCoins: 2_000, rewardsBadge: true, badgeId: 'a-month-mover', sort: 5, startsInDays: null },
+  { _id: 'ch-15k-steps', title: '15K Steps Challenge', description: 'Walk 15,000 steps in a day', emoji: '🏃', metric: 'steps', cadence: 'daily', goal: 15_000, rewardCoins: 300, rewardsBadge: false, badgeId: null, sort: 6, startsInDays: 1 },
+  { _id: 'ch-7-day-consistency', title: '7 Days Consistency', description: 'Hit your daily goal for 7 days', emoji: '⭐', metric: 'days', cadence: 'weekly', goal: 7, rewardCoins: 500, rewardsBadge: true, badgeId: 'a-7-day-streak', sort: 7, startsInDays: 2 },
+  { _id: 'ch-weekend-warrior', title: 'Weekend Warrior', description: 'Finish two workouts this week', emoji: '🎯', metric: 'workouts', cadence: 'weekly', goal: 2, rewardCoins: 200, rewardsBadge: false, badgeId: null, sort: 8, startsInDays: 5 },
+  { _id: 'ch-monthly-marathon', title: 'Monthly Marathon', description: 'Cover 300,000 steps in a month', emoji: '🏅', metric: 'steps', cadence: 'monthly', goal: 300_000, rewardCoins: 1_500, rewardsBadge: true, badgeId: 'a-marathon', sort: 9, startsInDays: 9 },
+] as const;
+
+/**
+ * The achievement shelf (RULES C7). `rule`/`threshold` unlock a badge on its
+ * own — the member's best day, longest streak or running total reaching it;
+ * a badge with no rule is a challenge's to give.
+ */
+export const ACHIEVEMENTS = [
+  { _id: 'a-10k-steps', label: '10K Steps', value: 10_000, metric: 'steps', rule: 'best_day_steps', threshold: 10_000, sort: 1 },
+  { _id: 'a-cal-burner', label: 'Cal Burner', value: 500, metric: 'calories', rule: 'best_day_calories', threshold: 500, sort: 2 },
+  { _id: 'a-active-30', label: 'Active 30', value: 30, metric: 'minutes', rule: 'best_day_minutes', threshold: 30, sort: 3 },
+  { _id: 'a-7-day-streak', label: '7 Days Streak', value: 7, metric: 'days', rule: 'longest_streak', threshold: 7, sort: 4 },
+  { _id: 'a-first-challenge', label: 'First Challenge', value: 1, metric: 'workouts', rule: 'challenges_completed', threshold: 1, sort: 5 },
+  { _id: 'a-15k-steps', label: '15K Steps', value: 15_000, metric: 'steps', rule: 'best_day_steps', threshold: 15_000, sort: 6 },
+  { _id: 'a-cal-crusher', label: 'Cal Crusher', value: 1_000, metric: 'calories', rule: 'best_day_calories', threshold: 1_000, sort: 7 },
+  { _id: 'a-active-60', label: 'Active 60', value: 60, metric: 'minutes', rule: 'best_day_minutes', threshold: 60, sort: 8 },
+  { _id: 'a-30-day-streak', label: '30 Days Streak', value: 30, metric: 'days', rule: 'longest_streak', threshold: 30, sort: 9 },
+  { _id: 'a-ten-workouts', label: 'Ten Workouts', value: 10, metric: 'workouts', rule: 'total_workouts', threshold: 10, sort: 10 },
+  { _id: 'a-20k-steps', label: '20K Steps', value: 20_000, metric: 'steps', rule: 'best_day_steps', threshold: 20_000, sort: 11 },
+  { _id: 'a-cal-machine', label: 'Cal Machine', value: 2_000, metric: 'calories', rule: 'best_day_calories', threshold: 2_000, sort: 12 },
+  { _id: 'a-active-120', label: 'Active 120', value: 120, metric: 'minutes', rule: 'best_day_minutes', threshold: 120, sort: 13 },
+  { _id: 'a-90-day-streak', label: '90 Days Streak', value: 90, metric: 'days', rule: 'longest_streak', threshold: 90, sort: 14 },
+  { _id: 'a-fifty-workouts', label: 'Fifty Workouts', value: 50, metric: 'workouts', rule: 'total_workouts', threshold: 50, sort: 15 },
+  { _id: 'a-step-master', label: 'Step Master', value: 70_000, metric: 'steps', rule: null, threshold: null, sort: 16 },
+  { _id: 'a-month-mover', label: 'Month Mover', value: 900, metric: 'minutes', rule: null, threshold: null, sort: 17 },
+  { _id: 'a-marathon', label: 'Marathoner', value: 300_000, metric: 'steps', rule: null, threshold: null, sort: 18 },
+] as const;
+
+/**
+ * The app's standing words, one shown per topic per day in rotation. The
+ * seed keeps the wording current, like the help articles; an operator adds
+ * or retires a tip in `content_tips` (`active`).
+ */
+export const CONTENT_TIPS = [
+  { _id: 'motivation-1', topic: 'motivation', title: null, text: 'Small steps every day lead to big results.', sort: 1 },
+  { _id: 'motivation-2', topic: 'motivation', title: null, text: 'You do not have to be fast. You only have to keep going.', sort: 2 },
+  { _id: 'motivation-3', topic: 'motivation', title: null, text: 'Consistency beats intensity, every time.', sort: 3 },
+  { _id: 'motivation-4', topic: 'motivation', title: null, text: 'Every step counts — the first one most of all.', sort: 4 },
+  { _id: 'motivation-5', topic: 'motivation', title: null, text: 'A walk today is a better day tomorrow.', sort: 5 },
+  { _id: 'hydration-1', topic: 'hydration', title: null, text: "Drink water regularly; don't wait until thirsty.", sort: 1 },
+  { _id: 'hydration-2', topic: 'hydration', title: null, text: 'Start the day with a glass of water, before tea or coffee.', sort: 2 },
+  { _id: 'hydration-3', topic: 'hydration', title: null, text: 'Keep a bottle in sight — you drink more of what you can see.', sort: 3 },
+  { _id: 'hydration-4', topic: 'hydration', title: null, text: 'Add a glass for every hour of exercise.', sort: 4 },
+  { _id: 'reminders-1', topic: 'reminders', title: 'Small sips, big difference', text: 'A glass every couple of hours beats a litre in one go — your body can only take in so much at a time.', sort: 1 },
+  { _id: 'reminders-2', topic: 'reminders', title: 'Pair it with a habit', text: 'Tie a reminder to something you already do — a meeting, a meal — and it sticks.', sort: 2 },
+  { _id: 'nutrition-1', topic: 'nutrition', title: null, text: 'Add more protein to your dinner for better muscle recovery.', sort: 1 },
+  { _id: 'nutrition-2', topic: 'nutrition', title: null, text: 'Fill half your plate with vegetables at lunch and dinner.', sort: 2 },
+  { _id: 'nutrition-3', topic: 'nutrition', title: null, text: 'Swap one sugary drink a day for water or buttermilk.', sort: 3 },
+  { _id: 'health-1', topic: 'health', title: null, text: 'Drink enough water, eat balanced meals and sleep well.', sort: 1 },
+  { _id: 'health-2', topic: 'health', title: null, text: 'Seven to nine hours of sleep does more for your numbers than any supplement.', sort: 2 },
+  { _id: 'health-3', topic: 'health', title: null, text: 'Take readings at the same time of day so they compare fairly.', sort: 3 },
+  { _id: 'heart-rate-1', topic: 'heart_rate', title: 'Keep Your Heart Healthy', text: 'Regular exercise, good sleep and a balanced diet', sort: 1 },
+  { _id: 'heart-rate-2', topic: 'heart_rate', title: 'Measure at rest', text: 'Sit quietly for five minutes before you take a reading', sort: 2 },
+  { _id: 'blood-pressure-1', topic: 'blood_pressure', title: 'Keep Your BP In Check', text: 'Stay active, sleep well and monitor regularly', sort: 1 },
+  { _id: 'blood-pressure-2', topic: 'blood_pressure', title: 'Watch the salt', text: 'Less salt in cooking and fewer packaged snacks help keep pressure down', sort: 2 },
+] as const;
+
+/**
+ * The food library everyone sees (RULES N8), from the add-meal screen's
+ * catalogue; `quickAdd` marks its shortcuts. Members' own foods live in the
+ * same collection with an owner and are never seeded.
+ */
+export const FOOD_ITEMS = [
+  {"_id": "fl-oats", "name": "Oats (Cooked)", "portion": "1 Cup (150 g)", "emoji": "🥣", "calories": 150, "proteinG": 5, "carbsG": 27, "fatsG": 3, "fiberG": 4, "quickAdd": true, "sort": 1},
+  {"_id": "fl-banana", "name": "Banana", "portion": "1 Medium (118 g)", "emoji": "🍌", "calories": 89, "proteinG": 1, "carbsG": 23, "fatsG": 0.3, "fiberG": 2.6, "quickAdd": true, "sort": 2},
+  {"_id": "fl-egg", "name": "Boiled Egg", "portion": "1 Large (50 g)", "emoji": "🥚", "calories": 78, "proteinG": 6, "carbsG": 0.6, "fatsG": 5, "fiberG": 0, "quickAdd": true, "sort": 3},
+  {"_id": "fl-peanut-butter", "name": "Peanut Butter", "portion": "1 Tbsp (16 g)", "emoji": "🥜", "calories": 94, "proteinG": 4, "carbsG": 3, "fatsG": 8, "fiberG": 1, "quickAdd": true, "sort": 4},
+  {"_id": "fl-brown-rice", "name": "Brown Rice", "portion": "1 Cup (150 g)", "emoji": "🍚", "calories": 215, "proteinG": 5, "carbsG": 45, "fatsG": 1.8, "fiberG": 3.5, "quickAdd": false, "sort": 5},
+  {"_id": "fl-dal", "name": "Dal", "portion": "1 Bowl (150 g)", "emoji": "🍲", "calories": 180, "proteinG": 10, "carbsG": 22, "fatsG": 5, "fiberG": 6, "quickAdd": false, "sort": 6},
+  {"_id": "fl-paneer", "name": "Paneer", "portion": "100 g", "emoji": "🧀", "calories": 265, "proteinG": 18, "carbsG": 6, "fatsG": 20, "fiberG": 0, "quickAdd": false, "sort": 7},
+  {"_id": "fl-curd", "name": "Curd", "portion": "1 Bowl (150 g)", "emoji": "🥛", "calories": 98, "proteinG": 6, "carbsG": 8, "fatsG": 4, "fiberG": 0, "quickAdd": false, "sort": 8},
+  {"_id": "fl-roti", "name": "Roti", "portion": "1 Piece (40 g)", "emoji": "🫓", "calories": 104, "proteinG": 3, "carbsG": 20, "fatsG": 1.5, "fiberG": 2, "quickAdd": false, "sort": 9},
+  {"_id": "fl-chicken", "name": "Grilled Chicken", "portion": "100 g", "emoji": "🍗", "calories": 165, "proteinG": 31, "carbsG": 0, "fatsG": 3.6, "fiberG": 0, "quickAdd": false, "sort": 10},
+  {"_id": "fl-salad", "name": "Mixed Salad", "portion": "1 Bowl (120 g)", "emoji": "🥗", "calories": 45, "proteinG": 2, "carbsG": 8, "fatsG": 0.5, "fiberG": 3, "quickAdd": false, "sort": 11},
+  {"_id": "fl-almonds", "name": "Almonds", "portion": "10 pieces (12 g)", "emoji": "🌰", "calories": 70, "proteinG": 3, "carbsG": 2.5, "fatsG": 6, "fiberG": 1.5, "quickAdd": false, "sort": 12},
+  {"_id": "fl-apple", "name": "Apple", "portion": "1 Medium (180 g)", "emoji": "🍎", "calories": 95, "proteinG": 0.5, "carbsG": 25, "fatsG": 0.3, "fiberG": 4.4, "quickAdd": false, "sort": 13},
+  {"_id": "fl-coffee", "name": "Black Coffee", "portion": "1 Cup", "emoji": "☕", "calories": 5, "proteinG": 0.3, "carbsG": 0, "fatsG": 0, "fiberG": 0, "quickAdd": false, "sort": 14},
+  {"_id": "fl-protein-shake", "name": "Protein Shake", "portion": "1 Scoop (30 g)", "emoji": "🥤", "calories": 120, "proteinG": 24, "carbsG": 3, "fatsG": 1.5, "fiberG": 0, "quickAdd": false, "sort": 15},
+] as const;
+
+/**
+ * The diet plan's curated days (RULES N7): the app's three-day rotation and
+ * variants of it for each diet type. A member's plan cycles through the
+ * days that suit their preferences — the placeholder for plan generation.
+ */
+export const DIET_PLAN_TEMPLATES = [
+  {"_id": "plan-1", "dietTypes": ["non_vegetarian"], "mealPlans": ["balanced", "high_protein"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 320, "proteinG": 18, "carbsG": 42, "fatsG": 9, "items": [{"name": "Oats with banana", "quantity": "1 bowl (200g)"}, {"name": "Boiled eggs", "quantity": "2 eggs"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 450, "proteinG": 26, "carbsG": 58, "fatsG": 14, "items": [{"name": "Brown rice", "quantity": "1 cup (150g)"}, {"name": "Dal", "quantity": "1 bowl (150g)"}, {"name": "Mixed salad", "quantity": "1 bowl"}, {"name": "Paneer curry", "quantity": "100g"}]}, {"slot": "snack", "time": "17:00", "calories": 180, "proteinG": 6, "carbsG": 18, "fatsG": 11, "items": [{"name": "Mixed nuts", "quantity": "30g"}, {"name": "Apple", "quantity": "1 medium"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 300, "proteinG": 32, "carbsG": 32, "fatsG": 11, "items": [{"name": "Grilled chicken", "quantity": "100g"}, {"name": "Steamed veggies", "quantity": "1 bowl"}, {"name": "Quinoa", "quantity": "1 cup (100g)"}]}], "sort": 1},
+  {"_id": "plan-2", "dietTypes": ["non_vegetarian"], "mealPlans": ["balanced", "high_protein", "low_carb"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 350, "proteinG": 20, "carbsG": 44, "fatsG": 10, "items": [{"name": "Poha with peanuts", "quantity": "1 plate (200g)"}, {"name": "Curd", "quantity": "1 bowl"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 470, "proteinG": 28, "carbsG": 60, "fatsG": 13, "items": [{"name": "Roti", "quantity": "3"}, {"name": "Rajma", "quantity": "1 bowl (150g)"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 160, "proteinG": 12, "carbsG": 14, "fatsG": 5, "items": [{"name": "Sprouts chaat", "quantity": "1 bowl"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 320, "proteinG": 30, "carbsG": 30, "fatsG": 12, "items": [{"name": "Grilled fish", "quantity": "120g"}, {"name": "Sautéed spinach", "quantity": "1 bowl"}, {"name": "Millet khichdi", "quantity": "1 cup"}]}], "sort": 2},
+  {"_id": "plan-3", "dietTypes": ["vegetarian", "eggetarian", "non_vegetarian"], "mealPlans": ["balanced", "high_protein"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 330, "proteinG": 22, "carbsG": 38, "fatsG": 10, "items": [{"name": "Besan chilla", "quantity": "2"}, {"name": "Mint chutney", "quantity": "2 tbsp"}, {"name": "Buttermilk", "quantity": "1 glass"}]}, {"slot": "lunch", "time": "13:00", "calories": 440, "proteinG": 25, "carbsG": 56, "fatsG": 12, "items": [{"name": "Vegetable pulao", "quantity": "1 bowl (180g)"}, {"name": "Soya chunk curry", "quantity": "100g"}, {"name": "Raita", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 170, "proteinG": 8, "carbsG": 20, "fatsG": 7, "items": [{"name": "Roasted chana", "quantity": "40g"}, {"name": "Orange", "quantity": "1 medium"}]}, {"slot": "dinner", "time": "20:00", "calories": 310, "proteinG": 28, "carbsG": 34, "fatsG": 10, "items": [{"name": "Paneer tikka", "quantity": "120g"}, {"name": "Stir-fried veggies", "quantity": "1 bowl"}, {"name": "Jowar roti", "quantity": "2"}]}], "sort": 3},
+  {"_id": "plan-4", "dietTypes": ["vegetarian", "eggetarian"], "mealPlans": ["balanced", "high_protein"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 320, "proteinG": 18, "carbsG": 42, "fatsG": 9, "items": [{"name": "Oats with banana", "quantity": "1 bowl (200g)"}, {"name": "Sprouts salad", "quantity": "1 bowl"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 450, "proteinG": 26, "carbsG": 58, "fatsG": 14, "items": [{"name": "Brown rice", "quantity": "1 cup (150g)"}, {"name": "Dal", "quantity": "1 bowl (150g)"}, {"name": "Mixed salad", "quantity": "1 bowl"}, {"name": "Paneer curry", "quantity": "100g"}]}, {"slot": "snack", "time": "17:00", "calories": 180, "proteinG": 6, "carbsG": 18, "fatsG": 11, "items": [{"name": "Mixed nuts", "quantity": "30g"}, {"name": "Apple", "quantity": "1 medium"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 300, "proteinG": 32, "carbsG": 32, "fatsG": 11, "items": [{"name": "Grilled paneer", "quantity": "100g"}, {"name": "Steamed veggies", "quantity": "1 bowl"}, {"name": "Quinoa", "quantity": "1 cup (100g)"}]}], "sort": 4},
+  {"_id": "plan-5", "dietTypes": ["vegetarian", "eggetarian"], "mealPlans": ["balanced", "low_carb"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 350, "proteinG": 20, "carbsG": 44, "fatsG": 10, "items": [{"name": "Poha with peanuts", "quantity": "1 plate (200g)"}, {"name": "Curd", "quantity": "1 bowl"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 470, "proteinG": 28, "carbsG": 60, "fatsG": 13, "items": [{"name": "Roti", "quantity": "3"}, {"name": "Rajma", "quantity": "1 bowl (150g)"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 160, "proteinG": 12, "carbsG": 14, "fatsG": 5, "items": [{"name": "Sprouts chaat", "quantity": "1 bowl"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 320, "proteinG": 30, "carbsG": 30, "fatsG": 12, "items": [{"name": "Tofu stir-fry", "quantity": "120g"}, {"name": "Sautéed spinach", "quantity": "1 bowl"}, {"name": "Millet khichdi", "quantity": "1 cup"}]}], "sort": 5},
+  {"_id": "plan-6", "dietTypes": ["vegan", "vegetarian", "eggetarian"], "mealPlans": ["balanced"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 330, "proteinG": 22, "carbsG": 38, "fatsG": 10, "items": [{"name": "Besan chilla", "quantity": "2"}, {"name": "Mint chutney", "quantity": "2 tbsp"}, {"name": "Lemon water", "quantity": "1 glass"}]}, {"slot": "lunch", "time": "13:00", "calories": 440, "proteinG": 25, "carbsG": 56, "fatsG": 12, "items": [{"name": "Vegetable pulao", "quantity": "1 bowl (180g)"}, {"name": "Soya chunk curry", "quantity": "100g"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 170, "proteinG": 8, "carbsG": 20, "fatsG": 7, "items": [{"name": "Roasted chana", "quantity": "40g"}, {"name": "Orange", "quantity": "1 medium"}]}, {"slot": "dinner", "time": "20:00", "calories": 310, "proteinG": 28, "carbsG": 34, "fatsG": 10, "items": [{"name": "Tofu tikka", "quantity": "120g"}, {"name": "Stir-fried veggies", "quantity": "1 bowl"}, {"name": "Jowar roti", "quantity": "2"}]}], "sort": 6},
+  {"_id": "plan-7", "dietTypes": ["vegan"], "mealPlans": ["balanced", "low_carb"], "meals": [{"slot": "breakfast", "time": "08:00", "calories": 350, "proteinG": 20, "carbsG": 44, "fatsG": 10, "items": [{"name": "Poha with peanuts", "quantity": "1 plate (200g)"}, {"name": "Soy yogurt", "quantity": "1 bowl"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 470, "proteinG": 28, "carbsG": 60, "fatsG": 13, "items": [{"name": "Roti", "quantity": "3"}, {"name": "Rajma", "quantity": "1 bowl (150g)"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 160, "proteinG": 12, "carbsG": 14, "fatsG": 5, "items": [{"name": "Sprouts chaat", "quantity": "1 bowl"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 320, "proteinG": 30, "carbsG": 30, "fatsG": 12, "items": [{"name": "Tofu stir-fry", "quantity": "120g"}, {"name": "Sautéed spinach", "quantity": "1 bowl"}, {"name": "Millet khichdi", "quantity": "1 cup"}]}], "sort": 7},
+];

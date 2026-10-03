@@ -33,17 +33,24 @@ export const ActiveChallengeRow = memo(({ challenge }: Props) => {
   const { tint } = METRIC_STYLE[challenge.metric];
   const color = darkColors[tint];
   const foreground = darkColors.tierForeground;
+  const progress = formatProgress(
+    challenge.progress,
+    challenge.goal,
+    challenge.metric,
+  );
+  // The server completes a challenge on its own; the row says so in words
+  // as well as with a full bar.
+  const completed = challenge.completedAt !== null;
+  const status = completed ? `Completed ✓ · ${progress}` : progress;
 
   return (
     <HStack
       align="center"
       gap="md"
       accessible
-      accessibilityLabel={`${challenge.title}. ${formatProgress(
-        challenge.progress,
-        challenge.goal,
-        challenge.metric,
-      )}. Pays ${challenge.rewardCoins} coins${
+      accessibilityLabel={`${challenge.title}. ${status}. ${
+        completed ? 'Paid' : 'Pays'
+      } ${challenge.rewardCoins} coins${
         challenge.rewardsBadge ? ' and a special badge' : ''
       }`}
     >
@@ -80,7 +87,7 @@ export const ActiveChallengeRow = memo(({ challenge }: Props) => {
         />
 
         <AppText variant="micro" style={{ color }}>
-          {formatProgress(challenge.progress, challenge.goal, challenge.metric)}
+          {status}
         </AppText>
       </VStack>
 

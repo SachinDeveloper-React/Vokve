@@ -1,9 +1,10 @@
 /**
  * The whole screen is a draft: foods go on and come off a list, and nothing
  * reaches the diary until Save. The checks here are that the draft adds up,
- * that saving writes it against the day and meal that were chosen, and that
- * the verdict under the figures reads the meal rather than praising it either
- * way.
+ * that saving sends it for the day and meal that were chosen, that the
+ * library and its search are the server's, and that the verdict under the
+ * figures reads the meal rather than praising it either way. The API is the
+ * mock backend's own, served without latency.
  *
  * @format
  */
@@ -18,8 +19,8 @@ import { verdictFor } from '../src/components/meal/MealSummaryCard';
 import { ToastProvider } from '../src/components/feedback/Toast';
 import { ThemeProvider } from '../src/theme';
 import { useNutritionStore } from '../src/stores/nutritionStore';
-import { seedFoodEntries } from '../src/constants/seedData';
-import { todayIso } from '../src/utils/date';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import { mockAuthApi } from '../src/services/api/mockApi';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -37,6 +38,34 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockParams }),
 }));
 
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+// The mock backend's own library and diary, behind spies.
+jest.mock('../src/services/api/endpoints', () => {
+  const api = jest.requireActual('../src/services/api/mockApi');
+  return {
+    nutritionApi: {
+      searchFoods: jest.fn((query: string) =>
+        api.mockNutritionApi.searchFoods(query),
+      ),
+      quickAddFoods: jest.fn(() => api.mockNutritionApi.quickAddFoods()),
+      log: jest.fn((entries: unknown, options: unknown) =>
+        api.mockNutritionApi.log(entries, options),
+      ),
+    },
+  };
+});
+
+const { nutritionApi } = jest.requireMock('../src/services/api/endpoints') as {
+  nutritionApi: { searchFoods: jest.Mock; log: jest.Mock };
+};
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -44,12 +73,23 @@ const metrics = {
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
   mockParams = undefined;
+  clearServerReads();
+  await mockAuthApi.signOut();
+  nutritionApi.searchFoods.mockClear();
+  nutritionApi.log.mockClear();
   useNutritionStore.getState().reset();
 });
+
+/** Lets the server's answers land — and the search's pause pass. */
+const settle = (ms = 0) =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
 
 afterEach(async () => {
   const tree = mounted;
@@ -75,6 +115,7 @@ const render = async () => {
     );
   });
   mounted = tree;
+  await settle();
   return tree;
 };
 
@@ -94,11 +135,8 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
   ReactTestRenderer.act(() => node.props.onPress());
 };
 
-const todaysEntries = () =>
-  useNutritionStore.getState().entriesByDate[todayIso()] ?? [];
-
-/** What the day started with, so a test can assert nothing was written. */
-const SEEDED = seedFoodEntries.length;
+/** What has been handed to the store to send — nothing until Save. */
+const sent = () => useNutritionStore.getState().outbox;
 
 describe('the meal verdict', () => {
   test('a meal short on protein is told so, not congratulated', () => {
@@ -151,7 +189,8 @@ describe('AddMealScreen', () => {
     expect(text).toContain('Added Foods (1)');
     expect(text).toContain('150 kcal');
     // Nothing has been written yet — the draft is the screen's, not the diary's.
-    expect(todaysEntries()).toHaveLength(SEEDED);
+    expect(sent()).toEqual([]);
+    expect(nutritionApi.log).not.toHaveBeenCalled();
   });
 
   test('a food can be taken off the draft again', async () => {
@@ -171,7 +210,11 @@ describe('AddMealScreen', () => {
       .findAll(n => n.props?.accessibilityLabel === 'Search food to add')
       .find(n => typeof n.props.onChangeText === 'function');
     ReactTestRenderer.act(() => field?.props.onChangeText('paneer'));
+    // The server is asked once typing pauses, and answers.
+    await settle(300);
+    await settle();
 
+    expect(nutritionApi.searchFoods).toHaveBeenCalledWith('paneer');
     expect(allText(tree)).toContain('Paneer');
 
     press(tree, 'Add Paneer');
@@ -185,11 +228,16 @@ describe('AddMealScreen', () => {
     press(tree, 'Add Banana');
     press(tree, 'Add Boiled Egg');
     press(tree, 'Save Meal');
+    await settle();
 
-    // The day already had a snack in it, so what matters is what was added.
-    const added = todaysEntries().slice(SEEDED);
-    expect(added.map(entry => entry.name)).toEqual(['Banana', 'Boiled Egg']);
-    expect(added.every(entry => entry.slot === 'snack')).toBe(true);
+    // One meal, sent together, each food with its own id.
+    expect(nutritionApi.log).toHaveBeenCalledTimes(1);
+    const [entries] = nutritionApi.log.mock.calls[0] as [
+      { id: string; name: string; slot: string }[],
+    ];
+    expect(entries.map(entry => entry.name)).toEqual(['Banana', 'Boiled Egg']);
+    expect(entries.every(entry => entry.slot === 'snack')).toBe(true);
+    expect(new Set(entries.map(entry => entry.id)).size).toBe(2);
     // And it leaves, because the diary is where the result is read.
     expect(mockGoBack).toHaveBeenCalledTimes(1);
   });
@@ -209,7 +257,8 @@ describe('AddMealScreen', () => {
 
     press(tree, 'Back');
 
-    expect(todaysEntries()).toHaveLength(SEEDED);
+    expect(sent()).toEqual([]);
+    expect(nutritionApi.log).not.toHaveBeenCalled();
     expect(mockGoBack).toHaveBeenCalledTimes(1);
   });
 });

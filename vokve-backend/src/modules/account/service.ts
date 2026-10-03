@@ -26,7 +26,15 @@ import {
   type SupportTicket,
   type User,
 } from '../../contracts/index.js';
-import { ActivityDailyModel } from '../activity/models.js';
+import {
+  ActivityDailyModel,
+  ActivitySampleModel,
+  DeviceDayModel,
+  IngestNonceModel,
+  MotionWindowModel,
+  StepSnapshotModel,
+  StepUploadModel,
+} from '../activity/models.js';
 import { AddressModel, OrderModel } from '../commerce/models.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { AppReleaseModel, DeviceModel } from '../devices/models.js';
@@ -35,6 +43,13 @@ import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSetting
 import { NotificationModel } from '../notifications/models.js';
 import { AuditLogModel } from '../platform/models.js';
 import { ReferralModel } from '../social/models.js';
+import { StreakDayModel, StreakStateModel } from '../streak/models.js';
+import { ChallengeCompletionModel, UserAchievementModel } from '../challenges/models.js';
+import { LeaderboardResultModel, LeaderboardScoreModel } from '../leaderboard/models.js';
+import { HydrationEntryModel, HydrationPlanModel } from '../hydration/models.js';
+import { FoodEntryModel, FoodItemModel, NutritionProfileModel } from '../nutrition/models.js';
+import { VitalReadingModel } from '../vitals/models.js';
+import { streakFigures } from '../streak/service.js';
 import { WorkoutModel } from '../training/models.js';
 import { AccountPrivacyModel, MediaModel, SupportFaqModel, SupportTicketModel } from './models.js';
 import { toUser } from '../identity/serialize.js';
@@ -70,56 +85,9 @@ export function tierTitleFor(level: number): string {
   return TIER_TITLES[Math.min(band, TIER_TITLES.length - 1)]!;
 }
 
-// ─── Streaks ───────────────────────────────────────────────────────────────
-
-/** A day counts towards a streak when something was actually done on it. */
-function isActiveDay(row: { steps?: number; workoutsCompleted?: number }): boolean {
-  return (row.steps ?? 0) > 0 || (row.workoutsCompleted ?? 0) > 0;
-}
-
 const DAY_MS = 86_400_000;
 
-function dayKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-/**
- * The current and longest runs of active days, from the activity rollups.
- *
- * Computed rather than stored: the rollup rows are the truth about what was
- * done, and a counter kept beside them is one missed write away from being
- * a lie the member reads on their own profile. Today not being active does
- * not break the current run — the day is not over yet — so the walk starts
- * from yesterday and allows today to be the head.
- */
-function streaksFrom(days: string[], today: string): { current: number; longest: number } {
-  const active = new Set(days);
-  if (active.size === 0) return { current: 0, longest: 0 };
-
-  const sorted = [...active].sort();
-  let longest = 1;
-  let run = 1;
-  for (let i = 1; i < sorted.length; i += 1) {
-    const previous = Date.parse(`${sorted[i - 1]}T00:00:00Z`);
-    const current = Date.parse(`${sorted[i]}T00:00:00Z`);
-    run = current - previous === DAY_MS ? run + 1 : 1;
-    if (run > longest) longest = run;
-  }
-
-  let cursor = new Date(`${today}T00:00:00Z`);
-  if (!active.has(dayKey(cursor))) cursor = new Date(cursor.getTime() - DAY_MS);
-  let current = 0;
-  while (active.has(dayKey(cursor))) {
-    current += 1;
-    cursor = new Date(cursor.getTime() - DAY_MS);
-  }
-  return { current, longest: Math.max(longest, current) };
-}
-
 // ─── Profile summary ───────────────────────────────────────────────────────
-
-/** How long a walk back through the rollups the streak is worth. */
-const STREAK_WINDOW_DAYS = 400;
 
 /** What each missing field is worth, and what to call it (RULES P6). */
 const PROFILE_GAPS: readonly (ProfileGap & { done: (ctx: GapContext) => boolean })[] = [
@@ -184,15 +152,13 @@ export async function getProfileSummary(userId: string, timeZone: string): Promi
   const user = await UserModel.findById(userId).lean();
   if (!user || user.deletedAt) throw Errors.unauthorized();
 
-  const since = new Date(Date.now() - STREAK_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
-
   const balance = await CoinBalanceModel.findById(userId).lean();
   const lifetimeMc = balance?.lifetimeEarnedMc ?? 0;
 
-  const [activityRows, activityTotals, workoutCount, workoutMinutes, orders, referrals, hasAddress, ahead, members] =
+  const [streak, activityTotals, workoutCount, workoutMinutes, orders, referrals, hasAddress, ahead, members] =
     await Promise.all([
-      ActivityDailyModel.find({ userId, localDay: { $gte: since } }, { localDay: 1, steps: 1, workoutsCompleted: 1 }).lean(),
+      // The streak module's own figures, so this card and the streak screen agree.
+      streakFigures(userId, timeZone),
       ActivityDailyModel.aggregate<{ steps: number; days: number }>([
         { $match: { userId } },
         { $group: { _id: null, steps: { $sum: '$steps' }, days: { $sum: { $cond: [{ $gt: ['$steps', 0] }, 1, 0] } } } },
@@ -217,10 +183,7 @@ export async function getProfileSummary(userId: string, timeZone: string): Promi
   const nextLevelAt = coinsForLevel(level + 1);
   const span = nextLevelAt - levelStart;
 
-  const { current, longest } = streaksFrom(
-    activityRows.filter(isActiveDay).map(r => r.localDay),
-    today,
-  );
+  const { current, longest } = streak;
   const totals = activityTotals[0] ?? { steps: 0, days: 0 };
   const minutes = Math.round(workoutMinutes[0]?.minutes ?? 0);
 
@@ -504,12 +467,18 @@ export async function exportAccount(userId: string): Promise<Record<string, unkn
     throw new ApiError(429, 'EXPORT_TOO_SOON', 'Your last export was recent. Try again later.', { retryAfterSeconds });
   }
 
-  const [settings, prefs, privacy, activity, workouts, orders, addresses, referrals, notifications, tickets, devices] = await Promise.all([
+  const [settings, prefs, privacy, activity, workouts, streakDays, challenges, achievements, water, food, vitals, orders, addresses, referrals, notifications, tickets, devices] = await Promise.all([
     UserSettingsModel.findById(userId).lean(),
     NotificationPreferencesModel.findById(userId).lean(),
     getPrivacy(userId),
     ActivityDailyModel.find({ userId }).sort({ localDay: -1 }).lean(),
     WorkoutModel.find({ userId, deletedAt: null }).sort({ startedAt: -1 }).lean(),
+    StreakDayModel.find({ userId }).sort({ localDay: -1 }).lean(),
+    ChallengeCompletionModel.find({ userId }).sort({ completedAt: -1 }).lean(),
+    UserAchievementModel.find({ userId }).sort({ achievedAt: -1 }).lean(),
+    HydrationEntryModel.find({ userId, deletedAt: null }).sort({ at: -1 }).lean(),
+    FoodEntryModel.find({ userId, deletedAt: null }).sort({ loggedAt: -1 }).lean(),
+    VitalReadingModel.find({ userId, deletedAt: null }).sort({ recordedAt: -1 }).lean(),
     OrderModel.find({ userId }).sort({ placedAt: -1 }).lean(),
     AddressModel.find({ userId, deletedAt: null }).lean(),
     ReferralModel.find({ inviterId: userId }).lean(),
@@ -539,6 +508,12 @@ export async function exportAccount(userId: string): Promise<Record<string, unkn
     privacy,
     activity: strip(activity),
     workouts: strip(workouts),
+    streakDays: strip(streakDays),
+    challengeCompletions: strip(challenges),
+    achievements: strip(achievements),
+    hydration: strip(water),
+    food: strip(food),
+    vitals: strip(vitals),
     orders: strip(orders),
     addresses: strip(addresses),
     referrals: strip(referrals),
@@ -651,7 +626,28 @@ export async function purgeAccount(userId: string): Promise<void> {
 
   await Promise.all([
     ActivityDailyModel.deleteMany({ userId }),
+    // Health data goes with the account; the fraud flags and the audit log
+    // stay — they hold counts and verdicts, and they are what stops the
+    // same phone coming back as a fresh account.
+    StepSnapshotModel.deleteMany({ userId }),
+    StepUploadModel.deleteMany({ userId }),
+    DeviceDayModel.deleteMany({ userId }),
+    ActivitySampleModel.deleteMany({ userId }),
+    MotionWindowModel.deleteMany({ userId }),
+    IngestNonceModel.deleteMany({ userId }),
     WorkoutModel.deleteMany({ userId }),
+    StreakDayModel.deleteMany({ userId }),
+    StreakStateModel.deleteOne({ _id: userId }),
+    ChallengeCompletionModel.deleteMany({ userId }),
+    UserAchievementModel.deleteMany({ userId }),
+    LeaderboardScoreModel.deleteMany({ userId }),
+    LeaderboardResultModel.deleteMany({ userId }),
+    HydrationEntryModel.deleteMany({ userId }),
+    HydrationPlanModel.deleteOne({ _id: userId }),
+    FoodEntryModel.deleteMany({ userId }),
+    FoodItemModel.deleteMany({ ownerUserId: userId }),
+    NutritionProfileModel.deleteOne({ _id: userId }),
+    VitalReadingModel.deleteMany({ userId }),
     AddressModel.updateMany({ userId }, { $set: { deletedAt: new Date() } }),
     NotificationModel.deleteMany({ userId }),
     SupportTicketModel.deleteMany({ userId }),

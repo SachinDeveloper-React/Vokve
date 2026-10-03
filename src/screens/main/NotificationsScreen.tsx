@@ -13,6 +13,7 @@ import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import {
@@ -65,6 +66,9 @@ export const NotificationsScreen = () => {
   const loadMore = useNotificationsStore(s => s.loadMore);
   const nextCursor = useNotificationsStore(s => s.nextCursor);
   const isLoadingMore = useNotificationsStore(s => s.isLoadingMore);
+  const syncedAt = useNotificationsStore(s => s.syncedAt);
+  const isSyncing = useNotificationsStore(s => s.isSyncing);
+  const syncError = useNotificationsStore(s => s.syncError);
   const unread = useUnreadNotificationCount();
   const isSignedIn = useAuthStatus() === 'authenticated';
 
@@ -164,7 +168,14 @@ export const NotificationsScreen = () => {
           </HStack>
         ) : null}
 
-        {groups.length > 0 ? (
+        {syncedAt === null ? (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your notifications"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        ) : groups.length > 0 ? (
           groups.map(group => (
             <NotificationGroupCard
               key={group.date}

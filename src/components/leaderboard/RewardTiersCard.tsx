@@ -6,44 +6,42 @@ import { Emoji } from '../media/Emoji';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
-import { RewardTierCard, type RewardTier } from './RewardTierCard';
+import type { RewardTierInfo } from '../../types/models';
+import {
+  RewardTierCard,
+  type RewardTier,
+  type TierTint,
+} from './RewardTierCard';
+
+/** The podium, rung by rung; a ladder longer than three gets the third's look. */
+const MEDALS = ['🥇', '🥈', '🥉'];
+const TINTS: readonly TierTint[] = ['gold', 'textSecondary', 'brandAccent'];
 
 /**
- * What each rung pays, declared here rather than fetched.
- *
- * These are the product's rules, not the user's data — the same reasoning as
- * the streak's milestones. A screen that could not state the prizes until a
- * request came back would be a screen with no reason to exist while it waited.
+ * The server's tiers in the card's own terms. The prizes are the server's
+ * (⚙ `leaderboard.tiers`, RULES L7); the medals and colours are only how
+ * the card tells the rungs apart.
  */
-export const REWARD_TIERS: readonly RewardTier[] = [
-  {
-    id: 'rank-1',
-    medal: '🥇',
-    label: 'Rank 1',
-    coins: 5_000,
-    perks: ['Premium T-Shirt', 'Water Bottle'],
-    scope: 'Country Rank',
-    tint: 'gold',
-  },
-  {
-    id: 'rank-2-3',
-    medal: '🥈',
-    label: 'Rank 2 – 3',
-    coins: 3_000,
-    perks: ['Premium T-Shirt', 'Fitness Mat'],
-    scope: 'Country Rank',
-    tint: 'textSecondary',
-  },
-  {
-    id: 'rank-4-10',
-    medal: '🥉',
-    label: 'Rank 4 – 10',
-    coins: 1_000,
-    perks: ['Fitness Mat'],
-    scope: 'Country Rank',
-    tint: 'brandAccent',
-  },
-];
+export function toRewardTiers(
+  tiers: readonly RewardTierInfo[],
+  scope: string,
+): RewardTier[] {
+  return tiers.map((tier, index) => ({
+    id: tier.id,
+    medal: MEDALS[Math.min(index, MEDALS.length - 1)],
+    label: tier.label,
+    coins: tier.coins,
+    perks: tier.perks,
+    scope: `${scope} Rank`,
+    tint: TINTS[Math.min(index, TINTS.length - 1)],
+  }));
+}
+
+interface Props {
+  tiers: readonly RewardTier[];
+  /** The line under the rungs, in the server's words. */
+  note: string;
+}
 
 /**
  * The reward ladder, three rungs across.
@@ -52,7 +50,7 @@ export const REWARD_TIERS: readonly RewardTier[] = [
  * next place up is worth — and a stack of three rows makes that a scroll
  * instead of a glance.
  */
-export const RewardTiersCard = memo(() => (
+export const RewardTiersCard = memo(({ tiers, note }: Props) => (
   <Card radius="xl" padding="base">
     <VStack gap="base">
       <HStack align="center" gap="sm">
@@ -63,7 +61,7 @@ export const RewardTiersCard = memo(() => (
       </HStack>
 
       <HStack align="stretch" gap="sm">
-        {REWARD_TIERS.map(tier => (
+        {tiers.map(tier => (
           <RewardTierCard key={tier.id} tier={tier} />
         ))}
       </HStack>
@@ -71,7 +69,7 @@ export const RewardTiersCard = memo(() => (
       <HStack align="center" gap="xs">
         <Icon as={Info} size="xs" color="textTertiary" />
         <AppText variant="miniMicro" color="textTertiary" numberOfLines={2}>
-          Rewards are given every week based on leaderboard ranking.
+          {note}
         </AppText>
       </HStack>
     </VStack>

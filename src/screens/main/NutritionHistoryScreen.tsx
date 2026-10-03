@@ -18,15 +18,11 @@ import { HStack } from '../../components/layout/Stack';
 import { Icon } from '../../components/media/Icon';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { useNutritionDay, useNutritionDays } from '../../hooks/useNutrition';
 import { useCoinBalance } from '../../stores/coinsStore';
-import {
-  useDayTotals,
-  useFoodEntriesOn,
-  useMealSummariesOn,
-  useNutritionGoals,
-  totalsForDay,
-} from '../../stores/nutritionStore';
+import { useNutritionGoals } from '../../stores/nutritionStore';
 import { useThemedStyles, type ThemeShape } from '../../theme';
 import type { MealSlot } from '../../types/models';
 import { addDays, daysBetween, todayIso, type IsoDate } from '../../utils/date';
@@ -61,10 +57,11 @@ function datesFor(
 /**
  * The diary, read backwards.
  *
- * Everything comes from the same per-day buckets the add-meal screen writes
- * into, so a meal logged this morning is in this history a moment later and a
- * day nobody logged reads as "nothing logged" rather than as a day of zero
- * calories — those are different facts and the screen says which one it has.
+ * Everything is the server's diary (`GET /nutrition/day`, `/nutrition/days`),
+ * asked again whenever the server confirms a meal, so a meal logged this
+ * morning is in this history a moment later and a day nobody logged reads as
+ * "nothing logged" rather than as a day of zero calories — those are
+ * different facts and the screen says which one it has.
  *
  * The three fixed ranges are windows ending at the day being looked at; the
  * fourth lets the user draw their own, which is the only way to ask about a
@@ -76,7 +73,7 @@ export const NutritionHistoryScreen = () => {
   const navigation = useNavigation();
 
   const coins = useCoinBalance();
-  const goals = useNutritionGoals();
+  const profileGoals = useNutritionGoals();
 
   const [range, setRange] = useState<HistoryRange>('daily');
   const [date, setDate] = useState<IsoDate>(todayIso());
@@ -90,9 +87,10 @@ export const NutritionHistoryScreen = () => {
   const pickFrom = useCallback(() => setPicking('from'), []);
   const pickTo = useCallback(() => setPicking('to'), []);
 
-  const entries = useFoodEntriesOn(date);
-  const meals = useMealSummariesOn(date);
-  const totals = useMemo(() => totalsForDay(entries, date), [date, entries]);
+  const day = useNutritionDay(date);
+  const { meals, totals } = day;
+  // The targets the server measured the day against, or the profile's.
+  const goals = day.goals ?? profileGoals;
 
   const previousDates = useMemo(
     () =>
@@ -101,13 +99,13 @@ export const NutritionHistoryScreen = () => {
       ),
     [date],
   );
-  const previousDays = useDayTotals(previousDates);
+  const previous = useNutritionDays(previousDates);
 
   const rangeDates = useMemo(
     () => datesFor(range, date, from, to),
     [date, from, range, to],
   );
-  const rangeDays = useDayTotals(rangeDates);
+  const ranged = useNutritionDays(rangeDates);
 
   const previousDay = useCallback(
     () => setDate(current => addDays(current, -1)),
@@ -185,7 +183,14 @@ export const NutritionHistoryScreen = () => {
           />
         )}
 
-        {range === 'daily' ? (
+        {range === 'daily' && (!day.loaded || goals === null) ? (
+          <LoadState
+            loading={day.loading}
+            title="Couldn't load the day"
+            message={day.error}
+            onRetry={day.reload}
+          />
+        ) : range === 'daily' && goals !== null ? (
           <>
             <DailySummaryCard
               totals={totals}
@@ -214,14 +219,23 @@ export const NutritionHistoryScreen = () => {
               />
             ))}
 
-            <DayTotalsCard
-              title="Previous Days"
-              days={previousDays}
-              actionLabel="View All"
-              onPressAction={notImplemented}
-              onPressDay={openDay}
-            />
+            {previous.data ? (
+              <DayTotalsCard
+                title="Previous Days"
+                days={previous.data}
+                actionLabel="View All"
+                onPressAction={notImplemented}
+                onPressDay={openDay}
+              />
+            ) : null}
           </>
+        ) : ranged.data === null || goals === null ? (
+          <LoadState
+            loading={ranged.loading}
+            title="Couldn't load these days"
+            message={ranged.error}
+            onRetry={ranged.reload}
+          />
         ) : (
           <>
             <RangeSummaryCard
@@ -232,13 +246,13 @@ export const NutritionHistoryScreen = () => {
                   ? 'The last 30 days'
                   : 'Your own span'
               }
-              days={rangeDays}
+              days={ranged.data}
               goals={goals}
             />
 
             <DayTotalsCard
               title="Day by day"
-              days={rangeDays}
+              days={ranged.data}
               onPressDay={openDay}
             />
           </>

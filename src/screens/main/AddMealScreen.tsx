@@ -23,7 +23,7 @@ import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Screen } from '../../components/ui/Screen';
 import { useToast } from '../../components/feedback/Toast';
-import { foodLibrary, quickAddFoodIds } from '../../constants/seedData';
+import { useFoodSearch, useQuickAddFoods } from '../../hooks/useNutrition';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useNutritionStore } from '../../stores/nutritionStore';
 import { useThemedStyles, type ThemeShape } from '../../theme';
@@ -35,6 +35,8 @@ const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
   });
+
+const NO_FOODS: FoodItem[] = [];
 
 /** The clock time a screen opened now would default to, as `HH:mm`. */
 function currentTime(): string {
@@ -67,6 +69,9 @@ function toDraft(item: FoodItem): DraftFood {
 
 /**
  * Logging a meal: which meal, when, and what was in it.
+ *
+ * The library is the server's: the shortcuts (`GET /foods/quick-add`) and
+ * the search (`GET /foods?q=`, asked once typing pauses).
  *
  * The whole screen is a draft. Foods are added to and taken off a list held
  * here, and nothing reaches the nutrition store until Save Meal — a user
@@ -105,23 +110,9 @@ export const AddMealScreen = () => {
   const openCustom = useCallback(() => setCustomOpen(true), []);
   const closeCustom = useCallback(() => setCustomOpen(false), []);
 
-  const quickAdds = useMemo(
-    () =>
-      quickAddFoodIds
-        .map(id => foodLibrary.find(item => item.id === id))
-        .filter((item): item is FoodItem => item !== undefined),
-    [],
-  );
-
-  const results = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (term.length === 0) {
-      return [];
-    }
-    return foodLibrary.filter(item =>
-      item.name.toLowerCase().includes(term),
-    );
-  }, [query]);
+  const quickAdds = useQuickAddFoods().data ?? NO_FOODS;
+  const search = useFoodSearch(query);
+  const results = search.data ?? NO_FOODS;
 
   const totals = useMemo(
     () =>
@@ -235,6 +226,7 @@ export const AddMealScreen = () => {
           <FoodSearchResults
             query={query}
             results={results}
+            searching={search.data === null && search.error === null}
             onAdd={addFood}
             onPressAddCustom={openCustom}
           />

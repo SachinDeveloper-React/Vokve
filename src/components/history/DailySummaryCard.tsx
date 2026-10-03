@@ -3,10 +3,8 @@ import { ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import { formatGrouped } from '../../utils/format';
-import type {
-  NutritionGoals,
-  NutritionTotals,
-} from '../../stores/nutritionStore';
+import type { MacroTotals as NutritionTotals } from '../../stores/nutritionStore';
+import type { NutritionGoals } from '../../types/models';
 import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';

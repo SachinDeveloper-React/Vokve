@@ -4,7 +4,8 @@ import { useTheme } from '../../theme';
 import { QuickActionCard } from './QuickActionCard';
 
 interface Props {
-  streakDays: number;
+  /** The server's current streak; null before it has said, and the card waits. */
+  streakDays: number | null;
   onPressChallenges: () => void;
   onPressNutrition: () => void;
   onPressHealth: () => void;
@@ -57,7 +58,11 @@ export const QuickActionsRow = memo(
           emoji="🔥"
           tint={colors.avatarPurple}
           title="Streaks"
-          detail={`${streakDays} ${streakDays === 1 ? 'Day' : 'Days'}`}
+          detail={
+            streakDays === null
+              ? '—'
+              : `${streakDays} ${streakDays === 1 ? 'Day' : 'Days'}`
+          }
           uppercaseDetail={false}
           onPress={onPressStreaks}
         />

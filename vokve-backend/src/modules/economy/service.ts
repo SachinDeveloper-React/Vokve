@@ -185,35 +185,49 @@ export interface SpendIntent {
   appVersion?: string;
 }
 
+export interface DebitResult {
+  ledgerId: string;
+  balance: number;
+  /** The event was already paid for: the earlier row is the answer, nothing moved now. */
+  replayed: boolean;
+}
+
 /** Conditional `$gte` on the balance is the overspend guard (RULES E4, D-03). */
-export async function debit(intent: SpendIntent): Promise<{ ledgerId: string; balance: number }> {
+export async function debit(intent: SpendIntent): Promise<DebitResult> {
+  return withTransaction(session => debitInSession(intent, session));
+}
+
+/**
+ * `debit()` inside a transaction the caller already holds, for a spend that
+ * must land together with the thing it buys — a streak restore's protected
+ * days (RULES S7). Either both commit or neither does.
+ */
+export async function debitInSession(intent: SpendIntent, session: ClientSession): Promise<DebitResult> {
   const amountMc = toMilli(intent.amount);
   if (amountMc <= 0) throw new ApiError(422, 'INVALID_AMOUNT', 'Nothing to spend.');
 
-  return withTransaction(async session => {
-    const existing = await CoinLedgerModel.findOne(refFilter(intent)).session(session).lean();
-    if (existing) {
-      const bal = await CoinBalanceModel.findById(intent.userId).session(session).lean();
-      return { ledgerId: existing._id, balance: toCoins(bal?.balanceMc ?? 0) };
-    }
-    const bal = await CoinBalanceModel.findOneAndUpdate(
-      { _id: intent.userId, balanceMc: { $gte: amountMc } },
-      { $inc: { balanceMc: -amountMc } },
-      { session, new: true },
-    ).lean();
-    if (!bal) {
-      const current = await CoinBalanceModel.findById(intent.userId).session(session).lean();
-      const balance = toCoins(current?.balanceMc ?? 0);
-      throw new ApiError(422, 'INSUFFICIENT_COINS', `You need ${fmt(intent.amount - balance)} more coins for this.`, { required: intent.amount, balance });
-    }
-    const ledgerId = newId('led');
-    await CoinLedgerModel.create([{
-      _id: ledgerId, userId: intent.userId, amountMc: -amountMc, source: intent.source, title: intent.title,
-      referenceType: intent.referenceType, referenceId: intent.referenceId, idempotencyKey: intent.idempotencyKey ?? null,
-      actor: 'user', deviceId: intent.deviceId, appVersion: intent.appVersion,
-    }], { session });
-    return { ledgerId, balance: toCoins(bal.balanceMc) };
-  });
+  const existing = await CoinLedgerModel.findOne(refFilter(intent)).session(session).lean();
+  if (existing) {
+    const bal = await CoinBalanceModel.findById(intent.userId).session(session).lean();
+    return { ledgerId: existing._id, balance: toCoins(bal?.balanceMc ?? 0), replayed: true };
+  }
+  const bal = await CoinBalanceModel.findOneAndUpdate(
+    { _id: intent.userId, balanceMc: { $gte: amountMc } },
+    { $inc: { balanceMc: -amountMc } },
+    { session, new: true },
+  ).lean();
+  if (!bal) {
+    const current = await CoinBalanceModel.findById(intent.userId).session(session).lean();
+    const balance = toCoins(current?.balanceMc ?? 0);
+    throw new ApiError(422, 'INSUFFICIENT_COINS', `You need ${fmt(intent.amount - balance)} more coins for this.`, { required: intent.amount, balance });
+  }
+  const ledgerId = newId('led');
+  await CoinLedgerModel.create([{
+    _id: ledgerId, userId: intent.userId, amountMc: -amountMc, source: intent.source, title: intent.title,
+    referenceType: intent.referenceType, referenceId: intent.referenceId, idempotencyKey: intent.idempotencyKey ?? null,
+    actor: 'user', deviceId: intent.deviceId, appVersion: intent.appVersion,
+  }], { session });
+  return { ledgerId, balance: toCoins(bal.balanceMc), replayed: false };
 }
 
 function refFilter(e: { userId: string; source: string; referenceType: string; referenceId: string }) {

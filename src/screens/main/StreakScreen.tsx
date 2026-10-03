@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { DateChip } from '../../components/streak/DateChip';
 import { StreakBenefitsCard } from '../../components/streak/StreakBenefitsCard';
@@ -8,23 +8,15 @@ import { StreakCheerCard } from '../../components/streak/StreakCheerCard';
 import { StreakHeader } from '../../components/streak/StreakHeader';
 import { StreakSummaryCard } from '../../components/streak/StreakSummaryCard';
 import { StreakToolsCard } from '../../components/streak/StreakToolsCard';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useToast } from '../../components/feedback/Toast';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useCurrentUser } from '../../stores/authStore';
-import { useCoinBalance, useCoinsStore } from '../../stores/coinsStore';
+import { useCoinBalance, useWalletSyncedAt } from '../../stores/coinsStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
-import {
-  STREAK_RESTORE_COST,
-  useCanRestore,
-  useCompletedDays,
-  useCountingDays,
-  useCurrentStreak,
-  useFreezesAvailable,
-  useLongestStreak,
-  useProtectedDays,
-  useStreakStore,
-} from '../../stores/streakStore';
-import { useThemedStyles, type ThemeShape } from '../../theme';
+import { useStreakStore } from '../../stores/streakStore';
+import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { addDays, fromIsoDate, todayIso } from '../../utils/date';
 import { formatCoins } from '../../utils/format';
 
@@ -37,52 +29,59 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * The streak: how long it is, how long it has ever been, the calendar that
  * proves it, and the two tools for keeping it alive.
  *
- * Both figures come from the streak store, never from `user.streakDays` —
- * the calendar is drawn from the same day list the figures are counted from,
- * so the number at the top and the run the user can see below it cannot
- * disagree.
- *
- * The coins a restore costs are charged here, through the coins store, and
- * only after the streak store has confirmed there is a gap to bridge: the two
- * stores do not know about each other, and this screen is the one place that
- * makes "50 coins for a restore" a single transaction.
+ * Everything here is the server's (`GET /streak`): which days counted, the
+ * two figures, the freezes, the milestones and what a restore costs. The
+ * calendar and the figures come from the same answer, so the number at the
+ * top and the run the user can see below it cannot disagree. A freeze and a
+ * restore are asked of the server, which charges for a restore in the same
+ * transaction that protects the days — the screen only says what happened.
  */
 export const StreakScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
   const user = useCurrentUser();
 
-  const today = todayIso();
-  const completedDays = useCompletedDays();
-  const protectedDays = useProtectedDays();
-  const countingDays = useCountingDays();
-  const currentStreak = useCurrentStreak();
-  const longestStreak = useLongestStreak();
-  const freezesAvailable = useFreezesAvailable();
-  const canRestore = useCanRestore();
-  const hasUnreadNotifications = useHasUnreadNotifications();
+  const summary = useStreakStore(s => s.summary);
+  const isSyncing = useStreakStore(s => s.isSyncing);
+  const syncError = useStreakStore(s => s.syncError);
+  const pendingAction = useStreakStore(s => s.pendingAction);
+  const hydrateFromServer = useStreakStore(s => s.hydrateFromServer);
+  const refreshIfStale = useStreakStore(s => s.refreshIfStale);
   const freezeToday = useStreakStore(s => s.freezeToday);
   const restore = useStreakStore(s => s.restore);
-
+  const hasUnreadNotifications = useHasUnreadNotifications();
   const balance = useCoinBalance();
-  const spend = useCoinsStore(s => s.spend);
+  const walletSynced = useWalletSyncedAt() !== null;
 
-  const completedSet = useMemo(() => new Set(completedDays), [completedDays]);
-  const protectedSet = useMemo(() => new Set(protectedDays), [protectedDays]);
+  useRefreshOnFocus(refreshIfStale);
+
+  // The server's today, so the calendar and the figures agree on it; the
+  // phone's own before the first answer.
+  const today = summary?.today ?? todayIso();
+
+  const completedSet = useMemo(
+    () => new Set(summary?.completedDays ?? []),
+    [summary],
+  );
+  const protectedSet = useMemo(
+    () => new Set(summary?.protectedDays ?? []),
+    [summary],
+  );
 
   // The days of the live run, for the calendar to draw on a disc. Counted
-  // back from today, or from yesterday when today is not yet done.
+  // back from today, or from yesterday when today is not yet covered.
   const streakDays = useMemo(() => {
     const days = new Set<string>();
-    if (currentStreak === 0) return days;
-    let cursor = countingDays.has(today) ? today : addDays(today, -1);
-    for (let i = 0; i < currentStreak; i++) {
+    if (!summary || summary.currentStreak === 0) return days;
+    let cursor = summary.todayCovered ? today : addDays(today, -1);
+    for (let i = 0; i < summary.currentStreak; i++) {
       days.add(cursor);
       cursor = addDays(cursor, -1);
     }
     return days;
-  }, [countingDays, currentStreak, today]);
+  }, [summary, today]);
 
   const now = fromIsoDate(today);
   const [visible, setVisible] = useState({
@@ -115,61 +114,112 @@ export const StreakScreen = () => {
     [],
   );
 
-  const handleFreeze = useCallback(() => {
-    if (freezeToday()) {
+  // The spinner follows the pull, not the background refresh on focus.
+  const [isPulling, setPulling] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await hydrateFromServer();
+    } finally {
+      setPulling(false);
+    }
+  }, [hydrateFromServer]);
+
+  const handleFreeze = useCallback(async () => {
+    const result = await freezeToday();
+    if (result.ok) {
       toast.show({
         title: 'Streak Freeze active',
         message: 'Today is covered. Your streak is safe until tomorrow.',
         tone: 'success',
       });
-    } else if (freezesAvailable === 0) {
-      toast.show({
-        title: 'No freezes left',
-        message: 'Earn more by hitting your next streak milestone.',
-        tone: 'warning',
-      });
-    } else {
-      toast.show({
-        title: 'Already covered',
-        message: 'Today already counts — save the freeze for a rest day.',
-        tone: 'info',
-      });
+      return;
     }
-  }, [freezeToday, freezesAvailable, toast]);
+    switch (result.code) {
+      case 'IN_PROGRESS':
+        return;
+      case 'NO_FREEZES_LEFT':
+        toast.show({
+          title: 'No freezes left',
+          message: result.message,
+          tone: 'warning',
+        });
+        return;
+      case 'STREAK_ALREADY_COVERED':
+        toast.show({
+          title: 'Already covered',
+          message: result.message,
+          tone: 'info',
+        });
+        return;
+      default:
+        toast.show({
+          title: "Couldn't freeze today",
+          message: result.message,
+          tone: 'error',
+        });
+    }
+  }, [freezeToday, toast]);
 
-  const handleRestore = useCallback(() => {
-    if (!canRestore) {
+  const handleRestore = useCallback(async () => {
+    if (!summary) return;
+    // The server would refuse both of these; saying so here saves the trip.
+    if (!summary.canRestore) {
       toast.show({
         title: 'Nothing to restore',
         message:
-          currentStreak > 0
+          summary.currentStreak > 0
             ? 'Your streak is intact. Keep it going!'
             : 'Your last streak ended too long ago to bring back.',
         tone: 'info',
       });
       return;
     }
-    if (balance < STREAK_RESTORE_COST) {
+    if (walletSynced && balance < summary.restoreCostCoins) {
       toast.show({
         title: 'Not enough coins',
-        message: `A restore costs ${formatCoins(STREAK_RESTORE_COST)} coins.`,
+        message: `A restore costs ${formatCoins(
+          summary.restoreCostCoins,
+        )} coins.`,
         tone: 'warning',
       });
       return;
     }
-    // Charge first, then restore: `spend` is the call that can still refuse
-    // (a stale balance), and a restore with no charge is the wrong failure.
-    if (
-      spend(STREAK_RESTORE_COST, 'Streak restored', 'purchase') &&
-      restore()
-    ) {
+
+    const result = await restore();
+    if (result.ok) {
       toast.show({
         title: 'Streak restored',
         message: 'The missed days are covered. Back on track!',
         tone: 'success',
       });
+      return;
     }
-  }, [balance, canRestore, currentStreak, restore, spend, toast]);
+    switch (result.code) {
+      case 'IN_PROGRESS':
+        return;
+      case 'INSUFFICIENT_COINS':
+        toast.show({
+          title: 'Not enough coins',
+          message: result.message,
+          tone: 'warning',
+        });
+        return;
+      case 'NOTHING_TO_RESTORE':
+        toast.show({
+          title: 'Nothing to restore',
+          message: result.message,
+          tone: 'info',
+        });
+        return;
+      default:
+        toast.show({
+          title: "Couldn't restore your streak",
+          message: result.message,
+          tone: 'error',
+        });
+    }
+  }, [balance, restore, summary, toast, walletSynced]);
 
   // A notification tap or a deep link can open the app straight onto this
   // screen, and `goBack` with nothing behind it is silently a no-op — the
@@ -207,6 +257,14 @@ export const StreakScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPulling}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <StreakHeader
           name={user?.name}
@@ -219,41 +277,59 @@ export const StreakScreen = () => {
 
         <DateChip date={today} onPress={showToday} />
 
-        <StreakSummaryCard
-          currentStreak={currentStreak}
-          longestStreak={longestStreak}
-          onPressInfo={notImplemented}
-        />
+        {summary === null ? (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your streak"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        ) : (
+          <>
+            <StreakSummaryCard
+              currentStreak={summary.currentStreak}
+              longestStreak={summary.longestStreak}
+              nextMilestone={summary.nextMilestone}
+              howToEarn={summary.howToEarn}
+              onPressInfo={notImplemented}
+            />
 
-        <StreakCalendarCard
-          year={visible.year}
-          month={visible.month}
-          today={today}
-          completedDays={completedSet}
-          protectedDays={protectedSet}
-          streakDays={streakDays}
-          freezesAvailable={freezesAvailable}
-          isTodayFrozen={protectedSet.has(today)}
-          onPreviousMonth={previousMonth}
-          onNextMonth={nextMonth}
-          canGoNext={!isCurrentMonth}
-          onPressInfo={notImplemented}
-          onPressHowItWorks={notImplemented}
-        />
+            <StreakCalendarCard
+              year={visible.year}
+              month={visible.month}
+              today={today}
+              completedDays={completedSet}
+              protectedDays={protectedSet}
+              streakDays={streakDays}
+              freezesAvailable={summary.freezesAvailable}
+              isTodayFrozen={summary.todayFrozen}
+              onPreviousMonth={previousMonth}
+              onNextMonth={nextMonth}
+              canGoNext={!isCurrentMonth}
+              onPressInfo={notImplemented}
+              onPressHowItWorks={notImplemented}
+            />
 
-        <StreakBenefitsCard
-          longestStreak={longestStreak?.length ?? 0}
-          onPressInfo={notImplemented}
-        />
+            <StreakBenefitsCard
+              milestones={summary.milestones}
+              onPressInfo={notImplemented}
+            />
 
-        <StreakToolsCard
-          freezesAvailable={freezesAvailable}
-          restoreCostCoins={STREAK_RESTORE_COST}
-          onPressFreeze={handleFreeze}
-          onPressRestore={handleRestore}
-        />
+            <StreakToolsCard
+              freezesAvailable={summary.freezesAvailable}
+              restoreCostCoins={summary.restoreCostCoins}
+              pendingAction={pendingAction}
+              onPressFreeze={handleFreeze}
+              onPressRestore={handleRestore}
+            />
 
-        <StreakCheerCard name={user?.name} currentStreak={currentStreak} />
+            <StreakCheerCard
+              name={user?.name}
+              currentStreak={summary.currentStreak}
+              howToEarn={summary.howToEarn}
+            />
+          </>
+        )}
       </ScrollView>
     </Screen>
   );

@@ -1,25 +1,52 @@
 import type {
+  Achievement,
   AccountDeletion,
   AccountSession,
   Address,
   AppAbout,
   Cart,
+  Challenge,
   CheckoutResult,
   PurchaseLine,
   Quote,
   Review,
   ReviewPage,
   ShopConfig,
+  ActivityConfig,
+  ActivityGranularity,
+  ActivityRange,
   AppNotification,
+  AttestationChallenge,
   AuthResponse,
   CoinSource,
   CoinTransaction,
+  ContentTip,
+  ContentTopic,
   DailyActivity,
+  DeviceAttestationResult,
+  DietPlanDay,
+  DietPlanDaySummary,
+  FoodEntry,
+  FoodItem,
   DeviceRegistration,
   EarnRule,
+  HealthScore,
+  HydrationDay,
+  HydrationEntry,
+  HydrationReminderPlan,
+  HydrationStats,
+  IngestNonce,
+  LeaderboardBoard,
+  LeaderboardHistory,
+  LeaderboardRules,
   NotificationCategory,
   NotificationCountsSummary,
   NotificationPreferences,
+  NutritionDay,
+  NutritionDayTotal,
+  NutritionGoals,
+  NutritionPreferences,
+  NutritionProfile,
   Order,
   PrivacySettings,
   ProfileSummary,
@@ -29,11 +56,19 @@ import type {
   ShopCategorySummary,
   ShopItem,
   ShopSort,
+  StepIngestResult,
+  StepSourcesReport,
+  StreakRestoreResult,
+  StreakSummary,
   SupportCategory,
   SupportFaq,
   SupportTicket,
   User,
+  UserSettings,
   VerificationChallenge,
+  VitalKind,
+  VitalReading,
+  VitalsLatest,
   Wallet,
   Workout,
   WorkoutTemplate,
@@ -104,6 +139,37 @@ export interface DeviceApi {
     deviceId: string,
     pushToken: string | null,
   ): Promise<{ ok: boolean }>;
+  /** A single-use challenge for the next Keystore key this device makes. */
+  attestationChallenge(deviceId: string): Promise<AttestationChallenge>;
+  /**
+   * Hands over the key the challenge was bound into — its public half and
+   * the certificate chain that vouches for it. Every signed step snapshot
+   * from this device is checked against it afterwards.
+   */
+  submitAttestation(
+    deviceId: string,
+    attestation: DeviceAttestationPayload,
+  ): Promise<DeviceAttestationResult>;
+}
+
+/**
+ * A Keystore key as `attestDevice()` reports it. Written out rather than
+ * imported from the step tracker, so the API layer does not depend on the
+ * one platform that has it.
+ */
+export interface DeviceAttestationPayload {
+  /** Hex SHA-256 of `publicKey`; every signature names it. */
+  keyId: string;
+  algorithm: string;
+  /** Base64 X.509 SubjectPublicKeyInfo. */
+  publicKey: string;
+  /** Base64 DER certificates, leaf first. */
+  certificateChain: string[];
+  /** False when the device refused attestation and made a plain key instead. */
+  attested: boolean;
+  securityLevel: string;
+  /** Epoch ms the key was made. */
+  createdAt: number;
 }
 
 /**
@@ -151,15 +217,86 @@ export interface UserApi {
   completeProfile(payload: CompleteProfilePayload): Promise<User>;
 }
 
+export interface SettingsApi {
+  get(): Promise<UserSettings>;
+  /** Only what changed; answers with the whole record as the server keeps it. */
+  update(patch: Partial<UserSettings>): Promise<UserSettings>;
+}
+
 export interface WorkoutApi {
   templates(): Promise<WorkoutTemplate[]>;
   history(cursor?: string): Promise<Page<Workout>>;
   save(workout: Workout): Promise<Workout>;
 }
 
+/**
+ * One day of steps, signed on the phone by the attested Keystore key. The
+ * server verifies `value` over `signedPayload` and then reads only the
+ * parsed payload — the counts, the sources, the minutes and the motion
+ * windows are all inside it, so nothing outside the signature is trusted.
+ */
+export interface SignedSnapshot {
+  keyId: string;
+  algorithm: string;
+  /** Base64 DER ECDSA over the UTF-8 bytes of `signedPayload`. */
+  value: string;
+  /** The key that signed was attested by the hardware. */
+  attested: boolean;
+  /** The snapshot as JSON, exactly as it was signed. */
+  signedPayload: string;
+  /** Hex SHA-256 of `signedPayload` — what a Play Integrity token is bound to. */
+  payloadSha256: string;
+}
+
+/**
+ * Play Integrity for one snapshot, sent once the server asks for it: a
+ * token bound to the snapshot's `payloadSha256`, or why Play would not give
+ * one — a phone without the Play Store still gets its steps judged.
+ */
+export type IngestIntegrity =
+  | { token: string }
+  | { error: string; retryable: boolean };
+
+export interface StepIngestPayload {
+  /** The day the snapshot covers, `YYYY-MM-DD` in the phone's zone. */
+  date: string;
+  snapshot: SignedSnapshot;
+  integrity?: IngestIntegrity;
+}
+
+export interface ActivityRangeQuery {
+  /** `YYYY-MM-DD`, inclusive. */
+  from: string;
+  to: string;
+  granularity: ActivityGranularity;
+}
+
 export interface ActivityApi {
   weekly(): Promise<DailyActivity[]>;
   today(): Promise<DailyActivity>;
+  /** Any one day, in the user's zone. */
+  day(date: string): Promise<DailyActivity>;
+  /** A period's steps at one grain, with its totals (BACKEND.md §6.3). */
+  range(query: ActivityRangeQuery): Promise<ActivityRange>;
+  /** How the tracker on this phone is set up and when it syncs. */
+  config(): Promise<ActivityConfig>;
+  /** Where a day's steps came from, and how the server matched them. */
+  sources(date: string): Promise<StepSourcesReport>;
+  /** The single-use value the next signed snapshot carries. */
+  ingestNonce(): Promise<IngestNonce>;
+  /**
+   * One day's signed snapshot (BACKEND.md §7.3). The errors the sync
+   * branches on, both answered before the nonce is spent:
+   * `ATTESTATION_REQUIRED` (403) — the server holds no key for this device,
+   * so attest and take the snapshot again; `INTEGRITY_REQUIRED` (403,
+   * `details.cloudProjectNumber`) — send the same snapshot again with a Play
+   * Integrity token. `NONCE_INVALID` (409) means the nonce was spent or ran
+   * out: take a new one and a new snapshot.
+   */
+  ingest(
+    payload: StepIngestPayload,
+    options: IdempotentOptions,
+  ): Promise<StepIngestResult>;
 }
 
 export interface NotificationQuery {
@@ -428,4 +565,127 @@ export interface SupportApi {
 export interface AppApi {
   /** Version, update state, release notes and the legal links. */
   about(): Promise<AppAbout>;
+}
+
+export interface StreakApi {
+  /** Every figure the streak screen shows, worked out by the server (RULES §S). */
+  get(): Promise<StreakSummary>;
+  /**
+   * Spends a freeze on today. Refused with `NO_FREEZES_LEFT` or
+   * `STREAK_ALREADY_COVERED` (409), with nothing spent.
+   */
+  freeze(options: IdempotentOptions): Promise<StreakSummary>;
+  /**
+   * Bridges the last gap for coins — the debit and the days in one
+   * transaction. Refused with `NOTHING_TO_RESTORE` or `INSUFFICIENT_COINS`
+   * (422), with nothing charged.
+   */
+  restore(options: IdempotentOptions): Promise<StreakRestoreResult>;
+}
+
+export interface ChallengeApi {
+  /**
+   * The board for one day (`YYYY-MM-DD`): what is open on it with the
+   * progress of the period it falls in (`startsAt: null`), then what opens
+   * soon (`startsAt` set). Progress and completion are the server's (RULES
+   * C3, C4) — there is nothing to report and nothing to claim.
+   */
+  board(date: string): Promise<Challenge[]>;
+  /** The achievement shelf, in the server's order, with what is unlocked. */
+  achievements(): Promise<Achievement[]>;
+}
+
+export interface LeaderboardApi {
+  /** This week's board for the caller's country, and their place on it. */
+  board(): Promise<LeaderboardBoard>;
+  /** The caller's record over the weeks that have closed. */
+  history(): Promise<LeaderboardHistory>;
+  /** The prizes and how a place is won, worded from the server's rules. */
+  rules(): Promise<LeaderboardRules>;
+}
+
+export interface HydrationDayTotal {
+  date: string;
+  consumedMl: number;
+  goalMl: number;
+}
+
+export interface HydrationApi {
+  /** Today's water in the user's zone. */
+  today(): Promise<HydrationDay>;
+  /**
+   * Logs a drink. The id is the app's own: sending the same drink again —
+   * a retry after a dropped connection — is the same glass, not a second.
+   */
+  log(entry: HydrationEntry, options: IdempotentOptions): Promise<HydrationDay>;
+  /** Takes a logged drink back out. Answers the day it was on. */
+  remove(id: string, options: IdempotentOptions): Promise<HydrationDay>;
+  /** The habit figures (RULES Y4). */
+  stats(): Promise<HydrationStats>;
+  /** Per-day totals, every day present. */
+  days(from: string, to: string): Promise<HydrationDayTotal[]>;
+  /** The reminder plan; the default one until the user has changed it. */
+  reminders(): Promise<HydrationReminderPlan>;
+  /** Replaces the whole plan; answers it as stored. */
+  saveReminders(
+    plan: HydrationReminderPlan,
+    options: IdempotentOptions,
+  ): Promise<HydrationReminderPlan>;
+}
+
+export interface ContentApi {
+  /** The day's tip for one place in the app — or, for `motivation`, the day's line. */
+  tip(topic: ContentTopic): Promise<ContentTip>;
+}
+
+export interface NutritionProfilePatch {
+  goals?: Partial<NutritionGoals>;
+  preferences?: Partial<NutritionPreferences>;
+}
+
+export interface NutritionApi {
+  /** The targets and the preferences (RULES N4). */
+  profile(): Promise<NutritionProfile>;
+  /** Changes them field by field; answers the whole profile as stored. */
+  updateProfile(
+    patch: NutritionProfilePatch,
+    options: IdempotentOptions,
+  ): Promise<NutritionProfile>;
+  /** One day's food (`YYYY-MM-DD`). */
+  day(date: string): Promise<NutritionDay>;
+  /** What each day from `from` to `to` came to, every day present. */
+  days(from: string, to: string): Promise<NutritionDayTotal[]>;
+  /**
+   * Logs a meal's foods. Each carries the app's own id: a retried save is
+   * the same plate. Answers the day of the first food.
+   */
+  log(entries: FoodEntry[], options: IdempotentOptions): Promise<NutritionDay>;
+  /** Takes a logged food back out; answers its day. */
+  remove(id: string, options: IdempotentOptions): Promise<NutritionDay>;
+  /** The library the user can see, by word prefix. */
+  searchFoods(query: string): Promise<FoodItem[]>;
+  /** The add-meal screen's shortcuts. */
+  quickAddFoods(): Promise<FoodItem[]>;
+  /** The plan for a day, chosen from the preferences (RULES N6, N7). */
+  plan(date: string): Promise<DietPlanDay>;
+  /** A run of days' plans in brief. */
+  planDays(from: string, to: string): Promise<DietPlanDaySummary[]>;
+}
+
+export interface VitalsApi {
+  /** The newest readings, of one kind or all, newest first. */
+  list(query: {
+    kind?: Exclude<VitalKind, 'bmi'>;
+    limit?: number;
+  }): Promise<VitalReading[]>;
+  /** The newest of each kind, and the BMI derived from them (RULES V3). */
+  latest(): Promise<VitalsLatest>;
+  /**
+   * Logs a reading under the app's own id — a retry is the same reading.
+   * BMI is never entered (RULES V1); the server refuses it.
+   */
+  log(reading: VitalReading, options: IdempotentOptions): Promise<VitalReading>;
+  remove(id: string, options: IdempotentOptions): Promise<{ ok: boolean }>;
+  /** One number for how the user is doing, and what made it (RULES V8). */
+  score(): Promise<HealthScore>;
 }

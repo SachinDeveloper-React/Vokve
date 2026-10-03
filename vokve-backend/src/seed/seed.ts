@@ -5,8 +5,15 @@ import { AppReleaseModel } from '../modules/devices/models.js';
 import { AppConfigModel } from '../modules/platform/models.js';
 import { ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
 import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.js';
+import { AchievementDefinitionModel, ChallengeDefinitionModel } from '../modules/challenges/models.js';
+import { ContentTipModel } from '../modules/content/models.js';
+import { DietPlanTemplateModel, FoodItemModel } from '../modules/nutrition/models.js';
+import { addDays } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
-import { APP_RELEASES, EXERCISES, SHOP_ITEMS, SHOP_STOCK, SUPPORT_FAQS, WORKOUT_TEMPLATES } from './data.js';
+import {
+  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, DIET_PLAN_TEMPLATES, EXERCISES, FOOD_ITEMS, SHOP_ITEMS, SHOP_STOCK,
+  SUPPORT_FAQS, WORKOUT_TEMPLATES,
+} from './data.js';
 
 /** Idempotent: safe to run on every deploy. Never touches user data. */
 export async function seed(): Promise<void> {
@@ -22,6 +29,24 @@ export async function seed(): Promise<void> {
   // Help articles are the seed's to keep current: support edits land in the
   // collection, and a re-seed restores the wording the app shipped with.
   await Promise.all(SUPPORT_FAQS.map(f => SupportFaqModel.updateOne({ _id: f._id }, { $set: f }, { upsert: true })));
+  // The challenge board and the achievement shelf are the seed's wording, but
+  // an opening day, once set, is never moved by a re-seed.
+  const seededOn = new Date().toISOString().slice(0, 10);
+  await Promise.all(CHALLENGES.map(({ startsInDays, ...c }) =>
+    ChallengeDefinitionModel.updateOne(
+      { _id: c._id },
+      { $set: c, $setOnInsert: { startsOn: startsInDays === null ? null : addDays(seededOn, startsInDays) } },
+      { upsert: true },
+    )));
+  await Promise.all(ACHIEVEMENTS.map(a => AchievementDefinitionModel.updateOne({ _id: a._id }, { $set: a }, { upsert: true })));
+  // The tips' wording is the seed's to keep current; whether one is shown is the operator's.
+  await Promise.all(CONTENT_TIPS.map(({ _id, ...t }) =>
+    ContentTipModel.updateOne({ _id }, { $set: t, $setOnInsert: { active: true } }, { upsert: true })));
+  // The global food library and the plan's curated days are the seed's to keep current.
+  await Promise.all(FOOD_ITEMS.map(({ _id, ...f }) =>
+    FoodItemModel.updateOne({ _id }, { $set: { ...f, ownerUserId: null } }, { upsert: true })));
+  await Promise.all(DIET_PLAN_TEMPLATES.map(({ _id, ...t }) =>
+    DietPlanTemplateModel.updateOne({ _id }, { $set: t, $setOnInsert: { active: true } }, { upsert: true })));
   // Config documents are created only if absent, so an operator's override survives a re-seed.
   for (const [key, value] of Object.entries(CONFIG_DEFAULTS)) {
     await AppConfigModel.updateOne({ _id: key }, { $setOnInsert: { _id: key, value, updatedBy: 'seed' } }, { upsert: true });

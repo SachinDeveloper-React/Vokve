@@ -118,7 +118,13 @@ export const workoutTemplateSchema = z.object({
 });
 export type WorkoutTemplate = z.infer<typeof workoutTemplateSchema>;
 
+/**
+ * Where a day's steps came from. `device` is the phone's own step sensor,
+ * counted by the app; the other two are a health store another app or a
+ * watch wrote to.
+ */
 export const activitySourceSchema = z.enum([
+  'device',
   'health_connect',
   'healthkit',
   'manual',
@@ -139,6 +145,261 @@ export const dailyActivitySchema = z.object({
   verified: z.boolean().default(false),
 });
 export type DailyActivity = z.infer<typeof dailyActivitySchema>;
+
+/**
+ * `POST /activity/ingest/nonce`: the value the next signed step snapshot
+ * carries inside what it signs, so a snapshot cannot be sent twice. Single
+ * use, and short-lived — taken right before the snapshot, never stored.
+ */
+export const ingestNonceSchema = z.object({
+  nonce: z.string().min(1).max(512),
+  /** ISO-8601. */
+  expiresAt: z.string(),
+});
+export type IngestNonce = z.infer<typeof ingestNonceSchema>;
+
+/** `POST /activity/ingest`: the day as the server holds it once the snapshot is in. */
+export const stepIngestResultSchema = z.object({
+  day: dailyActivitySchema,
+  /** The server already had this exact snapshot; the answer is the first one's. */
+  duplicate: z.boolean().default(false),
+  /** Step coins this snapshot put in escrow. 0 while step coins are off. */
+  coinsHeld: z.number().nonnegative().default(0),
+  /** ISO-8601: when those coins are due out of escrow, or null. */
+  releaseAfter: z.string().nullable().default(null),
+  /** This snapshot took the day to the step goal and earned it for the streak. */
+  streakEarned: z.boolean().default(false),
+});
+export type StepIngestResult = z.infer<typeof stepIngestResultSchema>;
+
+/**
+ * `GET /activity/config`: how the phone's step tracker is set up and when it
+ * syncs — the server's to change without a release. The record types are
+ * only those the app's manifest declares: a type the app has not declared
+ * would make Health Connect refuse the whole permission sheet.
+ */
+export const activityConfigSchema = z.object({
+  tracker: z.object({
+    healthConnectReadTypes: z.array(z.enum(['steps', 'distance'])).min(1),
+    healthConnectWriteEnabled: z.boolean(),
+    healthConnectIgnoreManualEntries: z.boolean(),
+    wearableTrust: z.enum(['metadata', 'catalog']).catch('catalog'),
+    /** Apps trusted as a watch's relay on top of the tracker's own catalog. */
+    wearableAllowlist: z.array(z.string()).default([]),
+    gapRecovery: z.enum(['split', 'today', 'today_capped', 'drop']).catch('split'),
+    historyRetentionDays: z.number().int().positive(),
+    motionWindowRetention: z.number().int().positive(),
+    fraudDetection: z.object({
+      enabled: z.boolean(),
+      mode: z.enum(['flag', 'exclude']).catch('flag'),
+    }),
+    motionSampling: z.object({
+      enabled: z.boolean(),
+      windowSeconds: z.number().int().positive(),
+      intervalMinutes: z.number().int().positive(),
+    }),
+    /** Where Health Connect sends someone who asks why the app wants their steps. */
+    privacyPolicyUrl: z.string(),
+  }),
+  sync: z.object({
+    /** Minutes between syncs of today while the app is open. */
+    intervalMinutes: z.number().positive(),
+    /** The least seconds between two syncs of today nobody asked for. */
+    minGapSeconds: z.number().nonnegative(),
+    /** How many days back the server still takes. */
+    maxAgeDays: z.number().int().positive(),
+    /** The evidence each signed snapshot carries. */
+    include: z.array(
+      z.enum(['minutes', 'motionWindows', 'healthConnectRecords']),
+    ),
+    healthConnectRecordTypes: z.array(z.enum(['steps', 'distance'])),
+  }),
+  playIntegrity: z.object({
+    /** Null while the server asks for no Play Integrity verdicts. */
+    cloudProjectNumber: z.number().int().positive().nullable(),
+  }),
+});
+export type ActivityConfig = z.infer<typeof activityConfigSchema>;
+
+/**
+ * `hour` is one day's 24 hours; `day` one point a day; `week` consecutive
+ * seven-day blocks counted from `from` — from the 1st of a month, W1 to
+ * W5; `month` calendar months.
+ */
+export const activityGranularitySchema = z.enum([
+  'hour',
+  'day',
+  'week',
+  'month',
+]);
+export type ActivityGranularity = z.infer<typeof activityGranularitySchema>;
+
+export const activityRangePointSchema = z.object({
+  /** `YYYY-MM-DD`, or `YYYY-MM-DDTHH:00` for an hour — local, inclusive. */
+  start: z.string(),
+  /** Inclusive, in the same form. */
+  end: z.string(),
+  steps: z.number().int().nonnegative(),
+  verifiedSteps: z.number().int().nonnegative(),
+});
+export type ActivityRangePoint = z.infer<typeof activityRangePointSchema>;
+
+/** `GET /activity/range`: a period's steps at one grain, with its totals. */
+export const activityRangeSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  granularity: activityGranularitySchema,
+  points: z.array(activityRangePointSchema),
+  totals: z.object({
+    steps: z.number().int().nonnegative(),
+    verifiedSteps: z.number().int().nonnegative(),
+    distanceKm: z.number().nonnegative(),
+    caloriesBurned: z.number().nonnegative(),
+    activeMinutes: z.number().int().nonnegative(),
+    /** Days with at least one step. */
+    activeDays: z.number().int().nonnegative(),
+  }),
+  /** The day with the most steps in the range; null when none had any. */
+  best: z
+    .object({ date: z.string(), steps: z.number().int().nonnegative() })
+    .nullable(),
+});
+export type ActivityRange = z.infer<typeof activityRangeSchema>;
+
+/**
+ * What became of one Health Connect source on one phone's day:
+ * `used` — it answered for the day; `lower` — trusted, and something else
+ * counted more; `not_counted` — far above what the phone itself saw;
+ * `unverified` — an app the server does not trust, shown but never paid;
+ * `blocked` — known to fabricate steps; `not_computed` — typed-in steps
+ * could not be told apart.
+ */
+export const stepSourceStatusSchema = z.enum([
+  'used',
+  'lower',
+  'not_counted',
+  'unverified',
+  'blocked',
+  'not_computed',
+]);
+export type StepSourceStatus = z.infer<typeof stepSourceStatusSchema>;
+
+export const stepSourceRowSchema = z.object({
+  packageName: z.string(),
+  appName: z.string(),
+  /** `watch`, `fitness_band`, `ring`, `phone`, `app`… — what wrote it. */
+  kind: z.string(),
+  isWearable: z.boolean(),
+  /** Android's own step count, kept by Health Connect. */
+  isPlatform: z.boolean(),
+  /** Everything the app wrote for the day. */
+  steps: z.number().int().nonnegative(),
+  /** Typed in by hand; null when it could not be told apart. */
+  manualSteps: z.number().int().nonnegative().nullable(),
+  /** What could count, once typed-in steps are taken out. */
+  countable: z.number().int().nonnegative().nullable(),
+  /** `countable` against the phone's own count. */
+  ratioToPhone: z.number().nonnegative().nullable(),
+  status: stepSourceStatusSchema,
+  /** One line on why, from the server. */
+  note: z.string(),
+});
+export type StepSourceRow = z.infer<typeof stepSourceRowSchema>;
+
+export const stepSourceDeviceSchema = z.object({
+  deviceId: z.string(),
+  /** "Pixel 8" — the phone as its maker names it. */
+  name: z.string(),
+  /** The phone asking. */
+  isCurrent: z.boolean(),
+  /** This phone's count is the one the day was decided on. */
+  answeredForDay: z.boolean(),
+  /** ISO-8601: when the server last heard from it about this day. */
+  syncedAt: z.string().nullable(),
+  /** The phone's own sensor, and what was taken off it before it competed. */
+  phone: z.object({
+    counted: z.number().int().nonnegative(),
+    /** Credited in one go after the phone had stopped counting. */
+    recovered: z.number().int().nonnegative(),
+    /** Flagged by the phone's own checks. */
+    flagged: z.number().int().nonnegative(),
+    clean: z.number().int().nonnegative(),
+  }),
+  /** The best count this phone's evidence supports. */
+  counted: z.number().int().nonnegative(),
+  source: activitySourceSchema,
+  verified: z.boolean(),
+  /** One line on how Health Connect was read, or null when it was. */
+  sourcesNote: z.string().nullable(),
+  sources: z.array(stepSourceRowSchema),
+  proof: z.object({
+    /** The signing key was vouched for by the phone's secure hardware. */
+    keyAttested: z.boolean().nullable(),
+    /** Locked bootloader and the maker's own OS. */
+    bootVerified: z.boolean().nullable(),
+    /** The last Play Integrity verdict: `pass`, `fail`, `unavailable`… */
+    playIntegrity: z.string().nullable(),
+  }),
+});
+export type StepSourceDevice = z.infer<typeof stepSourceDeviceSchema>;
+
+/**
+ * `GET /activity/sources?date=`: where a day's steps came from and how the
+ * server matched them — every phone, every Health Connect app, the raw
+ * records it holds, and each upload. `checks` is the fraud layers' own view,
+ * and only present where the server chooses to show it.
+ */
+export const stepSourcesReportSchema = z.object({
+  date: z.string(),
+  /** ISO-8601: when the day was last judged; null before its first upload. */
+  scoredAt: z.string().nullable(),
+  day: dailyActivitySchema,
+  /** How the day's figure was reached, in plain words, from the server. */
+  explanation: z.array(z.string()),
+  devices: z.array(stepSourceDeviceSchema),
+  /** The raw Health Connect records the server holds for the day, by app. */
+  records: z.array(
+    z.object({
+      packageName: z.string(),
+      appName: z.string(),
+      records: z.number().int().nonnegative(),
+      steps: z.number().int().nonnegative(),
+      manualSteps: z.number().int().nonnegative(),
+      unknownMethodSteps: z.number().int().nonnegative(),
+    }),
+  ),
+  /** The day's uploads, newest first. */
+  uploads: z.array(
+    z.object({
+      at: z.string(),
+      deviceName: z.string(),
+      phoneSteps: z.number().int().nonnegative(),
+      shownSteps: z.number().int().nonnegative(),
+      playIntegrity: z.string().nullable(),
+    }),
+  ),
+  checks: z
+    .object({
+      plausibility: z.number().nullable(),
+      layers: z.array(
+        z.object({
+          key: z.string(),
+          name: z.string(),
+          score: z.number().nullable(),
+        }),
+      ),
+      flags: z.array(
+        z.object({
+          kind: z.string(),
+          layer: z.string(),
+          severity: z.enum(['hard', 'soft', 'info']).catch('info'),
+          message: z.string(),
+        }),
+      ),
+    })
+    .nullable(),
+});
+export type StepSourcesReport = z.infer<typeof stepSourcesReportSchema>;
 
 export const bodyMeasurementSchema = z.object({
   id: z.string(),
@@ -600,13 +861,28 @@ export const challengeSchema = z.object({
    * a week in the future, and the screen splits its two lists on exactly this.
    */
   startsAt: z.string().nullable().default(null),
+  /**
+   * The last day of the period the progress counts, `YYYY-MM-DD` — today for
+   * a daily challenge, Sunday for a weekly one, the month's last day for a
+   * monthly one. Null for an upcoming challenge.
+   */
+  endsOn: z.string().nullable().default(null),
+  /**
+   * ISO-8601: when this period's goal was reached and the reward recorded,
+   * or null while it has not been. The server completes a challenge on its
+   * own (RULES C4, D-08 — everyone is enrolled); there is nothing to claim.
+   */
+  completedAt: z.string().nullable().default(null),
 });
 export type Challenge = z.infer<typeof challengeSchema>;
 
 export const achievementSchema = z.object({
   id: z.string(),
-  /** What the ring shows — "10K", "500", "30". Already abbreviated. */
-  value: z.string(),
+  /**
+   * The figure the badge stands for — 10000, 500, 30. A number (RULES C7):
+   * abbreviating it to "10K" for the ring is the app's job.
+   */
+  value: z.number().nonnegative(),
   /** What it was won for — "10K Steps", "Cal Burner". */
   label: z.string(),
   /** Borrowed from challenges: an achievement is what one pays out. */
@@ -913,6 +1189,8 @@ export const leaderboardEntrySchema = z.object({
   perk: z.string().default(''),
   avatarUrl: z.string().nullable().default(null),
   isCurrentUser: z.boolean().default(false),
+  /** The week's score (RULES L3) — what the rank was won with. */
+  score: z.number().nonnegative().default(0),
 });
 export type LeaderboardEntry = z.infer<typeof leaderboardEntrySchema>;
 
@@ -1162,6 +1440,48 @@ export const deviceRegistrationSchema = z.object({
 });
 export type DeviceRegistration = z.infer<typeof deviceRegistrationSchema>;
 
+/**
+ * `GET/PUT /me/settings`: the user's own targets and switches, kept by the
+ * server so a new phone opens on the same goal (RULES P3). Clamped there
+ * the same way the settings store clamps them.
+ */
+export const userSettingsSchema = z.object({
+  units: unitSystemSchema,
+  dailyStepGoal: z.number().int().min(1000).max(50000),
+  dailyWaterGoalMl: z.number().int().min(500).max(8000),
+  restTimerSeconds: z.number().int().min(15).max(600),
+  hapticsEnabled: z.boolean(),
+  workoutRemindersEnabled: z.boolean(),
+  keepAwakeDuringWorkout: z.boolean(),
+});
+export type UserSettings = z.infer<typeof userSettingsSchema>;
+
+/**
+ * `POST /devices/:id/attestation/challenge`: what the next Keystore key is
+ * bound to. The server finds it again in the key's certificate, which is how
+ * it knows the key was made just now, for this device, and not replayed.
+ */
+export const attestationChallengeSchema = z.object({
+  /** 1–128 bytes of UTF-8 — what `attestDevice()` accepts. */
+  challenge: z.string().min(1).max(128),
+  /** ISO-8601. */
+  expiresAt: z.string(),
+});
+export type AttestationChallenge = z.infer<typeof attestationChallengeSchema>;
+
+/** `POST /devices/:id/attestation`: what the server made of the key it was handed. */
+export const deviceAttestationResultSchema = z.object({
+  keyId: z.string(),
+  /** The chain verified up to Google's hardware attestation root. */
+  attested: z.boolean(),
+  securityLevel: z
+    .enum(['strongbox', 'tee', 'software', 'unknown'])
+    .catch('unknown'),
+});
+export type DeviceAttestationResult = z.infer<
+  typeof deviceAttestationResultSchema
+>;
+
 // ─── Account: profile, privacy, sessions, support ──────────────────────────
 
 /**
@@ -1392,3 +1712,342 @@ export const appAboutSchema = z.object({
   supportEmail: z.string(),
 });
 export type AppAbout = z.infer<typeof appAboutSchema>;
+
+// ─── Streak ────────────────────────────────────────────────────────────────
+
+/** An unbroken run of counting days, both ends included. */
+export const streakRunSchema = z.object({
+  length: z.number().int().positive(),
+  /** `YYYY-MM-DD`. */
+  start: z.string(),
+  /** `YYYY-MM-DD`. */
+  end: z.string(),
+});
+export type StreakRun = z.infer<typeof streakRunSchema>;
+
+/** One rung of the milestone ladder (⚙ `coins.streakMilestones`, RULES S8). */
+export const streakMilestoneSchema = z.object({
+  days: z.number().int().positive(),
+  coins: z.number().nonnegative(),
+  /** Reached by the longest streak on record — once reached, it stays reached. */
+  achieved: z.boolean(),
+  /** The coins are in the ledger. Can trail `achieved` by a sync. */
+  paid: z.boolean(),
+});
+export type StreakMilestone = z.infer<typeof streakMilestoneSchema>;
+
+/**
+ * `GET /streak` — every figure the streak screen shows, worked out by the
+ * server from the days it recorded (RULES §S). The calendar and the figures
+ * read the same day lists, so they cannot disagree.
+ */
+export const streakSummarySchema = z.object({
+  /** The user's today, `YYYY-MM-DD`, as the server counts it. */
+  today: z.string(),
+  currentStreak: z.number().int().nonnegative(),
+  longestStreak: streakRunSchema.nullable(),
+  /** Days earned by the rules in `howToEarn`, `YYYY-MM-DD`, oldest first. */
+  completedDays: z.array(z.string()),
+  /** Days a freeze or a restore covered, `YYYY-MM-DD`, oldest first. */
+  protectedDays: z.array(z.string()),
+  freezesAvailable: z.number().int().nonnegative(),
+  /** The most freezes that can be held at once (⚙). */
+  maxFreezes: z.number().int().nonnegative(),
+  /** Today already counts — earned, or frozen. */
+  todayCovered: z.boolean(),
+  /** Today counts because of a freeze. */
+  todayFrozen: z.boolean(),
+  /** There is a recent gap a restore would bridge (RULES S6). */
+  canRestore: z.boolean(),
+  /** The days a restore would cover, `YYYY-MM-DD`. Empty when `canRestore` is false. */
+  restoreGap: z.array(z.string()),
+  restoreCostCoins: z.number().nonnegative(),
+  restoreWindowDays: z.number().int().positive(),
+  milestones: z.array(streakMilestoneSchema),
+  /** The next rung above the current run, or null past the top. */
+  nextMilestone: streakMilestoneSchema.nullable(),
+  /** What makes a day count, worded by the server from its rules. */
+  howToEarn: z.string(),
+});
+export type StreakSummary = z.infer<typeof streakSummarySchema>;
+
+/** `POST /streak/restore`: the streak after the restore, and the wallet after the debit. */
+export const streakRestoreResultSchema = z.object({
+  streak: streakSummarySchema,
+  balance: z.number().nonnegative(),
+});
+export type StreakRestoreResult = z.infer<typeof streakRestoreResultSchema>;
+
+// ─── Leaderboard ───────────────────────────────────────────────────────────
+
+/** One prize rung (⚙ `leaderboard.tiers`, RULES L7). */
+export const rewardTierSchema = z.object({
+  id: z.string(),
+  fromRank: z.number().int().positive(),
+  toRank: z.number().int().positive(),
+  /** "Rank 1", "Rank 2 – 3". */
+  label: z.string(),
+  coins: z.number().nonnegative(),
+  /** The gear on top of the coins, one item each. */
+  perks: z.array(z.string()),
+});
+export type RewardTierInfo = z.infer<typeof rewardTierSchema>;
+
+/**
+ * `GET /leaderboard/reward-tiers`: what each place pays and how a place is
+ * won, worded by the server from the rules in force — so a changed prize or
+ * score weight never needs a release.
+ */
+export const leaderboardRulesSchema = z.object({
+  /** The board's country, for people — "India". */
+  scope: z.string(),
+  tiers: z.array(rewardTierSchema),
+  /** The rules in the order they happen to the user. */
+  howItWorks: z.array(z.object({ title: z.string(), detail: z.string() })),
+  /** The line under the tiers. */
+  note: z.string(),
+});
+export type LeaderboardRules = z.infer<typeof leaderboardRulesSchema>;
+
+export const leaderboardPeriodSchema = z.object({
+  /** The week's Monday, `YYYY-MM-DD` — the period's id. */
+  id: z.string(),
+  start: z.string(),
+  /** The week's Sunday, `YYYY-MM-DD`. */
+  end: z.string(),
+  /** ISO-8601: when the week ends in the board's zone. */
+  resetsAt: z.string(),
+  /** ISO 3166-1 alpha-2 — the country the board is scoped to (RULES L2). */
+  country: z.string(),
+  status: z.enum(['live', 'closed']),
+});
+export type LeaderboardPeriod = z.infer<typeof leaderboardPeriodSchema>;
+
+/** `GET /leaderboard`: this week's board, the top of it, and the caller's own place. */
+export const leaderboardBoardSchema = z.object({
+  period: leaderboardPeriodSchema,
+  /** In rank order (RULES L5: no two share a rank). */
+  entries: z.array(leaderboardEntrySchema),
+  /** The caller's place; null until they have scored this week. */
+  me: z
+    .object({
+      rank: z.number().int().positive(),
+      score: z.number().nonnegative(),
+      /** What the place would pay if the week ended now. */
+      coins: z.number().nonnegative(),
+      /** Share of the ranked who are at or below the caller, 0–100. */
+      percentile: z.number().min(0).max(100),
+    })
+    .nullable(),
+  /** How many have a score this week. */
+  ranked: z.number().int().nonnegative(),
+});
+export type LeaderboardBoard = z.infer<typeof leaderboardBoardSchema>;
+
+/** `GET /leaderboard/history`: the caller's record over the weeks that have closed. */
+export const leaderboardHistorySchema = z.object({
+  bestRank: z.number().int().positive().nullable(),
+  /** The last day of the week the best rank was won, `YYYY-MM-DD`. */
+  bestRankAchievedOn: z.string().nullable(),
+  topTenFinishes: z.number().int().nonnegative(),
+  /** Leaderboard coins actually paid. */
+  rewardCoinsEarned: z.number().nonnegative(),
+  /** Weeks that won gear. */
+  rewardsWon: z.number().int().nonnegative(),
+  /** Newest first. */
+  periods: z.array(
+    z.object({
+      id: z.string(),
+      start: z.string(),
+      end: z.string(),
+      rank: z.number().int().positive(),
+      score: z.number().nonnegative(),
+      coins: z.number().nonnegative(),
+    }),
+  ),
+});
+export type LeaderboardHistory = z.infer<typeof leaderboardHistorySchema>;
+
+// ─── Hydration ─────────────────────────────────────────────────────────────
+
+/** `GET /hydration/today`, and the answer to every log and delete: one day's water. */
+export const hydrationDaySchema = z.object({
+  /** The user's day, `YYYY-MM-DD`, as the server counts it. */
+  date: z.string(),
+  consumedMl: z.number().int().nonnegative(),
+  /** The user's own goal (`/me/settings`). */
+  goalMl: z.number().int().positive(),
+  /** Newest first. */
+  entries: z.array(hydrationEntrySchema),
+});
+export type HydrationDay = z.infer<typeof hydrationDaySchema>;
+
+/** `GET /hydration/stats`: the habit rather than the day (RULES Y4). */
+export const hydrationStatsSchema = z.object({
+  /** The longest run of days at or above the goal. */
+  bestStreakDays: z.number().int().nonnegative(),
+  /** Over the last 30 days that have any water logged. */
+  dailyAverageMl: z.number().int().nonnegative(),
+  /** Days at or above the goal ÷ days with any water, last 30 days. */
+  goalHitRatePercent: z.number().int().min(0).max(100),
+  /** Reminders that will actually arrive today. */
+  reminderCount: z.number().int().nonnegative(),
+});
+export type HydrationStats = z.infer<typeof hydrationStatsSchema>;
+
+/** `GET/PUT /hydration/reminders`: the whole reminder plan (RULES Y5). */
+export const hydrationReminderPlanSchema = z.object({
+  /** The master switch. */
+  enabled: z.boolean(),
+  reminders: z.array(hydrationReminderSchema),
+  /** The notification sound, by name. */
+  sound: z.string(),
+  vibration: z.boolean(),
+  /** Weekday indices the plan repeats on, 0 = Monday. */
+  repeatDays: z.array(z.number().int().min(0).max(6)),
+});
+export type HydrationReminderPlan = z.infer<typeof hydrationReminderPlanSchema>;
+
+// ─── Content ───────────────────────────────────────────────────────────────
+
+export const contentTopicSchema = z.enum([
+  'motivation',
+  'hydration',
+  'reminders',
+  'nutrition',
+  'health',
+  'heart_rate',
+  'blood_pressure',
+]);
+export type ContentTopic = z.infer<typeof contentTopicSchema>;
+
+/** `GET /content/tips/:topic`: the day's tip or quote for one place in the app. */
+export const contentTipSchema = z.object({
+  id: z.string(),
+  topic: contentTopicSchema,
+  /** A heading, where the card has room for one. */
+  title: z.string().nullable(),
+  text: z.string(),
+});
+export type ContentTip = z.infer<typeof contentTipSchema>;
+
+// ─── Nutrition ─────────────────────────────────────────────────────────────
+
+/** What a set of food adds up to. */
+export const nutritionTotalsSchema = z.object({
+  calories: z.number().nonnegative(),
+  proteinG: z.number().nonnegative(),
+  carbsG: z.number().nonnegative(),
+  fatsG: z.number().nonnegative(),
+  fiberG: z.number().nonnegative().default(0),
+});
+export type NutritionTotals = z.infer<typeof nutritionTotalsSchema>;
+
+/** The day's targets (RULES N4). */
+export const nutritionGoalsSchema = z.object({
+  calories: z.number().nonnegative(),
+  proteinG: z.number().nonnegative(),
+  carbsG: z.number().nonnegative(),
+  fatsG: z.number().nonnegative(),
+});
+export type NutritionGoals = z.infer<typeof nutritionGoalsSchema>;
+
+/** How the user eats, which the diet plan is chosen by. */
+export const nutritionPreferencesSchema = z.object({
+  dietType: dietTypeSchema,
+  mealPlan: mealPlanSchema,
+  goal: nutritionGoalSchema,
+});
+export type NutritionPreferences = z.infer<typeof nutritionPreferencesSchema>;
+
+/** `GET/PUT /nutrition/profile`: the targets and the preferences, kept by the server. */
+export const nutritionProfileSchema = z.object({
+  goals: nutritionGoalsSchema,
+  preferences: nutritionPreferencesSchema,
+});
+export type NutritionProfile = z.infer<typeof nutritionProfileSchema>;
+
+/** `GET /nutrition/day`, and the answer to every log and delete: one day's food. */
+export const nutritionDaySchema = z.object({
+  /** `YYYY-MM-DD`. */
+  date: z.string(),
+  /** In the order they were logged. */
+  entries: z.array(foodEntrySchema),
+  totals: nutritionTotalsSchema,
+  goals: nutritionGoalsSchema,
+});
+export type NutritionDay = z.infer<typeof nutritionDaySchema>;
+
+/** One row of `GET /nutrition/days`: what a day came to. Every day asked for is present. */
+export const nutritionDayTotalSchema = z.object({
+  date: z.string(),
+  /** How many things were logged, across every meal. */
+  items: z.number().int().nonnegative(),
+  calories: z.number().nonnegative(),
+  proteinG: z.number().nonnegative(),
+  carbsG: z.number().nonnegative(),
+  fatsG: z.number().nonnegative(),
+});
+export type NutritionDayTotal = z.infer<typeof nutritionDayTotalSchema>;
+
+/** `GET /diet-plan?date=`: the plan the server chose for a day, from the user's preferences (RULES N6, N7). */
+export const dietPlanDaySchema = z.object({
+  date: z.string(),
+  /** In clock order. */
+  meals: z.array(plannedMealSchema),
+  totals: nutritionTotalsSchema,
+  /** How many days the plan cycles through before it repeats. */
+  cycleLength: z.number().int().positive(),
+  /** What the plan was chosen by, for people — "Vegetarian · Balanced". */
+  basis: z.string(),
+});
+export type DietPlanDay = z.infer<typeof dietPlanDaySchema>;
+
+/** One row of `GET /diet-plan/days`: a day's plan in brief. */
+export const dietPlanDaySummarySchema = z.object({
+  date: z.string(),
+  meals: z.number().int().nonnegative(),
+  calories: z.number().nonnegative(),
+});
+export type DietPlanDaySummary = z.infer<typeof dietPlanDaySummarySchema>;
+
+// ─── Vitals and health ─────────────────────────────────────────────────────
+
+/** `GET /vitals/latest`: the newest reading of each kind, and the BMI worked out from them. */
+export const vitalsLatestSchema = z.object({
+  heart_rate: vitalReadingSchema.nullable(),
+  blood_pressure: vitalReadingSchema.nullable(),
+  weight: vitalReadingSchema.nullable(),
+  /**
+   * Derived, never entered (RULES V1, V3): the latest weight over the
+   * height on the profile. Null without both.
+   */
+  bmi: vitalReadingSchema.nullable(),
+  /** The wellness line every vitals answer carries (RULES V9). */
+  disclaimer: z.string(),
+});
+export type VitalsLatest = z.infer<typeof vitalsLatestSchema>;
+
+/** One part of the health score (RULES V8). */
+export const healthScoreFactorSchema = z.object({
+  id: z.enum(['activity', 'hydration', 'vitals', 'bmi', 'consistency']),
+  label: z.string(),
+  /** The most points this part is worth. */
+  weight: z.number().nonnegative(),
+  /** The points it earned. */
+  points: z.number().nonnegative(),
+  /** Why, in a sentence. */
+  detail: z.string(),
+});
+export type HealthScoreFactor = z.infer<typeof healthScoreFactorSchema>;
+
+/** `GET /health/score`: one number for how the user is doing, and what made it (RULES V8). */
+export const healthScoreSchema = z.object({
+  score: z.number().int().nonnegative(),
+  outOf: z.number().int().positive(),
+  /** The score in a word — "Good", "Fair", "Needs work". */
+  band: z.string(),
+  factors: z.array(healthScoreFactorSchema),
+  disclaimer: z.string(),
+});
+export type HealthScore = z.infer<typeof healthScoreSchema>;

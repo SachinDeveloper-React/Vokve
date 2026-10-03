@@ -9,8 +9,14 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Text as RNText } from 'react-native';
+import { mockSnapshot } from 'react-native-step-tracker-pro/jest';
 import { HomeScreen } from '../src/screens/main/HomeScreen';
+import { useStepsStore } from '../src/stores/stepsStore';
+import { useStreakStore } from '../src/stores/streakStore';
 import { ThemeProvider } from '../src/theme';
+import { textOf } from './helpers/text';
+import { addDays, todayIso } from '../src/utils/date';
 
 const mockNavigate = jest.fn();
 
@@ -21,6 +27,13 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate }),
 }));
 
+// The day's motivation line is the server's; these tests are about the
+// wiring, so it is left on its way rather than fetched for real.
+jest.mock('../src/services/api/endpoints', () => ({
+  ...jest.requireActual('../src/services/api/endpoints'),
+  contentApi: { tip: jest.fn(() => new Promise(() => {})) },
+}));
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -28,9 +41,18 @@ const metrics = {
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
+const INITIAL_STEPS = useStepsStore.getState();
+
 beforeEach(() => {
   mockNavigate.mockClear();
+  useStepsStore.setState(INITIAL_STEPS, true);
+  useStreakStore.getState().reset();
 });
+
+const labelsOf = (tree: ReactTestRenderer.ReactTestRenderer) =>
+  tree.root
+    .findAll(n => typeof n.props?.accessibilityLabel === 'string')
+    .map(n => n.props.accessibilityLabel as string);
 
 afterEach(async () => {
   const tree = mounted;
@@ -111,5 +133,95 @@ describe('HomeScreen', () => {
     press(await render(), 'Streaks');
 
     expect(mockNavigate).toHaveBeenCalledWith('Streak');
+  });
+
+  test("the streak shortcut carries the server's run, and a dash before it has said", async () => {
+    expect(labelsOf(await render())).toContain('Streaks —');
+
+    useStreakStore.setState({
+      summary: {
+        today: todayIso(),
+        currentStreak: 12,
+        longestStreak: {
+          length: 12,
+          start: addDays(todayIso(), -11),
+          end: todayIso(),
+        },
+        completedDays: [],
+        protectedDays: [],
+        freezesAvailable: 1,
+        maxFreezes: 3,
+        todayCovered: true,
+        todayFrozen: false,
+        canRestore: false,
+        restoreGap: [],
+        restoreCostCoins: 50,
+        restoreWindowDays: 7,
+        milestones: [],
+        nextMilestone: null,
+        howToEarn: 'Walk 10,000 steps in a day.',
+      },
+      syncedAt: new Date().toISOString(),
+    });
+    expect(labelsOf(await render())).toContain('Streaks 12 Days');
+  });
+
+  test('a phone not counting yet is asked to, and the prompt opens step tracking', async () => {
+    useStepsStore.setState({ supported: true, trackingState: 'idle' });
+
+    press(await render(), 'Start counting your steps');
+
+    expect(mockNavigate).toHaveBeenCalledWith('StepTracking');
+  });
+
+  test('the step cards show the server’s figures, not the phone’s own count', async () => {
+    useStepsStore.setState({
+      supported: true,
+      trackingState: 'running',
+      // The phone has counted further than the server has heard about yet.
+      today: mockSnapshot({ state: 'running', steps: 9999 }),
+      serverWeek: [
+        {
+          date: addDays(todayIso(), -1),
+          steps: 8765,
+          verifiedSteps: 8765,
+          distanceKm: 6,
+          activeMinutes: 60,
+          caloriesBurned: 300,
+          workoutsCompleted: 0,
+          source: 'device',
+          verified: true,
+        },
+        {
+          date: todayIso(),
+          steps: 4321,
+          verifiedSteps: 4000,
+          distanceKm: 3.1,
+          activeMinutes: 37,
+          caloriesBurned: 180,
+          workoutsCompleted: 0,
+          source: 'device',
+          verified: true,
+        },
+      ],
+    });
+
+    const text = textOf(await render(), RNText);
+
+    expect(text).toContain('4,321');
+    expect(text).not.toContain('9,999');
+    expect(text).toContain('3.1 km');
+    expect(text).toContain('37 min');
+    expect(text).toContain('180 kcal');
+    expect(text).toContain('8,765');
+    expect(text).not.toContain('Start counting your steps');
+  });
+
+  test('a phone without step counting gets no prompt to turn it on', async () => {
+    useStepsStore.setState({ supported: false });
+
+    expect(textOf(await render(), RNText)).not.toContain(
+      'Start counting your steps',
+    );
   });
 });

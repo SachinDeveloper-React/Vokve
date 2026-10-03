@@ -3,7 +3,8 @@
  * master switch, the four figures under it, the chips, and the custom rows —
  * so the checks here are that they move together: switching a chip off has to
  * change the count and the next reminder in the same breath, and the master
- * switch has to take the whole thing to zero.
+ * switch has to take the whole thing to zero. The plan is the server's: an
+ * edit is sent whole, and nothing is drawn before the first answer.
  *
  * @format
  */
@@ -20,6 +21,8 @@ import {
   useRemindersStore,
 } from '../src/stores/remindersStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import type { HydrationReminderPlan } from '../src/types/models';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -35,6 +38,58 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+// The mock backend's own plan store and tips, behind spies.
+jest.mock('../src/services/api/endpoints', () => {
+  const api = jest.requireActual('../src/services/api/mockApi');
+  return {
+    hydrationApi: {
+      reminders: jest.fn(() => api.mockHydrationApi.reminders()),
+      saveReminders: jest.fn((plan: unknown, options: unknown) =>
+        api.mockHydrationApi.saveReminders(plan, options),
+      ),
+    },
+    contentApi: {
+      tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
+    },
+  };
+});
+
+const { hydrationApi } = jest.requireMock('../src/services/api/endpoints') as {
+  hydrationApi: { reminders: jest.Mock; saveReminders: jest.Mock };
+};
+
+/** Seven presets and two custom times, all on, every day. */
+const PLAN: HydrationReminderPlan = {
+  enabled: true,
+  sound: 'Default',
+  vibration: true,
+  repeatDays: [0, 1, 2, 3, 4, 5, 6],
+  reminders: [
+    ['morning', '07:00'],
+    ['morning', '08:30'],
+    ['morning', '10:00'],
+    ['custom', '11:00'],
+    ['afternoon', '13:00'],
+    ['afternoon', '15:30'],
+    ['evening', '18:00'],
+    ['evening', '20:00'],
+    ['custom', '21:30'],
+  ].map(([slot, time]) => ({
+    id: `${slot}-${time}`,
+    time,
+    slot: slot as HydrationReminderPlan['reminders'][number]['slot'],
+    enabled: true,
+  })),
+};
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -45,9 +100,18 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 beforeEach(() => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
+  clearServerReads();
+  hydrationApi.reminders.mockClear();
+  hydrationApi.saveReminders.mockClear();
   useRemindersStore.getState().reset();
+  useRemindersStore.setState({
+    plan: PLAN,
+    syncedAt: new Date().toISOString(),
+  });
   useSettingsStore.setState({ dailyWaterGoalMl: 2500 });
 });
+
+const reminders = () => useRemindersStore.getState().plan?.reminders ?? [];
 
 afterEach(async () => {
   const tree = mounted;
@@ -105,6 +169,30 @@ const toggle = (
 };
 
 describe('HydrationReminderScreen', () => {
+  test('before the first answer it says it is loading, and draws no plan', async () => {
+    useRemindersStore.getState().reset();
+    hydrationApi.reminders.mockReturnValueOnce(new Promise(() => {}));
+
+    const text = allText(await render());
+
+    expect(text).not.toContain('reminders active');
+  });
+
+  test('an edit is sent to the server whole', async () => {
+    const tree = await render();
+
+    press(tree, '07:00 AM, on');
+
+    expect(hydrationApi.saveReminders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reminders: expect.arrayContaining([
+          expect.objectContaining({ time: '07:00', enabled: false }),
+        ]),
+      }),
+      { idempotencyKey: expect.any(String) },
+    );
+  });
+
   test('the plan states how many reminders are on and what is next', async () => {
     const text = allText(await render());
 
@@ -123,7 +211,7 @@ describe('HydrationReminderScreen', () => {
     expect(allText(tree)).toContain('0 reminders active');
     // The times are still there — the switch silences them, it does not clear
     // the plan the user built.
-    expect(useRemindersStore.getState().reminders).toHaveLength(9);
+    expect(reminders()).toHaveLength(9);
   });
 
   test('switching a preset chip off lowers the count', async () => {
@@ -135,24 +223,22 @@ describe('HydrationReminderScreen', () => {
   });
 
   test('the next reminder is the next one still ahead of now', () => {
-    const { reminders } = useRemindersStore.getState();
+    const list = reminders();
 
     // 10:00 is the first seeded time after half past eight.
     const morning = new Date();
     morning.setHours(8, 30, 0, 0);
-    expect(nextReminderTime(reminders, true, morning)).toBe('10:00');
+    expect(nextReminderTime(list, true, morning)).toBe('10:00');
 
     // Past the last one, it wraps to tomorrow's first rather than reading
     // empty for the whole evening.
     const night = new Date();
     night.setHours(23, 0, 0, 0);
-    expect(nextReminderTime(reminders, true, night)).toBe('07:00');
+    expect(nextReminderTime(list, true, night)).toBe('07:00');
   });
 
   test('nothing is next once the master switch is off', () => {
-    const { reminders } = useRemindersStore.getState();
-
-    expect(nextReminderTime(reminders, false)).toBeNull();
+    expect(nextReminderTime(reminders(), false)).toBeNull();
   });
 
   test('a custom time can be deleted through its menu', async () => {
@@ -163,16 +249,14 @@ describe('HydrationReminderScreen', () => {
     press(tree, 'Delete reminder');
 
     expect(allText(tree)).toContain('1 custom time');
-    expect(
-      useRemindersStore.getState().reminders.some(r => r.time === '11:00'),
-    ).toBe(false);
+    expect(reminders().some(r => r.time === '11:00')).toBe(false);
   });
 
   test('dropping a repeat day changes the plan from Everyday to the days left', async () => {
     const tree = await render();
 
     toggle(tree, 'Vibration', false);
-    expect(useRemindersStore.getState().vibration).toBe(false);
+    expect(useRemindersStore.getState().plan?.vibration).toBe(false);
 
     press(tree, 'Sunday, on');
 
@@ -186,7 +270,7 @@ describe('HydrationReminderScreen', () => {
     press(tree, 'Add a custom time');
 
     expect(allText(tree)).toContain('Add a reminder');
-    expect(useRemindersStore.getState().reminders).toHaveLength(9);
+    expect(reminders()).toHaveLength(9);
   });
 
   test('the chevron returns to whatever opened the plan', async () => {

@@ -79,7 +79,32 @@ curl -s $B/dev/jobs/coin-expiry -H "$H" -H "authorization: Bearer <access>" -H "
 
 ## Jobs
 
-`src/jobs/scheduler.ts` ticks hourly inside the API process. Daily jobs run once per UTC day (claim key in Redis/memory KV, so two instances never both run one): the coin expiry warnings (`warnExpiringWallets`, RULES E10 — feed row + push at 14 and 3 days) and then the idle-expiry sweep (`expireIdleWallets`, RULES E9). Hourly, unclaimed: `flushDeferredPushes` sends the pushes quiet hours held back. Runs on boot too, so a process started at 00:05 does not wait a day.
+`src/jobs/scheduler.ts` ticks hourly inside the API process. Daily jobs run once per UTC day (claim key in Redis/memory KV, so two instances never both run one): the coin expiry warnings (`warnExpiringWallets`, RULES E10 — feed row + push at 14 and 3 days) and then the idle-expiry sweep (`expireIdleWallets`, RULES E9). Hourly, unclaimed: `flushDeferredPushes` sends the pushes quiet hours held back, `expireUnpaidOrders` releases unpaid orders, `releaseDueHolds` pays step coins out of escrow once their window has passed — or, out of shadow mode, voids a hold whose day has since been found wanting (RULES E15) — `warnStreaksAtRisk` tells each member whose streak is not yet covered, at 19:00 in their zone (RULES S10), and `closeDueWeeks` freezes and pays last week's country leaderboard a few hours into Monday (RULES L6, L10). Runs on boot too, so a process started at 00:05 does not wait a day.
+
+## Steps (Phase 2 — shadow mode)
+
+The app counts with react-native-step-tracker-pro and sends one **signed snapshot** per day (BACKEND §7.3, §15):
+
+1. `POST /devices/:id/attestation/challenge`, then `POST /devices/:id/attestation` with the Keystore key `attestDevice()` made — the chain is checked to Google's roots (`src/lib/attestation`), and an unattestable key is kept as `attested: false`.
+2. `POST /activity/ingest/nonce`, then `POST /activity/ingest` with `getSignedSnapshot()`'s block. The signature is verified over the exact bytes before anything in them is read; `INTEGRITY_REQUIRED` asks for a Play Integrity token now and then.
+3. The rollup scores the day (`src/modules/activity/layers.ts`, L0–L6) into `activity_daily` and `fraud_flags`, and updates the trust score. Nothing is minted while `app_config` `coins.steps.enabled` is off.
+4. The app reads everything back from here: `GET /activity/config` (how its tracker is set up and when it syncs — ⚙ `activity.tracker`, `activity.sync`), `/activity/today`, `/weekly`, `/day`, `/range`, and `GET /activity/sources?date=` — how the day was matched across phones and Health Connect apps (`report.service.ts`).
+
+Play Integrity needs `PLAY_INTEGRITY_SERVICE_ACCOUNT` and the Cloud project number (`PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER`, or `integrity.playIntegrity.cloudProjectNumber` in `app_config`); without them no verdict is asked for. Set `integrity.android.signingCertSha256` to the release certificate's SHA-256 before production so a re-signed APK's key is not attested.
+
+## Everything the app shows is served
+
+Nothing on a screen comes from the app's own seed data (MEMORY D-45). Beyond steps, wallet, shop and the account:
+
+- **Streak** (`modules/streak`) — `GET /streak`, `POST /streak/freeze`, `POST /streak/restore` (debit + days in one transaction). Days are earned by a plausible workout or verified steps at the user's goal (⚙ `streak.earnedBy`).
+- **Challenges and achievements** (`modules/challenges`) — `GET /challenges?date=`, `GET /achievements`; completion is automatic after each rollup / workout save.
+- **Leaderboard** (`modules/leaderboard`) — `GET /leaderboard`, `/leaderboard/history`, `/leaderboard/reward-tiers`.
+- **Water** (`modules/hydration`) — `/hydration/today`, `/entries`, `/stats`, `/days`, `/reminders`.
+- **Food** (`modules/nutrition`) — `/nutrition/day`, `/days`, `/entries`, `/profile`, `/foods`, `/foods/quick-add`, `/foods/custom`, `/diet-plan`, `/diet-plan/days`.
+- **Vitals** (`modules/vitals`) — `/vitals`, `/vitals/latest`, `/health/score`.
+- **Words** (`modules/content`) — `GET /content/tips/:topic`, one tip (or Home's motivation line) per topic per day.
+
+Rewards that steps can earn — step coins, streak milestones, step-derived challenges, leaderboard prizes — all wait for ⚙ `coins.steps.enabled` (D-46); everything is recorded meanwhile.
 
 ## Notifications and push
 
@@ -97,8 +122,11 @@ npm test        # vitest + mongodb-memory-server (replica set), no Docker needed
 src/config      env, defaults (every ⚙ value), remote config (app_config overrides)
 src/lib         errors (the client's ApiError shape), coins (milli-coins), dates (local day), tokens, otp
 src/middleware  requestContext (X-Vokve-* headers), auth, device (428), version (426), idempotency, rateLimit
-src/modules     identity · devices · economy · training · activity · notifications · commerce · platform
-src/jobs        the in-process scheduler (daily: expiry warn + sweep; hourly: deferred pushes)
-src/seed        catalogue + config fixtures
+src/lib/attestation  Google's attestation roots, key attestation, the revocation list
+src/modules     identity · devices · integrity · economy · training · activity · streak · challenges · leaderboard ·
+                hydration · nutrition · vitals · content · notifications · commerce · social · account · platform
+src/jobs        the in-process scheduler (daily: expiry warn + sweep, account purge; hourly: deferred pushes, unpaid
+                orders, step holds, streak-at-risk, leaderboard close)
+src/seed        catalogue (shop, food, diet plans, challenges, achievements, tips) + config fixtures
 test            integration tests against a real replica set
 ```

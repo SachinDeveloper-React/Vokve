@@ -20,6 +20,7 @@ import { ThemeProvider } from '../src/theme';
 import { useAccountStore } from '../src/stores/accountStore';
 import { useAuthStore } from '../src/stores/authStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
+import { useNotificationsStore } from '../src/stores/notificationsStore';
 import { config } from '../src/constants/config';
 import type { ProfileSummary, User } from '../src/types/models';
 
@@ -142,6 +143,21 @@ beforeEach(() => {
   accountApi.profile.mockReset().mockResolvedValue(summary);
   useAuthStore.setState({ user, signOut, status: 'authenticated' });
   useCoinsStore.setState({ balance: 2450 });
+  // One unread row, so the bell carries its dot.
+  useNotificationsStore.setState({
+    notifications: [
+      {
+        id: 'n1',
+        topic: 'coins',
+        title: 'Coins added',
+        message: 'You earned 20 coins.',
+        createdAt: new Date().toISOString(),
+        read: false,
+      },
+    ],
+    counts: null,
+    syncedAt: new Date().toISOString(),
+  });
   useAccountStore.setState({
     profile: summary,
     privacy: null,
@@ -310,10 +326,8 @@ describe('AccountScreen', () => {
         `About VOKVE, v${config.appVersion}. App info, version and more`,
         'About',
       ],
-      [
-        'Health Data. Your vitals and connected health sources',
-        'HealthCheckup',
-      ],
+      ['Health Data. Your vitals and health check up', 'HealthCheckup'],
+      ['Step Tracking. Step counting, Health Connect and sync', 'StepTracking'],
     ];
 
     for (const [label, route] of cases) {

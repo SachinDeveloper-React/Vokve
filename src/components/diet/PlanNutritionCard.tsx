@@ -1,8 +1,7 @@
 import React, { memo } from 'react';
 import { useTheme } from '../../theme';
-import type { PlannedMeal } from '../../types/models';
-import type { NutritionGoals } from '../../stores/nutritionStore';
-import type { PlanTotals } from '../../stores/dietPlanStore';
+import type { NutritionGoals, PlannedMeal } from '../../types/models';
+import type { MacroTotals as PlanTotals } from '../../stores/nutritionStore';
 import { formatGrouped } from '../../utils/format';
 import { MEAL_STYLE } from '../nutrition/nutritionLabels';
 import { Divider } from '../layout/Divider';

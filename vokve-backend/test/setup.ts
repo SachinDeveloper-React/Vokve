@@ -6,6 +6,10 @@ process.env.NODE_ENV = 'test';
 process.env.OTP_DEV_ECHO = 'true';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
 delete process.env.REDIS_URL;
+// No reaching out to Google from a test: the revocation list is stubbed where it matters.
+process.env.ATTESTATION_STATUS_URL = '';
+delete process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT;
+delete process.env.PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER;
 
 let replSet: MongoMemoryReplSet;
 

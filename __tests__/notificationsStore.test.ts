@@ -1,9 +1,8 @@
 /**
- * The notification centre is now a cache of the server's feed, so the checks
- * here are about the seam: a sync replaces the seed with the server's rows, a
- * read mark clears the bell at once and reaches the server after — but only
- * for rows the server knows about — and a sync that fails leaves the feed
- * the user was already reading.
+ * The notification centre is a cache of the server's feed, so the checks
+ * here are about the seam: the feed starts empty and a sync fills it with the
+ * server's rows, a read mark clears the bell at once and reaches the server
+ * after, and a sync that fails leaves the feed the user was already reading.
  *
  * @format
  */
@@ -56,7 +55,25 @@ beforeEach(() => {
   notificationApi.markAllRead.mockReset().mockResolvedValue({ ok: true });
 });
 
-test("a sync replaces the seeded feed with the server's newest page", async () => {
+test('a new feed holds nothing the server has not sent', () => {
+  const state = useNotificationsStore.getState();
+  expect(state.notifications).toEqual([]);
+  expect(state.counts).toBeNull();
+  expect(state.syncedAt).toBeNull();
+});
+
+test('a stored feed that never synced is dropped; a synced one is kept', () => {
+  const migrate = useNotificationsStore.persist.getOptions().migrate!;
+
+  expect(migrate({ notifications: [note('seed-1')], syncedAt: null }, 1)).toMatchObject({
+    notifications: [],
+    syncedAt: null,
+  });
+  const synced = { notifications: [note('s1')], syncedAt: '2026-10-01T10:00:00.000Z' };
+  expect(migrate(synced, 1)).toEqual(synced);
+});
+
+test("a sync fills the feed with the server's newest page", async () => {
   notificationApi.list.mockResolvedValue({
     data: [note('s1'), note('s2', true)],
     nextCursor: null,
@@ -105,7 +122,7 @@ test('load more appends the next page and stops at the end', async () => {
   expect(notificationApi.list).toHaveBeenCalledTimes(2); // the end: nothing more asked for
 });
 
-test('a failed sync keeps whatever was on the device', async () => {
+test('a failed sync keeps whatever was on the device, and says why', async () => {
   useNotificationsStore.setState({ notifications: [note('kept')] });
   notificationApi.list.mockRejectedValue(new Error('Network Error'));
 
@@ -115,6 +132,7 @@ test('a failed sync keeps whatever was on the device', async () => {
   expect(state.notifications.map(n => n.id)).toEqual(['kept']);
   expect(state.syncedAt).toBeNull();
   expect(state.isSyncing).toBe(false);
+  expect(state.syncError).toEqual(expect.any(String));
 });
 
 test('refreshIfStale leaves a fresh feed alone and fetches a stale one', async () => {
@@ -149,19 +167,6 @@ test('reading a synced row clears it at once and tells the server', async () => 
   useNotificationsStore.getState().markRead('a');
   await flush();
   expect(notificationApi.markRead).toHaveBeenCalledTimes(1);
-});
-
-test('reading a seeded row never reaches the server, which has no such row', async () => {
-  useNotificationsStore.setState({
-    notifications: [note('seed-1')],
-    syncedAt: null,
-  });
-
-  useNotificationsStore.getState().markRead('seed-1');
-  await flush();
-
-  expect(useNotificationsStore.getState().notifications[0].read).toBe(true);
-  expect(notificationApi.markRead).not.toHaveBeenCalled();
 });
 
 test('a read mark the server refuses stays read on the device', async () => {

@@ -17,18 +17,27 @@ import { WeeklyTrendCard } from '../../components/analytics/WeeklyTrendCard';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { HStack } from '../../components/layout/Stack';
 import { Screen } from '../../components/ui/Screen';
-import {
-  monthlyStepsByWeek,
-  todayActivity,
-  todayHourlySteps,
-  weeklySteps,
-  yearlyStepsByMonth,
-} from '../../constants/seedData';
+import { useActivityDay, useActivityRange } from '../../hooks/useActivity';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
+import type { ActivityRangeQuery } from '../../services/api/contracts';
 import { useCurrentUser } from '../../stores/authStore';
 import { useDailyStepGoal } from '../../stores/settingsStore';
-import { useCurrentStreak } from '../../stores/streakStore';
+import { useTodayActivity } from '../../stores/stepsStore';
+import { useStreakStore, useStreakSummary } from '../../stores/streakStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { todayIso, type IsoDate } from '../../utils/date';
+import type { ActivityRangePoint } from '../../types/models';
+import {
+  addDays,
+  formatLongDate,
+  formatMonthShort,
+  formatMonthYear,
+  formatWeekdayShort,
+  fromIsoDate,
+  mondayOf,
+  monthBounds,
+  todayIso,
+  type IsoDate,
+} from '../../utils/date';
 import { formatGrouped } from '../../utils/format';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
@@ -46,23 +55,65 @@ function hourLabel(hour: number): string {
   return `${hour12} ${suffix}`;
 }
 
-/** The milestone a streak is working towards, in whole weeks. */
-function nextStreakMilestone(days: number): number {
-  return Math.max(7, Math.ceil((days + 1) / 7) * 7);
+/** The server query behind each range, for the period `date` falls in. */
+function queryFor(range: AnalyticsRange, date: IsoDate): ActivityRangeQuery {
+  switch (range) {
+    case 'week': {
+      const monday = mondayOf(date);
+      return { from: monday, to: addDays(monday, 6), granularity: 'day' };
+    }
+    case 'month': {
+      // Weekly buckets from the 1st — days 1–7, 8–14 and so on, so the last
+      // is a short W5. A month of daily bars is thirty columns on a 375pt
+      // screen, which is a texture rather than a chart.
+      const { first, last } = monthBounds(date);
+      return { from: first, to: last, granularity: 'week' };
+    }
+    case 'year': {
+      const year = date.slice(0, 4);
+      return {
+        from: `${year}-01-01`,
+        to: `${year}-12-31`,
+        granularity: 'month',
+      };
+    }
+    default:
+      return { from: date, to: date, granularity: 'hour' };
+  }
+}
+
+/** What each bar is called, from the point the server drew it for. */
+function labelFor(
+  range: AnalyticsRange,
+  point: ActivityRangePoint,
+  index: number,
+): string {
+  switch (range) {
+    case 'week':
+      return formatWeekdayShort(point.start);
+    case 'month':
+      return `W${index + 1}`;
+    case 'year':
+      return formatMonthShort(point.start);
+    default:
+      return hourLabel(index);
+  }
 }
 
 /**
- * Steps, analysed: today's count against the goal, the period's shape, and the
- * two figures worth knowing about the week.
+ * Steps, analysed: the chosen day's count against the goal, the period's
+ * shape, and the two figures worth knowing about the week.
  *
- * The range control drives the overview chart and nothing else. The card above
- * it is a daily readout — it is headed "Total Steps" beside "Daily Goal" — and
- * having a D/W/M/Y switch silently change what "today" meant would make the
- * biggest number on the screen the least trustworthy one. The chart says which
- * period it is drawing under its own title instead.
+ * The date anchors everything: the summary is that day's, and the chart is
+ * the day, week, month or year it falls in. The range control drives the
+ * chart and nothing else. The card above it is a daily readout — it is
+ * headed "Total Steps" beside "Daily Goal" — and having a D/W/M/Y switch
+ * silently change what the day meant would make the biggest number on the
+ * screen the least trustworthy one. The chart says which period it is
+ * drawing under its own title instead.
  *
- * Every series is seeded, and the hourly one adds up to `todayActivity.steps`
- * exactly, so the chart and the total above it can never disagree.
+ * Every figure is the server's (`/activity/day`, `/activity/range`), read
+ * again whenever a sync lands — the same numbers the dashboard shows.
  */
 export const AnalyticsScreen = () => {
   const styles = useThemedStyles(makeStyles);
@@ -71,7 +122,8 @@ export const AnalyticsScreen = () => {
   const user = useCurrentUser();
 
   const goal = useDailyStepGoal();
-  const streak = useCurrentStreak();
+  const streakSummary = useStreakSummary();
+  useRefreshOnFocus(useStreakStore.getState().refreshIfStale);
 
   const [range, setRange] = useState<AnalyticsRange>('day');
   const [date, setDate] = useState<IsoDate>(todayIso());
@@ -80,66 +132,95 @@ export const AnalyticsScreen = () => {
   const openCalendar = useCallback(() => setCalendarOpen(true), []);
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
 
+  const isToday = date === todayIso();
+  const day = useActivityDay(date).data;
+  const previous = useActivityDay(addDays(date, -1)).data;
+  const today = useTodayActivity();
+
+  // The week always — its best day and its trend have cards of their own,
+  // whatever the range shows — and the chart's own period.
+  const weekQuery = useMemo(() => queryFor('week', date), [date]);
+  const chartQuery = useMemo(() => queryFor(range, date), [range, date]);
+  const week = useActivityRange(weekQuery).data;
+  const chart = useActivityRange(chartQuery).data;
+
+  const weekSteps = useMemo(
+    () =>
+      (week?.points ?? []).map(point => ({
+        day: formatWeekdayShort(point.start),
+        steps: point.steps,
+      })),
+    [week],
+  );
+
   const { points, caption, axisLabels } = useMemo<{
     points: OverviewPoint[];
     caption: string;
     axisLabels: string[];
   }>(() => {
+    const drawn = (chart?.points ?? []).map((point, index) => ({
+      label: labelFor(range, point, index),
+      steps: point.steps,
+    }));
+    const isCurrent = (from: IsoDate) =>
+      from === queryFor(range, todayIso()).from;
     switch (range) {
       case 'week':
         return {
-          points: weeklySteps.map(entry => ({
-            label: entry.day,
-            steps: entry.steps,
-          })),
-          caption: 'This week, day by day',
-          axisLabels: [weeklySteps[0].day, weeklySteps[weeklySteps.length - 1].day],
+          points: drawn,
+          caption: isCurrent(chartQuery.from)
+            ? 'This week, day by day'
+            : `Week of ${formatLongDate(chartQuery.from)}, day by day`,
+          axisLabels: ['Mon', 'Sun'],
         };
-      case 'month':
+      case 'month': {
+        const anchor = fromIsoDate(date);
         return {
-          points: monthlyStepsByWeek.map(entry => ({
-            label: entry.label,
-            steps: entry.steps,
-          })),
-          caption: 'This month, week by week',
-          axisLabels: monthlyStepsByWeek.map(entry => entry.label),
+          points: drawn,
+          caption: isCurrent(chartQuery.from)
+            ? 'This month, week by week'
+            : `${formatMonthYear(
+                anchor.getFullYear(),
+                anchor.getMonth(),
+              )}, week by week`,
+          axisLabels: drawn.map(point => point.label),
         };
+      }
       case 'year':
         return {
-          points: yearlyStepsByMonth.map(entry => ({
-            label: entry.label,
-            steps: entry.steps,
-          })),
-          caption: 'This year, month by month',
+          points: drawn,
+          caption: isCurrent(chartQuery.from)
+            ? 'This year, month by month'
+            : `${date.slice(0, 4)}, month by month`,
           axisLabels: ['Jan', 'Apr', 'Jul', 'Oct', 'Dec'],
         };
       default:
         return {
-          points: todayHourlySteps.map((steps, hour) => ({
-            label: hourLabel(hour),
-            steps,
-          })),
-          caption: 'Today, hour by hour',
-          axisLabels: Array.from(
-            { length: 24 / HOUR_LABEL_STEP },
-            (_, index) => hourLabel(index * HOUR_LABEL_STEP),
+          points: drawn,
+          caption: isToday
+            ? 'Today, hour by hour'
+            : `${formatLongDate(date)}, hour by hour`,
+          axisLabels: Array.from({ length: 24 / HOUR_LABEL_STEP }, (_, index) =>
+            hourLabel(index * HOUR_LABEL_STEP),
           ),
         };
     }
-  }, [range]);
-
-  // Yesterday is the day before the last in the week series, which is today.
-  const yesterdaySteps = weeklySteps[weeklySteps.length - 2]?.steps ?? null;
+  }, [chart, chartQuery.from, date, isToday, range]);
 
   const bestDay = useMemo(
     () =>
-      weeklySteps.reduce((best, entry) =>
-        entry.steps > best.steps ? entry : best,
+      weekSteps.reduce<{ day: string; steps: number } | null>(
+        (best, entry) => (entry.steps > (best?.steps ?? 0) ? entry : best),
+        null,
       ),
-    [],
+    [weekSteps],
   );
 
-  const streakTarget = nextStreakMilestone(streak);
+  // The streak and the milestone it is working towards are the server's.
+  const streak = streakSummary?.currentStreak ?? null;
+  const nextMilestone = streakSummary?.nextMilestone ?? null;
+  const toNext =
+    streak !== null && nextMilestone ? nextMilestone.days - streak : null;
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -170,12 +251,13 @@ export const AnalyticsScreen = () => {
         />
 
         <StepsSummaryCard
-          steps={todayActivity.steps}
+          steps={day?.steps ?? 0}
           goal={goal}
-          previousSteps={yesterdaySteps}
-          caloriesBurned={todayActivity.caloriesBurned}
-          distanceKm={todayActivity.distanceKm}
-          activeMinutes={todayActivity.activeMinutes}
+          previousSteps={previous?.steps ?? null}
+          comparedWith={isToday ? 'yesterday' : 'the day before'}
+          caloriesBurned={day?.caloriesBurned ?? 0}
+          distanceKm={day?.distanceKm ?? 0}
+          activeMinutes={day?.activeMinutes ?? 0}
           onPressReport={notImplemented}
         />
 
@@ -190,34 +272,40 @@ export const AnalyticsScreen = () => {
           <AnalyticsHighlightCard
             label="Top Achievement"
             headline="Best Day This Week"
-            value={`${formatGrouped(bestDay.steps)} steps`}
-            caption={`${bestDay.day} — your highest count of the week`}
+            value={`${formatGrouped(bestDay?.steps ?? 0)} steps`}
+            caption={
+              bestDay
+                ? `${bestDay.day} — your highest count of the week`
+                : 'No steps counted this week yet'
+            }
             tint={colors.success}
           />
 
           <AnalyticsHighlightCard
             label="Streak"
             headline={`${streak === 1 ? 'day' : 'days'} in a row`}
-            value={`${streak} ${streak === 1 ? 'Day' : 'Days'}`}
+            value={
+              streak === null
+                ? '—'
+                : `${streak} ${streak === 1 ? 'Day' : 'Days'}`
+            }
             caption={
-              streak >= streakTarget
-                ? 'Milestone reached. Keep it rolling!'
-                : `Keep it up! ${streakTarget - streak} more ${
-                    streakTarget - streak === 1 ? 'day' : 'days'
-                  }`
+              streak === null
+                ? 'Your streak is on its way.'
+                : toNext === null
+                ? 'Every milestone reached. Keep it rolling!'
+                : `Keep it up! ${toNext} more ${
+                    toNext === 1 ? 'day' : 'days'
+                  } to ${nextMilestone!.days}`
             }
             tint={colors.primary}
             tintValue
           />
         </HStack>
 
-        <WeeklyTrendCard data={weeklySteps} />
+        <WeeklyTrendCard data={weekSteps} />
 
-        <AnalyticsCheerCard
-          name={user?.name}
-          steps={todayActivity.steps}
-          goal={goal}
-        />
+        <AnalyticsCheerCard name={user?.name} steps={today.steps} goal={goal} />
       </ScrollView>
 
       <CalendarSheet

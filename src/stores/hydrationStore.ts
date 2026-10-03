@@ -1,166 +1,281 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { HydrationEntry } from '../types/models';
+import { hydrationApi } from '../services/api/endpoints';
+import { toApiError } from '../services/api/errors';
+import type { HydrationDay, HydrationEntry } from '../types/models';
+import { todayIso } from '../utils/date';
+import { logger } from '../utils/logger';
+import { uuid } from '../utils/uuid';
 import { mmkvStorage } from './index';
 
-/** Local calendar date, `YYYY-MM-DD`. */
-function today(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
-}
+/** How old today's figures may be before a screen coming into view asks again. */
+export const HYDRATION_STALE_AFTER_MS = 60_000;
 
-function createId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
+/** A drink logged or taken back here that the server has not confirmed yet. */
+export type HydrationChange =
+  | { kind: 'add'; entry: HydrationEntry }
+  | { kind: 'remove'; id: string };
 
 interface HydrationState {
-  /** The day the count and the log below belong to. */
-  date: string;
-  consumedMl: number;
-  /** Today's drinks, newest first. */
-  entries: HydrationEntry[];
+  /** The server's last answer about the day; null until the first. */
+  day: HydrationDay | null;
+  /** Changes waiting for the server, oldest first. Persisted, so a drink logged offline is not lost. */
+  outbox: HydrationChange[];
+  syncedAt: string | null;
+  isSyncing: boolean;
+  /** Why the last exchange failed; cleared by the next that succeeds. */
+  syncError: string | null;
 
+  /** Sends what is waiting, then asks for today. Resolves either way. */
+  hydrateFromServer: () => Promise<void>;
+  refreshIfStale: () => Promise<void>;
+  /** Logs a drink now. It shows at once and is sent in the background. */
   add: (ml: number) => void;
-  /**
-   * Takes an amount back off the total, newest drink of that size first.
-   *
-   * Kept alongside `remove` because they answer different questions: this one
-   * is "I did not drink that 500", named by amount, where `remove` is "delete
-   * this row of the log", named by id.
-   */
-  undo: (ml: number) => void;
-  /** Deletes one logged drink and takes its millilitres off the total. */
+  /** Takes a logged drink back out. */
   remove: (id: string) => void;
+  /** Sends the waiting changes in order; stops at the first that cannot go yet. */
+  flush: () => Promise<void>;
   reset: () => void;
-  /** Millilitres logged today, zero once the date has rolled over. */
-  todayMl: () => number;
 }
 
+/** One flush at a time, whoever asks: two would send the same drink twice. */
+let flushing: Promise<void> | null = null;
+
+/** A refusal that sending again cannot change: the drink is not the server's to take, or never was. */
+const isPermanent = (status: number | null) => status === 404 || status === 422;
+
 /**
- * Water logged today.
+ * Water, as the server counts it (RULES §Y).
  *
- * The stored date is what makes the rollover work: the count is persisted with
- * the day it belongs to and is treated as zero once that day has passed, so
- * yesterday's total never appears as this morning's progress. Clearing on a
- * timer instead would miss the rollover whenever the app was not running.
- *
- * The total is stored beside the log rather than added up from it on every
- * read, and every mutation writes both together — the pattern the coin ledger
- * uses. That is what stops the figure at the top of the screen and the rows
- * underneath it from ever disagreeing.
+ * A cache of `GET /hydration/today` plus an outbox. A tap on a quick-add
+ * goes into the outbox and shows at once; the outbox is sent in order — each
+ * drink with its own id, so a retry is the same glass — and every answer
+ * replaces the cached day. The total on screen is the server's day with the
+ * changes still on their way laid over it, so it never waits for a network
+ * and never disagrees with the log under it.
  */
 export const useHydrationStore = create<HydrationState>()(
   persist(
     (set, get) => ({
-      date: today(),
-      consumedMl: 0,
-      entries: [],
+      day: null,
+      outbox: [],
+      syncedAt: null,
+      isSyncing: false,
+      syncError: null,
 
-      add: ml =>
-        set(state => {
-          const amount = Math.round(ml);
-          if (amount <= 0) {
-            return state;
-          }
-
-          const now = today();
-          const rolled = state.date !== now;
-          const entry: HydrationEntry = {
-            id: createId(),
-            ml: amount,
-            at: new Date().toISOString(),
-          };
-
-          return {
-            date: now,
-            consumedMl: (rolled ? 0 : state.consumedMl) + amount,
-            entries: [entry, ...(rolled ? [] : state.entries)],
-          };
-        }),
-
-      undo: ml =>
-        set(state => {
-          const now = today();
-          const rolled = state.date !== now;
-          const base = rolled ? 0 : state.consumedMl;
-          const entries = rolled ? [] : state.entries;
-          const amount = Math.round(ml);
-
-          // The log only has a row to drop if one of that size was logged
-          // today; the total still comes down either way, which is what an
-          // undo of a figure the log never saw has to mean.
-          const index = entries.findIndex(entry => entry.ml === amount);
-
-          return {
-            date: now,
-            consumedMl: Math.max(0, base - amount),
-            entries:
-              index === -1
-                ? entries
-                : [...entries.slice(0, index), ...entries.slice(index + 1)],
-          };
-        }),
-
-      remove: id =>
-        set(state => {
-          const now = today();
-          if (state.date !== now) {
-            return { date: now, consumedMl: 0, entries: [] };
-          }
-
-          const target = state.entries.find(entry => entry.id === id);
-          if (target === undefined) {
-            return state;
-          }
-
-          return {
-            date: now,
-            consumedMl: Math.max(0, state.consumedMl - target.ml),
-            entries: state.entries.filter(entry => entry.id !== id),
-          };
-        }),
-
-      reset: () => set({ date: today(), consumedMl: 0, entries: [] }),
-
-      todayMl: () => {
-        const state = get();
-        return state.date === today() ? state.consumedMl : 0;
+      hydrateFromServer: async () => {
+        if (get().isSyncing) {
+          return;
+        }
+        set({ isSyncing: true });
+        await get().flush();
+        try {
+          const day = await hydrationApi.today();
+          set({
+            day,
+            syncedAt: new Date().toISOString(),
+            isSyncing: false,
+            syncError: null,
+          });
+        } catch (error) {
+          const apiError = toApiError(error);
+          logger.warn('hydrationStore', 'Water sync failed', apiError);
+          set({ isSyncing: false, syncError: apiError.message });
+        }
       },
+
+      refreshIfStale: async () => {
+        const { syncedAt, isSyncing, day, hydrateFromServer } = get();
+        if (isSyncing) {
+          return;
+        }
+        const age = syncedAt
+          ? Date.now() - new Date(syncedAt).getTime()
+          : Infinity;
+        // A day that has rolled over is stale whatever its age.
+        if (age < HYDRATION_STALE_AFTER_MS && day?.date === todayIso()) {
+          return;
+        }
+        await hydrateFromServer();
+      },
+
+      add: ml => {
+        const amount = Math.round(ml);
+        if (amount <= 0) {
+          return;
+        }
+        const entry: HydrationEntry = {
+          id: uuid(),
+          ml: amount,
+          at: new Date().toISOString(),
+        };
+        set(state => ({ outbox: [...state.outbox, { kind: 'add', entry }] }));
+        get().flush();
+      },
+
+      remove: id => {
+        set(state => {
+          // A drink still waiting to go is simply not sent.
+          const queued = state.outbox.findIndex(
+            change => change.kind === 'add' && change.entry.id === id,
+          );
+          if (queued > 0 || (queued === 0 && flushing === null)) {
+            return {
+              outbox: state.outbox.filter((_, index) => index !== queued),
+            };
+          }
+          return { outbox: [...state.outbox, { kind: 'remove', id }] };
+        });
+        get().flush();
+      },
+
+      flush: () => {
+        if (flushing) {
+          return flushing;
+        }
+        flushing = (async () => {
+          try {
+            for (;;) {
+              const change = get().outbox[0];
+              if (change === undefined) {
+                return;
+              }
+              try {
+                const day =
+                  change.kind === 'add'
+                    ? await hydrationApi.log(change.entry, {
+                        idempotencyKey: `drink:${change.entry.id}`,
+                      })
+                    : await hydrationApi.remove(change.id, {
+                        idempotencyKey: `drink-remove:${change.id}`,
+                      });
+                set(state => ({
+                  outbox: state.outbox.filter(entry => entry !== change),
+                  // An answer about another day — a drink logged just
+                  // before midnight — does not replace today's.
+                  day:
+                    day.date === todayIso() || state.day === null
+                      ? day
+                      : state.day,
+                  syncedAt: new Date().toISOString(),
+                  syncError: null,
+                }));
+              } catch (error) {
+                const apiError = toApiError(error);
+                if (!isPermanent(apiError.status)) {
+                  // No connection, or the server is busy: everything waits
+                  // for the next chance, in the same order.
+                  set({ syncError: apiError.message });
+                  return;
+                }
+                logger.warn(
+                  'hydrationStore',
+                  'A water change was refused',
+                  apiError,
+                );
+                set(state => ({
+                  outbox: state.outbox.filter(entry => entry !== change),
+                }));
+              }
+            }
+          } finally {
+            flushing = null;
+          }
+        })();
+        return flushing;
+      },
+
+      reset: () =>
+        set({
+          day: null,
+          outbox: [],
+          syncedAt: null,
+          isSyncing: false,
+          syncError: null,
+        }),
     }),
     {
       name: 'vokve.hydration',
       storage: createJSONStorage(() => mmkvStorage),
-      version: 2,
+      // v3: the server's day and an outbox. A v2 store held today's drinks
+      // on the phone alone; today's are sent on as if just logged, older
+      // ones were already only the phone's and go.
+      version: 3,
+      migrate: (persisted, version) => {
+        const stored = persisted as {
+          date?: string;
+          entries?: HydrationEntry[];
+        } | null;
+        if (version < 3 && stored?.date === todayIso() && stored.entries) {
+          return {
+            day: null,
+            outbox: stored.entries
+              .slice()
+              .reverse()
+              .map(entry => ({ kind: 'add' as const, entry })),
+            syncedAt: null,
+          };
+        }
+        return version < 3
+          ? { day: null, outbox: [], syncedAt: null }
+          : (persisted as object);
+      },
       partialize: state => ({
-        date: state.date,
-        consumedMl: state.consumedMl,
-        entries: state.entries,
+        day: state.day,
+        outbox: state.outbox,
+        syncedAt: state.syncedAt,
       }),
     },
   ),
 );
 
-/**
- * Subscribes to today's total. Reads the fields rather than calling the
- * store's own selector so the component re-renders when they change.
- */
-export const useTodayHydration = () =>
-  useHydrationStore(state => (state.date === today() ? state.consumedMl : 0));
+export interface HydrationToday {
+  /** Null until the server has answered for today. */
+  synced: boolean;
+  consumedMl: number;
+  /** Newest first: the server's drinks less those being taken back, and the ones on their way. */
+  entries: HydrationEntry[];
+}
 
 /**
- * Today's drinks, newest first — empty once the date has rolled over.
- *
- * Returns the stored array itself rather than a filtered copy: a fresh array
- * on every read never compares equal to the last one, and the subscriber would
- * re-render on every store change.
+ * Today as the screens show it: the server's day — when it is today's —
+ * with the outbox laid over it. Derived with `useMemo`: a fresh object from
+ * a selector would never compare equal and would re-render forever.
  */
-export const useTodayHydrationEntries = (): HydrationEntry[] => {
-  const date = useHydrationStore(state => state.date);
-  const entries = useHydrationStore(state => state.entries);
-  return date === today() ? entries : EMPTY_ENTRIES;
+export const useTodayHydrationView = (): HydrationToday => {
+  const day = useHydrationStore(s => s.day);
+  const outbox = useHydrationStore(s => s.outbox);
+  return useMemo(() => {
+    const today = todayIso();
+    const base = day?.date === today ? day.entries : [];
+    const removed = new Set(
+      outbox.flatMap(change => (change.kind === 'remove' ? [change.id] : [])),
+    );
+    const known = new Set(base.map(entry => entry.id));
+    const todayLocal = new Date().toDateString();
+    const pending = outbox.flatMap(change =>
+      change.kind === 'add' &&
+      !known.has(change.entry.id) &&
+      new Date(change.entry.at).toDateString() === todayLocal
+        ? [change.entry]
+        : [],
+    );
+    const entries = [...pending, ...base]
+      .filter(entry => !removed.has(entry.id))
+      .sort((a, b) => b.at.localeCompare(a.at));
+    return {
+      synced: day?.date === today,
+      consumedMl: entries.reduce((sum, entry) => sum + entry.ml, 0),
+      entries,
+    };
+  }, [day, outbox]);
 };
 
-/** One shared empty array, for the same referential-stability reason. */
-const EMPTY_ENTRIES: HydrationEntry[] = [];
+/** Millilitres today — the server's, with this phone's unsent drinks added. */
+export const useTodayHydration = (): number =>
+  useTodayHydrationView().consumedMl;
+
+/** Today's drinks, newest first. */
+export const useTodayHydrationEntries = (): HydrationEntry[] =>
+  useTodayHydrationView().entries;

@@ -5,8 +5,9 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WorkoutCard } from '../../components/fitness/WorkoutCard';
 import { AppText } from '../../components/ui/AppText';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { workoutTemplates } from '../../constants/seedData';
+import { useWorkoutTemplates } from '../../hooks/useWorkouts';
 import { useThemedStyles, type ThemeShape } from '../../theme';
 import type { RootStackParamList } from '../../types/navigation';
 import type { WorkoutTemplate } from '../../types/models';
@@ -18,10 +19,15 @@ const makeStyles = ({ spacing }: ThemeShape) =>
     listContent: { paddingBottom: spacing.xxxl },
   });
 
+/**
+ * The routine library — the server's (`GET /workout-templates`), so a new
+ * routine needs no release. Not reachable from a tab yet.
+ */
 export const WorkoutsScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const templates = useWorkoutTemplates();
 
   // Stable identities: without useCallback every row's memo() would be
   // defeated on each render of this screen.
@@ -59,14 +65,23 @@ export const WorkoutsScreen = () => {
         which is what keeps scrolling smooth once the library grows past a
         screenful.
       */}
-      <FlashList
-        data={workoutTemplates}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        ItemSeparatorComponent={separator}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {templates.data ? (
+        <FlashList
+          data={templates.data}
+          renderItem={renderItem}
+          keyExtractor={keyExtractor}
+          ItemSeparatorComponent={separator}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      ) : (
+        <LoadState
+          loading={templates.loading}
+          title="Couldn't load the workouts"
+          message={templates.error}
+          onRetry={templates.reload}
+        />
+      )}
     </Screen>
   );
 };

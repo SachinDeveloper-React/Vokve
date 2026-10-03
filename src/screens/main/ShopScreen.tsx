@@ -13,6 +13,7 @@ import { ShopCoinsBanner } from '../../components/shop/ShopCoinsBanner';
 import { ShopHeader } from '../../components/shop/ShopHeader';
 import { ShopSearchBar } from '../../components/shop/ShopSearchBar';
 import { TopCategoriesGrid } from '../../components/shop/TopCategoriesGrid';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import { useCartCount } from '../../stores/cartStore';
@@ -56,6 +57,7 @@ export const ShopScreen = () => {
   const categories = useShopCategories();
   const isCatalogueSyncing = useShopStore(s => s.isSyncing);
   const catalogueSyncedAt = useShopStore(s => s.syncedAt);
+  const catalogueError = useShopStore(s => s.syncError);
   const hydrateCatalogue = useShopStore(s => s.hydrateFromServer);
   const refreshCatalogueIfStale = useShopStore(s => s.refreshIfStale);
 
@@ -160,19 +162,30 @@ export const ShopScreen = () => {
 
         <ShopCategoryFilter value={filter} onChange={setFilter} />
 
-        <FeaturedRewardsRow
-          items={featured}
-          onPressItem={onOpenItem}
-          onPressViewAll={onViewAllShelf}
-        />
+        {catalogueSyncedAt === null ? (
+          <LoadState
+            loading={isCatalogueSyncing || catalogueError === null}
+            title="Couldn't load the shop"
+            message={catalogueError}
+            onRetry={hydrateCatalogue}
+          />
+        ) : (
+          <>
+            <FeaturedRewardsRow
+              items={featured}
+              onPressItem={onOpenItem}
+              onPressViewAll={onViewAllShelf}
+            />
 
-        <DailyOffersCard onPressDailyOffers={onOpenDeals} />
+            <DailyOffersCard onPressDailyOffers={onOpenDeals} />
 
-        <TopCategoriesGrid
-          items={shopItems}
-          summaries={categories}
-          onPressCategory={onOpenCategory}
-        />
+            <TopCategoriesGrid
+              items={shopItems}
+              summaries={categories}
+              onPressCategory={onOpenCategory}
+            />
+          </>
+        )}
 
         <ShopAssuranceStrip />
       </ScrollView>

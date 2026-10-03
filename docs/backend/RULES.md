@@ -128,7 +128,7 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 
 | # | Rule | Source / note |
 |---|---|---|
-| S1 | A day counts if it is `earned` (plausible workout) or `protected` (frozen/restored). | `countingDays` |
+| S1 | A day counts if it is `earned` (S9) or `protected` (frozen/restored). One `streak_days` row per counting day, written when decided and never recomputed; a protected day later earned becomes earned (and records `protectedBy`). | `streak_days` |
 | S2 | **Current streak** is the run ending today, or ending yesterday if today is not yet covered. A streak is not broken until the day it needed is over. | `currentStreakOf` |
 | S3 | **Longest streak** is the longest run on record, with `start` and `end` dates; null when nothing is recorded. | `longestStreakOf` |
 | S4 | A **freeze** protects today. It is refused — with no charge — if no freezes remain or today is already covered. | `freezeToday` |
@@ -136,7 +136,7 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | S6 | **Restore** bridges every day from the last run's end + 1 through yesterday with `restored` days, only if the last run ended within **7 days** ⚙ (`RESTORE_WINDOW_DAYS`). If the current streak is already > 0 there is nothing to restore. | `restoreGapOf` |
 | S7 | Restore costs **50 coins** ⚙ (`STREAK_RESTORE_COST`). Debit and protection happen in one transaction; if either fails, neither happens. | Closes the client's two-step race |
 | S8 | Milestones ⚙ 7/15/30/90/180 days pay 50/150/300/1,000/2,000 coins, **once each**, judged against **longest** streak. A user who hit 30 in March keeps the badge in April. | `STREAK_MILESTONES`, `achieved={longestStreak >= days}` |
-| S9 | Do steps alone (no workout) count as an earned day? **Decision pending** (MEMORY.md D-07). Default: **no** — the client's model comment says "consecutive days with a completed workout". | `userSchema.streakDays` doc |
+| S9 | What earns a day is config ⚙ `streak.earnedBy`: a plausible workout, and/or verified steps at or above the user's own daily goal (`/me/settings`). Default: **both** (MEMORY.md D-44). Unverified steps never earn a day. | `modules/streak`, `activity/rollup.service` |
 | S10 | Streak-at-risk notification fires at 19:00 local ⚙ if today is not covered, subject to quiet hours and the `activity` category. | |
 
 ## §C · Challenges and achievements
@@ -146,10 +146,10 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | C1 | A challenge has one `metric` (`steps, calories, minutes, days, workouts`) and one `cadence` (`daily, weekly, monthly`). | 🔒 |
 | C2 | `startsAt: null` means running; a date means upcoming. There is no separate status field. | `challengeSchema.startsAt` |
 | C3 | Progress is recomputed server-side from **verified** activity for the current period; the client never sends progress. | |
-| C4 | A claim succeeds once per `(user, challenge, period)` when `progress ≥ goal`; pays `rewardCoins` and, if `rewardsBadge`, an achievement. | |
-| C5 | Enrolment: **auto-enrol every active user** in every open challenge (pending D-08). | |
+| C4 | A challenge **completes itself** once per `(user, challenge, period)` when `progress ≥ goal` — evaluated after every step rollup and workout save; there is no claim. It pays `rewardCoins` through `credit()` (`source:'challenge'`) and, if `rewardsBadge`, unlocks its achievement. Rewards on step-derived metrics (steps, calories, minutes, days) wait for ⚙ `coins.steps.enabled` (D-46); the completion is recorded either way. | `challenge_completions` |
+| C5 | Enrolment: **every member is in every open challenge** (D-08). | |
 | C6 | Daily challenges reset at local midnight; weekly on Monday 00:00 local; monthly on the 1st 00:00 local. | |
-| C7 | Achievement `value` is a number; formatting ("10K") is the client's job. | fixes C8 |
+| C7 | Achievement `value` is a number; formatting ("10K") is the client's job. A badge unlocks by its own rule — best day (verified steps / calories / active minutes), longest streak, total plausible workouts, challenges completed — or, with no rule, only through its challenge. Unlocked once, never taken back. | fixes C8; `achievement_definitions`, `user_achievements` |
 
 ## §L · Leaderboard
 
@@ -160,11 +160,11 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | L3 | **Score formula** ⚙ (proposed, to resolve C5): `score = verified_steps / 100 + workouts × 50 + challenges_completed × 100`. A 70k-step week with 4 workouts and 3 challenges = 700 + 200 + 300 = 1,200. Tuned so no single source dominates. | |
 | L4 | Only verified activity scores. | |
 | L5 | Tie-break: higher score → earlier timestamp at which that score was reached → lower `user_id`. Two users never share a rank. | |
-| L6 | At close, standings are **frozen** into `leaderboard_snapshots`; payouts and history read from the snapshot only. | |
+| L6 | At close — ⚙ `leaderboard.closeAfterHours` into Monday in the country's zone, so Sunday's late syncs count — standings are **frozen** into `leaderboard_results` (one row per ranked member) and `leaderboard_periods`; payouts and history read only those. A score that moves after the close changes nothing. | `modules/leaderboard` |
 | L7 | Tiers ⚙: rank 1 → 5,000 coins + Premium T-Shirt + Water Bottle; ranks 2–3 → 3,000 + T-Shirt + Fitness Mat; ranks 4–10 → 1,000 + Fitness Mat. | `REWARD_TIERS` |
-| L8 | Merchandise perks create an order automatically (status `awaiting_address` if none on file). | |
+| L8 | Merchandise perks create an order automatically (status `awaiting_address` if none on file). *Not built yet:* the perks are recorded on the frozen result. | |
 | L9 | An account with an open fraud flag at close is excluded from payout and its rank is skipped (no re-ranking of others). | |
-| L10 | "Rewards land on Monday" — payout job runs immediately after close. | |
+| L10 | "Rewards land on Monday" — the hourly close job pays the tiers through `credit()` right after freezing, exempt from the cap (E8d). Prizes are step-derived: they wait for ⚙ `coins.steps.enabled` (D-46); the frozen place and its notification happen either way. | |
 
 ## §R · Shop and orders
 
@@ -222,7 +222,7 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | V5 | Heart-rate bands: < 60 low · 60–100 normal · 101–120 elevated · > 120 high. | `HEART_BANDS` |
 | V6 | Blood-pressure bands: **high** if systolic ≥ 130 **or** diastolic ≥ 80; else **low** if systolic < 90 or diastolic < 60; else **elevated** if systolic 120–129; else **normal**. Either half can raise the band. | `pressureBandFor` |
 | V7 | BMI bands: < 18.5 underweight · 18.5–24.9 healthy · 25–29.9 overweight · ≥ 30 obese. | `BmiGuide` |
-| V8 | **Health score** ⚙ (proposal, resolves C11): 0–100 = 30 × activity (7-day avg steps / goal, capped 1) + 20 × hydration (7-day goal-hit rate) + 20 × vitals (1 if latest HR and BP normal, 0.5 if elevated/low, 0 if high or missing) + 15 × BMI (1 if healthy, 0.5 if adjacent band, 0 otherwise) + 15 × consistency (current streak / 7, capped 1). Return the factor breakdown. | |
+| V8 | **Health score** ⚙ (built as config `health.scoreWeights`, D-50; resolves C11): 0–100 = 30 × activity (7-day avg steps / goal, capped 1) + 20 × hydration (7-day goal-hit rate) + 20 × vitals (1 if latest HR and BP normal, 0.5 if elevated/low, 0 if high or missing) + 15 × BMI (1 if healthy, 0.5 if adjacent band, 0 otherwise) + 15 × consistency (current streak / 7, capped 1). Return the factor breakdown. | |
 | V9 | All vitals responses carry a wellness disclaimer string; band copy never uses diagnostic language beyond what the client already shows. | |
 | V10 | Vitals from HealthKit / Health Connect are accepted through the ingest path with `source = provider`; manual entries have `source = 'manual'`. | |
 

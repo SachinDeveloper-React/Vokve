@@ -34,6 +34,17 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+// Read marks are sent to the server; these tests are about the screen, so
+// the server simply agrees.
+jest.mock('../src/services/api/endpoints', () => ({
+  notificationApi: {
+    list: jest.fn(() => new Promise(() => {})),
+    counts: jest.fn(() => new Promise(() => {})),
+    markRead: jest.fn(async () => ({ ok: true })),
+    markAllRead: jest.fn(async () => ({ ok: true })),
+  },
+}));
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -61,12 +72,15 @@ const note = (
   read,
 });
 
+/** The feed as a finished sync leaves it. */
 const seed = (notifications: AppNotification[]) =>
   useNotificationsStore.setState({
     notifications,
     counts: null,
     nextCursor: null,
-    syncedAt: null,
+    syncedAt: new Date().toISOString(),
+    isSyncing: false,
+    syncError: null,
   });
 
 /**
@@ -125,6 +139,28 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
 };
 
 describe('NotificationsScreen', () => {
+  test('before the first sync it says it is loading, not that nothing happened', async () => {
+    useNotificationsStore.getState().reset();
+    useNotificationsStore.setState({ isSyncing: true });
+
+    const tree = await render();
+
+    expect(
+      tree.root.findAll(n => n.props?.accessibilityLabel === 'Loading').length,
+    ).toBeGreaterThan(0);
+    expect(allText(tree)).not.toContain('Nothing here yet');
+  });
+
+  test('a first sync that failed offers to try again', async () => {
+    useNotificationsStore.getState().reset();
+    useNotificationsStore.setState({ syncError: 'No connection.' });
+
+    const text = allText(await render());
+
+    expect(text).toContain("Couldn't load your notifications");
+    expect(text).toContain('Try again');
+  });
+
   test('files each notification under the day it arrived', async () => {
     seed([
       note('a', 'steps', at(0, 10, 30)),

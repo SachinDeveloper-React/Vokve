@@ -2,7 +2,9 @@
  * The leaderboard screen states the same prize twice — once as a tier rule and
  * once as the coins a named person is taking this week — so the checks here are
  * that those two agree, that the tab param decides which half opens without
- * then overriding the user, and that the balance in the header is the live one.
+ * then overriding the user, that the balance in the header is the live one,
+ * and that every card waits for the server rather than inventing figures. The
+ * API is the mock backend's own, served without latency.
  *
  * @format
  */
@@ -13,10 +15,11 @@ import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
 import { LeaderboardRewardsScreen } from '../src/screens/main/LeaderboardRewardsScreen';
-import { REWARD_TIERS } from '../src/components/leaderboard/RewardTiersCard';
 import { ThemeProvider } from '../src/theme';
 import { useCoinsStore } from '../src/stores/coinsStore';
 import { seedLeaderboard } from '../src/constants/seedData';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import { mockLeaderboardApi } from '../src/services/api/mockApi';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -34,6 +37,34 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockParams }),
 }));
 
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+// The mock backend's own answers, behind spies a test can redirect.
+jest.mock('../src/services/api/endpoints', () => {
+  const { mockLeaderboardApi: api } = jest.requireActual(
+    '../src/services/api/mockApi',
+  );
+  return {
+    leaderboardApi: {
+      board: jest.fn(() => api.board()),
+      history: jest.fn(() => api.history()),
+      rules: jest.fn(() => api.rules()),
+    },
+  };
+});
+
+const { leaderboardApi } = jest.requireMock(
+  '../src/services/api/endpoints',
+) as {
+  leaderboardApi: { board: jest.Mock; history: jest.Mock; rules: jest.Mock };
+};
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -45,6 +76,7 @@ beforeEach(() => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
   mockParams = undefined;
+  clearServerReads();
   useCoinsStore.setState({
     balance: 650,
     lifetimeEarned: 650,
@@ -62,7 +94,14 @@ afterEach(async () => {
   }
 });
 
-const render = async () => {
+/** Lets the server's answers land. */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+const render = async ({ wait = true } = {}) => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await ReactTestRenderer.act(() => {
     tree = ReactTestRenderer.create(
@@ -74,6 +113,7 @@ const render = async () => {
     );
   });
   mounted = tree;
+  if (wait) await settle();
   return tree;
 };
 
@@ -94,6 +134,29 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
 };
 
 describe('LeaderboardRewardsScreen', () => {
+  test('each card waits for its answer, and invents no prize or place', async () => {
+    leaderboardApi.rules.mockReturnValueOnce(new Promise(() => {}));
+    leaderboardApi.board.mockReturnValueOnce(new Promise(() => {}));
+    leaderboardApi.history.mockReturnValueOnce(new Promise(() => {}));
+    const tree = await render({ wait: false });
+
+    expect(
+      tree.root.findAll(n => n.props?.accessibilityLabel === 'Loading').length,
+    ).toBeGreaterThanOrEqual(3);
+    const text = allText(tree);
+    expect(text).not.toContain('Rank 1');
+    expect(text).not.toContain('Rahul Verma');
+  });
+
+  test('a board that failed to load offers to try again', async () => {
+    leaderboardApi.board.mockRejectedValueOnce(new Error('offline'));
+    const tree = await render();
+
+    expect(allText(tree)).toContain("Couldn't load the board");
+    // The prizes came back on their own.
+    expect(allText(tree)).toContain('Rank 1');
+  });
+
   test('the header states the balance the prizes are paid in', async () => {
     expect(allText(await render())).toContain('650');
   });
@@ -117,9 +180,16 @@ describe('LeaderboardRewardsScreen', () => {
     // Whoever holds first place takes the first tier's coins; a board that
     // disagreed with the table above it would be the screen's worst bug.
     const first = seedLeaderboard.find(entry => entry.rank === 1);
-    expect(first?.coins).toBe(REWARD_TIERS[0].coins);
+    const rules = await mockLeaderboardApi.rules();
+    expect(first?.coins).toBe(rules.tiers[0].coins);
     expect(text).toContain('Rahul Verma');
     expect(text).toContain('Delhi, India');
+  });
+
+  test('the user is told their own place when it is below the top five', async () => {
+    expect(allText(await render())).toContain(
+      'You are #12 this week with 1,240 points.',
+    );
   });
 
   test('the rankings strip states the user own record', async () => {

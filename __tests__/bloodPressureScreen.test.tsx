@@ -16,6 +16,8 @@ import { BloodPressureScreen } from '../src/screens/main/BloodPressureScreen';
 import { pressureBandFor, statusOf } from '../src/components/health/vitals';
 import { ThemeProvider } from '../src/theme';
 import { useVitalsStore } from '../src/stores/vitalsStore';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import { stockVitals } from './helpers/vitals';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -31,6 +33,30 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+// The mock backend's own readings, score and tips, behind spies.
+jest.mock('../src/services/api/endpoints', () => {
+  const api = jest.requireActual('../src/services/api/mockApi');
+  return {
+    vitalsApi: {
+      list: jest.fn((query: unknown) => api.mockVitalsApi.list(query)),
+      latest: jest.fn(() => api.mockVitalsApi.latest()),
+      log: jest.fn((reading: unknown, options: unknown) =>
+        api.mockVitalsApi.log(reading, options),
+      ),
+      score: jest.fn(() => api.mockVitalsApi.score()),
+    },
+    contentApi: { tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)) },
+  };
+});
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -41,8 +67,18 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 beforeEach(() => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
+  clearServerReads();
   useVitalsStore.getState().reset();
+  stockVitals();
 });
+
+/** Lets the server's answers land. */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
 
 afterEach(async () => {
   const tree = mounted;
@@ -66,6 +102,7 @@ const render = async () => {
     );
   });
   mounted = tree;
+  await settle();
   return tree;
 };
 

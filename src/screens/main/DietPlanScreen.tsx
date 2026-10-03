@@ -16,12 +16,15 @@ import { PlannedMealCard } from '../../components/diet/PlannedMealCard';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { HStack } from '../../components/layout/Stack';
 import { Button } from '../../components/ui/Button';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { useDietPlan, useDietPlanDays } from '../../hooks/useNutrition';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import {
-  usePlanForDate,
-  usePlanTotals,
-} from '../../stores/dietPlanStore';
-import { useNutritionGoals } from '../../stores/nutritionStore';
+  useNutritionGoals,
+  useNutritionStore,
+} from '../../stores/nutritionStore';
+import type { PlannedMeal } from '../../types/models';
 import { useThemedStyles, type ThemeShape } from '../../theme';
 import { addDays, todayIso, type IsoDate } from '../../utils/date';
 
@@ -34,13 +37,17 @@ const makeStyles = ({ spacing }: ThemeShape) =>
 /** How many days either tab lists. */
 const RUN_LENGTH = 7;
 
+const NO_MEALS: PlannedMeal[] = [];
+const NO_TOTALS = { calories: 0, proteinG: 0, carbsG: 0, fatsG: 0, fiberG: 0 };
+
 /**
  * The diet plan: what to eat on a given day, and the week either side of it.
  *
- * The plan itself is a three-day rotation rather than a row per date, so every
- * day the user pages to has something behind it — forwards into next week as
- * readily as back into last. What the user adds is stored per date on top of
- * that, which is the only part of a plan that is theirs.
+ * The plan is the server's (`GET /diet-plan`, `/diet-plan/days`), chosen from
+ * the user's preferences: the days that suit them, in rotation, so every day
+ * the user pages to has something behind it — forwards into next week as
+ * readily as back into last. Changing a preference on the nutrition screen
+ * changes the plan here.
  *
  * The calorie goal is the nutrition screen's, not a second one of this
  * screen's own: a plan measured against one target while the day's food is
@@ -54,9 +61,11 @@ export const DietPlanScreen = () => {
   const [date, setDate] = useState<IsoDate>(todayIso());
   const [isCalendarOpen, setCalendarOpen] = useState(false);
 
-  const meals = usePlanForDate(date);
-  const totals = usePlanTotals(date);
+  const plan = useDietPlan(date);
+  const meals = plan.data?.meals ?? NO_MEALS;
+  const totals = plan.data?.totals ?? NO_TOTALS;
   const goals = useNutritionGoals();
+  useRefreshOnFocus(useNutritionStore.getState().refreshIfStale);
 
   const openCalendar = useCallback(() => setCalendarOpen(true), []);
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
@@ -96,6 +105,8 @@ export const DietPlanScreen = () => {
       ),
     [],
   );
+  const ahead = useDietPlanDays(upcoming);
+  const behind = useDietPlanDays(past);
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -129,21 +140,32 @@ export const DietPlanScreen = () => {
               onPressDate={openCalendar}
             />
 
-            <PlanCaloriesCard
-              calories={totals.calories}
-              goal={goals.calories}
-              proteinG={totals.proteinG}
-              carbsG={totals.carbsG}
-              fatsG={totals.fatsG}
-            />
-
-            {meals.map(meal => (
-              <PlannedMealCard
-                key={meal.id}
-                meal={meal}
-                onPress={notImplemented}
+            {plan.data === null || goals === null ? (
+              <LoadState
+                loading={plan.loading}
+                title="Couldn't load the plan"
+                message={plan.error}
+                onRetry={plan.reload}
               />
-            ))}
+            ) : (
+              <>
+                <PlanCaloriesCard
+                  calories={totals.calories}
+                  goal={goals.calories}
+                  proteinG={totals.proteinG}
+                  carbsG={totals.carbsG}
+                  fatsG={totals.fatsG}
+                />
+
+                {meals.map(meal => (
+                  <PlannedMealCard
+                    key={meal.id}
+                    meal={meal}
+                    onPress={notImplemented}
+                  />
+                ))}
+              </>
+            )}
 
             {/* `Button` sizes itself to its label, so the halves are set by
                 the views around it rather than by the buttons themselves. */}
@@ -173,27 +195,58 @@ export const DietPlanScreen = () => {
         ) : null}
 
         {tab === 'plan' ? (
-          <PlanDayList
-            dates={upcoming}
-            selected={date}
-            title="The week ahead"
-            caption="Your plan runs on a three-day rotation."
-            onPressDay={handlePickDay}
-          />
+          ahead.data ? (
+            <PlanDayList
+              days={ahead.data}
+              selected={date}
+              title="The week ahead"
+              caption={
+                plan.data
+                  ? `${plan.data.basis} — a ${plan.data.cycleLength}-day rotation.`
+                  : 'Your plan, day by day.'
+              }
+              onPressDay={handlePickDay}
+            />
+          ) : (
+            <LoadState
+              loading={ahead.loading}
+              title="Couldn't load the week ahead"
+              message={ahead.error}
+              onRetry={ahead.reload}
+            />
+          )
         ) : null}
 
         {tab === 'nutrition' ? (
-          <PlanNutritionCard meals={meals} totals={totals} goals={goals} />
+          goals !== null && plan.data ? (
+            <PlanNutritionCard meals={meals} totals={totals} goals={goals} />
+          ) : (
+            <LoadState
+              loading={plan.loading}
+              title="Couldn't load the plan"
+              message={plan.error}
+              onRetry={plan.reload}
+            />
+          )
         ) : null}
 
         {tab === 'history' ? (
-          <PlanDayList
-            dates={past}
-            selected={date}
-            title="The week behind"
-            caption="What the plan asked for on each of the last seven days."
-            onPressDay={handlePickDay}
-          />
+          behind.data ? (
+            <PlanDayList
+              days={behind.data}
+              selected={date}
+              title="The week behind"
+              caption="What the plan asked for on each of the last seven days."
+              onPressDay={handlePickDay}
+            />
+          ) : (
+            <LoadState
+              loading={behind.loading}
+              title="Couldn't load the week behind"
+              message={behind.error}
+              onRetry={behind.reload}
+            />
+          )
         ) : null}
       </ScrollView>
 

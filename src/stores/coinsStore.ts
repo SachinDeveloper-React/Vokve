@@ -1,37 +1,18 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { seedCoinTransactions } from '../constants/seedData';
 import { walletApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import { logger } from '../utils/logger';
-import type { CoinSource, CoinTransaction, EarnRule } from '../types/models';
+import type { CoinTransaction, EarnRule } from '../types/models';
 import { mmkvStorage } from './index';
 
 /**
  * How many ledger rows are kept on the device. The wallet shows a history, not
- * an archive: everything older lives on the server once the API exists, and an
- * unbounded array here would grow the persisted blob forever.
+ * an archive: everything older lives on the server, and an unbounded array
+ * here would grow the persisted blob forever.
  */
 const MAX_LEDGER_ENTRIES = 50;
-
-/**
- * How long coins survive without the user earning any (RULES E9).
- *
- * The window resets on every credit rather than running from when each coin
- * was earned: a per-coin expiry would need the wallet to explain which slice
- * of a balance lapses when, and the rule the screen actually states — stay
- * active and nothing expires — is the one a user can act on.
- *
- * The server's `expiryWindowDays` is the figure in force; this is only what
- * the seeded, never-synced wallet counts against.
- */
-export const COIN_EXPIRY_WINDOW_DAYS = 90;
-
-/** Days-before-expiry at which the wallet raises its voice (RULES E10), until the server says otherwise. */
-export const COIN_EXPIRY_WARN_DAYS: readonly number[] = [14, 3];
-
-const MS_PER_DAY = 86_400_000;
 
 /**
  * How old a synced wallet may be before opening the screen fetches it again.
@@ -43,23 +24,6 @@ const MS_PER_DAY = 86_400_000;
  * tabs does not fire a request each time.
  */
 export const WALLET_STALE_AFTER_MS = 60_000;
-
-function createId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** Coins in hand: every movement in the ledger, added up. */
-function balanceOf(transactions: CoinTransaction[]): number {
-  return transactions.reduce((sum, entry) => sum + entry.amount, 0);
-}
-
-/** Only the credits — spending must not reduce a lifetime total. */
-function earnedOf(transactions: CoinTransaction[]): number {
-  return transactions.reduce(
-    (sum, entry) => (entry.amount > 0 ? sum + entry.amount : sum),
-    0,
-  );
-}
 
 export interface MonthlyCoinSummary {
   /** Coins credited this calendar month. */
@@ -84,10 +48,8 @@ interface CoinsState {
   remainingToday: number;
   /**
    * The server's own month figures and expiry countdown (RULES E12, BACKEND.md
-   * §5 Wallet). Null until the first sync, when the hooks below fall back to
-   * working them out from the ledger on the device — which is right for the
-   * seeded wallet and wrong for a real one, whose ledger here is only the
-   * newest fifty rows.
+   * §5 Wallet). Null until the first sync. Never worked out on the device:
+   * the ledger here is only the newest fifty rows.
    */
   monthSummary: MonthlyCoinSummary | null;
   expiryDaysLeft: number | null;
@@ -102,9 +64,13 @@ interface CoinsState {
    * the first sync.
    */
   earnRules: EarnRule[] | null;
-  /** The price from which a redemption asks for a code first (RULES O8). */
-  stepUpThreshold: number;
-  /** When the server last confirmed these figures; null while still seeded. */
+  /** The price from which a redemption asks for a code first (RULES O8); null before a sync. */
+  stepUpThreshold: number | null;
+  /**
+   * When the server last confirmed these figures; null until it first has.
+   * Until then every figure above is a placeholder, and the wallet says it
+   * is loading rather than showing them.
+   */
   syncedAt: string | null;
   isSyncing: boolean;
   /**
@@ -114,9 +80,9 @@ interface CoinsState {
   syncError: string | null;
 
   /**
-   * Replaces the seeded figures with the server's. The server is the ledger
-   * (BACKEND.md §8); this store is its cache, and `earn`/`spend` below only
-   * keep the screens responsive between syncs.
+   * Replaces the figures with the server's. The server is the ledger
+   * (BACKEND.md §8) and this store is its cache: coins are only ever minted
+   * there (RULES E6), so nothing on the device adds to a balance.
    *
    * Resolves either way: a failed sync is recorded on `syncError`, not thrown,
    * because every caller — sign-in, a pull-to-refresh — has the same answer
@@ -130,16 +96,27 @@ interface CoinsState {
    */
   refreshIfStale: () => Promise<void>;
 
-  earn: (amount: number, title: string, source?: CoinSource) => void;
-  /**
-   * Spends coins if there are enough, and reports whether it happened. The
-   * caller needs the answer to tell the user why nothing changed, so this
-   * returns a boolean rather than throwing on the ordinary "not enough coins"
-   * case.
-   */
-  spend: (amount: number, title: string, source?: CoinSource) => boolean;
   reset: () => void;
 }
+
+/** Every figure before the first sync: nothing claimed, nothing to show. */
+const EMPTY_WALLET = {
+  balance: 0,
+  pending: 0,
+  lifetimeEarned: 0,
+  transactions: [] as CoinTransaction[],
+  dailyCap: 0,
+  earnedToday: 0,
+  remainingToday: 0,
+  monthSummary: null,
+  expiryDaysLeft: null,
+  expiresAt: null,
+  expiryWindowDays: null,
+  expiryWarnDays: null,
+  earnRules: null,
+  stepUpThreshold: null,
+  syncedAt: null,
+} satisfies Partial<CoinsState>;
 
 /**
  * The coin wallet.
@@ -147,27 +124,14 @@ interface CoinsState {
  * Balance and lifetime total are stored as numbers rather than recomputed from
  * the ledger on every read, because the ledger is trimmed: once the oldest
  * rows are dropped, the surviving ones no longer add up to what the user
- * actually holds. Every mutation writes all three together, so they cannot
- * drift apart.
+ * actually holds. Every sync writes all three together, so they cannot drift
+ * apart — and nothing on the device writes them otherwise: coins are minted
+ * and spent on the server (RULES E6, D1), which answers with the balance.
  */
 export const useCoinsStore = create<CoinsState>()(
   persist(
     (set, get) => ({
-      balance: balanceOf(seedCoinTransactions),
-      pending: 0,
-      lifetimeEarned: earnedOf(seedCoinTransactions),
-      transactions: seedCoinTransactions,
-      dailyCap: 300,
-      earnedToday: 0,
-      remainingToday: 300,
-      monthSummary: null,
-      expiryDaysLeft: null,
-      expiresAt: null,
-      expiryWindowDays: null,
-      expiryWarnDays: null,
-      earnRules: null,
-      stepUpThreshold: 1000,
-      syncedAt: null,
+      ...EMPTY_WALLET,
       isSyncing: false,
       syncError: null,
 
@@ -223,98 +187,18 @@ export const useCoinsStore = create<CoinsState>()(
         await hydrateFromServer();
       },
 
-      earn: (amount, title, source = 'challenge') =>
-        set(state => {
-          const credit = Math.max(0, Math.round(amount));
-          if (credit === 0) {
-            return state;
-          }
-
-          const entry: CoinTransaction = {
-            id: createId(),
-            title,
-            source,
-            amount: credit,
-            createdAt: new Date().toISOString(),
-          };
-
-          return {
-            balance: state.balance + credit,
-            lifetimeEarned: state.lifetimeEarned + credit,
-            transactions: [entry, ...state.transactions].slice(
-              0,
-              MAX_LEDGER_ENTRIES,
-            ),
-            // The month figures are the server's; a local credit moves them
-            // too, or the summary would lag the ledger it sits under.
-            monthSummary: state.monthSummary && {
-              earned: state.monthSummary.earned + credit,
-              spent: state.monthSummary.spent,
-              net: state.monthSummary.net + credit,
-            },
-          };
-        }),
-
-      spend: (amount, title, source = 'purchase') => {
-        const debit = Math.max(0, Math.round(amount));
-        let spent = false;
-
-        set(state => {
-          if (debit === 0 || debit > state.balance) {
-            return state;
-          }
-          spent = true;
-
-          const entry: CoinTransaction = {
-            id: createId(),
-            title,
-            source,
-            amount: -debit,
-            createdAt: new Date().toISOString(),
-          };
-
-          return {
-            balance: state.balance - debit,
-            transactions: [entry, ...state.transactions].slice(
-              0,
-              MAX_LEDGER_ENTRIES,
-            ),
-            monthSummary: state.monthSummary && {
-              earned: state.monthSummary.earned,
-              spent: state.monthSummary.spent + debit,
-              net: state.monthSummary.net - debit,
-            },
-          };
-        });
-
-        return spent;
-      },
-
-      reset: () =>
-        set({
-          balance: balanceOf(seedCoinTransactions),
-          pending: 0,
-          lifetimeEarned: earnedOf(seedCoinTransactions),
-          transactions: seedCoinTransactions,
-          dailyCap: 300,
-          earnedToday: 0,
-          remainingToday: 300,
-          monthSummary: null,
-          expiryDaysLeft: null,
-          expiresAt: null,
-          expiryWindowDays: null,
-          expiryWarnDays: null,
-          earnRules: null,
-          stepUpThreshold: 1000,
-          syncedAt: null,
-          isSyncing: false,
-          syncError: null,
-        }),
+      reset: () => set({ ...EMPTY_WALLET, isSyncing: false, syncError: null }),
     }),
     {
       name: 'vokve.coins',
       storage: createJSONStorage(() => mmkvStorage),
-      version: 2,
+      // v3: the placeholder wallet is gone. A stored wallet that never synced
+      // was that placeholder, and is dropped; a synced one is the server's.
+      version: 3,
+      migrate: persisted => {
+        const stored = persisted as Partial<CoinsState> | null;
+        return stored?.syncedAt ? stored : EMPTY_WALLET;
+      },
       partialize: state => ({
         balance: state.balance,
         pending: state.pending,
@@ -351,50 +235,6 @@ export const useIsWalletSyncing = () => useCoinsStore(s => s.isSyncing);
 export const useWalletSyncError = () => useCoinsStore(s => s.syncError);
 
 /**
- * When the newest credit was made, from the ledger on the device — the seeded
- * wallet's stand-in for the server's `lastCreditAt`.
- */
-function newestCreditAt(transactions: CoinTransaction[]): number | undefined {
-  return transactions
-    .filter(entry => entry.amount > 0)
-    .map(entry => new Date(entry.createdAt).getTime())
-    .filter(time => !Number.isNaN(time))
-    .sort((a, b) => b - a)[0];
-}
-
-/**
- * Whole days left before an idle wallet's coins lapse, clamped to the window.
- *
- * Counted from the newest credit, so a user who earned today always sees the
- * full window. A wallet that has never earned has nothing to expire and
- * reports the full window too, rather than a countdown against coins it does
- * not hold.
- */
-function expiryDaysLeft(transactions: CoinTransaction[]): number {
-  const newestCredit = newestCreditAt(transactions);
-  if (newestCredit === undefined) {
-    return COIN_EXPIRY_WINDOW_DAYS;
-  }
-
-  const daysIdle = Math.floor((Date.now() - newestCredit) / MS_PER_DAY);
-  return Math.min(
-    COIN_EXPIRY_WINDOW_DAYS,
-    Math.max(0, COIN_EXPIRY_WINDOW_DAYS - daysIdle),
-  );
-}
-
-/** The moment the seeded wallet's coins would lapse, or null with nothing to lapse. */
-function expiryMoment(transactions: CoinTransaction[]): string | null {
-  const newestCredit = newestCreditAt(transactions);
-  if (newestCredit === undefined || balanceOf(transactions) <= 0) {
-    return null;
-  }
-  return new Date(
-    newestCredit + COIN_EXPIRY_WINDOW_DAYS * MS_PER_DAY,
-  ).toISOString();
-}
-
-/**
  * How loudly the countdown should speak. `'soon'` from the outer warn
  * threshold, `'urgent'` from the inner one — the same days the server sends
  * its reminders on (RULES E10), so the panel and the push agree.
@@ -427,88 +267,39 @@ function urgencyOf(
   return 'safe';
 }
 
+const NO_MONTH: MonthlyCoinSummary = { earned: 0, spent: 0, net: 0 };
+const NO_WARN_DAYS: readonly number[] = [];
+
+/** The server's figures for this calendar month (RULES E12); zeros before a sync. */
+export const useMonthlyCoinSummary = (): MonthlyCoinSummary =>
+  useCoinsStore(s => s.monthSummary) ?? NO_MONTH;
+
 /**
- * The current calendar month's movements, added up.
+ * Everything the expiry panel and its explainer say, from one place — the
+ * server's countdown, window and warn days (RULES E9–E11). Before the first
+ * sync there is nothing to count down, and the wallet does not draw it.
  *
- * Calendar month rather than a rolling 30 days: the figure is labelled "this
- * month" on screen, and a user checking it against their own sense of the
- * month would find a rolling window quietly disagreeing with them.
- */
-function summarizeMonth(transactions: CoinTransaction[]): MonthlyCoinSummary {
-  const now = new Date();
-  const month = now.getMonth();
-  const year = now.getFullYear();
-
-  let earned = 0;
-  let spent = 0;
-
-  for (const entry of transactions) {
-    const at = new Date(entry.createdAt);
-    if (
-      Number.isNaN(at.getTime()) ||
-      at.getMonth() !== month ||
-      at.getFullYear() !== year
-    ) {
-      continue;
-    }
-
-    if (entry.amount > 0) {
-      earned += entry.amount;
-    } else {
-      spent += -entry.amount;
-    }
-  }
-
-  return { earned, spent, net: earned - spent };
-}
-
-/**
- * Derived through `useMemo` over the ledger rather than inside the zustand
- * selector: a selector that built a fresh object on every call would never
- * compare equal to the last one, and the subscriber would re-render forever.
- */
-export const useMonthlyCoinSummary = (): MonthlyCoinSummary => {
-  const fromServer = useCoinsStore(s => s.monthSummary);
-  const transactions = useCoinTransactions();
-  return useMemo(
-    () => fromServer ?? summarizeMonth(transactions),
-    [fromServer, transactions],
-  );
-};
-
-/**
- * Everything the expiry panel and its explainer say, from one place: the
- * server's figures once synced, the ledger's own arithmetic before.
+ * Derived through `useMemo` rather than inside the zustand selector: a
+ * selector that built a fresh object on every call would never compare
+ * equal to the last one, and the subscriber would re-render forever.
  */
 export const useCoinExpiry = (): CoinExpiry => {
   const balance = useCoinBalance();
-  const transactions = useCoinTransactions();
-  const synced = useCoinsStore(s => s.syncedAt !== null);
-  const serverDaysLeft = useCoinsStore(s => s.expiryDaysLeft);
-  const serverExpiresAt = useCoinsStore(s => s.expiresAt);
-  const serverWindow = useCoinsStore(s => s.expiryWindowDays);
-  const serverWarn = useCoinsStore(s => s.expiryWarnDays);
+  const daysLeft = useCoinsStore(s => s.expiryDaysLeft);
+  const expiresAt = useCoinsStore(s => s.expiresAt);
+  const windowDays = useCoinsStore(s => s.expiryWindowDays);
+  const warnDays = useCoinsStore(s => s.expiryWarnDays) ?? NO_WARN_DAYS;
 
   return useMemo(() => {
-    const daysLeft = serverDaysLeft ?? expiryDaysLeft(transactions);
-    const expiresAt = synced ? serverExpiresAt : expiryMoment(transactions);
-    const warnDays = serverWarn ?? COIN_EXPIRY_WARN_DAYS;
+    const days = daysLeft ?? windowDays ?? 0;
     return {
-      daysLeft,
+      daysLeft: days,
       expiresAt,
-      windowDays: serverWindow ?? COIN_EXPIRY_WINDOW_DAYS,
+      windowDays: windowDays ?? 0,
       warnDays,
-      urgency: urgencyOf(daysLeft, warnDays, balance > 0),
+      urgency: urgencyOf(days, warnDays, balance > 0),
     };
-  }, [
-    balance,
-    serverDaysLeft,
-    serverExpiresAt,
-    serverWarn,
-    serverWindow,
-    synced,
-    transactions,
-  ]);
+  }, [balance, daysLeft, expiresAt, warnDays, windowDays]);
 };
 
 export const useCoinExpiryDaysLeft = (): number => useCoinExpiry().daysLeft;

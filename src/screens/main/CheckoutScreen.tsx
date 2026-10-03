@@ -172,8 +172,12 @@ export const CheckoutScreen = () => {
       payable: quote.total - coinsValue,
     };
   }, [coinsApplied, quote]);
+  // Before the till's rules arrive the server is the one to ask for the
+  // code (`STEP_UP_REQUIRED`), and the store already answers that.
   const needsStepUp =
-    coinsApplied > 0 && coinsApplied >= config.stepUpThreshold;
+    config !== null &&
+    coinsApplied > 0 &&
+    coinsApplied >= config.stepUpThreshold;
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -442,13 +446,13 @@ export const CheckoutScreen = () => {
                 {quote.coinsMax > 0 ? (
                   <Switch
                     label="Pay with coins"
-                    helper={`Up to ${formatCoins(
-                      quote.coinsMax,
-                    )} coins (${Math.round(
-                      config.coinShareMax * 100,
-                    )}% of the items) · you have ${formatCoins(
-                      Math.floor(balance),
-                    )}`}
+                    helper={`Up to ${formatCoins(quote.coinsMax)} coins${
+                      config
+                        ? ` (${Math.round(
+                            config.coinShareMax * 100,
+                          )}% of the items)`
+                        : ''
+                    } · you have ${formatCoins(Math.floor(balance))}`}
                     value={useCoins}
                     onChange={setUseCoins}
                   />
@@ -491,7 +495,7 @@ export const CheckoutScreen = () => {
                   </VStack>
                 ) : null}
 
-                {needsStepUp ? (
+                {needsStepUp && config ? (
                   <HStack
                     align="center"
                     gap="sm"

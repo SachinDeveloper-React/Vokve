@@ -9,6 +9,7 @@ import { RefreshTokenModel, UserModel } from '../src/modules/identity/models.js'
 import { notify } from '../src/modules/notifications/service.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
 import { EventModel } from '../src/modules/platform/models.js';
+import { StreakDayModel } from '../src/modules/streak/models.js';
 import { WorkoutModel } from '../src/modules/training/models.js';
 import { app, authed, baseHeaders, signUpAndRegister, type Session } from './helpers.js';
 
@@ -57,12 +58,19 @@ describe('account: profile summary (RULES P4, P6)', () => {
       { _id: `${session.userId}:${daysAgo(0)}`, userId: session.userId, localDay: daysAgo(0), steps: 8_000 },
       { _id: `${session.userId}:${daysAgo(1)}`, userId: session.userId, localDay: daysAgo(1), steps: 12_000 },
       { _id: `${session.userId}:${daysAgo(2)}`, userId: session.userId, localDay: daysAgo(2), steps: 6_000, workoutsCompleted: 1 },
-      // A gap, then an older run — the longest streak is the longer of the two.
+      // A gap, then an older run.
       { _id: `${session.userId}:${daysAgo(6)}`, userId: session.userId, localDay: daysAgo(6), steps: 5_000 },
       { _id: `${session.userId}:${daysAgo(7)}`, userId: session.userId, localDay: daysAgo(7), steps: 5_000 },
       { _id: `${session.userId}:${daysAgo(8)}`, userId: session.userId, localDay: daysAgo(8), steps: 5_000 },
       { _id: `${session.userId}:${daysAgo(9)}`, userId: session.userId, localDay: daysAgo(9), steps: 5_000 },
     ]);
+    // The streak figures are the streak module's: the days it recorded as
+    // earned, the same ones the streak screen draws.
+    await StreakDayModel.insertMany(
+      [0, 1, 2, 6, 7, 8, 9].map(n => ({
+        _id: `${session.userId}:${daysAgo(n)}`, userId: session.userId, localDay: daysAgo(n), kind: 'earned', source: 'steps',
+      })),
+    );
     const started = new Date('2026-09-14T06:00:00Z');
     await WorkoutModel.create({
       _id: 'wk-1', userId: session.userId, title: 'Push Day', startedAt: started,

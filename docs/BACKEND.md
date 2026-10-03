@@ -66,22 +66,22 @@ Plus `POST /auth/refresh` (`{ refreshToken }` → `AuthTokens`), called from `cl
 
 ### 2.2 What is faked, and where
 
-Every export of `seedData.ts` is a backend feature that does not exist:
+Every export of `seedData.ts` stood in for a backend feature. The **Now** column is where each one stands (D-45: the app keeps seed data only for the mock API and tests — a screen never shows it):
 
-| Seed export | Consumed by | Stands in for |
-|---|---|---|
-| `workoutTemplates` | Workouts | Template/exercise catalogue |
-| `weeklySteps`, `todayActivity`, `todayHourlySteps`, `monthlyStepsByWeek`, `yearlyStepsByMonth` | Home, Analytics, Nutrition | Step/activity history at four granularities |
-| `seedStreak` | Streak store | Training-day history |
-| `seedCoinTransactions` | Wallet, Shop, every coin badge | The coin ledger |
-| `shopItems` | Shop | Reward catalogue |
-| `seedNotifications` | Notifications | Notification feed |
-| `seedChallenges`, `seedAchievements` | Challenges | Challenge engine |
-| `seedLeaderboard`, `leaderboardHighlights` | Leaderboard | Rankings and prize history |
-| `hydrationHighlights`, `hydrationTip` | Hydration | Water history beyond today |
-| `seedVitals`, `healthHighlights`, `healthTip` | Health Checkup, Heart Rate, Blood Pressure | Vitals history and health score |
-| `seedFoodEntries`, `foodLibrary`, `quickAddFoodIds`, `dietPlanRotation`, `nutritionTip` | Nutrition, Add Meal, Diet Plan, Nutrition History | Food diary, food database, meal plans |
-| `referralCode`, `REFERRAL_REWARD_COINS`, `seedReferrals` | Referral | Referral programme |
+| Seed export | Consumed by | Stands in for | Now |
+|---|---|---|---|
+| `workoutTemplates` | Workouts | Template/exercise catalogue | **Gone** — `GET /workout-templates` (the screen is still not routed); mock only |
+| `weeklySteps`, `todayActivity`, `todayHourlySteps`, `monthlyStepsByWeek`, `yearlyStepsByMonth` | Home, Analytics, Nutrition | Step/activity history at four granularities | **Gone** — `/activity/*` (D-41) |
+| `seedStreak` | Streak store | Training-day history | **Gone** — `GET /streak` (D-44); mock only |
+| `seedCoinTransactions` | Wallet, Shop, every coin badge | The coin ledger | **Gone** — `GET /wallet` (D-45); mock only |
+| `shopItems` | Shop | Reward catalogue | **Gone** — `GET /shop/items` (D-45); mock and tests only |
+| `seedNotifications` | Notifications | Notification feed | **Gone** — `GET /notifications` (D-45); mock only |
+| `seedChallenges`, `seedAchievements` | Challenges | Challenge engine | **Gone** — `GET /challenges`, `GET /achievements` (D-46); mock only |
+| `seedLeaderboard`, `leaderboardHighlights` | Leaderboard | Rankings and prize history | **Gone** — `GET /leaderboard*` (D-47); mock only |
+| `hydrationHighlights`, `hydrationTip` | Hydration | Water history beyond today | **Gone** — `/hydration/*`, `/content/tips/*` (D-48); mock only |
+| `seedVitals`, `healthHighlights`, `healthTip` | Health Checkup, Heart Rate, Blood Pressure | Vitals history and health score | **Gone** — `/vitals*`, `/health/score`, `/content/tips/*` (D-50); mock only |
+| `seedFoodEntries`, `foodLibrary`, `quickAddFoodIds`, `dietPlanRotation`, `nutritionTip` | Nutrition, Add Meal, Diet Plan, Nutrition History | Food diary, food database, meal plans | **Gone** — `/nutrition/*`, `/foods*`, `/diet-plan*` (D-49); mock only |
+| `referralCode`, `REFERRAL_REWARD_COINS`, `seedReferrals` | Referral | Referral programme | **Gone** — `GET /referrals/me`; mock only |
 
 Thirteen zustand stores persist to MMKV. Each one is a client-side cache of state the server must own:
 
@@ -369,7 +369,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 
 #### Wallet ("Coins" tab)
 - **Renders:** `WalletSyncNotice` (only after a failed sync: "Couldn't refresh", figures' age, Retry), `CoinBalanceCard` (balance, **pending** step coins when > 0, lifetime earned; the label's "?" opens `CoinsInfoSheet` — what coins are, the **served** rate card from `/wallet/earn-rules` via `EarnCoinsCard`, the daily cap with today's headroom or "Daily limit reached — resets at midnight" (E8f), why step coins are pending, "Spend in the shop"), `WalletActionsRow` (Shop, History → CoinHistory, Orders → Orders, Invite → Referral), `CoinsSummaryCard` (this **calendar month** earned/spent/net), `KeepGoingCard`, `EarnCoinsCard` (rate card: 10/1,000 steps, 100/workout, 175/7-day streak, 300/referral), `CoinExpiryPanel` (days left of the idle window; amber/red inside the warn thresholds; "About Coin Expiry" and the label's "?" open `CoinExpirySheet` — the countdown, the exact date, four rules worded from the server's window/warn days, "Earn coins" → Referral), `RecentTransactionsCard` (4 rows + View All → CoinHistory).
-- **Source today:** `coinsStore` — a cache of the last `GET /wallet` + newest 50 rows of `GET /wallet/transactions`. Hydrated on sign-in, re-fetched on tab focus when older than 60 s (`WALLET_STALE_AFTER_MS`), and on pull-to-refresh. Month summary and expiry countdown are the server's once synced; the on-device ledger arithmetic is only the fallback for the seeded (never-synced) wallet.
+- **Source today:** `coinsStore` — a cache of the last `GET /wallet` + newest 50 rows of `GET /wallet/transactions`. Hydrated on sign-in, re-fetched on tab focus when older than 60 s (`WALLET_STALE_AFTER_MS`), and on pull-to-refresh. Every figure is the server's — month summary and expiry countdown included; there is no on-device ledger arithmetic and no local earn/spend. Before the first sync the balance card, ledger and summary are replaced by a loading state ("Couldn't load your wallet / Try again" after a failure); the shortcuts stay (D-45).
 - **Backend:** `GET /wallet` (returns `monthSummary`, `expiresAt`, `expiryDaysLeft`, `expiryWindowDays`, `expiryWarnDays`, `pending`, `dailyCap`/`earnedToday`/`remainingToday`, `stepUpThreshold`), `GET /wallet/transactions?cursor=&limit=&source=`, `GET /wallet/earn-rules`.
 
 #### Coin History (root route `CoinHistory`, from the wallet)
@@ -487,70 +487,71 @@ Every screen in the app, what it renders, where that data comes from today, what
 
 #### Streak
 - **Renders:** `StreakSummaryCard` (current, longest with dates, freezes available), `StreakCalendarCard` (month grid: earned vs protected days, month nav), `StreakToolsCard` (Freeze Today, Restore for 50 coins), `StreakBenefitsCard` (milestones 7/15/30/90/180 days → 50/150/300/1,000/2,000 coins, achieved against **longest**), `StreakCheerCard`.
-- **Actions:** `freezeToday()` (refused if none left or today already covered, no charge); restore = `canRestore && balance >= 50 && spend(50,'Streak restored','purchase') && restore()`.
-- **Rules ported verbatim (RULES.md §S):** streak anchors on today *or yesterday*; restore bridges from the last run's end to yesterday, only if that end is within 7 days.
-- **Backend:** `GET /streak`, `POST /streak/freeze`, `POST /streak/restore` (atomic debit + protected days), `GET /streak/milestones`. Fix C6: debit with `source:'streak'`, not `'purchase'`.
+- **Actions:** Freeze → `POST /streak/freeze` (refused with `NO_FREEZES_LEFT` / `STREAK_ALREADY_COVERED`, nothing spent); Restore → `POST /streak/restore` (the debit and the protected days in one transaction; `NOTHING_TO_RESTORE` / `INSUFFICIENT_COINS` charge nothing). The screen pre-checks only what the summary already says (`canRestore`, a synced balance below the cost) and otherwise shows the server's words.
+- **Rules (RULES.md §S), on the server:** streak anchors on today *or yesterday*; restore bridges from the last run's end to yesterday, only if that end is within ⚙ 7 days; a day is earned by a plausible workout or verified steps ≥ the user's goal (⚙ `streak.earnedBy`, D-44).
+- **Backend (built — `modules/streak`):** `GET /streak` → `StreakSummary` (figures, both day lists, freezes, restore gap and cost, the milestone ladder with achieved/paid, `nextMilestone`, a server-worded `howToEarn`); `POST /streak/freeze`; `POST /streak/restore` → `{ streak, balance }`. Days come from `saveWorkout` (W6) and the step rollup (`streakEarned` on the ingest answer tells the app to re-read). Milestones paid by `credit()` with `source:'streak'`; restore debits `source:'streak'` (C6). Hourly `streak-at-risk` job at 19:00 local (S10). Before the first answer the screen shows a loading state, never a placeholder streak (D-45).
 
 ### 5.6 Challenges and rewards
 
 #### Challenges
 - **Renders:** header, `ChallengePeriodFilter` (daily/weekly/monthly) + date chip + calendar, `ActiveChallengesCard` (progress bars, reward chips, View All **[no-op]**), `ChallengeRewardStrip` (How it works → Leaderboard "how" tab), `UpcomingChallengesCard` (View All **[no-op]**), `AchievementsCard` (rings, View All **[no-op]**), `ChallengeCheerCard`.
-- **Source today:** `seedChallenges` split on `startsAt === null`; `seedAchievements`.
-- **Backend:** `GET /challenges?cadence=&date=`, `POST /challenges/:id/claim`, `GET /achievements`. Progress recomputed server-side from verified activity.
+- **Source today:** `GET /challenges?date=` for the chosen day (split on `startsAt === null`, filtered by cadence on the device) and `GET /achievements`, through `useServerRead` — re-read when a step sync lands, on a pull, and remembered in memory so a reopened screen paints at once. Before the first answer each card is a loading state; a completed challenge reads "Completed ✓ · 10,400 / 10,000 steps".
+- **Backend (built — `modules/challenges`, D-46):** the catalogue in `challenge_definitions`; progress from verified activity for the day's period; automatic completion once per (user, challenge, period) after each rollup / workout save, paid through `credit()` (step-derived rewards wait for step coins); badges by rule or by challenge. No claim endpoint — nothing to claim.
 
 #### Leaderboard & Rewards
 - **Renders:** two tabs. **Rewards:** `LeaderboardHeroBanner`, `RewardTiersCard` (rank 1 → 5,000 + tee + bottle; 2–3 → 3,000 + tee + mat; 4–10 → 1,000 + mat; "given every week"), `CurrentLeaderboardCard` (top 5, View Full **[no-op]**), `BestRankingsCard` (best rank + date, top-ten finishes, reward coins earned, rewards won). **How it works:** week runs Mon–Sun; steps + workouts + completed challenges count; country-scoped; rewards land Monday.
-- **Source today:** `seedLeaderboard`, `leaderboardHighlights`, `REWARD_TIERS` constant.
-- **Backend:** `GET /leaderboard?period=&cursor=` with `me` block, `GET /leaderboard/history`, `GET /leaderboard/reward-tiers`. **Needs a scoring formula (C5) — proposed in RULES.md §L.**
+- **Source today:** `GET /leaderboard/reward-tiers` (tiers, the line under them and the how-it-works steps — all worded by the server), `GET /leaderboard` (this week's top five on the card, plus "You are #12 this week with 1,240 points." when the user is not among them), `GET /leaderboard/history` (best rank and its week, top-ten weeks, coins and gear won). Each card shows a loading state until its own answer arrives; pull-to-refresh asks all three again.
+- **Backend (built — `modules/leaderboard`, D-47):** scores recounted per member per week after rollups and workout saves; country board ranked by L5; hourly close a few hours into Monday — results frozen, flagged places skipped, prizes paid (exempt from the cap; step-derived, so behind ⚙ `coins.steps.enabled`).
 
 ### 5.7 Hydration
 
 #### Hydration
 - **Renders:** header (back, reminders → HydrationReminder), `HydrationProgressCard` (glass, ml vs goal), `QuickAddRow` (presets + custom sheet), `HydrationLogCard` (today's entries, delete), `HydrationStatsCard` (best streak, daily average, goal hit %, reminder count; History **[no-op]**), `HydrationTipCard`.
-- **Source today:** store for today; `hydrationHighlights` seed for stats.
-- **Backend:** `GET /hydration/today`, `POST /hydration/entries`, `DELETE /hydration/entries/:id`, `GET /hydration/stats`, `GET /hydration/days?from=&to=`.
+- **Source today:** `hydrationStore` — a cache of `GET /hydration/today` plus a persisted **outbox**: a quick-add goes into the outbox and shows at once, the outbox is sent in order (each drink under its own id, `Idempotency-Key: drink:<id>`), every answer replaces the cached day, and the screen shows the server's day with the outbox laid over it. A 404/422 drops a change; anything else waits for the next flush (focus, pull, next log). Stats from `GET /hydration/stats`, re-read when a drink is confirmed; the tip from `GET /content/tips/hydration`. Before the first answer the progress and log are a loading state (D-45).
+- **Backend (built — `modules/hydration`, D-48):** `GET /hydration/today`, `POST /hydration/entries` (idempotent on the app's id; 10–3000 ml ⚙, within the last 7 days), `DELETE /hydration/entries/:id` (soft delete, 404 if not the caller's), `GET /hydration/stats` (Y4, reminder count by Y6), `GET /hydration/days?from=&to=`.
 
 #### Hydration Reminder
 - **Renders:** `ReminderHeroCard` (enabled toggle, active count, next time), `ReminderPlanCard` (morning/afternoon/evening presets with add per slot), `CustomTimesCard` (custom times + remove menu), `ReminderSettingsCard` (sound **[no-op]**, vibration, repeat days M–S), `ReminderTipCard`.
-- **Source today:** `remindersStore` (presets 07:00/08:30/10:00, 13:00/15:30, 18:00/20:00, custom 11:00/21:30).
-- **Backend:** `GET/PUT /hydration/reminders`. Delivery can be **local notifications** scheduled on-device; the server copy exists for cross-device sync and for server-sent reminders when the app is dead. Must respect quiet hours and the `health` notification category (default **off**).
+- **Source today:** `remindersStore` — a cache of `GET /hydration/reminders`; every edit shows at once and `PUT`s the whole plan; a refusal puts the server's plan back. The default plan (presets 07:00/08:30/10:00, 13:00/15:30, 18:00/20:00, every day) is ⚙ `hydration.defaultPlan`. The tip is `GET /content/tips/reminders`.
+- **Backend (built):** `GET/PUT /hydration/reminders` — whole plan, (time, block) de-duplicated, clock order, ⚙ `hydration.maxReminders`. Delivery is still not built: **local notifications** scheduled on-device are the plan; server-sent reminders when the app is dead would respect quiet hours and the `health` category (default **off**).
 
 ### 5.8 Nutrition
 
 #### Nutrition
 - **Renders:** header, period/date chip + calendar, `CalorieSummaryCard` (eaten vs goal vs burned — burned reads `todayActivity.caloriesBurned`; Learn more **[no-op]**), `DailyGoalCard` (kcal/protein/carbs/fats vs goals, edit **[no-op]**), `MealsCard` (4 slots with item count, kcal, first-logged time; add per slot → AddMeal; View All → History; Tips **[no-op]**), `PreferencesCard` (diet type / meal plan / goal via action sheet; Manage → Diet Plan).
-- **Source today:** `nutritionStore` seeded with today's 11 items + 6 days of history generated from the plan rotation.
-- **Backend:** `GET /nutrition/day/:date`, `GET/PUT /nutrition/goals`, `GET/PUT /nutrition/preferences`, `GET /activity/today` (for burned).
+- **Source today:** `GET /nutrition/day?date=` for the chosen day (the date chip now moves the figures), with the outbox's unsent meals laid over it; targets and preferences from `GET /nutrition/profile` (`nutritionStore.profile`, a preference change `PUT`s at once); burned calories from `GET /activity/day`; the tip from `GET /content/tips/nutrition`. Loading states until each answers (D-45).
+- **Backend (built — `modules/nutrition`, D-49):** `GET /nutrition/day`, `GET/PUT /nutrition/profile` (goals + preferences in one, field by field).
 
 #### Add Meal
 - **Renders:** header with coin badge, slot selector, date + time pickers, `FoodSearchRow` (search library; add custom), `FoodQuickAddRow` (4 quick-add ids), `AddedFoodsCard`, `MealSummaryCard` (totals), Save.
-- **Actions:** `addEntries(drafts[])` — batched, one `loggedAt` from date + time.
-- **Backend:** `GET /foods?q=&limit=` (search), `GET /foods/quick-add`, `POST /foods/custom`, `POST /nutrition/entries` (batch, idempotent).
+- **Actions:** `addEntries(drafts[])` — batched, one `loggedAt` from date + time, each food with its own id; queued in the outbox and sent as one `POST /nutrition/entries` (`Idempotency-Key: meal:<first id>`).
+- **Source today:** shortcuts from `GET /foods/quick-add`; search from `GET /foods?q=` once typing pauses (250 ms), "Searching…" until it answers.
+- **Backend (built):** `GET /foods?q=&limit=` (word prefix over name; the member's own foods first), `GET /foods/quick-add`, `POST /foods/custom` (private, N8 — not yet used by the app), `POST /nutrition/entries` (batch ≤ 30 ⚙, idempotent per food id, within ⚙ 30 days).
 
 #### Diet Plan
 - **Renders:** Today / Week tabs; day nav + calendar; `PlanCaloriesCard` (plan total vs goal); `PlannedMealCard` per meal (tap **[no-op]**); add meal → AddMeal; `PlanNutritionCard` (macros vs goals); week strip.
-- **Source today:** `dietPlanRotation` (seed plans cycled by day-of-epoch modulo cycle length) + per-date `extras` in store.
-- **Backend:** `GET /diet-plan?date=`, `GET /diet-plan/week?start=`, `POST /diet-plan/meals`, `DELETE /diet-plan/meals/:id`. Plan generation from `preferences` (diet type × meal plan × goal) is a server job — the rotation is a placeholder for it.
+- **Source today:** `GET /diet-plan?date=` (meals, totals, `cycleLength`, `basis` — "Vegetarian · Balanced") and `GET /diet-plan/days?from=&to=` for the week ahead / behind; both re-read when a preference changes. The local plan store (and its never-called per-date extras) is gone.
+- **Backend (built):** curated days in `diet_plan_templates`, each tagged with the diet types and meal plans it suits; a member's plan cycles (by date) through the days that suit both their preferences, else their diet type, else all (N7 placeholder; portion scaling to the kcal goal not built). User additions to a plan (`POST/DELETE /diet-plan/meals`) are not built — the app's "Add Meal" logs food instead.
 
 #### Nutrition History
 - **Renders:** Daily / Weekly / Custom range; day nav; `DailySummaryCard` (insights **[no-op]**); `HistoryMealCard` per slot (tap → AddMeal for that slot/date); `DayTotalsCard` list (previous 6 days or range); `RangeSummaryCard`.
-- **Backend:** `GET /nutrition/days?from=&to=` → per-day totals + item counts; `GET /nutrition/day/:date` for detail.
+- **Source today / Backend (built):** `GET /nutrition/days?from=&to=` → per-day totals + item counts, every day present (≤ 366); `GET /nutrition/day?date=` for detail; both re-read when the server confirms a change.
 
 ### 5.9 Health and vitals
 
 #### Health Checkup
 - **Renders:** header, date chip, `HealthScoreCard` (82/100 with band word; ⓘ **[no-op]**), `VitalsCard` (latest HR, BP, BMI, weight; add reading sheet; BMI guide; tap HR/BP → detail screens), `TrackProgressCard` (Trends **[no-op]**), `RecentHistoryCard` (last readings, View All **[no-op]**), `HealthTipCard`.
-- **Source today:** `vitalsStore` seeded; `healthHighlights.score` seed.
+- **Source today:** `vitalsStore` — a cache of `GET /vitals?limit=60` and the derived BMI from `GET /vitals/latest`, plus a persisted outbox (a reading shows at once and is sent under its own id); the score from `GET /health/score` (re-read when a reading is confirmed, the server's band word on the card); the tip from `GET /content/tips/health`. BMI is no longer offered in "Add New Reading" (V1). Loading states until each answers (D-45).
 - **Add reading bounds:** HR 30–220 bpm; BP systolic 60–250 / diastolic 30–150 mmHg; BMI 10–60; weight 20–350 kg.
-- **Backend:** `GET /vitals/latest`, `GET /vitals?kind=&limit=&cursor=`, `POST /vitals`, `DELETE /vitals/:id`, `GET /health/score`. BMI derived server-side from latest weight + profile height (C9). A `weight` vital also updates `User.weightKg` (C10). HealthKit/Health Connect can supply HR and weight — same ingest path as steps (§7).
+- **Backend (built — `modules/vitals`, D-50):** `GET /vitals/latest` (newest of each kind + derived BMI + the V9 disclaimer), `GET /vitals?kind=&limit=` (newest first; no cursor yet), `POST /vitals` (idempotent on the app's id; bounds ⚙ `health.bounds`; `bmi` refused), `DELETE /vitals/:id`, `GET /health/score` (V8 with ⚙ `health.scoreWeights`, each part's points and a sentence). BMI is derived from the newest weight + profile height (C9); the newest weight also becomes `User.weightKg` (C10). Readings from HealthKit/Health Connect are not ingested yet (V10).
 
 #### Heart Rate
 - **Renders:** `HeartRateHeroCard` (latest bpm + band: <60 low, 60–100 normal, 101–120 elevated, >120 high), `LiveMeasureCard` (opens log sheet — manual entry, no camera), `HeartRateTrendCard` (7 readings), `RecentVitalReadingsCard` (View All **[no-op]**), `VitalTipCard` (**[no-op]**), ⓘ **[no-op]**.
-- **Backend:** `GET /vitals?kind=heart_rate&limit=7`, `POST /vitals`.
+- **Source today / Backend (built):** the store's heart-rate readings (`GET /vitals`), `POST /vitals`; the tip from `GET /content/tips/heart_rate`.
 
 #### Blood Pressure
 - **Renders:** `BloodPressureHeroCard` (sys/dia + pulse from latest HR + band: high if sys≥130 **or** dia≥80; low if sys<90 or dia<60; elevated if sys 120–129; else normal), trend, recent, tip.
-- **Backend:** as Heart Rate with `kind=blood_pressure`.
+- **Source today / Backend (built):** as Heart Rate with `kind=blood_pressure`; the tip from `GET /content/tips/blood_pressure`.
 
 ### 5.10 Social and messaging
 
@@ -578,7 +579,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 
 ## 6. Endpoint catalogue
 
-**[E]** = already called by the client, build to match. **[N]** = new. All under `/v1`. All authenticated unless marked.
+**[E]** = already called by the client, build to match. **[N]** = new. **[✓]** = built on both sides (server module + the app reads it). All under `/v1`. All authenticated unless marked.
 
 ### 6.1 Auth
 | | Method + path | Body → Response |
@@ -626,8 +627,12 @@ Every screen in the app, what it renders, where that data comes from today, what
 |---|---|---|
 | E | `GET /activity/weekly` | 7 local days, oldest first, **+ distanceKm/source/verified** |
 | N | `GET /activity/today` | Same shape, one day |
-| N | `GET /activity/range` | `?from&to&granularity=hour\|day\|week\|month` |
-| N | `POST /activity/ingest` | Batch samples + attestation (§7.4) |
+| N | `GET /activity/day?date=` | One day, same shape as today |
+| N | `GET /activity/range` | `?from&to&granularity=hour\|day\|week\|month` → `{ points[{start,end,steps,verifiedSteps}], totals, best }`. `week` = consecutive 7-day blocks from `from` (W1–W5 of a month); `month` = calendar months, clipped |
+| N | `GET /activity/config` | The phone tracker's set-up (⚙ `activity.tracker`) and sync policy (⚙ `activity.sync`), passed to react-native-step-tracker-pro as is |
+| N | `GET /activity/sources?date=` | How a day was matched: each device's own count (recovered/flagged taken off), every Health Connect app with its status (`used`/`lower`/`not_counted`/`unverified`/`blocked`/`not_computed`) and a server-written note, the raw records by app, the uploads, plain-language `explanation`, and — only where ⚙ `activity.inspector.showChecks` allows — the layer scores and flags |
+| N | `POST /activity/ingest/nonce` | Single-use value the next signed snapshot carries (10 min) |
+| N | `POST /activity/ingest` | One day's **signed step snapshot** (react-native-step-tracker-pro `getSignedSnapshot`) + Play Integrity on request — see the example in §15 |
 | N | `GET/POST/DELETE /health/connections[/:provider]` | Provider consent + sync cursor |
 | N | `GET /home` | Optional aggregate: today + weekly + streak + hydration + unread count |
 
@@ -644,10 +649,10 @@ Every screen in the app, what it renders, where that data comes from today, what
 ### 6.5 Streak
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /streak` | `{ currentStreak, longestStreak, completedDays[], protectedDays[], freezesAvailable, canRestore, restoreCostCoins, restoreGap[] }` |
-| N | `POST /streak/freeze` | No charge on refusal |
-| N | `POST /streak/restore` | Atomic debit + protected days |
-| N | `GET /streak/milestones` | Table + achieved flags (vs longest) |
+| ✓ | `GET /streak` | `{ today, currentStreak, longestStreak{length,start,end}, completedDays[], protectedDays[], freezesAvailable, maxFreezes, todayCovered, todayFrozen, canRestore, restoreGap[], restoreCostCoins, restoreWindowDays, milestones[{days,coins,achieved,paid}], nextMilestone, howToEarn }` |
+| ✓ | `POST /streak/freeze` | Idempotent; 409 `NO_FREEZES_LEFT` / `STREAK_ALREADY_COVERED`, nothing spent; answers the summary |
+| ✓ | `POST /streak/restore` | Idempotent; debit + protected days in one transaction; 422 `NOTHING_TO_RESTORE` / `INSUFFICIENT_COINS`; answers `{ streak, balance }` |
+| — | `GET /streak/milestones` | Folded into `GET /streak` (`milestones`, `nextMilestone`) |
 
 ### 6.6 Wallet
 | | Method + path | Notes |
@@ -660,16 +665,16 @@ Every screen in the app, what it renders, where that data comes from today, what
 ### 6.7 Challenges and achievements
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /challenges?cadence=&date=` | `startsAt: null` = running |
-| N | `POST /challenges/:id/claim` | Idempotent; server-verified progress ≥ goal |
-| N | `GET /achievements` | `value` as number (C8) |
+| ✓ | `GET /challenges?date=` | `Challenge[]` for the day (default today in the caller's zone): open ones with the period's progress, `endsOn` and `completedAt` (`startsAt: null`), then those opening within ⚙ `challenges.upcomingDays` (`startsAt` set). 422 on a malformed date |
+| — | `POST /challenges/:id/claim` | Not built: completion is automatic (C4) |
+| ✓ | `GET /achievements` | `Achievement[]` in catalogue order; `value` is a number (C7), `achievedAt` or null |
 
 ### 6.8 Leaderboard
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /leaderboard?period=current\|<id>&cursor=` | `{ period:{id,start,end,resetsAt,scope}, entries[], me:{rank,score,coins,percentile}, nextCursor }` |
-| N | `GET /leaderboard/history` | `{ bestRank, bestRankAchievedOn, topTenFinishes, rewardCoinsEarned, rewardsWon, periods[] }` |
-| N | `GET /leaderboard/reward-tiers` | |
+| ✓ | `GET /leaderboard` | This week, the caller's country: `{ period:{id,start,end,resetsAt,country,status}, entries[] (top ⚙ 50: rank, "First L.", country, prize coins + perk, score, isCurrentUser), me:{rank,score,coins,percentile}\|null, ranked }`. Past periods are read through `/history`; no cursor yet |
+| ✓ | `GET /leaderboard/history` | `{ bestRank, bestRankAchievedOn (YYYY-MM-DD), topTenFinishes, rewardCoinsEarned, rewardsWon, periods[] (newest 12) }` from frozen results |
+| ✓ | `GET /leaderboard/reward-tiers` | `{ scope, tiers[{id,fromRank,toRank,label,coins,perks[]}], howItWorks[{title,detail}], note }` — worded from ⚙ `leaderboard.*` |
 
 ### 6.9 Shop, cart, checkout and orders
 | | Method + path | Notes |
@@ -690,35 +695,36 @@ Every screen in the app, what it renders, where that data comes from today, what
 ### 6.10 Hydration
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /hydration/today` | `{ date, consumedMl, goalMl, entries[] }` |
-| N | `POST /hydration/entries` | `{ ml, at }`, idempotent |
-| N | `DELETE /hydration/entries/:id` | |
-| N | `GET /hydration/stats` | `{ bestStreakDays, dailyAverageMl, goalHitRatePercent, reminderCount }` |
-| N | `GET /hydration/days?from=&to=` | |
-| N | `GET/PUT /hydration/reminders` | Whole schedule object |
+| ✓ | `GET /hydration/today` | `{ date, consumedMl, goalMl, entries[] }` |
+| ✓ | `POST /hydration/entries` | `{ id, ml, at? }` — idempotent on the app's `id`; answers the day |
+| ✓ | `DELETE /hydration/entries/:id` | Soft delete; answers the day; 404 if not the caller's |
+| ✓ | `GET /hydration/stats` | `{ bestStreakDays, dailyAverageMl, goalHitRatePercent, reminderCount }` |
+| ✓ | `GET /hydration/days?from=&to=` | Per-day totals, every day present (≤ 366 days) |
+| ✓ | `GET/PUT /hydration/reminders` | Whole plan object `{ enabled, reminders[], sound, vibration, repeatDays }` |
 
 ### 6.11 Nutrition
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /nutrition/day/:date` | `{ date, entries[], totals, meals[4], goals }` |
-| N | `GET /nutrition/days?from=&to=` | Per-day totals + item counts |
-| N | `POST /nutrition/entries` | `{ entries: FoodEntryDraft[] }`, batch, idempotent |
-| N | `DELETE /nutrition/entries/:id` | |
-| N | `GET/PUT /nutrition/goals` | |
-| N | `GET/PUT /nutrition/preferences` | Changing preferences triggers plan regeneration |
-| N | `GET /foods?q=&limit=` | Search; also `GET /foods/quick-add` |
-| N | `POST /foods/custom` | User-private food item |
-| N | `GET /diet-plan?date=`, `GET /diet-plan/week?start=` | |
-| N | `POST /diet-plan/meals`, `DELETE /diet-plan/meals/:id` | User additions to a generated plan |
+| ✓ | `GET /nutrition/day?date=` | `{ date, entries[] (logged order), totals{calories,proteinG,carbsG,fatsG,fiberG}, goals }` — today in the caller's zone by default |
+| ✓ | `GET /nutrition/days?from=&to=` | `[{ date, items, calories, proteinG, carbsG, fatsG }]`, every day present |
+| ✓ | `POST /nutrition/entries` | `{ entries: FoodEntry[] }` with the app's ids — batch, idempotent per id; answers the first food's day |
+| ✓ | `DELETE /nutrition/entries/:id` | Soft delete; answers the day; 404 if not the caller's |
+| ✓ | `GET/PUT /nutrition/profile` | `{ goals, preferences }`; PUT is a partial patch of either (goals bounded: 800–6000 kcal…) |
+| ✓ | `GET /foods?q=&limit=` | Word-prefix search over global + own foods |
+| ✓ | `GET /foods/quick-add` | The add-meal shortcuts |
+| ✓ | `POST /foods/custom` | Member-private food (N8) |
+| ✓ | `GET /diet-plan?date=` | `{ date, meals[], totals, cycleLength, basis }` |
+| ✓ | `GET /diet-plan/days?from=&to=` | `[{ date, meals, calories }]` (≤ 62 days) |
+| — | `POST /diet-plan/meals`, `DELETE /diet-plan/meals/:id` | Not built (see Diet Plan above) |
 
 ### 6.12 Vitals and health
 | | Method + path | Notes |
 |---|---|---|
-| N | `GET /vitals/latest` | One per kind |
-| N | `GET /vitals?kind=&limit=&cursor=` | |
-| N | `POST /vitals` | `{ kind, value, secondary?, recordedAt? }`; server bounds; `weight` also updates profile |
-| N | `DELETE /vitals/:id` | |
-| N | `GET /health/score` | `{ score, outOf, band, factors[] }` — formula in RULES.md §H |
+| ✓ | `GET /vitals/latest` | `{ heart_rate, blood_pressure, weight, bmi (derived), disclaimer }` — each a `VitalReading` or null |
+| ✓ | `GET /vitals?kind=&limit=` | Newest first, ≤ 100; `kind` ∈ heart_rate / blood_pressure / weight |
+| ✓ | `POST /vitals` | `{ id, kind, value, secondary?, recordedAt? }` — idempotent on `id`; bounds ⚙; `bmi` refused (V1); a newest `weight` updates the profile (V4) |
+| ✓ | `DELETE /vitals/:id` | Soft delete; 404 if not the caller's |
+| ✓ | `GET /health/score` | `{ score, outOf, band, factors[{id,label,weight,points,detail}], disclaimer }` — V8, weights ⚙ `health.scoreWeights` |
 
 ### 6.13 Referrals
 | | Method + path | Notes |
@@ -739,7 +745,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 | | Method + path | Notes |
 |---|---|---|
 | N | `GET /config` (public) | Earn rates, tiers, milestones, feature flags, min app version, maintenance |
-| N | `GET /content/motivation` | Quote of the day |
+| ✓ | `GET /content/tips/:topic` | The day's tip for `motivation` (Home's line), `hydration`, `reminders`, `nutrition`, `health`, `heart_rate`, `blood_pressure` — `{ id, topic, title\|null, text }`, rotating daily in the caller's zone over the topic's active rows in `content_tips` (D-48). Replaces `GET /content/motivation` |
 | N | `GET /health` (public, unauth) | Liveness |
 
 ### 6.16 Devices and versions
@@ -747,6 +753,8 @@ Every screen in the app, what it renders, where that data comes from today, what
 |---|---|---|
 | N | `POST /devices/register` | `{ installId, vendorId, profile, integrity, pushToken? }` → `{ deviceId, trustTier, mustUpgrade, minVersion }`. Called on every launch; idempotent by `(user, installId)` |
 | N | `PATCH /devices/:deviceId` | Heartbeat: app version/build, OS, push token, timezone, locale |
+| N | `POST /devices/:deviceId/attestation/challenge` | 32 random bytes (base64url), single use, 10 min — only for the calling device |
+| N | `POST /devices/:deviceId/attestation` | The Keystore key made for it: `{ keyId, publicKey, certificateChain, … }` → `{ keyId, attested, securityLevel }`. Chain checked to Google's roots (by key), challenge, package, signer, revocation list; an unattestable key is kept as `attested:false` |
 | N | `GET /me/devices` | All devices on the account with last seen, app version, current flag |
 | N | `DELETE /me/devices/:deviceId` | Revoke that device's refresh token(s) and push token ("sign out other device") |
 | N | `GET /releases?platform=` (public) | Known builds with status; `minSupported`, `current` |
@@ -1121,23 +1129,27 @@ POST /v1/auth/verify-otp
 200 { "user":{ …, "phoneVerifiedAt":"…","emailVerifiedAt":"2026-09-13T10:31:00Z" }, "tokens":{ … } }
 ```
 
-**Activity ingest**
+**Activity ingest** — one day, signed on the phone by the attested Keystore key. Only what is inside `signedPayload` is trusted; it is the tracker's `VerificationSnapshot` (schema 2): the phone's own count, every Health Connect origin unresolved, the day's minutes, motion windows and raw records, the clock, and the nonce.
 ```http
+POST /v1/activity/ingest/nonce
+200 { "nonce":"Qm9vdHMgb24gdGhlIGdyb3VuZCBhbmQgYSB3YXRjaA","expiresAt":"2026-09-13T07:40:00Z" }
+
 POST /v1/activity/ingest
-Idempotency-Key: 7f3c1e2a-…   X-Vokve-Timezone: Asia/Kolkata
-{ "attestation":{"platform":"android","token":"…"},
-  "pedometer":{ "windowStart":"2026-09-13T00:00:00+05:30","windowEnd":"2026-09-13T07:30:00+05:30","steps":6190 },
-  "motion":[{ "windowStart":"2026-09-13T07:10:00+05:30","dominantHz":1.9,"variance":0.42,"zeroCrossRate":3.8,"peakRatio":0.61 }],
-  "samples":[{ "sampleId":"hc_9f21a","type":"steps","value":842,
-    "startedAt":"2026-09-13T07:12:00+05:30","endedAt":"2026-09-13T07:21:00+05:30",
-    "origin":"com.google.android.apps.fitness","recordingMethod":"automatically_recorded",
-    "device":{"manufacturer":"Google","model":"Pixel 8"} }] }
-200 { "accepted":1,"rejected":0,
-      "day":{ "date":"2026-09-13","steps":6245,"verifiedSteps":6245,"distanceKm":4.2,
-              "activeMinutes":48,"caloriesBurned":358,"workoutsCompleted":0,
-              "source":"health_connect","verified":true },
-      "coinsHeld":10,"releaseAfter":"2026-09-16T07:30:00+05:30","trustTier":"normal","rejections":[] }
+Idempotency-Key: <uuid per attempt>   X-Vokve-Timezone: Asia/Kolkata
+{ "date":"2026-09-13",
+  "snapshot":{ "keyId":"5f2c…","algorithm":"SHA256withECDSA","value":"MEUCIQ…","attested":true,
+               "signedPayload":"{\"schemaVersion\":2,\"date\":\"2026-09-13\",\"deviceSteps\":6190,…,\"nonce\":\"Qm9v…\",\"signedAt\":1757731800000}",
+               "payloadSha256":"9b1d…" } }
+403 { "error":{ "code":"INTEGRITY_REQUIRED","message":"…","details":{ "cloudProjectNumber":123456789012 } } }
+
+… the same snapshot again, with a token bound to its payloadSha256 (or { "error":"PLAY_STORE_NOT_FOUND","retryable":false }):
+{ "date":"2026-09-13","snapshot":{ … },"integrity":{ "token":"…" } }
+200 { "day":{ "date":"2026-09-13","steps":6245,"verifiedSteps":6190,"distanceKm":4.3,
+              "activeMinutes":48,"caloriesBurned":180.5,"workoutsCompleted":0,
+              "source":"device","verified":true },
+      "duplicate":false,"coinsHeld":0,"releaseAfter":null }
 ```
+`ATTESTATION_REQUIRED` (403) and `INTEGRITY_REQUIRED` (403) are answered before the nonce is spent, so the phone resends the same snapshot; `NONCE_INVALID` (409) means take a new nonce; every 422 (`SNAPSHOT_INVALID`, `SNAPSHOT_SIGNATURE_INVALID`, `SNAPSHOT_DATE_OUT_OF_RANGE`) means drop the day. The `Idempotency-Key` is one per attempt — a resend with a token is a new attempt — and the snapshot itself is deduped on its hash (`duplicate:true`). `coinsHeld` stays 0 while ⚙ `coins.steps.enabled` is off (Phase 2).
 
 **Nutrition batch**
 ```http

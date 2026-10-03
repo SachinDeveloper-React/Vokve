@@ -183,14 +183,17 @@ export const ProductDetailScreen = () => {
     });
   }, [item, navigation, quantity, requireSize, size]);
 
+  // Both lines wait for the till's rules: a split or a delivery promise
+  // drawn from rules the app made up could disagree with the checkout.
   const coinsLine = useMemo(() => {
-    if (!item || item.coinsMax === 0) return null;
+    if (!item || item.coinsMax === 0 || config === null) return null;
     const coins = Math.min(item.coinsMax * quantity, Math.floor(balance));
     const worth = coins * config.coinValuePaise;
     return { coins, worth, capped: coins < item.coinsMax * quantity };
-  }, [balance, config.coinValuePaise, item, quantity]);
+  }, [balance, config, item, quantity]);
 
   const deliveryLine = useMemo(() => {
+    if (config === null) return null;
     if (config.freeShippingAbovePaise === null) {
       return config.shippingFeePaise === 0
         ? 'Free delivery'
@@ -337,7 +340,7 @@ export const ProductDetailScreen = () => {
               </AppText>
               <QuantityStepper
                 value={quantity}
-                max={config.maxQuantityPerLine}
+                max={config?.maxQuantityPerLine ?? quantity}
                 onChange={setQuantity}
                 label={item.title}
               />
@@ -350,12 +353,14 @@ export const ProductDetailScreen = () => {
                 </AppText>
                 <AppText variant="body">{item.description}</AppText>
                 <Divider />
-                <HStack align="center" gap="sm">
-                  <Icon as={Truck} size="sm" tint={colors.primary} />
-                  <AppText variant="caption" color="textSecondary">
-                    {deliveryLine}
-                  </AppText>
-                </HStack>
+                {deliveryLine ? (
+                  <HStack align="center" gap="sm">
+                    <Icon as={Truck} size="sm" tint={colors.primary} />
+                    <AppText variant="caption" color="textSecondary">
+                      {deliveryLine}
+                    </AppText>
+                  </HStack>
+                ) : null}
                 <HStack align="center" gap="sm">
                   <Icon
                     as={PackageCheck}

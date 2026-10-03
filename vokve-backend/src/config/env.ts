@@ -25,6 +25,19 @@ const envSchema = z.object({
    * send is logged as `push.no_provider`.
    */
   FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
+  /**
+   * Play Integrity: a service account allowed to call `decodeIntegrityToken`
+   * for the app (the JSON itself, or a path to it). Absent means tokens the
+   * app sends are recorded as unverifiable — nothing is decoded.
+   */
+  PLAY_INTEGRITY_SERVICE_ACCOUNT: z.string().optional(),
+  /** The Cloud project linked in Play Console. Wins over `integrity.playIntegrity.cloudProjectNumber`. */
+  PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER: z.coerce.number().int().positive().optional(),
+  /**
+   * Google's key attestation revocation list. An empty value turns the
+   * check off — tests, and a box with no way out to the internet.
+   */
+  ATTESTATION_STATUS_URL: z.string().default('https://android.googleapis.com/attestation/status'),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(60),
   /** Dev only — OTP codes echoed in responses. Hard-refused in production. */

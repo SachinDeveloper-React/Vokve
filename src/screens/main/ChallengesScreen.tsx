@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { AchievementsCard } from '../../components/challenges/AchievementsCard';
 import { ActiveChallengesCard } from '../../components/challenges/ActiveChallengesCard';
@@ -12,11 +12,13 @@ import {
 import { ChallengesHeader } from '../../components/challenges/ChallengesHeader';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { UpcomingChallengesCard } from '../../components/challenges/UpcomingChallengesCard';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { seedAchievements, seedChallenges } from '../../constants/seedData';
+import { useAchievements, useChallengeBoard } from '../../hooks/useChallenges';
+import { syncStepsNow } from '../../services/steps';
 import { useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
-import { useThemedStyles, type ThemeShape } from '../../theme';
+import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { Challenge } from '../../types/models';
 import { todayIso, type IsoDate } from '../../utils/date';
 
@@ -24,17 +26,6 @@ const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
   });
-
-/**
- * A challenge is running on a given day once its start date is not still in
- * front of that day. Challenges with no start date are always running.
- *
- * Measured against the day the user is looking at rather than against today,
- * so moving the date actually moves a challenge between the two cards: that is
- * what makes the calendar a control rather than a caption.
- */
-const isActiveOn = (challenge: Challenge, date: IsoDate) =>
-  challenge.startsAt === null || challenge.startsAt <= date;
 
 const matchesPeriod = (challenge: Challenge, period: ChallengePeriod) =>
   period === 'all' || challenge.cadence === period;
@@ -48,10 +39,13 @@ const matchesPeriod = (challenge: Challenge, period: ChallengePeriod) =>
  * filter that survived into the next visit would greet the user with a board
  * that is missing challenges for no reason they can see.
  *
- * Challenges and achievements come straight from the seed rather than through a
- * store: nothing on this screen changes them. The two lists are split on the
- * challenge's own start date, so a challenge cannot appear as both running and
- * upcoming however the data is ordered.
+ * The board is the server's for the chosen day (`GET /challenges?date=`):
+ * which challenges are open, how far the user has got with each — counted
+ * from verified activity — and which completed; the shelf is
+ * `GET /achievements`. Both are read again when a step sync lands and on a
+ * pull. The two lists are split on the challenge's own start date, so a
+ * challenge cannot appear as both running and upcoming however the data is
+ * ordered.
  *
  * It is a root route rather than a page of a tab. It is opened from Home's
  * shortcut row today and from the account's rewards later, and filing it under
@@ -60,6 +54,7 @@ const matchesPeriod = (challenge: Challenge, period: ChallengePeriod) =>
  */
 export const ChallengesScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const user = useCurrentUser();
   const hasUnreadNotifications = useHasUnreadNotifications();
@@ -71,38 +66,57 @@ export const ChallengesScreen = () => {
   const openCalendar = useCallback(() => setCalendarOpen(true), []);
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
 
+  const board = useChallengeBoard(date);
+  const shelf = useAchievements();
+
   const active = useMemo(
     () =>
-      seedChallenges.filter(
+      (board.data ?? []).filter(
         challenge =>
-          isActiveOn(challenge, date) && matchesPeriod(challenge, period),
+          challenge.startsAt === null && matchesPeriod(challenge, period),
       ),
-    [date, period],
+    [board.data, period],
   );
 
   // Soonest first: the card shows the top of the list, and a board that opened
   // with next month's challenge would bury the one starting tomorrow.
   const upcoming = useMemo(
     () =>
-      seedChallenges
+      (board.data ?? [])
         .filter(
           challenge =>
-            !isActiveOn(challenge, date) && matchesPeriod(challenge, period),
+            challenge.startsAt !== null && matchesPeriod(challenge, period),
         )
         .sort((a, b) => (a.startsAt ?? '').localeCompare(b.startsAt ?? '')),
-    [date, period],
+    [board.data, period],
   );
 
   // Earned first. The shelf is a record of what the user has done, and a first
   // page of padlocks would read as a list of failures.
   const achievements = useMemo(
     () =>
-      [...seedAchievements].sort(
+      [...(shelf.data ?? [])].sort(
         (a, b) =>
           Number(b.achievedAt !== null) - Number(a.achievedAt !== null),
       ),
-    [],
+    [shelf.data],
   );
+
+  // Pulling down sends what this phone has counted — the progress moves with
+  // it — and asks for the board and the shelf again.
+  const [refreshing, setRefreshing] = useState(false);
+  const { reload: reloadBoard } = board;
+  const { reload: reloadShelf } = shelf;
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await syncStepsNow();
+    } finally {
+      reloadBoard();
+      reloadShelf();
+      setRefreshing(false);
+    }
+  }, [reloadBoard, reloadShelf]);
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -144,6 +158,14 @@ export const ChallengesScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <ChallengesHeader
           name={user?.name}
@@ -161,23 +183,43 @@ export const ChallengesScreen = () => {
           onPressDate={openCalendar}
         />
 
-        <ActiveChallengesCard
-          challenges={active}
-          onPressViewAll={notImplemented}
-        />
+        {board.data === null ? (
+          <LoadState
+            loading={board.loading}
+            title="Couldn't load the challenges"
+            message={board.error}
+            onRetry={board.reload}
+          />
+        ) : (
+          <ActiveChallengesCard
+            challenges={active}
+            onPressViewAll={notImplemented}
+          />
+        )}
 
         <ChallengeRewardStrip onPressHowItWorks={onOpenHowItWorks} />
 
-        <AchievementsCard
-          achievements={achievements}
-          onPressViewAll={notImplemented}
-        />
+        {shelf.data === null ? (
+          <LoadState
+            loading={shelf.loading}
+            title="Couldn't load your achievements"
+            message={shelf.error}
+            onRetry={shelf.reload}
+          />
+        ) : (
+          <AchievementsCard
+            achievements={achievements}
+            onPressViewAll={notImplemented}
+          />
+        )}
 
-        <UpcomingChallengesCard
-          challenges={upcoming}
-          relativeTo={date}
-          onPressViewAll={notImplemented}
-        />
+        {board.data !== null ? (
+          <UpcomingChallengesCard
+            challenges={upcoming}
+            relativeTo={date}
+            onPressViewAll={notImplemented}
+          />
+        ) : null}
 
         <ChallengeCheerCard name={user?.name} />
       </ScrollView>

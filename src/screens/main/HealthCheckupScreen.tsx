@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { AddReadingSheet } from '../../components/health/AddReadingSheet';
 import { HealthHeader } from '../../components/health/HealthHeader';
@@ -10,15 +10,19 @@ import { TrackProgressCard } from '../../components/health/TrackProgressCard';
 import { VitalsCard } from '../../components/health/VitalsCard';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { DateChip } from '../../components/streak/DateChip';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { healthHighlights, healthTip } from '../../constants/seedData';
+import { useTip } from '../../hooks/useContent';
+import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
+import { useHealthScore } from '../../hooks/useVitals';
 import { useCurrentUser } from '../../stores/authStore';
 import {
   useLatestVitals,
   useRecentVitals,
   useVitalsStore,
+  useVitalsSynced,
 } from '../../stores/vitalsStore';
-import { useThemedStyles, type ThemeShape } from '../../theme';
+import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { todayIso, type IsoDate } from '../../utils/date';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
@@ -32,11 +36,12 @@ const HISTORY_ROWS = 4;
 /**
  * The checkup: where every vital stands today, and what has been logged lately.
  *
- * The tiles, the history and the score are three readings of one list. The
- * tiles take the newest of each kind and the history takes the newest overall,
- * both from the vitals store, so logging a reading moves them together — which
- * is the whole reason "Add New Reading" is on this screen rather than behind a
- * form somewhere else.
+ * The tiles and the history are two readings of one list — the server's
+ * readings with any still on their way — and the score is the server's
+ * (`GET /health/score`), asked again when it confirms a reading. Logging a
+ * reading moves the tiles and the history at once, which is the whole reason
+ * "Add New Reading" is on this screen rather than behind a form somewhere
+ * else. BMI is the server's, worked out from the newest weight and height.
  *
  * Whether a reading is healthy is worked out at render from the reference
  * ranges rather than stored with it. A number and a verdict that were saved
@@ -45,12 +50,34 @@ const HISTORY_ROWS = 4;
  */
 export const HealthCheckupScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const user = useCurrentUser();
 
   const latest = useLatestVitals();
   const recent = useRecentVitals(HISTORY_ROWS);
+  const synced = useVitalsSynced();
   const addReading = useVitalsStore(s => s.addReading);
+  const isSyncing = useVitalsStore(s => s.isSyncing);
+  const syncError = useVitalsStore(s => s.syncError);
+  const hydrateFromServer = useVitalsStore(s => s.hydrateFromServer);
+  const refreshIfStale = useVitalsStore(s => s.refreshIfStale);
+  const score = useHealthScore();
+  const tip = useTip('health');
+
+  useRefreshOnFocus(refreshIfStale);
+
+  const [isPulling, setPulling] = useState(false);
+  const { reload: reloadScore } = score;
+  const onRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await hydrateFromServer();
+    } finally {
+      reloadScore();
+      setPulling(false);
+    }
+  }, [hydrateFromServer, reloadScore]);
 
   const [date, setDate] = useState<IsoDate>(todayIso());
   const [isCalendarOpen, setCalendarOpen] = useState(false);
@@ -89,6 +116,14 @@ export const HealthCheckupScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPulling}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <HealthHeader onPressBack={onPressBack} />
 
@@ -99,29 +134,50 @@ export const HealthCheckupScreen = () => {
           accessibilityHint="Change the day"
         />
 
-        <HealthScoreCard
-          score={healthHighlights.score}
-          outOf={healthHighlights.outOf}
-          name={user?.name}
-          onPressInfo={notImplemented}
-        />
+        {score.data ? (
+          <HealthScoreCard
+            score={score.data.score}
+            outOf={score.data.outOf}
+            band={score.data.band}
+            name={user?.name}
+            onPressInfo={notImplemented}
+          />
+        ) : (
+          <LoadState
+            loading={score.loading}
+            title="Couldn't load your health score"
+            message={score.error}
+            onRetry={score.reload}
+          />
+        )}
 
-        <VitalsCard
-          latest={latest}
-          onPressAdd={openAdd}
-          onPressBmiInfo={notImplemented}
-          onPressHeartRate={onOpenHeartRate}
-          onPressBloodPressure={onOpenBloodPressure}
-        />
+        {synced ? (
+          <>
+            <VitalsCard
+              latest={latest}
+              onPressAdd={openAdd}
+              onPressBmiInfo={notImplemented}
+              onPressHeartRate={onOpenHeartRate}
+              onPressBloodPressure={onOpenBloodPressure}
+            />
 
-        <TrackProgressCard onPressTrends={notImplemented} />
+            <TrackProgressCard onPressTrends={notImplemented} />
 
-        <RecentHistoryCard
-          readings={recent}
-          onPressViewAll={notImplemented}
-        />
+            <RecentHistoryCard
+              readings={recent}
+              onPressViewAll={notImplemented}
+            />
+          </>
+        ) : (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your readings"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        )}
 
-        <HealthTipCard tip={healthTip} />
+        {tip ? <HealthTipCard tip={tip.text} /> : null}
       </ScrollView>
 
       <AddReadingSheet

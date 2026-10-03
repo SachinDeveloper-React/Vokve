@@ -1,16 +1,25 @@
 import { z } from 'zod';
 import {
   accountDeletionSchema,
+  achievementSchema,
   accountSessionSchema,
+  activityConfigSchema,
+  activityRangeSchema,
   addressSchema,
   appAboutSchema,
   appNotificationSchema,
+  attestationChallengeSchema,
   authResponseSchema,
   cartSchema,
+  challengeSchema,
   checkoutResultSchema,
   coinTransactionSchema,
+  contentTipSchema,
   notificationCountsSchema,
   notificationPreferencesSchema,
+  nutritionDaySchema,
+  nutritionDayTotalSchema,
+  nutritionProfileSchema,
   orderSchema,
   privacySettingsSchema,
   profileSummarySchema,
@@ -25,11 +34,30 @@ import {
   supportFaqSchema,
   supportTicketSchema,
   dailyActivitySchema,
+  deviceAttestationResultSchema,
+  dietPlanDaySchema,
+  dietPlanDaySummarySchema,
+  foodItemSchema,
   deviceRegistrationSchema,
   earnRuleSchema,
+  healthScoreSchema,
+  hydrationDaySchema,
+  hydrationReminderPlanSchema,
+  hydrationStatsSchema,
+  ingestNonceSchema,
+  leaderboardBoardSchema,
+  leaderboardHistorySchema,
+  leaderboardRulesSchema,
   pageSchema,
+  stepIngestResultSchema,
+  stepSourcesReportSchema,
+  streakRestoreResultSchema,
+  streakSummarySchema,
   verificationChallengeSchema,
   userSchema,
+  userSettingsSchema,
+  vitalReadingSchema,
+  vitalsLatestSchema,
   walletSchema,
   workoutSchema,
   workoutTemplateSchema,
@@ -51,15 +79,23 @@ import type {
   AppApi,
   AuthApi,
   CartApi,
+  ChallengeApi,
   CheckoutApi,
+  ContentApi,
   DeviceApi,
+  HydrationApi,
+  LeaderboardApi,
   NotificationApi,
   NotificationPreferencesApi,
+  NutritionApi,
   OrderApi,
   ReferralApi,
+  SettingsApi,
   ShopApi,
+  StreakApi,
   SupportApi,
   UserApi,
+  VitalsApi,
   WalletApi,
   WishlistApi,
   WorkoutApi,
@@ -72,15 +108,23 @@ import {
   mockAppApi,
   mockAuthApi,
   mockCartApi,
+  mockChallengeApi,
   mockCheckoutApi,
+  mockContentApi,
   mockDeviceApi,
+  mockHydrationApi,
+  mockLeaderboardApi,
   mockNotificationApi,
   mockNotificationPreferencesApi,
+  mockNutritionApi,
   mockOrderApi,
   mockReferralApi,
+  mockSettingsApi,
   mockShopApi,
+  mockStreakApi,
   mockUserApi,
   mockSupportApi,
+  mockVitalsApi,
   mockWalletApi,
   mockWishlistApi,
   mockWorkoutApi,
@@ -175,6 +219,19 @@ const realDeviceApi: DeviceApi = {
     request(okSchema, client =>
       client.patch(`/devices/${encodeURIComponent(deviceId)}`, { pushToken }),
     ),
+  attestationChallenge: deviceId =>
+    request(attestationChallengeSchema, client =>
+      client.post(
+        `/devices/${encodeURIComponent(deviceId)}/attestation/challenge`,
+      ),
+    ),
+  submitAttestation: (deviceId, attestation) =>
+    request(deviceAttestationResultSchema, client =>
+      client.post(
+        `/devices/${encodeURIComponent(deviceId)}/attestation`,
+        attestation,
+      ),
+    ),
 };
 
 const realWalletApi: WalletApi = {
@@ -210,6 +267,12 @@ const realUserApi: UserApi = {
     request(userSchema, client => client.delete('/me/avatar')),
 };
 
+const realSettingsApi: SettingsApi = {
+  get: () => request(userSettingsSchema, client => client.get('/me/settings')),
+  update: patch =>
+    request(userSettingsSchema, client => client.put('/me/settings', patch)),
+};
+
 const realWorkoutApi: WorkoutApi = {
   templates: (): Promise<WorkoutTemplate[]> =>
     request(z.array(workoutTemplateSchema), client =>
@@ -232,6 +295,32 @@ const realActivityApi: ActivityApi = {
     ),
   today: (): Promise<DailyActivity> =>
     request(dailyActivitySchema, client => client.get('/activity/today')),
+  day: date =>
+    request(dailyActivitySchema, client =>
+      client.get('/activity/day', { params: { date } }),
+    ),
+  range: query =>
+    request(activityRangeSchema, client =>
+      client.get('/activity/range', { params: query }),
+    ),
+  config: () =>
+    request(activityConfigSchema, client => client.get('/activity/config')),
+  sources: date =>
+    request(stepSourcesReportSchema, client =>
+      client.get('/activity/sources', { params: { date } }),
+    ),
+  ingestNonce: () =>
+    request(ingestNonceSchema, client => client.post('/activity/ingest/nonce')),
+  // The key is one per attempt, not the snapshot's hash: a snapshot sent
+  // again with the integrity token the server asked for is a new attempt,
+  // and must not be answered with the stored refusal of the first one. The
+  // server dedupes the snapshot itself on its hash.
+  ingest: (payload, { idempotencyKey }) =>
+    request(stepIngestResultSchema, client =>
+      client.post('/activity/ingest', payload, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
 };
 
 const orderResultSchema = z.object({
@@ -472,6 +561,170 @@ const realReferralApi: ReferralApi = {
     ),
 };
 
+const realStreakApi: StreakApi = {
+  get: () => request(streakSummarySchema, client => client.get('/streak')),
+  freeze: ({ idempotencyKey }) =>
+    request(streakSummarySchema, client =>
+      client.post('/streak/freeze', undefined, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  restore: ({ idempotencyKey }) =>
+    request(streakRestoreResultSchema, client =>
+      client.post('/streak/restore', undefined, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+};
+
+const realChallengeApi: ChallengeApi = {
+  board: date =>
+    request(z.array(challengeSchema), client =>
+      client.get('/challenges', { params: { date } }),
+    ),
+  achievements: () =>
+    request(z.array(achievementSchema), client => client.get('/achievements')),
+};
+
+const realLeaderboardApi: LeaderboardApi = {
+  board: () =>
+    request(leaderboardBoardSchema, client => client.get('/leaderboard')),
+  history: () =>
+    request(leaderboardHistorySchema, client =>
+      client.get('/leaderboard/history'),
+    ),
+  rules: () =>
+    request(leaderboardRulesSchema, client =>
+      client.get('/leaderboard/reward-tiers'),
+    ),
+};
+
+const hydrationDayTotalsSchema = z.array(
+  z.object({
+    date: z.string(),
+    consumedMl: z.number().int().nonnegative(),
+    goalMl: z.number().int().positive(),
+  }),
+);
+
+const realHydrationApi: HydrationApi = {
+  today: () =>
+    request(hydrationDaySchema, client => client.get('/hydration/today')),
+  log: (entry, { idempotencyKey }) =>
+    request(hydrationDaySchema, client =>
+      client.post('/hydration/entries', entry, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  remove: (id, { idempotencyKey }) =>
+    request(hydrationDaySchema, client =>
+      client.delete(`/hydration/entries/${encodeURIComponent(id)}`, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  stats: () =>
+    request(hydrationStatsSchema, client => client.get('/hydration/stats')),
+  days: (from, to) =>
+    request(hydrationDayTotalsSchema, client =>
+      client.get('/hydration/days', { params: { from, to } }),
+    ),
+  reminders: () =>
+    request(hydrationReminderPlanSchema, client =>
+      client.get('/hydration/reminders'),
+    ),
+  saveReminders: (plan, { idempotencyKey }) =>
+    request(hydrationReminderPlanSchema, client =>
+      client.put('/hydration/reminders', plan, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+};
+
+const realContentApi: ContentApi = {
+  tip: topic =>
+    request(contentTipSchema, client =>
+      client.get(`/content/tips/${encodeURIComponent(topic)}`),
+    ),
+};
+
+const realNutritionApi: NutritionApi = {
+  profile: () =>
+    request(nutritionProfileSchema, client => client.get('/nutrition/profile')),
+  updateProfile: (patch, { idempotencyKey }) =>
+    request(nutritionProfileSchema, client =>
+      client.put('/nutrition/profile', patch, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  day: date =>
+    request(nutritionDaySchema, client =>
+      client.get('/nutrition/day', { params: { date } }),
+    ),
+  days: (from, to) =>
+    request(z.array(nutritionDayTotalSchema), client =>
+      client.get('/nutrition/days', { params: { from, to } }),
+    ),
+  log: (entries, { idempotencyKey }) =>
+    request(nutritionDaySchema, client =>
+      client.post(
+        '/nutrition/entries',
+        { entries },
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      ),
+    ),
+  remove: (id, { idempotencyKey }) =>
+    request(nutritionDaySchema, client =>
+      client.delete(`/nutrition/entries/${encodeURIComponent(id)}`, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  searchFoods: query =>
+    request(z.array(foodItemSchema), client =>
+      client.get('/foods', { params: { q: query } }),
+    ),
+  quickAddFoods: () =>
+    request(z.array(foodItemSchema), client => client.get('/foods/quick-add')),
+  plan: date =>
+    request(dietPlanDaySchema, client =>
+      client.get('/diet-plan', { params: { date } }),
+    ),
+  planDays: (from, to) =>
+    request(z.array(dietPlanDaySummarySchema), client =>
+      client.get('/diet-plan/days', { params: { from, to } }),
+    ),
+};
+
+const realVitalsApi: VitalsApi = {
+  list: query =>
+    request(z.array(vitalReadingSchema), client =>
+      client.get('/vitals', { params: query }),
+    ),
+  latest: () =>
+    request(vitalsLatestSchema, client => client.get('/vitals/latest')),
+  log: (reading, { idempotencyKey }) =>
+    request(vitalReadingSchema, client =>
+      client.post(
+        '/vitals',
+        {
+          id: reading.id,
+          kind: reading.kind,
+          value: reading.value,
+          secondary: reading.secondary,
+          recordedAt: reading.recordedAt,
+        },
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      ),
+    ),
+  remove: (id, { idempotencyKey }) =>
+    request(z.object({ ok: z.boolean() }), client =>
+      client.delete(`/vitals/${encodeURIComponent(id)}`, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  score: () =>
+    request(healthScoreSchema, client => client.get('/health/score')),
+};
+
 const realAddressApi: AddressApi = {
   list: () =>
     request(pageSchema(addressSchema), client =>
@@ -572,6 +825,10 @@ export const deviceApi: DeviceApi = {
     pick(mockDeviceApi, realDeviceApi).register(profile, refreshToken),
   setPushToken: (deviceId, pushToken) =>
     pick(mockDeviceApi, realDeviceApi).setPushToken(deviceId, pushToken),
+  attestationChallenge: deviceId =>
+    pick(mockDeviceApi, realDeviceApi).attestationChallenge(deviceId),
+  submitAttestation: (deviceId, attestation) =>
+    pick(mockDeviceApi, realDeviceApi).submitAttestation(deviceId, attestation),
 };
 
 export const walletApi: WalletApi = {
@@ -589,6 +846,11 @@ export const userApi: UserApi = {
   removeAvatar: () => pick(mockUserApi, realUserApi).removeAvatar(),
 };
 
+export const settingsApi: SettingsApi = {
+  get: () => pick(mockSettingsApi, realSettingsApi).get(),
+  update: patch => pick(mockSettingsApi, realSettingsApi).update(patch),
+};
+
 export const workoutApi: WorkoutApi = {
   templates: () => pick(mockWorkoutApi, realWorkoutApi).templates(),
   history: cursor => pick(mockWorkoutApi, realWorkoutApi).history(cursor),
@@ -598,6 +860,13 @@ export const workoutApi: WorkoutApi = {
 export const activityApi: ActivityApi = {
   weekly: () => pick(mockActivityApi, realActivityApi).weekly(),
   today: () => pick(mockActivityApi, realActivityApi).today(),
+  day: date => pick(mockActivityApi, realActivityApi).day(date),
+  range: query => pick(mockActivityApi, realActivityApi).range(query),
+  config: () => pick(mockActivityApi, realActivityApi).config(),
+  sources: date => pick(mockActivityApi, realActivityApi).sources(date),
+  ingestNonce: () => pick(mockActivityApi, realActivityApi).ingestNonce(),
+  ingest: (payload, options) =>
+    pick(mockActivityApi, realActivityApi).ingest(payload, options),
 };
 
 export const shopApi: ShopApi = {
@@ -647,6 +916,68 @@ export const referralApi: ReferralApi = {
   me: () => pick(mockReferralApi, realReferralApi).me(),
   list: cursor => pick(mockReferralApi, realReferralApi).list(cursor),
   apply: code => pick(mockReferralApi, realReferralApi).apply(code),
+};
+
+export const streakApi: StreakApi = {
+  get: () => pick(mockStreakApi, realStreakApi).get(),
+  freeze: options => pick(mockStreakApi, realStreakApi).freeze(options),
+  restore: options => pick(mockStreakApi, realStreakApi).restore(options),
+};
+
+export const challengeApi: ChallengeApi = {
+  board: date => pick(mockChallengeApi, realChallengeApi).board(date),
+  achievements: () => pick(mockChallengeApi, realChallengeApi).achievements(),
+};
+
+export const leaderboardApi: LeaderboardApi = {
+  board: () => pick(mockLeaderboardApi, realLeaderboardApi).board(),
+  history: () => pick(mockLeaderboardApi, realLeaderboardApi).history(),
+  rules: () => pick(mockLeaderboardApi, realLeaderboardApi).rules(),
+};
+
+export const hydrationApi: HydrationApi = {
+  today: () => pick(mockHydrationApi, realHydrationApi).today(),
+  log: (entry, options) =>
+    pick(mockHydrationApi, realHydrationApi).log(entry, options),
+  remove: (id, options) =>
+    pick(mockHydrationApi, realHydrationApi).remove(id, options),
+  stats: () => pick(mockHydrationApi, realHydrationApi).stats(),
+  days: (from, to) => pick(mockHydrationApi, realHydrationApi).days(from, to),
+  reminders: () => pick(mockHydrationApi, realHydrationApi).reminders(),
+  saveReminders: (plan, options) =>
+    pick(mockHydrationApi, realHydrationApi).saveReminders(plan, options),
+};
+
+export const contentApi: ContentApi = {
+  tip: topic => pick(mockContentApi, realContentApi).tip(topic),
+};
+
+export const nutritionApi: NutritionApi = {
+  profile: () => pick(mockNutritionApi, realNutritionApi).profile(),
+  updateProfile: (patch, options) =>
+    pick(mockNutritionApi, realNutritionApi).updateProfile(patch, options),
+  day: date => pick(mockNutritionApi, realNutritionApi).day(date),
+  days: (from, to) => pick(mockNutritionApi, realNutritionApi).days(from, to),
+  log: (entries, options) =>
+    pick(mockNutritionApi, realNutritionApi).log(entries, options),
+  remove: (id, options) =>
+    pick(mockNutritionApi, realNutritionApi).remove(id, options),
+  searchFoods: query =>
+    pick(mockNutritionApi, realNutritionApi).searchFoods(query),
+  quickAddFoods: () => pick(mockNutritionApi, realNutritionApi).quickAddFoods(),
+  plan: date => pick(mockNutritionApi, realNutritionApi).plan(date),
+  planDays: (from, to) =>
+    pick(mockNutritionApi, realNutritionApi).planDays(from, to),
+};
+
+export const vitalsApi: VitalsApi = {
+  list: query => pick(mockVitalsApi, realVitalsApi).list(query),
+  latest: () => pick(mockVitalsApi, realVitalsApi).latest(),
+  log: (reading, options) =>
+    pick(mockVitalsApi, realVitalsApi).log(reading, options),
+  remove: (id, options) =>
+    pick(mockVitalsApi, realVitalsApi).remove(id, options),
+  score: () => pick(mockVitalsApi, realVitalsApi).score(),
 };
 
 export const addressApi: AddressApi = {

@@ -5,6 +5,8 @@ import { ApiError, toApiError } from '../services/api/errors';
 import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
 import { registerForPush, unregisterFromPush } from '../services/push';
+import { stopStepsForSignOut } from '../services/steps';
+import { clearServerReads } from '../hooks/useServerRead';
 import { useAccountStore } from './accountStore';
 import { useAddressesStore } from './addressesStore';
 import { useCartStore } from './cartStore';
@@ -14,6 +16,12 @@ import { useNotificationSettingsStore } from './notificationSettingsStore';
 import { useNotificationsStore } from './notificationsStore';
 import { useOrdersStore } from './ordersStore';
 import { useReferralStore } from './referralStore';
+import { useSettingsStore } from './settingsStore';
+import { useStreakStore } from './streakStore';
+import { useHydrationStore } from './hydrationStore';
+import { useRemindersStore } from './remindersStore';
+import { useNutritionStore } from './nutritionStore';
+import { useVitalsStore } from './vitalsStore';
 import { useWishlistStore } from './wishlistStore';
 import type { AuthTokens, User, VerificationChallenge } from '../types/models';
 import type { CompleteProfilePayload, SignUpPayload } from '../types/forms';
@@ -160,15 +168,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await registerDevice(tokens);
       const user = await userApi.me();
       set({ status: 'authenticated', user, error: null, isSubmitting: false });
-      useCoinsStore.getState().hydrateFromServer();
-      useNotificationsStore.getState().hydrateFromServer();
-      useNotificationSettingsStore.getState().hydrateFromServer();
-      registerForPush();
-      useOrdersStore.getState().hydrateFromServer();
-      useAddressesStore.getState().hydrateFromServer();
-      useCartStore.getState().hydrateFromServer();
-      useWishlistStore.getState().hydrateFromServer();
-      useAccountStore.getState().hydrateFromServer();
+      hydrateUserCaches();
     } catch (error) {
       const apiError = toApiError(error);
       logger.warn(
@@ -218,15 +218,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return false;
       }
       set({ status: 'authenticated', user, isSubmitting: false, notice: null });
-      useCoinsStore.getState().hydrateFromServer();
-      useNotificationsStore.getState().hydrateFromServer();
-      useNotificationSettingsStore.getState().hydrateFromServer();
-      registerForPush();
-      useOrdersStore.getState().hydrateFromServer();
-      useAddressesStore.getState().hydrateFromServer();
-      useCartStore.getState().hydrateFromServer();
-      useWishlistStore.getState().hydrateFromServer();
-      useAccountStore.getState().hydrateFromServer();
+      hydrateUserCaches();
       return true;
     } catch (error) {
       set({ error: toApiError(error), isSubmitting: false });
@@ -289,15 +281,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         stepUpToken: stepUpToken ?? get().stepUpToken,
         isSubmitting: false,
       });
-      useCoinsStore.getState().hydrateFromServer();
-      useNotificationsStore.getState().hydrateFromServer();
-      useNotificationSettingsStore.getState().hydrateFromServer();
-      registerForPush();
-      useOrdersStore.getState().hydrateFromServer();
-      useAddressesStore.getState().hydrateFromServer();
-      useCartStore.getState().hydrateFromServer();
-      useWishlistStore.getState().hydrateFromServer();
-      useAccountStore.getState().hydrateFromServer();
+      hydrateUserCaches();
       return true;
     } catch (error) {
       const apiError = toApiError(error);
@@ -508,19 +492,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error,
       );
     }
+    // Nobody is left to count for. Never throws: counting that would not
+    // stop is not a reason to keep someone signed in.
+    await stopStepsForSignOut();
     await secureStorage.clearTokens();
     // The caches are this user's: the next sign-in hydrates its own, but
     // until it does the wallet and feed must not show the last user's.
-    useCoinsStore.getState().reset();
-    useNotificationsStore.getState().reset();
-    useOrdersStore.getState().reset();
-    useAddressesStore.getState().reset();
-    useCartStore.getState().reset();
-    useWishlistStore.getState().reset();
-    useAccountStore.getState().reset();
-    useCheckoutStore.getState().reset();
-    useReferralStore.getState().reset();
-    useNotificationSettingsStore.getState().reset();
+    resetUserCaches();
     set({
       status: 'signed_out',
       user: null,
@@ -538,6 +516,51 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 }));
+
+/**
+ * Everything the app shows about the signed-in user is a cache of the
+ * server's, filled the moment a session exists — on launch, sign-in and
+ * verification alike, so no path forgets one. Each sync resolves on its own
+ * and records its own failure; none of them holds up the others.
+ */
+function hydrateUserCaches(): void {
+  useCoinsStore.getState().hydrateFromServer();
+  useNotificationsStore.getState().hydrateFromServer();
+  useNotificationSettingsStore.getState().hydrateFromServer();
+  registerForPush();
+  useOrdersStore.getState().hydrateFromServer();
+  useAddressesStore.getState().hydrateFromServer();
+  useCartStore.getState().hydrateFromServer();
+  useWishlistStore.getState().hydrateFromServer();
+  useAccountStore.getState().hydrateFromServer();
+  useSettingsStore.getState().hydrateFromServer();
+  useStreakStore.getState().hydrateFromServer();
+  useHydrationStore.getState().hydrateFromServer();
+  useRemindersStore.getState().hydrateFromServer();
+  useNutritionStore.getState().hydrateFromServer();
+  useVitalsStore.getState().hydrateFromServer();
+}
+
+/** The caches above, emptied: what the next user must not see of this one. */
+function resetUserCaches(): void {
+  useCoinsStore.getState().reset();
+  useNotificationsStore.getState().reset();
+  useOrdersStore.getState().reset();
+  useAddressesStore.getState().reset();
+  useCartStore.getState().reset();
+  useWishlistStore.getState().reset();
+  useAccountStore.getState().reset();
+  useCheckoutStore.getState().reset();
+  useReferralStore.getState().reset();
+  useNotificationSettingsStore.getState().reset();
+  useSettingsStore.getState().reset();
+  useStreakStore.getState().reset();
+  useHydrationStore.getState().reset();
+  useRemindersStore.getState().reset();
+  useNutritionStore.getState().reset();
+  useVitalsStore.getState().reset();
+  clearServerReads();
+}
 
 // When a refresh fails mid-session the API layer cannot import this store
 // without creating a cycle, so it calls back through this handler instead.

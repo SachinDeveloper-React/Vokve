@@ -31,6 +31,7 @@ import { useCheckoutStore } from '../src/stores/checkoutStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
 import { useOrdersStore } from '../src/stores/ordersStore';
 import { useShopStore } from '../src/stores/shopStore';
+import { SHOP_CONFIG, stockShop } from './helpers/shop';
 import { useWishlistStore } from '../src/stores/wishlistStore';
 import { shopItems } from '../src/constants/seedData';
 import type {
@@ -323,7 +324,7 @@ beforeEach(() => {
       total: shopItems.length,
     });
   shopApi.categories.mockReset().mockResolvedValue([]);
-  shopApi.config.mockReset().mockResolvedValue(useShopStore.getState().config);
+  shopApi.config.mockReset().mockResolvedValue(SHOP_CONFIG);
   shopApi.reviews.mockReset().mockResolvedValue(EMPTY_REVIEWS);
   shopApi.writeReview.mockReset();
   cartApi.get
@@ -343,6 +344,7 @@ beforeEach(() => {
   walletApi.earnRules.mockReset().mockRejectedValue(new Error('offline'));
   addressApi.list.mockReset().mockResolvedValue([]);
   useShopStore.getState().reset();
+  stockShop();
   useCartStore.getState().reset();
   useWishlistStore.getState().reset();
   useCheckoutStore.getState().reset();

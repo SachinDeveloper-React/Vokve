@@ -53,6 +53,8 @@ ResultRow.displayName = 'ResultRow';
 interface Props {
   query: string;
   results: FoodItem[];
+  /** The server has not answered for this query yet — not the same as no match. */
+  searching?: boolean;
   onAdd: (item: FoodItem) => void;
   onPressAddCustom: () => void;
 }
@@ -65,9 +67,13 @@ interface Props {
  * no next step is where a food diary gets abandoned.
  */
 export const FoodSearchResults = memo(
-  ({ query, results, onAdd, onPressAddCustom }: Props) => (
+  ({ query, results, searching = false, onAdd, onPressAddCustom }: Props) => (
     <Card radius="xl" padding="base">
-      {results.length === 0 ? (
+      {results.length === 0 && searching ? (
+        <AppText variant="micro" color="textSecondary">
+          {`Searching for "${query.trim()}"…`}
+        </AppText>
+      ) : results.length === 0 ? (
         <VStack gap="sm">
           <AppText variant="micro" color="textSecondary">
             {`Nothing in the library matches "${query.trim()}".`}

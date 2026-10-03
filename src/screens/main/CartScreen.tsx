@@ -261,7 +261,7 @@ export const CartScreen = () => {
               <CartLineRow
                 key={`${line.item.id}:${line.size ?? ''}`}
                 line={line}
-                max={config.maxQuantityPerLine}
+                max={config?.maxQuantityPerLine ?? line.quantity}
                 onChangeQuantity={onChangeQuantity}
                 onPressItem={onPressItem}
               />

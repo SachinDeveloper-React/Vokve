@@ -52,3 +52,17 @@ export function formatProgress(
 
   return `${write(progress)} / ${write(goal)} ${METRIC_STYLE[metric].unit}`;
 }
+
+/**
+ * The figure inside an achievement's ring — "10K", "1.5K", "500". The server
+ * sends the number (RULES C7); the ring has room for four characters.
+ */
+export function formatBadgeValue(value: number): string {
+  if (value >= 1_000_000) {
+    return `${Number((value / 1_000_000).toFixed(1))}M`;
+  }
+  if (value >= 1_000) {
+    return `${Number((value / 1_000).toFixed(1))}K`;
+  }
+  return String(Math.round(value));
+}

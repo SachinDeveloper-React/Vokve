@@ -115,13 +115,18 @@ export const useCheckoutStore = create<CheckoutState>()((set, get) => ({
         balance: useCoinsStore.getState().balance,
       };
     }
+    // The gateway's public key is the till's; an order paid from the
+    // orders list may come before the shop has ever synced.
+    if (useShopStore.getState().config === null) {
+      await useShopStore.getState().hydrateFromServer();
+    }
     const intent: PaymentIntent = {
       provider: order.payment.provider,
       orderId: order.id,
       providerOrderId: order.payment.providerOrderId,
       amount: order.payment.amount,
       currency: order.payment.currency,
-      keyId: useShopStore.getState().config.paymentKeyId,
+      keyId: useShopStore.getState().config?.paymentKeyId ?? null,
       expiresAt: order.payment.expiresAt,
     };
     return settlePayment(order, intent, set);

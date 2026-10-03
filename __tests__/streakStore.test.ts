@@ -1,129 +1,198 @@
 /**
- * A streak is arithmetic over a list of days, and every figure the streak
- * screen shows falls out of it — so the checks here are about the edges of
- * that arithmetic: that a streak survives until the day it needs is over,
- * that the record is found across a gap, that a restore only bridges a gap
- * that exists, and that a freeze cannot be spent on a day already earned.
+ * The streak store is a cache of the server's streak (RULES §S): the
+ * arithmetic over days now lives on the server, with its golden tests. The
+ * checks here are about the seam — that nothing is invented before the first
+ * answer, that a placeholder streak stored by an older build is dropped, and
+ * that a freeze and a restore take the server's answer, or its refusal,
+ * without charging or protecting anything on the device.
  *
  * @format
  */
 
+jest.mock('../src/services/api/endpoints', () => ({
+  streakApi: { get: jest.fn(), freeze: jest.fn(), restore: jest.fn() },
+  walletApi: { get: jest.fn(), transactions: jest.fn(), earnRules: jest.fn() },
+}));
+
+import { ApiError } from '../src/services/api/errors';
+import { useCoinsStore } from '../src/stores/coinsStore';
 import {
-  currentStreakOf,
-  longestStreakOf,
-  restoreGapOf,
+  STREAK_STALE_AFTER_MS,
   useStreakStore,
 } from '../src/stores/streakStore';
-import { addDays } from '../src/utils/date';
+import type { StreakSummary } from '../src/types/models';
 
-const TODAY = '2025-05-26';
-const d = (daysAgo: number) => addDays(TODAY, -daysAgo);
-const run = (from: number, to: number) =>
-  Array.from({ length: from - to + 1 }, (_, i) => d(from - i));
+const { streakApi, walletApi } = jest.requireMock(
+  '../src/services/api/endpoints',
+) as {
+  streakApi: { get: jest.Mock; freeze: jest.Mock; restore: jest.Mock };
+  walletApi: { get: jest.Mock; transactions: jest.Mock; earnRules: jest.Mock };
+};
 
-describe('currentStreakOf', () => {
-  test('counts back from today when today is done', () => {
-    expect(currentStreakOf(new Set(run(6, 0)), TODAY)).toBe(7);
-  });
-
-  test('is still alive when only today is missing', () => {
-    // The day is not over: yesterday's run has not been broken yet.
-    expect(currentStreakOf(new Set(run(6, 1)), TODAY)).toBe(6);
-  });
-
-  test('is broken once yesterday is missed', () => {
-    expect(currentStreakOf(new Set(run(8, 2)), TODAY)).toBe(0);
-  });
-
-  test('is zero with nothing recorded', () => {
-    expect(currentStreakOf(new Set(), TODAY)).toBe(0);
-  });
+const summary = (over: Partial<StreakSummary> = {}): StreakSummary => ({
+  today: '2026-10-02',
+  currentStreak: 3,
+  longestStreak: { length: 3, start: '2026-09-30', end: '2026-10-02' },
+  completedDays: ['2026-09-30', '2026-10-01', '2026-10-02'],
+  protectedDays: [],
+  freezesAvailable: 1,
+  maxFreezes: 3,
+  todayCovered: true,
+  todayFrozen: false,
+  canRestore: false,
+  restoreGap: [],
+  restoreCostCoins: 50,
+  restoreWindowDays: 7,
+  milestones: [{ days: 7, coins: 50, achieved: false, paid: false }],
+  nextMilestone: { days: 7, coins: 50, achieved: false, paid: false },
+  howToEarn: 'Finish a workout or walk 10,000 steps in a day.',
+  ...over,
 });
 
-describe('longestStreakOf', () => {
-  test('finds the record across a gap, with its dates', () => {
-    const days = new Set([...run(25, 11), ...run(6, 0)]);
-
-    expect(longestStreakOf(days)).toEqual({
-      length: 15,
-      start: d(25),
-      end: d(11),
-    });
-  });
-
-  test('a single day is a run of one', () => {
-    expect(longestStreakOf(new Set([TODAY]))).toEqual({
-      length: 1,
-      start: TODAY,
-      end: TODAY,
-    });
-  });
-
-  test('is null with nothing recorded', () => {
-    expect(longestStreakOf(new Set())).toBeNull();
-  });
-
-  test('order of the list does not matter', () => {
-    const shuffled = new Set([d(0), d(2), d(1)]);
-    expect(longestStreakOf(shuffled)?.length).toBe(3);
-  });
+beforeEach(() => {
+  useStreakStore.getState().reset();
+  streakApi.get.mockReset();
+  streakApi.freeze.mockReset();
+  streakApi.restore.mockReset();
+  walletApi.get.mockReset().mockRejectedValue(new Error('offline'));
+  walletApi.transactions.mockReset().mockRejectedValue(new Error('offline'));
+  walletApi.earnRules.mockReset().mockRejectedValue(new Error('offline'));
 });
 
-describe('restoreGapOf', () => {
-  test('is empty while the streak is alive', () => {
-    expect(restoreGapOf(new Set(run(6, 0)), TODAY)).toEqual([]);
-  });
-
-  test('is the missed days between the last run and today', () => {
-    // Ran up to three days ago, missed the two since.
-    expect(restoreGapOf(new Set(run(10, 3)), TODAY)).toEqual([d(2), d(1)]);
-  });
-
-  test('gives up on a run that ended too long ago', () => {
-    expect(restoreGapOf(new Set(run(20, 12)), TODAY)).toEqual([]);
-  });
+test('a new store holds no streak until the server has said one', () => {
+  const state = useStreakStore.getState();
+  expect(state.summary).toBeNull();
+  expect(state.syncedAt).toBeNull();
 });
 
-describe('useStreakStore', () => {
-  beforeEach(() => {
-    useStreakStore.setState({
-      completedDays: [],
-      protectedDays: [],
-      freezesAvailable: 1,
-    });
+test('a streak stored by an older build — the device’s own day lists — is dropped', () => {
+  const migrate = useStreakStore.persist.getOptions().migrate!;
+  expect(
+    migrate({ completedDays: ['2026-09-01'], freezesAvailable: 1 }, 1),
+  ).toEqual({ summary: null, syncedAt: null });
+});
+
+test("a sync takes the server's streak whole", async () => {
+  streakApi.get.mockResolvedValue(summary());
+
+  await useStreakStore.getState().hydrateFromServer();
+
+  const state = useStreakStore.getState();
+  expect(state.summary).toEqual(summary());
+  expect(state.syncedAt).not.toBeNull();
+  expect(state.syncError).toBeNull();
+});
+
+test('a failed sync keeps the cached streak and says why', async () => {
+  useStreakStore.setState({ summary: summary() });
+  streakApi.get.mockRejectedValue(new Error('Network Error'));
+
+  await useStreakStore.getState().hydrateFromServer();
+
+  const state = useStreakStore.getState();
+  expect(state.summary).toEqual(summary());
+  expect(state.syncError).toEqual(expect.any(String));
+  expect(state.isSyncing).toBe(false);
+});
+
+test('refreshIfStale leaves a fresh streak alone and fetches a stale one', async () => {
+  streakApi.get.mockResolvedValue(summary());
+
+  useStreakStore.setState({ syncedAt: new Date().toISOString() });
+  await useStreakStore.getState().refreshIfStale();
+  expect(streakApi.get).not.toHaveBeenCalled();
+
+  useStreakStore.setState({
+    syncedAt: new Date(Date.now() - STREAK_STALE_AFTER_MS - 1).toISOString(),
   });
+  await useStreakStore.getState().refreshIfStale();
+  expect(streakApi.get).toHaveBeenCalledTimes(1);
+});
 
-  test('a freeze covers today and is used up', () => {
-    expect(useStreakStore.getState().freezeToday()).toBe(true);
+test("a freeze takes the server's answer, keyed so a retry cannot spend two", async () => {
+  useStreakStore.setState({ summary: summary({ todayCovered: false }) });
+  const frozen = summary({ todayFrozen: true, freezesAvailable: 0 });
+  streakApi.freeze.mockResolvedValue(frozen);
 
-    const state = useStreakStore.getState();
-    expect(state.freezesAvailable).toBe(0);
-    expect(state.protectedDays).toHaveLength(1);
+  const result = await useStreakStore.getState().freezeToday();
+
+  expect(result).toEqual({ ok: true });
+  expect(streakApi.freeze).toHaveBeenCalledWith({
+    idempotencyKey: expect.any(String),
   });
+  expect(useStreakStore.getState().summary).toEqual(frozen);
+  expect(useStreakStore.getState().pendingAction).toBeNull();
+});
 
-  test('a freeze is refused when none are left', () => {
-    useStreakStore.setState({ freezesAvailable: 0 });
+test('a refused freeze reports the code and message, and asks again', async () => {
+  useStreakStore.setState({ summary: summary() });
+  streakApi.freeze.mockRejectedValue(
+    new ApiError(
+      'unknown',
+      'Today already counts — save the freeze for a rest day.',
+      409,
+      null,
+      'STREAK_ALREADY_COVERED',
+    ),
+  );
+  streakApi.get.mockResolvedValue(summary());
 
-    expect(useStreakStore.getState().freezeToday()).toBe(false);
-    expect(useStreakStore.getState().protectedDays).toEqual([]);
+  const result = await useStreakStore.getState().freezeToday();
+
+  expect(result).toEqual({
+    ok: false,
+    code: 'STREAK_ALREADY_COVERED',
+    message: 'Today already counts — save the freeze for a rest day.',
   });
+  expect(streakApi.get).toHaveBeenCalledTimes(1);
+});
 
-  test('a freeze is not spent on a day already earned', () => {
-    useStreakStore.getState().completeToday();
-
-    expect(useStreakStore.getState().freezeToday()).toBe(false);
-    expect(useStreakStore.getState().freezesAvailable).toBe(1);
+test("a restore takes the streak and the wallet's balance from the server", async () => {
+  useStreakStore.setState({
+    summary: summary({ currentStreak: 0, canRestore: true }),
   });
+  useCoinsStore.setState({ balance: 1000 });
+  const restored = summary({ protectedDays: ['2026-09-29'] });
+  streakApi.restore.mockResolvedValue({ streak: restored, balance: 950 });
 
-  test('completing today twice records it once', () => {
-    useStreakStore.getState().completeToday();
-    useStreakStore.getState().completeToday();
+  const result = await useStreakStore.getState().restore();
 
-    expect(useStreakStore.getState().completedDays).toHaveLength(1);
+  expect(result).toEqual({ ok: true });
+  expect(useStreakStore.getState().summary).toEqual(restored);
+  expect(useCoinsStore.getState().balance).toBe(950);
+  // The ledger row follows on the wallet's own sync.
+  expect(walletApi.get).toHaveBeenCalled();
+});
+
+test('a restore the server refuses charges nothing on the device', async () => {
+  useStreakStore.setState({
+    summary: summary({ currentStreak: 0, canRestore: true }),
   });
+  useCoinsStore.setState({ balance: 20 });
+  streakApi.restore.mockRejectedValue(
+    new ApiError(
+      'validation',
+      'You need 30 more coins for this.',
+      422,
+      { required: 50, balance: 20 },
+      'INSUFFICIENT_COINS',
+    ),
+  );
+  streakApi.get.mockResolvedValue(summary({ currentStreak: 0 }));
 
-  test('a restore changes nothing when there is no gap', () => {
-    expect(useStreakStore.getState().restore()).toBe(false);
-    expect(useStreakStore.getState().protectedDays).toEqual([]);
-  });
+  const result = await useStreakStore.getState().restore();
+
+  expect(result).toMatchObject({ ok: false, code: 'INSUFFICIENT_COINS' });
+  expect(useCoinsStore.getState().balance).toBe(20);
+});
+
+test('a second tap while one is in flight is not sent', async () => {
+  useStreakStore.setState({ summary: summary({ todayCovered: false }) });
+  streakApi.freeze.mockReturnValue(new Promise(() => {}));
+
+  useStreakStore.getState().freezeToday();
+  const second = await useStreakStore.getState().freezeToday();
+
+  expect(second).toMatchObject({ ok: false, code: 'IN_PROGRESS' });
+  expect(streakApi.freeze).toHaveBeenCalledTimes(1);
 });

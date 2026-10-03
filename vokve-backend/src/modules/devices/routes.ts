@@ -1,9 +1,12 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
+import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
+import { Errors } from '../../lib/errors.js';
 import { hashToken } from '../../lib/tokens.js';
+import { attestationBody, issueAttestationChallenge, submitAttestation } from '../integrity/service.js';
 import { AppReleaseModel, DeviceModel } from './models.js';
 import { listDevices, registerDevice, registerDeviceBody, revokeDevice } from './service.js';
 
@@ -33,6 +36,39 @@ devicesRouter.patch('/devices/:deviceId', requireAuth, validate('body', heartbea
   const updated = await DeviceModel.updateOne({ _id: String(req.params.deviceId), userId: req.ctx.userId, revokedAt: null }, { $set: set });
   res.json({ ok: updated.matchedCount === 1 });
 });
+
+/**
+ * Key attestation (RULES DV2, A2): a challenge, then the Keystore key made
+ * for it. Only the device itself may attest — its key is the one in its own
+ * secure hardware — so the path must name the device making the call.
+ */
+const ownDevice: RequestHandler = (req, _res, next) => {
+  if (String(req.params.deviceId) !== req.ctx.deviceId) return next(Errors.notFound('That device'));
+  next();
+};
+
+devicesRouter.post(
+  '/devices/:deviceId/attestation/challenge',
+  requireAuth,
+  requireDevice,
+  ownDevice,
+  rateLimit({ name: 'attest-challenge', max: 20, windowSeconds: 3600, by: 'device' }),
+  async (req, res) => {
+    res.json(await issueAttestationChallenge(req.ctx.userId!, req.ctx.deviceId!));
+  },
+);
+
+devicesRouter.post(
+  '/devices/:deviceId/attestation',
+  requireAuth,
+  requireDevice,
+  ownDevice,
+  rateLimit({ name: 'attest', max: 20, windowSeconds: 3600, by: 'device' }),
+  validate('body', attestationBody),
+  async (req, res) => {
+    res.json(await submitAttestation(req.ctx.userId!, req.ctx.deviceId!, req.body));
+  },
+);
 
 devicesRouter.get('/me/devices', requireAuth, requireDevice, async (req, res) => {
   const data = await listDevices(req.ctx.userId!);

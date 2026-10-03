@@ -98,6 +98,7 @@ export const AccountScreen = () => {
           | 'HelpSupport'
           | 'About'
           | 'HealthCheckup'
+          | 'StepTracking'
           | 'Wishlist',
       ) =>
       () =>
@@ -179,6 +180,7 @@ export const AccountScreen = () => {
           onPressWishlist={go('Wishlist')}
           onPressRewards={go('LeaderboardRewards')}
           onPressStreakFreeze={go('Streak')}
+          onPressStepTracking={go('StepTracking')}
           onPressHealthData={go('HealthCheckup')}
           onPressHelp={go('HelpSupport')}
           onPressAbout={go('About')}

@@ -11,6 +11,7 @@ import { RecentTransactionsCard } from '../../components/wallet/RecentTransactio
 import { WalletActionsRow } from '../../components/wallet/WalletActionsRow';
 import { WalletHeader } from '../../components/wallet/WalletHeader';
 import { WalletSyncNotice } from '../../components/wallet/WalletSyncNotice';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
@@ -47,7 +48,9 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  *
  * Every figure is the server's (BACKEND.md §8): the store is a cache of the
  * last `GET /wallet`, refreshed when the tab comes into view if it has gone
- * stale, and on demand by pulling down. The screen never computes a balance.
+ * stale, and on demand by pulling down. The screen never computes a balance,
+ * and before the first answer it says it is loading rather than showing a
+ * zero the user might believe.
  */
 export const WalletScreen = () => {
   const styles = useThemedStyles(makeStyles);
@@ -180,23 +183,34 @@ export const WalletScreen = () => {
 
         <EmailVerificationBanner reason="place orders" />
 
-        <WalletSyncNotice
-          error={syncError}
-          syncedAt={syncedAt}
-          isRetrying={isSyncing}
-          onRetry={hydrateFromServer}
-        />
+        {syncedAt === null ? (
+          <LoadState
+            loading={isSyncing || syncError === null}
+            title="Couldn't load your wallet"
+            message={syncError}
+            onRetry={hydrateFromServer}
+          />
+        ) : (
+          <>
+            <WalletSyncNotice
+              error={syncError}
+              syncedAt={syncedAt}
+              isRetrying={isSyncing}
+              onRetry={hydrateFromServer}
+            />
 
-        <CoinBalanceCard
-          balance={balance}
-          pending={pending}
-          lifetimeEarned={lifetimeEarned}
-          expiryDaysLeft={expiry.daysLeft}
-          expiryUrgency={expiry.urgency}
-          onPressAboutExpiry={openExpiry}
-          onPressExpiryInfo={openExpiry}
-          onPressBalanceInfo={openCoinsInfo}
-        />
+            <CoinBalanceCard
+              balance={balance}
+              pending={pending}
+              lifetimeEarned={lifetimeEarned}
+              expiryDaysLeft={expiry.daysLeft}
+              expiryUrgency={expiry.urgency}
+              onPressAboutExpiry={openExpiry}
+              onPressExpiryInfo={openExpiry}
+              onPressBalanceInfo={openCoinsInfo}
+            />
+          </>
+        )}
 
         <WalletActionsRow
           onPressEarn={onOpenReferral}
@@ -207,16 +221,20 @@ export const WalletScreen = () => {
 
         <KeepGoingCard />
 
-        <RecentTransactionsCard
-          transactions={transactions}
-          onPressViewAll={onOpenHistory}
-        />
+        {syncedAt !== null ? (
+          <>
+            <RecentTransactionsCard
+              transactions={transactions}
+              onPressViewAll={onOpenHistory}
+            />
 
-        <CoinsSummaryCard
-          earned={summary.earned}
-          spent={summary.spent}
-          net={summary.net}
-        />
+            <CoinsSummaryCard
+              earned={summary.earned}
+              spent={summary.spent}
+              net={summary.net}
+            />
+          </>
+        ) : null}
       </ScrollView>
 
       <CoinExpirySheet

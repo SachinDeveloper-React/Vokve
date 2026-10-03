@@ -2,7 +2,8 @@ import React, { Fragment, memo } from 'react';
 import { StyleSheet } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../theme';
-import type { LeaderboardEntry } from '../../types/models';
+import type { LeaderboardBoard, LeaderboardEntry } from '../../types/models';
+import { formatGrouped } from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
@@ -23,9 +24,21 @@ const SUBTITLE = "This week's top performers & their rewards";
 interface Props {
   /** In rank order. The card shows the top of the board, not a sample of it. */
   entries: LeaderboardEntry[];
+  /** The user's own place this week; null until they have scored. */
+  me?: LeaderboardBoard['me'];
   /** The period the board covers — "This Week". */
   period?: string;
   onPressViewFull: () => void;
+}
+
+/** The user's own line under the board, when their row is not on it. */
+function standingLine(me: LeaderboardBoard['me'] | undefined): string {
+  if (me === null || me === undefined) {
+    return 'Walk, train and finish challenges to get on the board this week.';
+  }
+  return `You are #${formatGrouped(me.rank)} this week with ${formatGrouped(
+    me.score,
+  )} points.`;
 }
 
 /**
@@ -36,8 +49,9 @@ interface Props {
  * the person it is currently about, in that order.
  */
 export const CurrentLeaderboardCard = memo(
-  ({ entries, period = 'This Week', onPressViewFull }: Props) => {
+  ({ entries, me, period = 'This Week', onPressViewFull }: Props) => {
     const { colors } = useTheme();
+    const meShown = entries.some(entry => entry.isCurrentUser);
 
     return (
       <Card radius="xl" padding="base">
@@ -66,6 +80,12 @@ export const CurrentLeaderboardCard = memo(
               </Fragment>
             ))}
           </VStack>
+
+          {meShown ? null : (
+            <AppText variant="micro" color="textSecondary">
+              {standingLine(me)}
+            </AppText>
+          )}
 
           <Pressable
             onPress={onPressViewFull}

@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { StyleSheet } from 'react-native';
+import { formatLongDate } from '../../utils/date';
 import { formatCoins } from '../../utils/format';
 import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
@@ -8,9 +9,10 @@ import { Card } from '../ui/Card';
 import { RankingStatTile } from './RankingStatTile';
 
 interface Props {
-  bestRank: number;
-  /** Already formatted for display — "12 May 2025". */
-  bestRankAchievedOn: string;
+  /** Null until a week has closed with the user on the board. */
+  bestRank: number | null;
+  /** The last day of that week, `YYYY-MM-DD`. */
+  bestRankAchievedOn: string | null;
   topTenFinishes: number;
   rewardCoinsEarned: number;
   rewardsWon: number;
@@ -50,14 +52,18 @@ export const BestRankingsCard = memo(
           <RankingStatTile
             emoji="🎖️"
             label="Best Rank"
-            value={String(bestRank)}
-            caption={`Achieved on ${bestRankAchievedOn}`}
+            value={bestRank === null ? '—' : String(bestRank)}
+            caption={
+              bestRankAchievedOn
+                ? `Achieved on ${formatLongDate(bestRankAchievedOn)}`
+                : 'No week closed yet'
+            }
           />
           <RankingStatTile
             emoji="🏆"
             label="Total Top 10"
             value={String(topTenFinishes)}
-            caption="This Month"
+            caption="Weeks"
           />
           <RankingStatTile
             emoji="⭐"
@@ -69,7 +75,7 @@ export const BestRankingsCard = memo(
             emoji="🎁"
             label="Rewards Won"
             value={String(rewardsWon)}
-            caption="This Month"
+            caption="Gear prizes"
           />
         </HStack>
       </VStack>

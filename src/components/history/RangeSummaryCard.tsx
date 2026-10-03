@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { useTheme } from '../../theme';
-import type { DayTotals, NutritionGoals } from '../../stores/nutritionStore';
+import type { DayTotals } from '../../stores/nutritionStore';
+import type { NutritionGoals } from '../../types/models';
 import { formatGrouped } from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';

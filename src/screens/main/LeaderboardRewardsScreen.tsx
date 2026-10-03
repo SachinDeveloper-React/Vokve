@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { BestRankingsCard } from '../../components/leaderboard/BestRankingsCard';
 import { CurrentLeaderboardCard } from '../../components/leaderboard/CurrentLeaderboardCard';
@@ -10,11 +10,19 @@ import {
   LeaderboardTabs,
   type LeaderboardTab,
 } from '../../components/leaderboard/LeaderboardTabs';
-import { RewardTiersCard } from '../../components/leaderboard/RewardTiersCard';
+import {
+  RewardTiersCard,
+  toRewardTiers,
+} from '../../components/leaderboard/RewardTiersCard';
+import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
-import { leaderboardHighlights, seedLeaderboard } from '../../constants/seedData';
+import {
+  useLeaderboardBoard,
+  useLeaderboardHistory,
+  useLeaderboardRules,
+} from '../../hooks/useLeaderboard';
 import { useCoinBalance } from '../../stores/coinsStore';
-import { useThemedStyles, type ThemeShape } from '../../theme';
+import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { RootStackScreenProps } from '../../types/navigation';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
@@ -37,16 +45,41 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * user's, and a param that kept reasserting itself would snap the screen back
  * under them.
  *
- * The balance in the header is live from the coins store; the board and the
- * user's record come from the seed, because nothing here changes them.
+ * Everything here is the server's: the prizes and the rules
+ * (`GET /leaderboard/reward-tiers`, worded from the config in force), this
+ * week's board for the user's country with their own place
+ * (`GET /leaderboard`), and their record over closed weeks
+ * (`GET /leaderboard/history`). Each card waits for its own answer.
  */
 export const LeaderboardRewardsScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const { params } = useRoute<RootStackScreenProps<'LeaderboardRewards'>['route']>();
   const coins = useCoinBalance();
 
   const [tab, setTab] = useState<LeaderboardTab>(params?.tab ?? 'rewards');
+
+  const rules = useLeaderboardRules();
+  const board = useLeaderboardBoard();
+  const history = useLeaderboardHistory();
+
+  const tiers = useMemo(
+    () => (rules.data ? toRewardTiers(rules.data.tiers, rules.data.scope) : []),
+    [rules.data],
+  );
+  // The card is a glance at who is winning; the rest is behind "View Full".
+  const top = useMemo(() => board.data?.entries.slice(0, 5) ?? [], [board.data]);
+
+  // A pull asks all three again; each card shows its own answer as it lands.
+  const { reload: reloadRules } = rules;
+  const { reload: reloadBoard } = board;
+  const { reload: reloadHistory } = history;
+  const onRefresh = useCallback(() => {
+    reloadRules();
+    reloadBoard();
+    reloadHistory();
+  }, [reloadBoard, reloadHistory, reloadRules]);
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -65,6 +98,14 @@ export const LeaderboardRewardsScreen = () => {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={false}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       >
         <LeaderboardHeader coins={coins} onPressBack={onPressBack} />
 
@@ -74,23 +115,58 @@ export const LeaderboardRewardsScreen = () => {
 
         {tab === 'rewards' ? (
           <>
-            <RewardTiersCard />
+            {rules.data ? (
+              <RewardTiersCard tiers={tiers} note={rules.data.note} />
+            ) : (
+              <LoadState
+                loading={rules.loading}
+                title="Couldn't load the prizes"
+                message={rules.error}
+                onRetry={rules.reload}
+              />
+            )}
 
-            <CurrentLeaderboardCard
-              entries={seedLeaderboard}
-              onPressViewFull={notImplemented}
-            />
+            {board.data ? (
+              <CurrentLeaderboardCard
+                entries={top}
+                me={board.data.me}
+                onPressViewFull={notImplemented}
+              />
+            ) : (
+              <LoadState
+                loading={board.loading}
+                title="Couldn't load the board"
+                message={board.error}
+                onRetry={board.reload}
+              />
+            )}
 
-            <BestRankingsCard
-              bestRank={leaderboardHighlights.bestRank}
-              bestRankAchievedOn={leaderboardHighlights.bestRankAchievedOn}
-              topTenFinishes={leaderboardHighlights.topTenFinishes}
-              rewardCoinsEarned={leaderboardHighlights.rewardCoinsEarned}
-              rewardsWon={leaderboardHighlights.rewardsWon}
-            />
+            {history.data ? (
+              <BestRankingsCard
+                bestRank={history.data.bestRank}
+                bestRankAchievedOn={history.data.bestRankAchievedOn}
+                topTenFinishes={history.data.topTenFinishes}
+                rewardCoinsEarned={history.data.rewardCoinsEarned}
+                rewardsWon={history.data.rewardsWon}
+              />
+            ) : (
+              <LoadState
+                loading={history.loading}
+                title="Couldn't load your rankings"
+                message={history.error}
+                onRetry={history.reload}
+              />
+            )}
           </>
+        ) : rules.data ? (
+          <LeaderboardHowItWorks steps={rules.data.howItWorks} />
         ) : (
-          <LeaderboardHowItWorks />
+          <LoadState
+            loading={rules.loading}
+            title="Couldn't load how it works"
+            message={rules.error}
+            onRetry={rules.reload}
+          />
         )}
       </ScrollView>
     </Screen>

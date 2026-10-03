@@ -1,8 +1,10 @@
 /**
- * The plan is a three-day rotation rather than a row per date, so the checks
- * here are that every day the pager can reach has meals behind it, that the
- * cycle is stable in both directions, and that the four tabs show four
- * genuinely different things.
+ * The plan is the server's, chosen from the user's preferences and cycled by
+ * date, so the checks here are that every day the pager can reach has meals
+ * behind it, that the cycle is stable in both directions, that the screen
+ * shows what the server planned, and that the four tabs show four genuinely
+ * different things. The API is the mock backend's own, served without
+ * latency.
  *
  * @format
  */
@@ -14,12 +16,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
 import { DietPlanScreen } from '../src/screens/main/DietPlanScreen';
 import { ThemeProvider } from '../src/theme';
-import {
-  dietPlanForDate,
-  totalsOf,
-  useDietPlanStore,
-} from '../src/stores/dietPlanStore';
 import { useNutritionStore } from '../src/stores/nutritionStore';
+import { clearServerReads } from '../src/hooks/useServerRead';
+import { mockAuthApi, mockNutritionApi } from '../src/services/api/mockApi';
 import { addDays, formatLongDate, todayIso } from '../src/utils/date';
 
 const mockNavigate = jest.fn();
@@ -36,6 +35,27 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 
+// Latency is what makes spinners visible in the app and slow in a test suite.
+jest.mock('../src/constants/config', () => ({
+  config: {
+    ...jest.requireActual('../src/constants/config').config,
+    mockLatencyMs: 0,
+  },
+}));
+
+jest.mock('../src/services/api/endpoints', () => {
+  const api = jest.requireActual('../src/services/api/mockApi');
+  return {
+    nutritionApi: {
+      profile: jest.fn(() => api.mockNutritionApi.profile()),
+      plan: jest.fn((date: string) => api.mockNutritionApi.plan(date)),
+      planDays: jest.fn((from: string, to: string) =>
+        api.mockNutritionApi.planDays(from, to),
+      ),
+    },
+  };
+});
+
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
@@ -43,12 +63,26 @@ const metrics = {
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
-beforeEach(() => {
+beforeEach(async () => {
   mockNavigate.mockClear();
   mockGoBack.mockClear();
-  useDietPlanStore.getState().reset();
+  clearServerReads();
+  await mockAuthApi.signOut();
   useNutritionStore.getState().reset();
+  useNutritionStore.setState({
+    profile: await mockNutritionApi.profile(),
+    syncedAt: new Date().toISOString(),
+  });
 });
+
+/** Lets the server's answers land. */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+const planFor = async (date: string) => (await mockNutritionApi.plan(date)).meals;
 
 afterEach(async () => {
   const tree = mounted;
@@ -72,13 +106,17 @@ const render = async () => {
     );
   });
   mounted = tree;
+  await settle();
   return tree;
 };
 
 const allText = (tree: ReactTestRenderer.ReactTestRenderer) =>
   textOf(tree, RNText);
 
-const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
+const press = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  prefix: string,
+) => {
   const node = tree.root
     .findAll(
       n =>
@@ -89,38 +127,33 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
 
   if (!node) throw new Error(`No pressable labelled "${prefix}…"`);
   ReactTestRenderer.act(() => node.props.onPress());
+  // A new day or tab can be a new question for the server.
+  await settle();
 };
 
 describe('the diet plan rotation', () => {
-  test('every day the pager can reach has a plan behind it', () => {
+  test('every day the pager can reach has a plan behind it', async () => {
     for (let offset = -10; offset <= 10; offset++) {
-      const meals = dietPlanForDate(addDays(todayIso(), offset));
+      const meals = await planFor(addDays(todayIso(), offset));
       expect(meals.length).toBeGreaterThan(0);
     }
   });
 
-  test('paging forward and back lands on the same plan', () => {
+  test('paging forward and back lands on the same plan', async () => {
     const today = todayIso();
-    const there = addDays(today, 3);
-    const back = addDays(there, -3);
+    const back = addDays(addDays(today, 3), -3);
 
-    expect(dietPlanForDate(back)).toEqual(dietPlanForDate(today));
-  });
-
-  test('the cycle repeats every three days', () => {
-    const today = todayIso();
-
-    expect(dietPlanForDate(addDays(today, 3))).toEqual(dietPlanForDate(today));
-    expect(dietPlanForDate(addDays(today, 1))).not.toEqual(
-      dietPlanForDate(today),
-    );
+    expect(await planFor(back)).toEqual(await planFor(today));
   });
 });
 
 describe('DietPlanScreen', () => {
   test('the day states its meals and what they come to', async () => {
     const text = allText(await render());
-    const { calories } = totalsOf(dietPlanForDate(todayIso()));
+    const calories = (await planFor(todayIso())).reduce(
+      (sum, meal) => sum + meal.calories,
+      0,
+    );
 
     expect(text).toContain('Breakfast');
     expect(text).toContain('Dinner');
@@ -137,52 +170,35 @@ describe('DietPlanScreen', () => {
     const tree = await render();
     const before = allText(tree);
 
-    press(tree, 'Next day');
+    await press(tree, 'Next day');
 
     expect(allText(tree)).not.toBe(before);
-  });
-
-  test('a meal added to a day joins that day and no other', async () => {
-    const tree = await render();
-
-    ReactTestRenderer.act(() =>
-      useDietPlanStore.getState().addMeal(todayIso(), {
-        slot: 'snack',
-        calories: 120,
-        items: [{ name: 'Greek yoghurt', quantity: '1 cup' }],
-      }),
-    );
-
-    expect(allText(tree)).toContain('Greek yoghurt');
-
-    press(tree, 'Next day');
-    expect(allText(tree)).not.toContain('Greek yoghurt');
   });
 
   test('each tab shows something the others do not', async () => {
     const tree = await render();
 
-    press(tree, 'Plan');
+    await press(tree, 'Plan');
     expect(allText(tree)).toContain('The week ahead');
 
-    press(tree, 'Nutrition');
+    await press(tree, 'Nutrition');
     expect(allText(tree)).toContain('Planned nutrition');
 
-    press(tree, 'History');
+    await press(tree, 'History');
     expect(allText(tree)).toContain('The week behind');
 
-    press(tree, 'Today');
+    await press(tree, 'Today');
     expect(allText(tree)).toContain('Add Meal');
   });
 
   test('picking a day from the week returns to that day of the plan', async () => {
     const tree = await render();
-    press(tree, 'Plan');
+    await press(tree, 'Plan');
 
     // The rows are the control on this tab: tapping one is how a user gets
     // from "Thursday looks heavy" to the meals that made it heavy.
     const tomorrow = addDays(todayIso(), 1);
-    press(tree, formatLongDate(tomorrow));
+    await press(tree, formatLongDate(tomorrow));
 
     const text = allText(tree);
     expect(text).toContain('Add Meal'); // back on the day itself
@@ -192,8 +208,8 @@ describe('DietPlanScreen', () => {
   test('Add Meal opens the logging screen on the day being shown', async () => {
     const tree = await render();
 
-    press(tree, 'Next day');
-    press(tree, 'Add Meal');
+    await press(tree, 'Next day');
+    await press(tree, 'Add Meal');
 
     // A screen, not a sheet: logging a meal is several foods with portions and
     // macros, and it opens on the day the plan was showing.
@@ -203,7 +219,7 @@ describe('DietPlanScreen', () => {
   });
 
   test('the chevron returns to whatever opened the plan', async () => {
-    press(await render(), 'Back');
+    await press(await render(), 'Back');
 
     expect(mockGoBack).toHaveBeenCalledTimes(1);
   });
