@@ -42,6 +42,7 @@ import {
   leaderboardBoardSchema,
   leaderboardHistorySchema,
   leaderboardRulesSchema,
+  stepGoalSchema,
   stepIngestResultSchema,
   stepSourcesReportSchema,
   streakRestoreResultSchema,
@@ -53,6 +54,7 @@ import {
   vitalsLatestSchema,
   workoutSchema,
   type AccountSession,
+  type ActivityLevel,
   type Address,
   type AppNotification,
   type AuthResponse,
@@ -551,6 +553,7 @@ export const mockAuthApi: AuthApi = {
     mockIntegrityAt = 0;
     mockSnapshots = new Map();
     mockSettings = { ...MOCK_DEFAULT_SETTINGS };
+    mockGoalChosenAt = null;
     mockStreak = mockFreshStreak();
     mockWater = new Map();
     mockPlan = mockDefaultPlan();
@@ -642,17 +645,51 @@ const MOCK_DEFAULT_SETTINGS: UserSettings = {
 };
 let mockSettings: UserSettings = { ...MOCK_DEFAULT_SETTINGS };
 
+/** ⚙ `activity.goal` as the server ships it (D-55). */
+const MOCK_GOAL = {
+  min: 3000,
+  max: 20_000,
+  increment: 500,
+  historyDays: 14,
+  minDaysWithSteps: 5,
+  typicalByLevel: {
+    sedentary: 4000,
+    light: 6000,
+    moderate: 8500,
+    active: 11_000,
+    athlete: 13_000,
+  } as Record<ActivityLevel, number>,
+  stretch: 2000,
+};
+/** When the goal was last saved; null while it is the default. */
+let mockGoalChosenAt: string | null = null;
+
 export const mockSettingsApi: SettingsApi = {
   async get() {
     await delay();
     return mockSettings;
   },
-  /** Validated by the same schema the server's clamps mirror. */
+  /**
+   * Validated by the same schema the server's clamps mirror, and the step
+   * goal against its range as the server checks it; saving a goal marks it
+   * chosen.
+   */
   async update(patch) {
     await delay();
     const next = userSettingsSchema.safeParse({ ...mockSettings, ...patch });
+    const goal = patch.dailyStepGoal;
+    if (goal !== undefined && (goal < MOCK_GOAL.min || goal > MOCK_GOAL.max)) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422, {
+        dailyStepGoal: `Choose a goal between ${MOCK_GOAL.min.toLocaleString(
+          'en-IN',
+        )} and ${MOCK_GOAL.max.toLocaleString('en-IN')} steps.`,
+      });
+    }
     if (!next.success) {
       throw new ApiError('validation', 'Check the highlighted fields.', 422);
+    }
+    if (goal !== undefined) {
+      mockGoalChosenAt = new Date().toISOString();
     }
     mockSettings = next.data;
     return mockSettings;
@@ -1786,6 +1823,58 @@ export const mockActivityApi: ActivityApi = {
     return activityConfigSchema.parse({
       ...MOCK_ACTIVITY_CONFIG,
       playIntegrity: { cloudProjectNumber: MOCK_CLOUD_PROJECT_NUMBER },
+    });
+  },
+
+  /**
+   * The server's suggestion, abridged: where the user walks now (the days
+   * synced, or their activity level), one stretch on, up to the target for
+   * their age and BMI.
+   */
+  async goal() {
+    await delay();
+    const user = currentUser;
+    const recent = Array.from(
+      { length: MOCK_GOAL.historyDays },
+      (_, index) =>
+        mockActivityDays.get(mockDateDaysAgo(index + 1))?.steps ?? 0,
+    ).filter(steps => steps > 0);
+    const recentSteps = recent.length >= MOCK_GOAL.minDaysWithSteps;
+    const age = user?.dateOfBirth
+      ? new Date().getFullYear() - Number(user.dateOfBirth.slice(0, 4))
+      : null;
+    const bmi =
+      user?.heightCm && user.weightKg
+        ? user.weightKg / (user.heightCm / 100) ** 2
+        : null;
+    const now = recentSteps
+      ? recent.reduce((sum, steps) => sum + steps, 0) / recent.length
+      : MOCK_GOAL.typicalByLevel[user?.activityLevel ?? 'moderate'];
+    const target =
+      (age === null || (age >= 18 && age < 60)
+        ? 10_000
+        : age < 18
+        ? 12_000
+        : age < 70
+        ? 8000
+        : 7000) + (bmi !== null && bmi >= 25 ? 1000 : 0);
+    const suggested =
+      now >= target ? now : Math.min(target, now + MOCK_GOAL.stretch);
+    const recommended = Math.min(
+      MOCK_GOAL.max,
+      Math.max(
+        MOCK_GOAL.min,
+        Math.round(suggested / MOCK_GOAL.increment) * MOCK_GOAL.increment,
+      ),
+    );
+    return stepGoalSchema.parse({
+      goal: mockSettings.dailyStepGoal,
+      recommended,
+      basedOn: { age: age !== null, bmi: bmi !== null, recentSteps },
+      min: MOCK_GOAL.min,
+      max: MOCK_GOAL.max,
+      increment: MOCK_GOAL.increment,
+      chosenAt: mockGoalChosenAt,
     });
   },
 

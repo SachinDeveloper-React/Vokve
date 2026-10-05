@@ -18,6 +18,8 @@ interface Props {
   steps: number;
   /** That source — "this phone", "Fitbit". Null before the first reading. */
   sourceName: string | null;
+  /** The user's other phones' steps today, shown with this phone's (D-53). */
+  otherDevicesSteps?: number;
   /** The last request for physical activity was refused. */
   permissionDenied: boolean;
   /** An action is in flight; its buttons wait for it. */
@@ -50,6 +52,7 @@ export const StepCountingCard = memo(
     state,
     steps,
     sourceName,
+    otherDevicesSteps = 0,
     permissionDenied,
     busy,
     onTurnOn,
@@ -75,9 +78,17 @@ export const StepCountingCard = memo(
               <AppText variant="bodyStrong">Step counting</AppText>
               <AppText variant="caption" color="textSecondary">
                 {state === 'running' || state === 'paused'
-                  ? `${formatGrouped(steps)} steps today${
-                      sourceName ? `, counted by ${sourceName}` : ''
-                    }`
+                  ? otherDevicesSteps > 0
+                    ? `${formatGrouped(
+                        steps + otherDevicesSteps,
+                      )} steps today — ${formatGrouped(steps)} counted by ${
+                        sourceName ?? 'this phone'
+                      }, ${formatGrouped(
+                        otherDevicesSteps,
+                      )} by your other phones`
+                    : `${formatGrouped(steps)} steps today${
+                        sourceName ? `, counted by ${sourceName}` : ''
+                      }`
                   : state === 'unsupported'
                   ? 'Not available on this phone yet'
                   : 'Turn it on to count every walk'}

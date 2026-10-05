@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../src/app.js';
+import { DeviceModel } from '../src/modules/devices/models.js';
 import { seed } from '../src/seed/seed.js';
 
 export const app = createApp();
@@ -31,8 +32,15 @@ let counter = 0;
  * Sign up (code goes to the email — `otp.signupChannel`), verify it, register
  * a device. With no SMS provider in tests the phone stays unverified and no
  * second challenge is issued.
+ *
+ * The phone is signed in from a week back, so any day a test sends counts
+ * whole: counting starts at sign-in (D-56), and a registration made a moment
+ * ago would leave out every walk a test places earlier today. Tests about
+ * that rule pass `countingFrom: 'registration'` and keep the server's own.
  */
-export async function signUpAndRegister(): Promise<Session> {
+export async function signUpAndRegister(
+  options: { countingFrom?: 'registration' } = {},
+): Promise<Session> {
   await seed();
   counter += 1;
   const phone = `+9198765${String(43210 + counter).padStart(5, '0')}`;
@@ -52,6 +60,12 @@ export async function signUpAndRegister(): Promise<Session> {
     .send({ installId: `install-${counter}-${Date.now()}`, vendorId: `vendor-${counter}`, platform: 'android',
       profile: { brand: 'Google', model: 'Pixel 8', osVersion: '14', isEmulator: false, app: { version: '1.0.0', build: '1', bundleId: 'com.vokve' } } });
   if (register.status !== 200) throw new Error(`register failed: ${JSON.stringify(register.body)}`);
+  if (options.countingFrom !== 'registration') {
+    await DeviceModel.updateOne(
+      { _id: register.body.deviceId },
+      { $set: { counting: [{ from: new Date(Date.now() - 8 * 86_400_000), to: null }] } },
+    );
+  }
 
   const session: Session = {
     userId: verify.body.user.id,

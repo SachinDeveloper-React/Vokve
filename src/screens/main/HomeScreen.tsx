@@ -134,6 +134,11 @@ export const HomeScreen = () => {
     [navigation],
   );
 
+  const onEditGoal = useCallback(
+    () => navigation.navigate('StepGoal'),
+    [navigation],
+  );
+
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -166,7 +171,7 @@ export const HomeScreen = () => {
         <StepGoalCard
           steps={today.steps}
           goal={stepGoal}
-          onEditGoal={() => {}}
+          onEditGoal={onEditGoal}
         />
 
         <ActivityMetricsRow

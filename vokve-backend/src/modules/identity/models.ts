@@ -102,6 +102,8 @@ const userSettingsSchema = new Schema(
     _id: { type: String, required: true },
     units: { type: String, default: 'metric' },
     dailyStepGoal: { type: Number, default: 10000 },
+    /** When the member last chose their step goal; null while it is the one every account starts on (D-55). */
+    stepGoalSetAt: { type: Date, default: null },
     dailyWaterGoalMl: { type: Number, default: 2500 },
     restTimerSeconds: { type: Number, default: 90 },
     hapticsEnabled: { type: Boolean, default: true },

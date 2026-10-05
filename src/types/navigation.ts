@@ -36,6 +36,24 @@ export type OnboardingStackParamList = {
 };
 
 /**
+ * The set-up after sign-in and the profile: the permission screens (D-54),
+ * each asking for one thing — physical activity, notifications, Health
+ * Connect — with one already granted left out, then the step goal (D-55). A
+ * list of its own, like onboarding: the user is signed in, and the app
+ * waits until these have been answered once on this phone.
+ */
+export type PermissionsStackParamList = {
+  ActivityPermission: undefined;
+  NotificationPermission: undefined;
+  HealthConnectPermission: undefined;
+  /**
+   * Last, the daily step goal (D-55) — only while the account has never
+   * chosen one, so a second phone is not asked again.
+   */
+  StepGoalSetup: undefined;
+};
+
+/**
  * The screens under the Account tab.
  *
  * Only the tab's own landing screen is here. Everything the account leads to —
@@ -67,6 +85,7 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList>;
   Onboarding: NavigatorScreenParams<OnboardingStackParamList>;
+  Permissions: NavigatorScreenParams<PermissionsStackParamList>;
   Main: NavigatorScreenParams<MainTabParamList>;
   WorkoutDetail: { template: WorkoutTemplate };
   ActiveWorkout: undefined;
@@ -107,6 +126,8 @@ export type RootStackParamList = {
   StepTracking: undefined;
   /** Where a day's steps came from and how they were matched — from the step tracking screen. */
   StepSources: undefined;
+  /** The daily step goal, from the dashboard step card's "Edit Goal" (D-55). */
+  StepGoal: undefined;
   /** Opened from the dashboard's "Health check up" shortcut. */
   HealthCheckup: undefined;
   /** Opened from the dashboard's "Nutrition & goal" shortcut. */

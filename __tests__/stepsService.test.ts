@@ -8,10 +8,12 @@
  * @format
  */
 
-import { AppState } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import StepTracker from 'react-native-step-tracker-pro';
 import { ApiError } from '../src/services/api/errors';
 import {
+  allowHealthConnectWrites,
+  enableStepCounting,
   endStepSession,
   startStepSession,
   stopStepsForSignOut,
@@ -68,7 +70,8 @@ const today = todayIso();
 const SERVER_CONFIG = {
   tracker: {
     healthConnectReadTypes: ['steps', 'distance'] as ('steps' | 'distance')[],
-    healthConnectWriteEnabled: false,
+    healthConnectWriteEnabled: true,
+    healthConnectWriteGranularity: 'minute' as const,
     healthConnectIgnoreManualEntries: true,
     wearableTrust: 'catalog' as const,
     wearableAllowlist: ['com.google.android.apps.fitness'],
@@ -190,7 +193,9 @@ describe('a step session', () => {
         sex: 'female',
         dailyGoal: 8000,
         healthConnectReadTypes: ['steps', 'distance'],
-        healthConnectWriteEnabled: false,
+        // This phone's own steps go into Health Connect, a minute at a time (D-57).
+        healthConnectWriteEnabled: true,
+        healthConnectWriteGranularity: 'minute',
         healthConnectIgnoreManualEntries: true,
         wearableTrust: 'catalog',
         // Google Fit relays a watch: used whenever it counted more.
@@ -431,6 +436,29 @@ describe('a step session', () => {
     expect(useStepsStore.getState().queue).toEqual([]);
   });
 
+  test('shows the other phones’ steps on top of this phone’s: the server’s day less what this phone sent (D-53)', async () => {
+    // 629 walked on another phone; this one counted 72, and once it is in
+    // the server's day is both.
+    mockActivityApi.weekly.mockImplementation(async () => {
+      const steps = mockActivityApi.ingest.mock.calls.length > 0 ? 701 : 629;
+      return [{ ...ingested(0).day, date: today, steps, verifiedSteps: steps }];
+    });
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === today ? 72 : 0),
+    );
+    mockActivityApi.ingest.mockResolvedValue(ingested(701));
+
+    await startStepSession(PROFILE);
+    await settle();
+
+    // Before this phone has sent anything, all of the server's day is the
+    // other phones'; once it has, the rest is.
+    expect(tracker.setOtherDevicesSteps).toHaveBeenCalledWith(today, 629);
+    expect(tracker.setOtherDevicesSteps).toHaveBeenLastCalledWith(today, 629);
+    expect(mockActivityApi.ingest).toHaveBeenCalledTimes(1);
+    expect(useStepsStore.getState().serverDays[today]?.steps).toBe(701);
+  });
+
   test('sends a day again when a watch’s steps reach Health Connect, though the phone’s own count has not moved', async () => {
     useStepsStore.setState({
       ownerId: 'user_a',
@@ -475,43 +503,172 @@ describe('a step session', () => {
 });
 
 describe('who the phone counts for', () => {
-  test('another account signing in gets a clean phone and its own choice', async () => {
+  /** The instant the tracker was told to count from, if it was. */
+  const countedFrom = () =>
+    tracker.setCountFrom.mock.calls.at(-1)?.[0] as number | undefined;
+
+  test('another account signing in gets a clean phone, counted from now, and its own choice', async () => {
     useStepsStore.setState({
       ownerId: 'user_b',
       trackingWanted: true,
       queue: [today],
     });
     tracker.getTrackingState.mockResolvedValueOnce('running');
+    const before = Date.now();
 
     await startStepSession(PROFILE);
 
     expect(tracker.stopTracking).toHaveBeenCalled();
+    // The last account's days, and its other phones' steps with them (2.7).
     expect(tracker.clearHistory).toHaveBeenCalled();
-    expect(tracker.resetToday).toHaveBeenCalled();
+    // Today starts over from the sign-in: nothing before it counts (D-56).
+    expect(countedFrom()).toBeGreaterThanOrEqual(before);
+    expect(tracker.resetToday).not.toHaveBeenCalled();
     const state = useStepsStore.getState();
     expect(state.ownerId).toBe('user_a');
+    expect(state.countingFrom).toBe(countedFrom());
     expect(state.trackingWanted).toBe(false);
     expect(tracker.startTracking).not.toHaveBeenCalled();
   });
 
-  test('the same account signing back in picks counting up again', async () => {
+  test('the first account on a phone counts from its sign-in too', async () => {
+    const before = Date.now();
+    await startStepSession(PROFILE);
+
+    expect(countedFrom()).toBeGreaterThanOrEqual(before);
+    expect(tracker.clearHistory).not.toHaveBeenCalled();
+  });
+
+  test('a tracker that cannot be told still starts the next account on a clean today', async () => {
+    useStepsStore.setState({ ownerId: 'user_b' });
+    tracker.setCountFrom.mockRejectedValueOnce(new Error('not in this build'));
+
+    await startStepSession(PROFILE);
+
+    expect(tracker.resetToday).toHaveBeenCalled();
+    expect(useStepsStore.getState().ownerId).toBe('user_a');
+  });
+
+  test('a launch with the session still there changes nothing', async () => {
     useStepsStore.setState({ ownerId: 'user_a', trackingWanted: true });
     tracker.getTrackingState.mockResolvedValue('stopped');
 
     await startStepSession(PROFILE);
 
     expect(tracker.clearHistory).not.toHaveBeenCalled();
+    expect(tracker.setCountFrom).not.toHaveBeenCalled();
     expect(tracker.startTracking).toHaveBeenCalled();
   });
 
-  test('signing out stops counting but remembers it was on', async () => {
+  test('back after a sign-out on an earlier day, today counts from the sign-in', async () => {
+    useStepsStore.setState({
+      ownerId: 'user_a',
+      trackingWanted: true,
+      signedOutAt: Date.now() - 36 * 3_600_000,
+    });
+    const before = Date.now();
+
+    await startStepSession(PROFILE);
+
+    expect(countedFrom()).toBeGreaterThanOrEqual(before);
+    expect(tracker.clearHistory).not.toHaveBeenCalled();
+    expect(useStepsStore.getState().signedOutAt).toBeNull();
+  });
+
+  test('back after a sign-out earlier today, the morning stays: counting carries on', async () => {
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    useStepsStore.setState({
+      ownerId: 'user_a',
+      trackingWanted: true,
+      // Signed out earlier today — whatever the clock says now.
+      signedOutAt: Math.max(midnight.getTime(), Date.now() - 60_000),
+    });
+
+    await startStepSession(PROFILE);
+
+    expect(tracker.setCountFrom).not.toHaveBeenCalled();
+    expect(useStepsStore.getState().signedOutAt).toBeNull();
+  });
+
+  test('signing out stops counting, remembers it was on, and when', async () => {
     useStepsStore.setState({ ownerId: 'user_a', trackingWanted: true });
     await startStepSession(PROFILE);
     tracker.getTrackingState.mockResolvedValue('running');
+    const before = Date.now();
 
     await stopStepsForSignOut();
 
     expect(tracker.stopTracking).toHaveBeenCalled();
+    const state = useStepsStore.getState();
+    expect(state.trackingWanted).toBe(true);
+    expect(state.signedOutAt).toBeGreaterThanOrEqual(before);
+    expect(tracker.setOtherDevicesSteps).toHaveBeenLastCalledWith(today, 0);
+  });
+});
+
+describe('writing to Health Connect (D-57)', () => {
+  test('asks for what Vokve uses, writing included, and keeps the answer', async () => {
+    const status = { canWriteSteps: true, undeclaredPermissions: [] };
+    tracker.requestHealthConnectPermissions.mockResolvedValueOnce(status);
+
+    await expect(allowHealthConnectWrites()).resolves.toBe(status);
+
+    expect(useStepsStore.getState().healthConnect).toBe(status);
+  });
+});
+
+describe('the permission screens’ ask (D-54)', () => {
+  beforeEach(() => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'Version', 'get').mockReturnValue(34);
+    jest.spyOn(PermissionsAndroid, 'check').mockResolvedValue(false);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test('asks for physical activity alone, and starts counting', async () => {
+    const request = jest
+      .spyOn(PermissionsAndroid, 'request')
+      .mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
+    await startStepSession(PROFILE);
+
+    expect(await enableStepCounting()).toBe('started');
+
+    expect(request).toHaveBeenCalledWith(
+      PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+    );
+    // Notifications have a screen of their own: the tracker's combined ask is not used.
+    expect(tracker.requestPermissions).not.toHaveBeenCalled();
+    expect(tracker.startTracking).toHaveBeenCalledTimes(1);
     expect(useStepsStore.getState().trackingWanted).toBe(true);
+  });
+
+  test('allowed before the session is up, counting starts with it', async () => {
+    jest
+      .spyOn(PermissionsAndroid, 'request')
+      .mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
+
+    expect(await enableStepCounting()).toBe('started');
+    expect(tracker.startTracking).not.toHaveBeenCalled();
+
+    // The session that follows the sign-in: a first one on this phone.
+    await startStepSession(PROFILE);
+    await settle();
+
+    expect(tracker.startTracking).toHaveBeenCalledTimes(1);
+    expect(useStepsStore.getState().trackingWanted).toBe(true);
+  });
+
+  test('a refusal leaves counting off', async () => {
+    jest
+      .spyOn(PermissionsAndroid, 'request')
+      .mockResolvedValue(PermissionsAndroid.RESULTS.DENIED);
+    await startStepSession(PROFILE);
+
+    expect(await enableStepCounting()).toBe('permission_denied');
+    expect(tracker.startTracking).not.toHaveBeenCalled();
   });
 });

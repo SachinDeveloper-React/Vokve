@@ -36,6 +36,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 jest.mock('../src/services/steps', () => ({
+  allowHealthConnectWrites: jest.fn().mockResolvedValue(null),
   connectHealthConnect: jest.fn().mockResolvedValue(null),
   disconnectHealthConnect: jest.fn().mockResolvedValue(undefined),
   enableStepTracking: jest.fn().mockResolvedValue('started'),
@@ -187,6 +188,24 @@ describe('StepTrackingScreen', () => {
     expect(steps.stopStepTracking).toHaveBeenCalledTimes(1);
   });
 
+  test('the day so far includes the other phones, and says which part is this phone’s', async () => {
+    // The tracker shows 72 counted here and 629 from the other phone.
+    useStepsStore.setState({
+      supported: true,
+      trackingState: 'running',
+      today: mockSnapshot({
+        state: 'running',
+        steps: 701,
+        otherDevicesSteps: 629,
+      }),
+    });
+    const tree = await render();
+
+    expect(allText(tree)).toContain(
+      '701 steps today — 72 counted by this phone, 629 by your other phones',
+    );
+  });
+
   test('a phone that keeps killing the service is told how to stop it', async () => {
     useStepsStore.setState({
       ...counting(900),
@@ -277,6 +296,48 @@ describe('StepTrackingScreen', () => {
 
     await press(tree, 'Manage access');
     expect(steps.openHealthConnectSettings).toHaveBeenCalledTimes(1);
+  });
+
+  test('connected before Vokve wrote there, it offers to add this phone’s steps (D-57)', async () => {
+    useStepsStore.setState({ ...counting(10), healthConnect: CONNECTED });
+    const tree = await render();
+
+    expect(allText(tree)).toContain(
+      'Let it add the steps this phone counts too, so your other fitness apps see them.',
+    );
+    await press(tree, 'Add my steps to Health Connect');
+    expect(steps.allowHealthConnectWrites).toHaveBeenCalledTimes(1);
+  });
+
+  test('with writing allowed, it says what goes in — and from when', async () => {
+    useStepsStore.setState({
+      ...counting(10),
+      healthConnect: {
+        ...CONNECTED,
+        canWriteSteps: true,
+      } as HealthConnectStatus,
+    });
+    const text = allText(await render());
+
+    expect(text).toContain('Reading your watch, adding your phone');
+    expect(text).toContain('Only what you walk while signed in is added.');
+    expect(text).not.toContain('Add my steps to Health Connect');
+  });
+
+  test('a build that does not declare writing only reads, and says so', async () => {
+    useStepsStore.setState({
+      ...counting(10),
+      healthConnect: {
+        ...CONNECTED,
+        undeclaredPermissions: ['android.permission.health.WRITE_STEPS'],
+      } as HealthConnectStatus,
+    });
+    const text = allText(await render());
+
+    expect(text).toContain(
+      'Vokve only reads. It never writes to Health Connect.',
+    );
+    expect(text).not.toContain('Add my steps to Health Connect');
   });
 
   test('Health Connect is read from the session, not asked again by the screen', async () => {

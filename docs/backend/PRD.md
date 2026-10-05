@@ -79,7 +79,7 @@ Numbered for traceability to PHASES.md and to tests. **MUST** = launch-blocking.
 |---|---|
 | P1 | MUST expose the `User` model exactly as the client's zod schema, plus `createdAt` and `country`. |
 | P2 | MUST expose profile highlights: level, tier title, achievement count, lifetime steps. Level curve defined in RULES.md. |
-| P3 | MUST sync user settings (units, step goal 1,000–50,000, water goal 500–8,000 ml, rest timer 15–600 s, haptics, reminders, keep-awake). |
+| P3 | MUST sync user settings (units, step goal 3,000–20,000 ⚙, water goal 500–8,000 ml, rest timer 15–600 s, haptics, reminders, keep-awake). |
 | P4 | MUST sync notification preferences: 8 category switches, quiet hours, SMS, email. |
 | P5 | MUST support avatar upload. |
 | P6 | MUST support shipping addresses (create, list, update, delete, default). |

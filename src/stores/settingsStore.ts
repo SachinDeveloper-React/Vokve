@@ -21,7 +21,12 @@ interface SettingsState {
   syncedAt: string | null;
 
   setUnits: (units: UnitSystem) => void;
-  setDailyStepGoal: (steps: number) => void;
+  /**
+   * Sets the step goal and waits for the server to keep it, so the goal
+   * screen can say whether it did. Throws when it did not, with the goal
+   * put back as it was.
+   */
+  saveDailyStepGoal: (steps: number) => Promise<void>;
   setDailyWaterGoalMl: (ml: number) => void;
   setRestTimerSeconds: (seconds: number) => void;
   toggleHaptics: () => void;
@@ -92,14 +97,19 @@ export const useSettingsStore = create<SettingsState>()(
           set({ dailyWaterGoalMl });
           push({ dailyWaterGoalMl });
         },
-        setDailyStepGoal: steps => {
-          // Clamped to a range a person can actually walk in a day.
-          const dailyStepGoal = Math.max(
-            1000,
-            Math.min(50000, Math.round(steps)),
-          );
+        // Waited on rather than pushed: the goal screen closes on the
+        // server's answer, and the range is the server's to check (⚙
+        // `activity.goal`) — the screen keeps to the one it was given.
+        saveDailyStepGoal: async steps => {
+          const previous = get().dailyStepGoal;
+          const dailyStepGoal = Math.round(steps);
           set({ dailyStepGoal });
-          push({ dailyStepGoal });
+          try {
+            set(fromServer(await settingsApi.update({ dailyStepGoal })));
+          } catch (error) {
+            set({ dailyStepGoal: previous });
+            throw error;
+          }
         },
         setRestTimerSeconds: seconds => {
           const restTimerSeconds = Math.max(

@@ -56,6 +56,14 @@ interface StepsState {
   /** The account whose steps the tracker's history holds. */
   ownerId: string | null;
   /**
+   * The instant this phone counts `ownerId` from (D-56): the sign-in the
+   * tracker was told to start at (`setCountFrom`). Null for an owner from
+   * before the tracker could be told.
+   */
+  countingFrom: number | null;
+  /** When `ownerId` last signed out on this phone; null while signed in. */
+  signedOutAt: number | null;
+  /**
    * The user turned counting on and has not turned it off. Signing out
    * stops the service without clearing this, so signing back in resumes.
    */
@@ -108,6 +116,8 @@ export const useStepsStore = create<StepsState>()(
     set => ({
       ...LIVE_DEFAULTS,
       ownerId: null,
+      countingFrom: null,
+      signedOutAt: null,
       trackingWanted: false,
       queue: [],
       synced: {},
@@ -136,6 +146,8 @@ export const useStepsStore = create<StepsState>()(
       version: 2,
       partialize: state => ({
         ownerId: state.ownerId,
+        countingFrom: state.countingFrom,
+        signedOutAt: state.signedOutAt,
         trackingWanted: state.trackingWanted,
         queue: state.queue,
         synced: state.synced,
@@ -156,6 +168,14 @@ export const useStepsSupported = () => useStepsStore(s => s.supported);
 export const useTrackingState = () => useStepsStore(s => s.trackingState);
 export const useStepPermissions = () => useStepsStore(s => s.permissions);
 export const useHealthConnectStatus = () => useStepsStore(s => s.healthConnect);
+/**
+ * Whether this phone's steps are written into Health Connect (D-57), as the
+ * server's set-up says — on, as it ships, before the server has answered.
+ */
+export const useHealthConnectWrites = () =>
+  useStepsStore(
+    s => s.activityConfig?.tracker.healthConnectWriteEnabled ?? true,
+  );
 export const useTrackingHealth = () => useStepsStore(s => s.trackingHealth);
 export const useBackgroundRestrictions = () => useStepsStore(s => s.background);
 export const useStepSyncStatus = () => useStepsStore(s => s.syncStatus);
@@ -282,11 +302,23 @@ export const useTodayActivity = (): TodayActivity => {
 
 /**
  * What the tracker on this phone has counted today — the step tracking
- * screen's live figure, before it has reached the server. A snapshot from an
- * earlier day reads as zero: the app can sit across midnight with nothing to
- * replace it until it comes back.
+ * screen's live figure, before it has reached the server. Its own count,
+ * without the other phones' steps the tracker shows on top of it. A
+ * snapshot from an earlier day reads as zero: the app can sit across
+ * midnight with nothing to replace it until it comes back.
  */
 export const usePhoneStepsToday = (): number =>
   useStepsStore(s =>
-    s.today && s.today.date === todayIso() ? s.today.steps : 0,
+    s.today && s.today.date === todayIso()
+      ? s.today.steps - (s.today.otherDevicesSteps ?? 0)
+      : 0,
+  );
+
+/**
+ * The user's other phones' steps today, as the tracker shows them on top of
+ * this phone's — the server's day less what this phone sent it (D-53).
+ */
+export const useOtherDevicesStepsToday = (): number =>
+  useStepsStore(s =>
+    s.today && s.today.date === todayIso() ? s.today.otherDevicesSteps ?? 0 : 0,
   );

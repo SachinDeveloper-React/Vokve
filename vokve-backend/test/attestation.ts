@@ -204,8 +204,10 @@ export interface DayShape {
   resolvedBy?: { packageName: string; appName: string; kind?: string };
   timezone?: string;
   signedAt?: number;
-  /** Minutes of walking, spread from 09:00 local in steps of `perMinute`. */
+  /** Minutes of walking, spread from `walkStartHour` (09:00) local in steps of `perMinute`. */
   walkingMinutes?: number;
+  /** The local hour the walk starts at; 9 when absent. */
+  walkStartHour?: number;
   perMinute?: number;
   windows?: { hz: number; variance: number; steps: number }[];
   sources?: Record<string, unknown>[];
@@ -216,8 +218,8 @@ export interface DayShape {
 /** A `VerificationSnapshot` as react-native-step-tracker-pro 2.4 builds one, with the parts a test varies. */
 export function snapshotPayload(shape: DayShape): Record<string, unknown> {
   const timezone = shape.timezone ?? 'Asia/Kolkata';
-  // 09:00 IST on the day, in epoch ms.
-  const start = Date.parse(`${shape.date}T09:00:00+05:30`);
+  // The walk's start, 09:00 IST unless the shape says, in epoch ms.
+  const start =Date.parse(`${shape.date}T${String(shape.walkStartHour ?? 9).padStart(2, '0')}:00:00+05:30`);
   const perMinute = shape.perMinute ?? 100;
   const minutes = Array.from({ length: shape.walkingMinutes ?? Math.round(shape.deviceSteps / perMinute) }, (_, i) => ({
     minuteStart: start + i * 60_000, steps: perMinute, untimedSteps: 0, chargingSteps: 0, stillSteps: 0, vehicleSteps: 0,

@@ -4,17 +4,21 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
-      Health Connect, read only. Step counting itself (ACTIVITY_RECOGNITION,
-      the health foreground service, boot restart) is declared by
-      react-native-step-tracker-pro's own manifest. These two let it read a
-      watch or another app's steps and distance for the same day; Vokve never
-      writes to Health Connect, so no WRITE_* is declared. Background reads
-      need no READ_HEALTH_DATA_IN_BACKGROUND while tracking is on: the
-      tracking service is a foreground service, which Health Connect treats
-      as foreground.
+      Health Connect. Step counting itself (ACTIVITY_RECOGNITION, the health
+      foreground service, boot restart) is declared by
+      react-native-step-tracker-pro's own manifest. The two reads let it use
+      a watch or another app's steps and distance for the same day. WRITE_STEPS
+      puts the steps this phone counts into Health Connect for the user's
+      other fitness apps (D-57) - steps only: Vokve's distance and calories
+      are estimates, so WRITE_DISTANCE and WRITE_TOTAL_CALORIES_BURNED are
+      left out, and the tracker does not ask for them. Background reads need
+      no READ_HEALTH_DATA_IN_BACKGROUND while tracking is on: the tracking
+      service is a foreground service, which Health Connect treats as
+      foreground.
     -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+    <uses-permission android:name="android.permission.health.WRITE_STEPS" />
 
     <!--
       Taking a profile photo. The picker needs no storage permission: on

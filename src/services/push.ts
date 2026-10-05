@@ -3,6 +3,7 @@ import {
   AuthorizationStatus,
   getMessaging,
   getToken,
+  hasPermission,
   onTokenRefresh,
   requestPermission,
 } from '@react-native-firebase/messaging';
@@ -36,6 +37,31 @@ async function ensurePermission(): Promise<boolean> {
   );
 }
 
+/**
+ * Whether the OS shows this app's notifications now — asked of nobody. On
+ * Android before 13 they need no permission; from 13 the runtime one says;
+ * iOS answers through Firebase without a dialog.
+ */
+export async function notificationsAllowed(): Promise<boolean> {
+  try {
+    if (Platform.OS === 'android') {
+      return (
+        Platform.Version < 33 ||
+        (await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+        ))
+      );
+    }
+    const status = await hasPermission(getMessaging());
+    return (
+      status === AuthorizationStatus.AUTHORIZED ||
+      status === AuthorizationStatus.PROVISIONAL
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function sendToken(token: string | null): Promise<void> {
   const deviceId = getDeviceId();
   if (!deviceId) {
@@ -51,18 +77,25 @@ async function sendToken(token: string | null): Promise<void> {
 }
 
 /**
- * Asks to be allowed to notify, then hands the device's FCM token to the
- * server (`PATCH /devices/:id { pushToken }`) — which is where a push for
- * this user is actually addressed. Called once a session and a device
- * registration exist; a refusal is respected and simply leaves the server
- * with no token for this device, so it writes feed rows only.
+ * Hands the device's FCM token to the server (`PATCH /devices/:id
+ * { pushToken }`) — which is where a push for this user is actually
+ * addressed — once notifications are allowed. Called whenever a session
+ * and a device registration exist, and then it only checks: the asking is
+ * the notification screen's, after sign-in (`ask`), where the user has been
+ * told what the notifications are for before the system dialog appears. A
+ * refusal is respected and simply leaves the server with no token for this
+ * device, so it writes feed rows only.
  *
  * Firebase rotates tokens; the listener keeps the server current for as
  * long as the app runs.
  */
-export async function registerForPush(): Promise<boolean> {
+export async function registerForPush({
+  ask = false,
+}: { ask?: boolean } = {}): Promise<boolean> {
   try {
-    const allowed = await ensurePermission();
+    const allowed = ask
+      ? await ensurePermission()
+      : await notificationsAllowed();
     if (!allowed) {
       logger.info('push', 'Notifications not permitted; feed only');
       return false;
@@ -85,6 +118,14 @@ export async function registerForPush(): Promise<boolean> {
     logger.warn('push', 'Push registration skipped', error);
     return false;
   }
+}
+
+/**
+ * The notification screen's "Allow": the system dialog, then the token to
+ * the server. True when notifications are on afterwards.
+ */
+export function enablePushNotifications(): Promise<boolean> {
+  return registerForPush({ ask: true });
 }
 
 /**

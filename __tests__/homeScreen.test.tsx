@@ -105,6 +105,12 @@ describe('HomeScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('Hydration');
   });
 
+  test("the step card's Edit Goal opens the step goal screen", async () => {
+    press(await render(), 'Edit daily step goal');
+
+    expect(mockNavigate).toHaveBeenCalledWith('StepGoal');
+  });
+
   test('the analysis tile opens the steps analytics', async () => {
     press(await render(), 'Analysis');
 

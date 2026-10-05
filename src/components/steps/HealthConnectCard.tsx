@@ -20,6 +20,30 @@ export type HealthConnectCardState =
   | 'connected';
 
 /**
+ * Whether this phone's steps go into Health Connect (D-57): `off` where
+ * Vokve does not write — the server's set-up, or a build that does not
+ * declare it — `on` once the user allowed it, and `ask` where the user has
+ * not, which is everyone who connected before Vokve wrote there.
+ */
+export type HealthConnectWrites = 'off' | 'on' | 'ask';
+
+const WRITE_STEPS = 'android.permission.health.WRITE_STEPS';
+
+export function healthConnectWrites(
+  status: HealthConnectStatus | null,
+  enabled: boolean,
+): HealthConnectWrites {
+  if (
+    !enabled ||
+    !status ||
+    status.undeclaredPermissions?.includes(WRITE_STEPS)
+  ) {
+    return 'off';
+  }
+  return status.canWriteSteps ? 'on' : 'ask';
+}
+
+/**
  * The rung, from the tracker's status. Steps are what matter: a user who
  * allowed steps and refused distance is connected — the watch's steps are
  * used and its distance worked out from them.
@@ -41,6 +65,10 @@ export function healthConnectCardState(
 
 interface Props {
   state: HealthConnectCardState;
+  /** Whether this phone's steps are written there, once connected. */
+  writes: HealthConnectWrites;
+  /** Asks for the write grant (`ask`). */
+  onAllowWrites: () => void;
   /**
    * The app can take its own access away and have it gone at once — Android
    * 13 and below. From Android 14 an app's own revocation only lands when
@@ -79,16 +107,33 @@ const PROMPT: Partial<
   },
 };
 
+/** What Vokve does with Health Connect once connected, in a sentence. */
+const WRITES_NOTE: Record<HealthConnectWrites, string> = {
+  on: "Vokve uses your watch's steps, and adds the steps this phone counts so your other fitness apps see them. Only what you walk while signed in is added. See which apps your steps come from on the step sources page.",
+  ask: "Vokve uses your watch's steps. Let it add the steps this phone counts too, so your other fitness apps see them.",
+  off: 'Vokve only reads. It never writes to Health Connect. See which apps your steps come from on the step sources page.',
+};
+
 /**
- * Health Connect, which is how a watch's steps reach Vokve.
+ * Health Connect, which is how a watch's steps reach Vokve — and how the
+ * steps this phone counts reach the user's other fitness apps (D-57).
  *
  * Optional, and labelled so: the phone counts on its own, and a card that
  * looked like a required step would push people with no watch through a
- * permission sheet for nothing. Vokve only reads — the card says so, because
- * "health data" on a permission sheet is the line people stop at.
+ * permission sheet for nothing. What Vokve reads and what it writes is said
+ * plainly, because "health data" on a permission sheet is the line people
+ * stop at.
  */
 export const HealthConnectCard = memo(
-  ({ state, disconnectInApp, onConnect, onManage, onDisconnect }: Props) => {
+  ({
+    state,
+    writes,
+    disconnectInApp,
+    onConnect,
+    onAllowWrites,
+    onManage,
+    onDisconnect,
+  }: Props) => {
     const { colors } = useTheme();
     const prompt = PROMPT[state];
 
@@ -104,9 +149,11 @@ export const HealthConnectCard = memo(
             <VStack flex={1} gap="xxs">
               <AppText variant="bodyStrong">Health Connect</AppText>
               <AppText variant="caption" color="textSecondary">
-                {state === 'connected'
-                  ? 'Reading steps and distance'
-                  : 'Steps from a watch or another fitness app'}
+                {state !== 'connected'
+                  ? 'Steps from a watch or another fitness app'
+                  : writes === 'on'
+                  ? 'Reading your watch, adding your phone'
+                  : 'Reading steps and distance'}
               </AppText>
             </VStack>
             <Chip
@@ -139,9 +186,17 @@ export const HealthConnectCard = memo(
           {state === 'connected' ? (
             <VStack gap="md">
               <AppText variant="caption" color="textSecondary">
-                Vokve only reads. It never writes to Health Connect. See which
-                apps your steps come from on the step sources page.
+                {WRITES_NOTE[writes]}
               </AppText>
+
+              {writes === 'ask' ? (
+                <Button
+                  label="Add my steps to Health Connect"
+                  variant="brandOutline"
+                  size="sm"
+                  onPress={onAllowWrites}
+                />
+              ) : null}
 
               {disconnectInApp ? (
                 <HStack gap="sm">

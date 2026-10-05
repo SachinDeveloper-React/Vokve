@@ -42,6 +42,7 @@ import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
 import { WishlistScreen } from '../screens/main/WishlistScreen';
 import { WriteReviewScreen } from '../screens/main/WriteReviewScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
+import { StepGoalScreen } from '../screens/main/StepGoalScreen';
 import { StepSourcesScreen } from '../screens/main/StepSourcesScreen';
 import { StepTrackingScreen } from '../screens/main/StepTrackingScreen';
 import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
@@ -53,13 +54,16 @@ import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
   useAuthStore,
+  useCurrentUser,
   useIsProfileComplete,
   usePendingContactVerification,
 } from '../stores/authStore';
+import { usePermissionsDone } from '../stores/onboardingStore';
 import { useTheme } from '../theme';
 import type { RootStackParamList } from '../types/navigation';
 import { AuthNavigator } from './AuthNavigator';
 import { OnboardingNavigator } from './OnboardingNavigator';
+import { PermissionsNavigator } from './PermissionsNavigator';
 import { TabNavigator } from './TabNavigator';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -85,6 +89,8 @@ export const RootNavigator = () => {
   const { colors, navigationTheme } = useTheme();
   const status = useAuthStatus();
   const isProfileComplete = useIsProfileComplete();
+  const userId = useCurrentUser()?.id;
+  const permissionsDone = usePermissionsDone(userId);
   const hydrate = useAuthStore(s => s.hydrate);
   const pendingContact = usePendingContactVerification();
   const upgradeRequired = useUpgradeRequired();
@@ -100,12 +106,33 @@ export const RootNavigator = () => {
   // Step counting follows the session, not any one screen.
   useStepTrackingSession();
 
+  const isSignedIn = status === 'authenticated' || shouldBypassAuth();
+
+  // Onboarding is gated on the session, not instead of it: a verified user
+  // who has not finished their profile is signed in — they simply cannot
+  // reach the app until the remaining details are in. The dev bypass skips
+  // this too, or it would replace one gate with another.
+  const needsOnboarding =
+    status === 'authenticated' && !isProfileComplete && !shouldBypassAuth();
+
+  // Then, once per account on this phone, the set-up — the permission
+  // screens (physical activity, notifications, Health Connect, D-54) and
+  // the step goal (D-55) — before Home.
+  const needsPermissions =
+    status === 'authenticated' &&
+    isProfileComplete &&
+    !permissionsDone &&
+    !shouldBypassAuth();
+
+  const inApp = isSignedIn && !needsOnboarding && !needsPermissions;
+
   // Once, per challenge: the moment the sign-up code passes, the server
-  // hands back the challenge for the other contact and the app is already
-  // on Main, so the verify screen is pushed over it. Skipping it goes back
-  // to Main; the banner can ask again later (D-20 — soft gate).
+  // hands back the challenge for the other contact, and the verify screen
+  // is pushed over Main as soon as Main is there — after the profile and
+  // the permission screens. Skipping it goes back to Main; the banner can
+  // ask again later (D-20 — soft gate).
   useEffect(() => {
-    if (!isNavReady || !pendingContact) {
+    if (!isNavReady || !pendingContact || !inApp) {
       return;
     }
     if (promptedFor.current === pendingContact.verificationId) {
@@ -113,7 +140,7 @@ export const RootNavigator = () => {
     }
     promptedFor.current = pendingContact.verificationId;
     navigationRef.navigate('VerifyContact');
-  }, [isNavReady, navigationRef, pendingContact]);
+  }, [inApp, isNavReady, navigationRef, pendingContact]);
 
   // A retired build outranks everything: no session state matters when
   // every request is refused.
@@ -137,15 +164,6 @@ export const RootNavigator = () => {
     );
   }
 
-  const isSignedIn = status === 'authenticated' || shouldBypassAuth();
-
-  // Onboarding is gated on the session, not instead of it: a verified user
-  // who has not finished their profile is signed in — they simply cannot
-  // reach the app until the remaining details are in. The dev bypass skips
-  // this too, or it would replace one gate with another.
-  const needsOnboarding =
-    status === 'authenticated' && !isProfileComplete && !shouldBypassAuth();
-
   return (
     <NavigationContainer
       ref={navigationRef}
@@ -155,6 +173,8 @@ export const RootNavigator = () => {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {needsOnboarding ? (
           <Stack.Screen name="Onboarding" component={OnboardingNavigator} />
+        ) : needsPermissions ? (
+          <Stack.Screen name="Permissions" component={PermissionsNavigator} />
         ) : isSignedIn ? (
           <Stack.Group>
             <Stack.Screen name="Main" component={TabNavigator} />
@@ -331,6 +351,11 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="StepSources"
               component={StepSourcesScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="StepGoal"
+              component={StepGoalScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

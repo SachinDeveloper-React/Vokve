@@ -1,4 +1,4 @@
-import { AppState } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import StepTracker, {
   StepTrackerError,
@@ -18,7 +18,7 @@ import type {
   Gender,
   StepIngestResult,
 } from '../types/models';
-import { addDays, todayIso } from '../utils/date';
+import { addDays, toIsoDate, todayIso } from '../utils/date';
 import { logger } from '../utils/logger';
 import { uuid } from '../utils/uuid';
 import type { IngestIntegrity } from './api/contracts';
@@ -52,7 +52,8 @@ import { logStepDebug } from './stepsDebug';
 const FALLBACK_CONFIG: ActivityConfig = {
   tracker: {
     healthConnectReadTypes: ['steps', 'distance'],
-    healthConnectWriteEnabled: false,
+    healthConnectWriteEnabled: true,
+    healthConnectWriteGranularity: 'minute',
     healthConnectIgnoreManualEntries: true,
     wearableTrust: 'catalog',
     wearableAllowlist: ['com.google.android.apps.fitness'],
@@ -92,9 +93,10 @@ export interface StepProfile {
 }
 
 /**
- * The tracker's config: the server's set-up (read-only Health Connect,
- * checks that flag and remove nothing, `split` recovery, as it stands by
- * default), and the user's own body and goal.
+ * The tracker's config: the server's set-up (Health Connect read for a
+ * watch and written with this phone's own steps, checks that flag and
+ * remove nothing, `split` recovery, as it stands by default), and the
+ * user's own body and goal.
  */
 function trackerConfig(
   profile: StepProfile,
@@ -207,6 +209,8 @@ export async function startStepSession(profile: StepProfile): Promise<void> {
     listen(id);
     await catchUp(id, { start: true });
     if (!isLive(id)) return;
+    // The server's week, read as the session began, may already be in.
+    shareOtherDevicesSteps();
 
     // Play's token provider takes seconds to warm up; doing it now means the
     // first token the server asks for does not pay for it.
@@ -247,6 +251,12 @@ async function catchUp(
     return;
   }
   if (!isLive(id)) return;
+  // Counting allowed on the permission screens before this session was up:
+  // wanted now, by this user, and switched on just below.
+  if (startWhenReady) {
+    startWhenReady = false;
+    useStepsStore.setState({ trackingWanted: true });
+  }
 
   // Reading tracking health from the foreground also restarts a service an
   // OEM killed — the one moment a background-start limit cannot apply.
@@ -305,8 +315,67 @@ export async function refreshServerActivity(): Promise<void> {
   try {
     const week = await activityApi.weekly();
     useStepsStore.setState({ serverWeek: week, serverWeekAt: Date.now() });
+    shareOtherDevicesSteps();
   } catch (error) {
     logger.warn('steps', 'Server steps not loaded', toApiError(error));
+  }
+}
+
+/** What the tracker was last told about the other phones, so the same figure is not sent twice. */
+let sharedOtherDevices: { date: string; steps: number } | null = null;
+
+/**
+ * The user's other phones' steps today, handed to the tracker, which shows
+ * them on top of this phone's own — the notification, the live count and
+ * the daily goal — and never counts them as this phone's (D-53). The
+ * server's day less what this phone last sent it; before this phone has
+ * sent anything, all of the server's day is the other phones'.
+ */
+function shareOtherDevicesSteps(): void {
+  if (!session) {
+    return;
+  }
+  const today = todayIso();
+  const state = steps();
+  const day =
+    state.serverWeek.find(entry => entry.date === today) ??
+    state.serverDays[today];
+  if (!day) {
+    return;
+  }
+  const others = Math.max(
+    0,
+    Math.round(day.steps - (state.synced[today]?.steps ?? 0)),
+  );
+  if (
+    sharedOtherDevices?.date === today &&
+    sharedOtherDevices.steps === others
+  ) {
+    return;
+  }
+  sharedOtherDevices = { date: today, steps: others };
+  StepTracker.setOtherDevicesSteps(today, others)
+    .then(snapshot => {
+      if (session) {
+        useStepsStore.setState({
+          today: snapshot,
+          trackingState: snapshot.state,
+        });
+      }
+    })
+    .catch(error => {
+      sharedOtherDevices = null;
+      logger.warn('steps', "Other phones' steps were not shown", error);
+    });
+}
+
+/** No other phones' steps on this phone any more: another account, or none. */
+async function clearOtherDevicesSteps(): Promise<void> {
+  sharedOtherDevices = null;
+  try {
+    await StepTracker.setOtherDevicesSteps(todayIso(), 0);
+  } catch (error) {
+    logger.warn('steps', "Other phones' steps were not cleared", error);
   }
 }
 
@@ -359,6 +428,7 @@ export function endStepSession(): void {
     clearInterval(session.interval);
   }
   session = null;
+  sharedOtherDevices = null;
   forced.clear();
   steps().resetLive();
 }
@@ -371,7 +441,11 @@ export function endStepSession(): void {
  * (`claimOwnership`).
  */
 export async function stopStepsForSignOut(): Promise<void> {
+  // A start asked for on the permission screens belongs to this account.
+  startWhenReady = false;
   endStepSession();
+  // The next sign-in decides from this whether today started over (D-56).
+  useStepsStore.setState({ signedOutAt: Date.now() });
   if (!isSupported()) {
     return;
   }
@@ -383,17 +457,37 @@ export async function stopStepsForSignOut(): Promise<void> {
   } catch (error) {
     logger.warn('steps', 'Could not stop counting on sign-out', error);
   }
+  // The other phones were this account's; the next sign-in learns its own.
+  await clearOtherDevicesSteps();
 }
 
 /**
- * The tracker's history is the phone's, not the account's. When a different
- * account signs in, the last one's days are cleared rather than shown — or
- * worse, synced — as the new one's, and counting waits for this user to turn
- * it on themselves.
+ * Whose steps the phone counts, and from when (D-56). Counting starts at
+ * sign-in: the tracker is told to count nothing before it
+ * (`setCountFrom`) — not the steps its counter held, not any Health
+ * Connect app's, a watch's included — and starts today over.
+ *
+ * - **Another account** (or the first): the last one's days are cleared
+ *   rather than shown — or worse, synced — as this one's, counting starts
+ *   now, and waits for this user to turn it on themselves.
+ * - **The same account, back after a sign-out**: counting starts now if the
+ *   sign-out was on an earlier day. Signed out earlier today, it carries on
+ *   from where it was: what was walked before the sign-out is this
+ *   account's, and starting over would lose it. What the phone counted
+ *   while signed out is never counted — tracking was stopped, and a stop is
+ *   a stop (tracker 2.7).
+ * - **A launch** with the session still there changes nothing.
  */
 async function claimOwnership(userId: string): Promise<void> {
-  const { ownerId } = steps();
+  const { ownerId, signedOutAt } = steps();
   if (ownerId === userId) {
+    if (signedOutAt === null) {
+      return;
+    }
+    if (toIsoDate(new Date(signedOutAt)) !== todayIso()) {
+      await countFrom(Date.now());
+    }
+    useStepsStore.setState({ signedOutAt: null });
     return;
   }
   if (ownerId !== null) {
@@ -401,12 +495,19 @@ async function claimOwnership(userId: string): Promise<void> {
     if (state === 'running' || state === 'paused') {
       await StepTracker.stopTracking();
     }
+    // The last account's days, and what its other phones counted on them.
     await StepTracker.clearHistory();
-    await StepTracker.resetToday();
+    sharedOtherDevices = null;
     useStepsStore.setState({ trackingState: 'stopped', today: null });
+  }
+  // Starting today over is what keeps the last account's walk off this
+  // one's: done by hand where the tracker could not be told.
+  if (!(await countFrom(Date.now())) && ownerId !== null) {
+    await StepTracker.resetToday();
   }
   useStepsStore.setState({
     ownerId: userId,
+    signedOutAt: null,
     trackingWanted: false,
     queue: [],
     synced: {},
@@ -414,6 +515,23 @@ async function claimOwnership(userId: string): Promise<void> {
     lastSyncedAt: null,
     recoveriesAcknowledged: null,
   });
+}
+
+/**
+ * Tells the tracker to count nothing before `at` — the sign-in — and starts
+ * today over from it. False, never a throw, when it could not be told — a
+ * build from before tracker 2.7 — which counts the day as it always did;
+ * the server still counts only what was walked after the sign-in.
+ */
+async function countFrom(at: number): Promise<boolean> {
+  try {
+    const snapshot = await StepTracker.setCountFrom(at);
+    useStepsStore.setState({ countingFrom: at, today: snapshot });
+    return true;
+  } catch (error) {
+    logger.warn('steps', 'Counting from sign-in was not set', error);
+    return false;
+  }
 }
 
 /** Counting back on after a sign-out, for a user who never turned it off. */
@@ -585,21 +703,110 @@ export async function enableStepTracking(): Promise<EnableTrackingResult> {
     if (!permissions.allGranted) {
       return 'permission_denied';
     }
-    const snapshot = await StepTracker.startTracking();
-    useStepsStore.setState({
-      today: snapshot,
-      trackingState: snapshot.state,
-      trackingWanted: true,
-    });
-    refreshStepStatus();
-    scheduleSync([todayIso()]);
-    return 'started';
+    return await startCounting();
   } catch (error) {
-    const code = error instanceof StepTrackerError ? error.code : null;
-    if (code === 'E_PERMISSION_DENIED') return 'permission_denied';
-    if (code === 'E_NO_SENSOR') return 'no_sensor';
-    logger.warn('steps', 'Counting did not start', error);
-    return 'failed';
+    return startFailure(error);
+  }
+}
+
+/** Counting on, once physical activity is allowed. */
+async function startCounting(): Promise<EnableTrackingResult> {
+  const snapshot = await StepTracker.startTracking();
+  useStepsStore.setState({
+    today: snapshot,
+    trackingState: snapshot.state,
+    trackingWanted: true,
+  });
+  refreshStepStatus();
+  scheduleSync([todayIso()]);
+  return 'started';
+}
+
+function startFailure(error: unknown): EnableTrackingResult {
+  const code = error instanceof StepTrackerError ? error.code : null;
+  if (code === 'E_PERMISSION_DENIED') return 'permission_denied';
+  if (code === 'E_NO_SENSOR') return 'no_sensor';
+  logger.warn('steps', 'Counting did not start', error);
+  return 'failed';
+}
+
+/** Physical activity is a runtime permission from Android 10. */
+const ACTIVITY_PERMISSION_FROM_API = 29;
+
+const hasActivityPermission = async (): Promise<boolean> =>
+  Platform.OS === 'android' &&
+  (Number(Platform.Version) < ACTIVITY_PERMISSION_FROM_API ||
+    (await PermissionsAndroid.check(
+      PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+    )));
+
+/**
+ * Counting asked for while the session that follows a sign-in was still
+ * starting. The session turns it on as soon as it is up — see `catchUp`.
+ */
+let startWhenReady = false;
+
+/**
+ * The permission screens' first ask, after sign-in: physical activity on
+ * its own — notifications have a screen of their own next — and counting
+ * on. The session may still be starting a moment after sign-in; counting
+ * then starts with it, so the user is never sent back to switch it on.
+ */
+export async function enableStepCounting(): Promise<EnableTrackingResult> {
+  if (Platform.OS !== 'android' || !isSupported()) {
+    return 'no_sensor';
+  }
+  try {
+    const allowed =
+      (await hasActivityPermission()) ||
+      (await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+      )) === PermissionsAndroid.RESULTS.GRANTED;
+    if (!allowed) {
+      return 'permission_denied';
+    }
+    if (!session) {
+      startWhenReady = true;
+      return 'started';
+    }
+    return await startCounting();
+  } catch (error) {
+    return startFailure(error);
+  }
+}
+
+/** Whether the permission screens should ask about counting: this phone can, and is not yet. */
+export async function countingNeedsTurningOn(): Promise<boolean> {
+  if (Platform.OS !== 'android' || !isSupported()) {
+    return false;
+  }
+  try {
+    const state = await StepTracker.getTrackingState();
+    const counting = state === 'running' || state === 'paused';
+    return !(counting && (await hasActivityPermission()));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Whether the permission screens should offer Health Connect: it can be
+ * used on this phone — installed or installable — and steps are not yet
+ * allowed. Its status is kept for the screen that asks.
+ */
+export async function healthConnectNeedsConnecting(): Promise<boolean> {
+  if (Platform.OS !== 'android' || !isSupported()) {
+    return false;
+  }
+  try {
+    const status = await StepTracker.getHealthConnectStatus();
+    useStepsStore.setState({ healthConnect: status });
+    if (status.availability === 'not_supported') {
+      return false;
+    }
+    return !(status.stepsGranted ?? status.canReadSteps ?? status.canRead);
+  } catch {
+    return false;
   }
 }
 
@@ -635,6 +842,19 @@ export async function openStepPermissionSettings(): Promise<void> {
  */
 export async function connectHealthConnect(): Promise<HealthConnectStatus> {
   const status = await StepTracker.enableHealthConnect();
+  useStepsStore.setState({ healthConnect: status });
+  return status;
+}
+
+/**
+ * Asks for what Health Connect still lacks of what Vokve uses — for a user
+ * who connected before Vokve wrote its steps there (D-57), the write grant.
+ * `enableHealthConnect` stops at steps being readable, so this is the one
+ * that shows the sheet for the rest. A sheet the user dismissed is not an
+ * error; the answer is the status afterwards.
+ */
+export async function allowHealthConnectWrites(): Promise<HealthConnectStatus> {
+  const status = await StepTracker.requestHealthConnectPermissions();
   useStepsStore.setState({ healthConnect: status });
   return status;
 }
@@ -888,6 +1108,8 @@ function recordSent(
     lastSyncedAt: at,
   }));
   patchServerWeek(result.day);
+  // The answer has the other phones in it as of this upload.
+  shareOtherDevicesSteps();
   if (result.coinsHeld > 0) {
     useCoinsStore.getState().hydrateFromServer();
   }

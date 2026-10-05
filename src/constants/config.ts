@@ -10,7 +10,7 @@ import { Platform } from 'react-native';
  * emulator reaches the host machine at 10.0.2.2, not localhost; a physical
  * device needs the machine's LAN address instead (D-31: staging comes later).
  */
-const LOCAL_API_HOST = Platform.OS === 'android' ? '192.168.1.35' : 'localhost';
+const LOCAL_API_HOST = Platform.OS === 'android' ? '192.168.0.112' : 'localhost';
 
 export const config = {
   apiBaseUrl: __DEV__

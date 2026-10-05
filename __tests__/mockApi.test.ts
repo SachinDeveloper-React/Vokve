@@ -243,7 +243,10 @@ describe('mock app data', () => {
   });
 
   test('starts a new account with no history, so the empty state is reachable', async () => {
-    await expect(mockWorkoutApi.history()).resolves.toEqual({ data: [], nextCursor: null });
+    await expect(mockWorkoutApi.history()).resolves.toEqual({
+      data: [],
+      nextCursor: null,
+    });
   });
 
   test('returns a full week of activity, dated, and empty until a day is synced', async () => {
@@ -330,9 +333,9 @@ describe('mock step sync', () => {
     );
 
     await attest();
-    const refusal = await mockActivityApi.ingest(payload, key()).catch(
-      error => error as ApiError,
-    );
+    const refusal = await mockActivityApi
+      .ingest(payload, key())
+      .catch(error => error as ApiError);
     expect((refusal as ApiError).code).toBe('INTEGRITY_REQUIRED');
     expect((refusal as ApiError).details).toEqual({
       cloudProjectNumber: MOCK_CLOUD_PROJECT_NUMBER,
@@ -340,7 +343,10 @@ describe('mock step sync', () => {
 
     // The same snapshot, now with what Play said: the nonce is still good.
     const result = await mockActivityApi.ingest(
-      { ...payload, integrity: { error: 'PLAY_STORE_NOT_FOUND', retryable: false } },
+      {
+        ...payload,
+        integrity: { error: 'PLAY_STORE_NOT_FOUND', retryable: false },
+      },
       key(),
     );
     expect(result.day.steps).toBe(6400);
@@ -462,6 +468,31 @@ describe('mock settings', () => {
       mockSettingsApi.update({ dailyStepGoal: 500 }),
     ).rejects.toBeInstanceOf(ApiError);
   });
+
+  test("keeps the step goal to the server's range, and a saved goal is chosen (D-55)", async () => {
+    await expect(mockActivityApi.goal()).resolves.toEqual({
+      goal: 10_000,
+      recommended: 10_000,
+      basedOn: { age: false, bmi: false, recentSteps: false },
+      min: 3000,
+      max: 20_000,
+      increment: 500,
+      chosenAt: null,
+    });
+
+    const refused = await mockSettingsApi
+      .update({ dailyStepGoal: 2500 })
+      .catch(error => error as ApiError);
+    expect(refused).toBeInstanceOf(ApiError);
+    expect((refused as ApiError).details).toEqual({
+      dailyStepGoal: 'Choose a goal between 3,000 and 20,000 steps.',
+    });
+
+    await mockSettingsApi.update({ dailyStepGoal: 7000 });
+    const goal = await mockActivityApi.goal();
+    expect(goal.goal).toBe(7000);
+    expect(goal.chosenAt).toEqual(expect.any(String));
+  });
 });
 
 describe('the wallet ledger', () => {
@@ -488,7 +519,10 @@ describe('the wallet ledger', () => {
   });
 
   test('filters to one source and pages inside it', async () => {
-    const page = await mockWalletApi.transactions({ source: 'workout', limit: 2 });
+    const page = await mockWalletApi.transactions({
+      source: 'workout',
+      limit: 2,
+    });
     expect(page.data.every(row => row.source === 'workout')).toBe(true);
     expect(page.data).toHaveLength(2);
     expect(page.nextCursor).not.toBeNull();
@@ -506,10 +540,17 @@ describe('the wallet ledger', () => {
     const now = new Date();
     const thisMonth = seedCoinTransactions.filter(row => {
       const at = new Date(row.createdAt);
-      return at.getMonth() === now.getMonth() && at.getFullYear() === now.getFullYear();
+      return (
+        at.getMonth() === now.getMonth() &&
+        at.getFullYear() === now.getFullYear()
+      );
     });
-    const earned = thisMonth.filter(r => r.amount > 0).reduce((s, r) => s + r.amount, 0);
-    const spent = thisMonth.filter(r => r.amount < 0).reduce((s, r) => s - r.amount, 0);
+    const earned = thisMonth
+      .filter(r => r.amount > 0)
+      .reduce((s, r) => s + r.amount, 0);
+    const spent = thisMonth
+      .filter(r => r.amount < 0)
+      .reduce((s, r) => s - r.amount, 0);
 
     expect(wallet.monthSummary).toEqual({ earned, spent, net: earned - spent });
   });
@@ -530,7 +571,9 @@ describe('the notification feed', () => {
     const rewards = await mockNotificationApi.list({ category: 'reward' });
     expect(rewards.data.length).toBeGreaterThan(0);
     expect(
-      rewards.data.every(n => ['coins', 'challenge', 'reward'].includes(n.topic)),
+      rewards.data.every(n =>
+        ['coins', 'challenge', 'reward'].includes(n.topic),
+      ),
     ).toBe(true);
   });
 
@@ -544,23 +587,39 @@ describe('the notification feed', () => {
     expect(after.data.find(n => n.id === target.id)?.read).toBe(true);
 
     await mockNotificationApi.markAllRead();
-    expect((await mockNotificationApi.list()).data.every(n => n.read)).toBe(true);
+    expect((await mockNotificationApi.list()).data.every(n => n.read)).toBe(
+      true,
+    );
 
     await mockAuthApi.signOut();
-    expect((await mockNotificationApi.list()).data.some(n => !n.read)).toBe(true);
+    expect((await mockNotificationApi.list()).data.some(n => !n.read)).toBe(
+      true,
+    );
   });
 });
 
 describe('the shop, orders and addresses', () => {
   const ADDRESS = {
-    label: 'Home', name: 'Asha Verma', phone: '+919876543210', line1: '12 MG Road', line2: '',
-    city: 'Bengaluru', state: 'Karnataka', postalCode: '560001', country: 'IN', isDefault: false,
+    label: 'Home',
+    name: 'Asha Verma',
+    phone: '+919876543210',
+    line1: '12 MG Road',
+    line2: '',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    postalCode: '560001',
+    country: 'IN',
+    isDefault: false,
   };
 
   /** Signs in and walks the flow to a session, as the screens would. */
   const signIn = async () => {
     await mockAuthApi.signUp(PAYLOAD);
-    const challenge = await mockAuthApi.signUp({ ...PAYLOAD, email: 'shopper@example.com', phone: '+919876543211' });
+    const challenge = await mockAuthApi.signUp({
+      ...PAYLOAD,
+      email: 'shopper@example.com',
+      phone: '+919876543211',
+    });
     await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
   };
 
@@ -574,7 +633,10 @@ describe('the shop, orders and addresses', () => {
     expect(deals.data.every(i => i.isDeal)).toBe(true);
     const featured = await mockShopApi.items({ featured: true });
     expect(featured.data.every(i => i.featured)).toBe(true);
-    const inStock = await mockShopApi.items({ category: 'accessories', inStock: true });
+    const inStock = await mockShopApi.items({
+      category: 'accessories',
+      inStock: true,
+    });
     expect(inStock.data.some(i => i.id === 'gym-towel')).toBe(false);
   });
 
@@ -593,14 +655,24 @@ describe('the shop, orders and addresses', () => {
     const first = await mockShopApi.items({ limit: 10 });
     expect(first.data).toHaveLength(10);
     expect(first.nextCursor).not.toBeNull();
-    const second = await mockShopApi.items({ limit: 10, cursor: first.nextCursor ?? undefined });
+    const second = await mockShopApi.items({
+      limit: 10,
+      cursor: first.nextCursor ?? undefined,
+    });
     expect(second.data[0].id).not.toBe(first.data[0].id);
-    expect(new Set([...first.data, ...second.data].map(i => i.id)).size).toBe(20);
+    expect(new Set([...first.data, ...second.data].map(i => i.id)).size).toBe(
+      20,
+    );
   });
 
   test('describes each shelf with counts and subcategories', async () => {
     const shelves = await mockShopApi.categories();
-    expect(shelves.map(s => s.category)).toEqual(['clothing', 'gym', 'sports', 'accessories']);
+    expect(shelves.map(s => s.category)).toEqual([
+      'clothing',
+      'gym',
+      'sports',
+      'accessories',
+    ]);
     const clothing = shelves.find(s => s.category === 'clothing')!;
     expect(clothing.count).toBe(8);
     expect(clothing.subcategories[0]).toEqual({ name: 'T-shirts', count: 2 });
@@ -617,25 +689,45 @@ describe('the shop, orders and addresses', () => {
 
     await mockAddressApi.setDefault(office.id);
     const book = await mockAddressApi.list();
-    expect(book.map(a => [a.label, a.isDefault])).toEqual([['Office', true], ['Home', false]]);
+    expect(book.map(a => [a.label, a.isDefault])).toEqual([
+      ['Office', true],
+      ['Home', false],
+    ]);
 
     await mockAddressApi.remove(office.id);
-    expect((await mockAddressApi.list())[0]).toMatchObject({ label: 'Home', isDefault: true });
+    expect((await mockAddressApi.list())[0]).toMatchObject({
+      label: 'Home',
+      isDefault: true,
+    });
   });
 
   test('the basket keeps lines by item and size, checks sizes, and quotes the split', async () => {
     await signIn();
-    await expectApiError(() => mockCartApi.setLine({ itemId: 'tee', quantity: 1 }), 'validation');
+    await expectApiError(
+      () => mockCartApi.setLine({ itemId: 'tee', quantity: 1 }),
+      'validation',
+    );
     await mockCartApi.setLine({ itemId: 'tee', quantity: 2, size: 'M' });
     const cart = await mockCartApi.setLine({ itemId: 'cap', quantity: 1 });
-    expect(cart.lines.map(l => [l.item.id, l.quantity, l.size])).toEqual([['tee', 2, 'M'], ['cap', 1, null]]);
+    expect(cart.lines.map(l => [l.item.id, l.quantity, l.size])).toEqual([
+      ['tee', 2, 'M'],
+      ['cap', 1, null],
+    ]);
     expect(cart.count).toBe(3);
     // ₹1,598 + ₹449 = ₹2,047 of goods, over the free-shipping line; 30% is 2,456 coins, capped by the wallet.
     const balance = Math.floor((await mockWalletApi.get()).balance);
-    expect(cart.quote).toMatchObject({ subtotal: 204700, shipping: 0, coinsMax: Math.min(2456, balance) });
+    expect(cart.quote).toMatchObject({
+      subtotal: 204700,
+      shipping: 0,
+      coinsMax: Math.min(2456, balance),
+    });
     expect(cart.quote.payable).toBe(204700 - cart.quote.coinsValue);
 
-    const fewer = await mockCartApi.setLine({ itemId: 'tee', quantity: 0, size: 'M' });
+    const fewer = await mockCartApi.setLine({
+      itemId: 'tee',
+      quantity: 0,
+      size: 'M',
+    });
     expect(fewer.lines.map(l => l.item.id)).toEqual(['cap']);
     expect((await mockCartApi.clear()).count).toBe(0);
   });
@@ -646,7 +738,10 @@ describe('the shop, orders and addresses', () => {
     await mockWishlistApi.add('yoga-mat');
     await mockWishlistApi.add('cap');
     expect(await mockWishlistApi.ids()).toEqual(['yoga-mat', 'cap']);
-    expect((await mockWishlistApi.list()).map(i => i.id)).toEqual(['yoga-mat', 'cap']);
+    expect((await mockWishlistApi.list()).map(i => i.id)).toEqual([
+      'yoga-mat',
+      'cap',
+    ]);
     await mockWishlistApi.remove('cap');
     expect(await mockWishlistApi.ids()).toEqual(['yoga-mat']);
   });
@@ -654,41 +749,112 @@ describe('the shop, orders and addresses', () => {
   test('a quote splits the goods between coins and money the way the server does', async () => {
     await signIn();
     // A ₹449 cap: 30% at ₹0.25 a coin is 538 coins; ₹49 to ship under ₹999.
-    const q = await mockCheckoutApi.quote([{ itemId: 'cap', quantity: 1, size: null }], 'max');
-    expect(q).toMatchObject({ subtotal: 44900, discount: 15000, shipping: 4900, total: 49800, coinsMax: 538, coinsApplied: 538, coinsValue: 13450, payable: 36350 });
-    expect((await mockCheckoutApi.quote([{ itemId: 'cap', quantity: 1, size: null }], 100)).payable).toBe(49800 - 2500);
-    expect((await mockCheckoutApi.quote([{ itemId: 'kettlebell-8', quantity: 1, size: null }], 'max')).shipping).toBe(0);
+    const q = await mockCheckoutApi.quote(
+      [{ itemId: 'cap', quantity: 1, size: null }],
+      'max',
+    );
+    expect(q).toMatchObject({
+      subtotal: 44900,
+      discount: 15000,
+      shipping: 4900,
+      total: 49800,
+      coinsMax: 538,
+      coinsApplied: 538,
+      coinsValue: 13450,
+      payable: 36350,
+    });
+    expect(
+      (
+        await mockCheckoutApi.quote(
+          [{ itemId: 'cap', quantity: 1, size: null }],
+          100,
+        )
+      ).payable,
+    ).toBe(49800 - 2500);
+    expect(
+      (
+        await mockCheckoutApi.quote(
+          [{ itemId: 'kettlebell-8', quantity: 1, size: null }],
+          'max',
+        )
+      ).shipping,
+    ).toBe(0);
   });
 
   test('checkout needs an address, holds coins and stock as pending, and pay makes it an order', async () => {
     await signIn();
     await expectApiError(
-      () => mockCheckoutApi.place({ lines: [{ itemId: 'cap', quantity: 1, size: null }], addressId: 'nope', coins: 0 }, { idempotencyKey: 'k' }),
+      () =>
+        mockCheckoutApi.place(
+          {
+            lines: [{ itemId: 'cap', quantity: 1, size: null }],
+            addressId: 'nope',
+            coins: 0,
+          },
+          { idempotencyKey: 'k' },
+        ),
       'validation',
     );
     const home = await mockAddressApi.create(ADDRESS);
     const before = (await mockWalletApi.get()).balance;
 
-    const placed = await mockCheckoutApi.place({ lines: [{ itemId: 'cap', quantity: 1, size: null }], addressId: home.id, coins: 300 }, { idempotencyKey: 'k' });
-    expect(placed.order).toMatchObject({ status: 'pending_payment', coinsUsed: 300, coinsValue: 7500, payable: 42300, cancellable: true, address: { city: 'Bengaluru' } });
+    const placed = await mockCheckoutApi.place(
+      {
+        lines: [{ itemId: 'cap', quantity: 1, size: null }],
+        addressId: home.id,
+        coins: 300,
+      },
+      { idempotencyKey: 'k' },
+    );
+    expect(placed.order).toMatchObject({
+      status: 'pending_payment',
+      coinsUsed: 300,
+      coinsValue: 7500,
+      payable: 42300,
+      cancellable: true,
+      address: { city: 'Bengaluru' },
+    });
     expect(placed.payment).toMatchObject({ provider: 'mock', amount: 42300 });
     expect(placed.balance).toBe(before - 300);
     expect(await mockOrderApi.count()).toBe(0);
 
-    const paid = await mockCheckoutApi.pay(placed.order.id, { providerPaymentId: 'mockpay_1' }, { idempotencyKey: 'p' });
-    expect(paid.order).toMatchObject({ status: 'placed', payment: { status: 'paid' } });
+    const paid = await mockCheckoutApi.pay(
+      placed.order.id,
+      { providerPaymentId: 'mockpay_1' },
+      { idempotencyKey: 'p' },
+    );
+    expect(paid.order).toMatchObject({
+      status: 'placed',
+      payment: { status: 'paid' },
+    });
     expect(await mockOrderApi.count()).toBe(1);
     expect((await mockOrderApi.list()).data[0].id).toBe(placed.order.id);
 
     // Cancel puts the coins and the stock back and refunds the money; a second cancel changes nothing.
-    const cancelled = await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c' });
-    expect(cancelled.order).toMatchObject({ status: 'cancelled', payment: { status: 'refunded' } });
+    const cancelled = await mockOrderApi.cancel(placed.order.id, {
+      idempotencyKey: 'c',
+    });
+    expect(cancelled.order).toMatchObject({
+      status: 'cancelled',
+      payment: { status: 'refunded' },
+    });
     expect(cancelled.balance).toBe(before);
-    expect((await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c2' })).balance).toBe(before);
+    expect(
+      (await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c2' }))
+        .balance,
+    ).toBe(before);
 
     // More coins than the quote allows is refused; an order the coins cover is placed at once.
     await expectApiError(
-      () => mockCheckoutApi.place({ lines: [{ itemId: 'cap', quantity: 1, size: null }], addressId: home.id, coins: 9999 }, { idempotencyKey: 'k3' }),
+      () =>
+        mockCheckoutApi.place(
+          {
+            lines: [{ itemId: 'cap', quantity: 1, size: null }],
+            addressId: home.id,
+            coins: 9999,
+          },
+          { idempotencyKey: 'k3' },
+        ),
       'validation',
     );
   });
@@ -696,23 +862,40 @@ describe('the shop, orders and addresses', () => {
   test('a thousand coins in one order asks for a step-up, and the code it issues works once', async () => {
     await signIn();
     const home = await mockAddressApi.create(ADDRESS);
-    const hoodie = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }], addressId: home.id, coins: MOCK_STEP_UP_THRESHOLD };
+    const hoodie = {
+      lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }],
+      addressId: home.id,
+      coins: MOCK_STEP_UP_THRESHOLD,
+    };
 
-    await expectApiError(() => mockCheckoutApi.place(hoodie, { idempotencyKey: 'k' }), 'forbidden');
+    await expectApiError(
+      () => mockCheckoutApi.place(hoodie, { idempotencyKey: 'k' }),
+      'forbidden',
+    );
 
     const challenge = await mockAuthApi.stepUp();
     expect(challenge).toMatchObject({ channel: 'email', purpose: 'step_up' });
-    const verified = await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
+    const verified = await mockAuthApi.verifyOtp(
+      challenge.verificationId,
+      MOCK_RULES.otp,
+    );
     expect(verified.stepUpToken).toEqual(expect.any(String));
 
-    const placed = await mockCheckoutApi.place({ ...hoodie, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k' });
+    const placed = await mockCheckoutApi.place(
+      { ...hoodie, stepUpToken: verified.stepUpToken! },
+      { idempotencyKey: 'k' },
+    );
     expect(placed.order.coinsUsed).toBe(MOCK_STEP_UP_THRESHOLD);
     expect(placed.order.items[0].size).toBe('L');
 
     // The coins come back on cancel, and the same token is refused the second time.
     await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c' });
     await expectApiError(
-      () => mockCheckoutApi.place({ ...hoodie, stepUpToken: verified.stepUpToken! }, { idempotencyKey: 'k2' }),
+      () =>
+        mockCheckoutApi.place(
+          { ...hoodie, stepUpToken: verified.stepUpToken! },
+          { idempotencyKey: 'k2' },
+        ),
       'forbidden',
     );
   });
@@ -720,23 +903,56 @@ describe('the shop, orders and addresses', () => {
   test('reviews: one per user, verified for a buyer, summarised onto the item', async () => {
     await signIn();
     const home = await mockAddressApi.create(ADDRESS);
-    const placed = await mockCheckoutApi.place({ lines: [{ itemId: 'yoga-mat', quantity: 1, size: null }], addressId: home.id, coins: 0 }, { idempotencyKey: 'k' });
-    await mockCheckoutApi.pay(placed.order.id, { providerPaymentId: 'mockpay_2' }, { idempotencyKey: 'p' });
+    const placed = await mockCheckoutApi.place(
+      {
+        lines: [{ itemId: 'yoga-mat', quantity: 1, size: null }],
+        addressId: home.id,
+        coins: 0,
+      },
+      { idempotencyKey: 'k' },
+    );
+    await mockCheckoutApi.pay(
+      placed.order.id,
+      { providerPaymentId: 'mockpay_2' },
+      { idempotencyKey: 'p' },
+    );
 
-    await expectApiError(() => mockShopApi.writeReview('yoga-mat', { rating: 5, body: 'Great' }), 'validation');
-    const mine = await mockShopApi.writeReview('yoga-mat', { rating: 4, title: 'Grippy', body: 'Stays put on a wooden floor.' });
+    await expectApiError(
+      () => mockShopApi.writeReview('yoga-mat', { rating: 5, body: 'Great' }),
+      'validation',
+    );
+    const mine = await mockShopApi.writeReview('yoga-mat', {
+      rating: 4,
+      title: 'Grippy',
+      body: 'Stays put on a wooden floor.',
+    });
     expect(mine).toMatchObject({ rating: 4, verified: true, mine: true });
-    const edited = await mockShopApi.writeReview('yoga-mat', { rating: 5, body: 'Stays put on a wooden floor. Still grippy.' });
+    const edited = await mockShopApi.writeReview('yoga-mat', {
+      rating: 5,
+      body: 'Stays put on a wooden floor. Still grippy.',
+    });
     expect(edited.id).toBe(mine.id);
 
     const page = await mockShopApi.reviews('yoga-mat');
-    expect(page.summary).toEqual({ average: 5, count: 1, histogram: [0, 0, 0, 0, 1] });
+    expect(page.summary).toEqual({
+      average: 5,
+      count: 1,
+      histogram: [0, 0, 0, 0, 1],
+    });
     expect(page.mine?.id).toBe(mine.id);
-    expect((await mockShopApi.item('yoga-mat')).rating).toEqual({ average: 5, count: 1 });
-    expect((await mockShopApi.items({ sort: 'rating', limit: 1 })).data[0].id).toBe('yoga-mat');
+    expect((await mockShopApi.item('yoga-mat')).rating).toEqual({
+      average: 5,
+      count: 1,
+    });
+    expect(
+      (await mockShopApi.items({ sort: 'rating', limit: 1 })).data[0].id,
+    ).toBe('yoga-mat');
 
     await mockShopApi.deleteReview('yoga-mat');
-    expect((await mockShopApi.item('yoga-mat')).rating).toEqual({ average: 0, count: 0 });
+    expect((await mockShopApi.item('yoga-mat')).rating).toEqual({
+      average: 0,
+      count: 0,
+    });
   });
 });
 
@@ -746,33 +962,52 @@ describe('the referral programme', () => {
     expect(me.code).toBe(referralCode);
     expect(me.shareMessage).toContain(referralCode);
     expect(me.shareUrl).toContain(referralCode);
-    expect(me.rewards).toMatchObject({ inviter: REFERRAL_REWARD_COINS, invitee: REFERRAL_REWARD_COINS });
+    expect(me.rewards).toMatchObject({
+      inviter: REFERRAL_REWARD_COINS,
+      invitee: REFERRAL_REWARD_COINS,
+    });
     expect(me.stats.successful + me.stats.pending).toBe(me.referrals.length);
     expect(me).toMatchObject({ applied: null, canApply: true });
   });
 
-  test("a code typed at sign-up is checked on the form and applied when the account is created", async () => {
+  test('a code typed at sign-up is checked on the form and applied when the account is created', async () => {
     await expectApiError(
       () => mockAuthApi.signUp({ ...PAYLOAD, referralCode: 'NOPE999' }),
       'validation',
     );
-    await mockAuthApi.signUp({ ...PAYLOAD, referralCode: 'NOPE999' }).catch(error => {
-      expect((error as ApiError).fieldErrors).toHaveProperty('referralCode');
-    });
+    await mockAuthApi
+      .signUp({ ...PAYLOAD, referralCode: 'NOPE999' })
+      .catch(error => {
+        expect((error as ApiError).fieldErrors).toHaveProperty('referralCode');
+      });
 
-    const challenge = await mockAuthApi.signUp({ ...PAYLOAD, referralCode: 'ASHA2K7' });
+    const challenge = await mockAuthApi.signUp({
+      ...PAYLOAD,
+      referralCode: 'ASHA2K7',
+    });
     // Nothing applied until the code passes.
     expect((await mockReferralApi.me()).applied).toBeNull();
     await mockAuthApi.verifyOtp(challenge.verificationId, MOCK_RULES.otp);
-    expect((await mockReferralApi.me()).applied).toMatchObject({ code: 'ASHA2K7', inviterName: 'Asha', status: 'pending' });
+    expect((await mockReferralApi.me()).applied).toMatchObject({
+      code: 'ASHA2K7',
+      inviterName: 'Asha',
+      status: 'pending',
+    });
   });
 
-  test('applying a friend\'s code once is accepted; your own, an unknown one, or a second is refused', async () => {
-    await expectApiError(() => mockReferralApi.apply(referralCode), 'validation');
+  test("applying a friend's code once is accepted; your own, an unknown one, or a second is refused", async () => {
+    await expectApiError(
+      () => mockReferralApi.apply(referralCode),
+      'validation',
+    );
     await expectApiError(() => mockReferralApi.apply('NOPE123'), 'not_found');
 
     const applied = await mockReferralApi.apply('asha 2k7');
-    expect(applied.applied).toMatchObject({ code: 'ASHA2K7', inviterName: 'Asha', status: 'pending' });
+    expect(applied.applied).toMatchObject({
+      code: 'ASHA2K7',
+      inviterName: 'Asha',
+      status: 'pending',
+    });
     expect(applied.canApply).toBe(false);
 
     await expectApiError(() => mockReferralApi.apply('RAVI9XB'), 'unknown');
@@ -787,18 +1022,28 @@ describe('the streak', () => {
     const streak = await mockStreakApi.get();
     expect(streak.currentStreak).toBe(7);
     expect(streak.longestStreak?.length).toBe(15);
-    expect(streak.milestones.filter(m => m.achieved).map(m => m.days)).toEqual([7, 15]);
-    expect(streak).toMatchObject({ todayCovered: true, canRestore: false, restoreCostCoins: 50 });
+    expect(streak.milestones.filter(m => m.achieved).map(m => m.days)).toEqual([
+      7, 15,
+    ]);
+    expect(streak).toMatchObject({
+      todayCovered: true,
+      canRestore: false,
+      restoreCostCoins: 50,
+    });
   });
 
   test('refuses a freeze on a day already earned, with the server code', async () => {
-    await expect(mockStreakApi.freeze({ idempotencyKey: 'k1' })).rejects.toMatchObject({
+    await expect(
+      mockStreakApi.freeze({ idempotencyKey: 'k1' }),
+    ).rejects.toMatchObject({
       code: 'STREAK_ALREADY_COVERED',
     });
   });
 
   test('refuses a restore with nothing to bridge', async () => {
-    await expect(mockStreakApi.restore({ idempotencyKey: 'k2' })).rejects.toMatchObject({
+    await expect(
+      mockStreakApi.restore({ idempotencyKey: 'k2' }),
+    ).rejects.toMatchObject({
       code: 'NOTHING_TO_RESTORE',
     });
   });

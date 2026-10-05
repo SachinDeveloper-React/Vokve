@@ -38,7 +38,7 @@ import {
 import { AddressModel, OrderModel } from '../commerce/models.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { AppReleaseModel, DeviceModel } from '../devices/models.js';
-import { listDevices } from '../devices/service.js';
+import { listDevices, stopCounting } from '../devices/service.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel } from '../identity/models.js';
 import { NotificationModel } from '../notifications/models.js';
 import { AuditLogModel } from '../platform/models.js';
@@ -442,6 +442,7 @@ export async function signOutOtherSessions(userId: string, currentDeviceId?: str
     { userId, revokedAt: null, ...(currentDeviceId ? { _id: { $ne: currentDeviceId } } : {}) },
     { $set: { revokedAt: new Date(), 'push.token': null } },
   );
+  await stopCounting(userId, currentDeviceId ? { except: currentDeviceId } : {});
   await AuditLogModel.create({ actorType: 'user', actorId: userId, deviceId: currentDeviceId, action: 'user.sessions_revoked', subjectType: 'user', subjectId: userId, after: { count: revoked.modifiedCount } });
   return { signedOut: revoked.modifiedCount };
 }

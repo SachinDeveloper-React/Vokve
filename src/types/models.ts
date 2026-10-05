@@ -181,7 +181,10 @@ export type StepIngestResult = z.infer<typeof stepIngestResultSchema>;
 export const activityConfigSchema = z.object({
   tracker: z.object({
     healthConnectReadTypes: z.array(z.enum(['steps', 'distance'])).min(1),
+    /** The phone's own steps written into Health Connect (D-57). */
     healthConnectWriteEnabled: z.boolean(),
+    /** A record per minute with steps, or one per day. */
+    healthConnectWriteGranularity: z.enum(['day', 'minute']).catch('day'),
     healthConnectIgnoreManualEntries: z.boolean(),
     wearableTrust: z.enum(['metadata', 'catalog']).catch('catalog'),
     /** Apps trusted as a watch's relay on top of the tracker's own catalog. */
@@ -267,6 +270,38 @@ export const activityRangeSchema = z.object({
     .nullable(),
 });
 export type ActivityRange = z.infer<typeof activityRangeSchema>;
+
+/**
+ * `GET /activity/goal`: the daily step goal — the user's own, the one the
+ * server suggests, and the range a goal may be set in (D-55). The goal is
+ * saved through `PUT /me/settings`, like every other setting.
+ */
+export const stepGoalSchema = z.object({
+  /** The goal now, as `/me/settings` holds it. */
+  goal: z.number().int().positive(),
+  /**
+   * The suggestion: a stretch past what the user walks now, up to where the
+   * benefit levels off for their age and BMI — inside the range, on its
+   * increment.
+   */
+  recommended: z.number().int().positive(),
+  /** What the suggestion could be worked out from. */
+  basedOn: z.object({
+    /** There was a date of birth. */
+    age: z.boolean(),
+    /** There were a height and a weight. */
+    bmi: z.boolean(),
+    /** Enough recent days with steps; without them the profile's activity level stood in. */
+    recentSteps: z.boolean(),
+  }),
+  /** The range a goal may be set in, and the step the screen moves by (⚙ `activity.goal`). */
+  min: z.number().int().positive(),
+  max: z.number().int().positive(),
+  increment: z.number().int().positive(),
+  /** ISO-8601: when the user last chose a goal; null while it is the one every account starts on. */
+  chosenAt: z.string().nullable(),
+});
+export type StepGoal = z.infer<typeof stepGoalSchema>;
 
 /**
  * What became of one Health Connect source on one phone's day:
@@ -1447,7 +1482,9 @@ export type DeviceRegistration = z.infer<typeof deviceRegistrationSchema>;
 /**
  * `GET/PUT /me/settings`: the user's own targets and switches, kept by the
  * server so a new phone opens on the same goal (RULES P3). Clamped there
- * the same way the settings store clamps them.
+ * the same way the settings store clamps them. The step goal's bounds here
+ * are only the outer limit: its range is ⚙ `activity.goal`, checked when
+ * one is saved (D-55).
  */
 export const userSettingsSchema = z.object({
   units: unitSystemSchema,

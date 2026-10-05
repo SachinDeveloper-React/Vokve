@@ -168,6 +168,16 @@ interface StoredDevice {
   sourcesStatus: string;
   signedAt: number;
   proof: DeviceProof;
+  /** The day cut to the time the account was signed in on the phone (D-56); absent when it was not cut. */
+  counting?: { window: [number, number][]; leftOut: number } | null;
+}
+
+/** `activity_daily.breakdown.union`: the phones added minute by minute (D-53); absent before it. */
+interface PhonesAdded {
+  phones: number;
+  verified: number;
+  /** The union is what the day shows: more than any one phone answered. */
+  added: boolean;
 }
 
 const LAYER_NAMES: Record<LayerName, string> = {
@@ -283,13 +293,38 @@ const SOURCES_STATUS_NOTES: Record<string, string> = {
   not_consulted: 'Health Connect was not read — it is not connected, or steps are not allowed.',
   timed_out: "Health Connect took too long to answer, so only the phone's own count was used.",
   failed: "Health Connect could not be read, so only the phone's own count was used.",
+  // Tracker 2.5: Health Connect refused the read for quota.
+  rate_limited: "Health Connect refused the read for now — the phone had called it too often — so only the phone's own count was used.",
 };
 
-function explain(day: { steps: number; verifiedSteps: number; verified: boolean }, devices: StoredDevice[], best: StoredDevice, names: Map<string, string>, ratio: AppRatio): string[] {
+function explain(
+  day: { steps: number; verifiedSteps: number; verified: boolean },
+  devices: StoredDevice[],
+  best: StoredDevice,
+  names: Map<string, string>,
+  ratio: AppRatio,
+  union: PhonesAdded | undefined,
+): string[] {
   const lines: string[] = [];
   const name = names.get(best.deviceId) ?? 'This phone';
   if (devices.length > 1) {
-    lines.push(`${devices.length} phones sent this day. ${name}'s count was used — counts from different phones are never added, since they saw the same walks.`);
+    const counts = devices.map(d => `${names.get(d.deviceId) ?? 'Phone'} ${fmt(d.phone.counted)}`).join(', ');
+    if (!union) {
+      lines.push(`${devices.length} phones sent this day (${counts}). ${name}'s count was used.`);
+    } else if (union.added) {
+      lines.push(`${devices.length} phones sent this day (${counts}). Their steps are added minute by minute — a minute two phones both counted counts once — so the day has ${fmt(union.phones)}.`);
+    } else {
+      lines.push(`${devices.length} phones sent this day (${counts}). Added minute by minute — a minute two phones both counted counts once — they make ${fmt(union.phones)}, no more than ${name}'s own answer, so ${name}'s stands.`);
+    }
+  }
+  // Counting starts at sign-in (D-56): what a phone held from before it, or
+  // from while the account was signed out there, is said once, up front.
+  for (const device of devices) {
+    const leftOut = device.counting?.leftOut ?? 0;
+    if (leftOut > 0) {
+      const phoneName = names.get(device.deviceId) ?? 'This phone';
+      lines.push(`Only steps taken while you were signed in on ${phoneName} count: ${plural(leftOut, 'step', 'steps')} from before you signed in there, or while you were signed out, ${leftOut === 1 ? 'is' : 'are'} left out.`);
+    }
   }
   const phone = best.phone;
   lines.push(`${name} counted ${plural(phone.counted, 'step', 'steps')} with its own sensor.`);
@@ -340,14 +375,15 @@ export async function getSourcesReport(userId: string, date: string, currentDevi
   const config = await getConfig();
   const ratio = { hard: config.activity.thresholds.pedometerRatio.hard };
   const row = await ActivityDailyModel.findById(`${userId}:${date}`).lean();
-  const breakdown = row?.breakdown as { bestDeviceId: string; devices: StoredDevice[] } | undefined;
+  const breakdown = row?.breakdown as { bestDeviceId: string; devices: StoredDevice[]; union?: PhonesAdded } | undefined;
   const stored = breakdown?.devices ?? [];
 
   const [deviceDocs, uploads, samples, flags] = await Promise.all([
     DeviceModel.find({ userId }, { info: 1 }).lean(),
     StepUploadModel.find({ userId, localDay: date }, { response: 0 }).sort({ receivedAt: -1 }).limit(20).lean(),
     ActivitySampleModel.aggregate<{ _id: { origin: string; method: string }; records: number; steps: number }>([
-      { $match: { userId, localDay: date, recordType: 'steps' } },
+      // Vokve's own records are the phone's count written out (D-57), not another app's.
+      { $match: { userId, localDay: date, recordType: 'steps', origin: { $ne: config.integrity.android.packageName } } },
       // A record edited later is stored again; only its newest version counts.
       { $sort: { lastModifiedAt: -1 } },
       { $group: { _id: '$sampleId', origin: { $first: '$origin' }, method: { $first: '$recordingMethod' }, value: { $first: '$value' } } },
@@ -383,14 +419,15 @@ export async function getSourcesReport(userId: string, date: string, currentDevi
   const day = toDaily(date, row);
   const best = stored.find(device => device.deviceId === breakdown?.bestDeviceId) ?? stored[0];
   const explanation = best
-    ? explain(day, stored, best, names, ratio)
+    ? explain(day, stored, best, names, ratio, breakdown?.union)
     : ['Nothing has been synced for this day yet. Open the app with step counting on and it will be.'];
 
   const devices: StepSourcesReport['devices'] = stored.map(device => ({
     deviceId: device.deviceId,
     name: names.get(device.deviceId) ?? 'Phone',
     isCurrent: device.deviceId === currentDeviceId,
-    answeredForDay: device.deviceId === best?.deviceId,
+    // Added minute by minute, every phone that counted answers for the day.
+    answeredForDay: breakdown?.union?.added ? device.phone.counted > 0 : device.deviceId === best?.deviceId,
     syncedAt: lastSync.get(device.deviceId)?.toISOString() ?? null,
     phone: device.phone,
     counted: device.candidate,

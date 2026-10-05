@@ -57,6 +57,19 @@ const deviceSchema = new Schema(
     firstSeenAt: { type: Date, default: Date.now },
     lastSeenAt: { type: Date, default: Date.now },
     revokedAt: { type: Date, default: null },
+    /**
+     * When this account counted steps on this install (D-56): a period from
+     * each sign-in here to its sign-out, the last one open while signed in.
+     * Steps taken outside every period — before the account signed in on
+     * this phone, or while it was signed out — are not the account's, and
+     * the day's evidence leaves them out. Absent on installs registered
+     * before periods were kept: those count whole days until their next
+     * sign-in.
+     */
+    counting: {
+      type: [{ _id: false, from: { type: Date, required: true }, to: { type: Date, default: null } }],
+      default: undefined,
+    },
   },
   { timestamps: true, collection: 'devices' },
 );

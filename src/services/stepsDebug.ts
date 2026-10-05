@@ -21,8 +21,9 @@ import { logger } from '../utils/logger';
  *
  * Development builds only, and only while ⚙ `config.logStepSources` is on:
  * these are health data. Read-only — nothing here changes the tracker or the
- * store. Health Connect rate-limits every call, so a report reads it once
- * (twice when that read fails, to learn why) and runs at most once a minute.
+ * store. Health Connect rate-limits every call, so a report reads the day
+ * once (again only when that read fails, to learn why) and runs at most
+ * once a minute.
  * It shows in React Native DevTools' console (`j` in Metro) and in
  * `adb logcat -s ReactNativeJS`.
  */
@@ -125,12 +126,20 @@ export async function stepDebugReport(
     ),
   ]);
   const records = await recordsOf(snapshot, dayStart.getTime(), now);
-  // The grants as the app last read them: asking again would spend the
-  // rate limit this report is often trying to explain.
-  const health = useStepsStore.getState().healthConnect;
+  // Asked fresh for the tracker's own count of its Health Connect calls
+  // (2.5's `rateLimit`, kept in the app — no call). The grants come with
+  // it: on Android 14+ a local check; on 13 and older one call, which the
+  // tracker answers from the last grants when Health Connect refuses it.
+  const fresh = await read(() => StepTracker.getHealthConnectStatus());
+  const health = fresh.ok
+    ? fresh.value
+    : useStepsStore.getState().healthConnect;
   const rateLimited =
     RATE_LIMITED.test(records.error ?? '') ||
-    (!snapshot.ok && RATE_LIMITED.test(snapshot.error));
+    (!snapshot.ok && RATE_LIMITED.test(snapshot.error)) ||
+    records.status === 'rate_limited' ||
+    (snapshot.ok && snapshot.value.sourcesStatus === 'rate_limited') ||
+    health?.rateLimit?.readsLimited === true;
 
   const sections = [
     setupSection(reason, date, now, snapshot, trackerConfig, health),
@@ -245,15 +254,24 @@ function setupSection(
       )}] · typed-in steps left out: ${yesNo(
         c.healthConnectIgnoreManualEntries,
       )}`,
+      // D-57: this phone's own steps written out, and whether it may.
+      `Health Connect writes: ${
+        c.healthConnectEnabled === false ||
+        c.healthConnectWriteEnabled === false
+          ? 'OFF'
+          : `on, per ${c.healthConnectWriteGranularity ?? 'day'} · allowed: ${
+              health ? yesNo(health.canWriteSteps === true) : '?'
+            }`
+      }`,
     );
   } else {
     lines.push(`Tracker config: could not be read — ${trackerConfig.error}`);
   }
   lines.push(
     health
-      ? `Health Connect, as the app last read it: ${
-          health.availability
-        } · steps allowed: ${yesNo(stepsAllowed(health))} · granted [${names(
+      ? `Health Connect: ${health.availability} · steps allowed: ${yesNo(
+          stepsAllowed(health),
+        )} · granted [${names(
           health.grantedPermissions.map(short),
         )}] · missing [${names(
           health.missingPermissions.map(short),
@@ -262,6 +280,21 @@ function setupSection(
         )}]`
       : 'Health Connect: not read by the app yet',
   );
+  const limit = health?.rateLimit;
+  if (limit) {
+    const held = (limited: boolean, retryAfterMs: number) =>
+      limited ? `HELD BACK for ${Math.ceil(retryAfterMs / 1000)} s` : 'ok';
+    lines.push(
+      `Health Connect calls by the tracker: reads ${n(
+        limit.readsLast15Minutes,
+      )} in 15 min / ${n(limit.readsLast24Hours)} in 24 h (${held(
+        limit.readsLimited,
+        limit.readsRetryAfterMs,
+      )}) · writes ${n(limit.writesLast15Minutes)} / ${n(
+        limit.writesLast24Hours,
+      )} (${held(limit.writesLimited, limit.writesRetryAfterMs)})`,
+    );
+  }
   return lines;
 }
 
@@ -274,6 +307,8 @@ function daySection(
   const shown = snapshot.resolved;
   const since =
     snapshot.coverageStartAt > 0 ? clock(snapshot.coverageStartAt) : 'midnight';
+  // 2.7: nothing before the sign-in counts (D-56).
+  const countFrom = snapshot.countFrom ?? null;
   const from = shown.usedExternal
     ? shown.merged
       ? `${shown.appName} (the phone's count + the ${n(
@@ -287,6 +322,11 @@ function daySection(
     )} steps today, counting since ${since} · added after a gap ${n(
       snapshot.recoveredSteps,
     )} · flagged ${n(snapshot.suspectSteps)}`,
+    countFrom
+      ? `Counting from sign-in: nothing before ${new Date(
+          countFrom,
+        ).toLocaleString()} counts — the phone's or any app's`
+      : 'Counting from sign-in: not set (whole days count)',
     `Shown: ${n(shown.steps)} from ${from} · best other app ${n(
       shown.externalSteps,
     )}${
@@ -297,11 +337,24 @@ function daySection(
     `Why: ${
       rateLimited ? RATE_LIMIT_WHY : why(snapshot, trackerConfig, health)
     }`,
+    // 2.6: what Vokve told the tracker the user's other phones counted —
+    // shown on top of the number above, never part of it (D-53).
+    ...((snapshot.otherDevicesSteps ?? 0) > 0
+      ? [
+          `Other phones today, from the server: ${n(
+            snapshot.otherDevicesSteps ?? 0,
+          )} — the notification and the live count show ${n(
+            shown.steps + (snapshot.otherDevicesSteps ?? 0),
+          )}`,
+        ]
+      : []),
   ];
 }
 
 const RATE_LIMIT_WHY =
-  'Health Connect is refusing Vokve\'s calls: its rate limit is used up ("quota has been exceeded") — too many calls in a short time. Nothing can be read until it refills. Leave Vokve closed for 15 minutes, then open it once. Until then the tracker may also say steps are not allowed: on Android 13 and older even the permission check is rate-limited, and a refused check reads as "nothing granted".';
+  'Health Connect is refusing Vokve\'s calls: its rate limit is used up ("quota has been exceeded") — too many calls in a short time. ' +
+  'The tracker waits before calling again (30 s, doubling to 15 min) and shows its last answer meanwhile. ' +
+  'Leave Vokve closed for 15 minutes, then open it once.';
 
 /** Why the number shown is what it is, from the first rule that decided it. */
 function why(
@@ -314,12 +367,7 @@ function why(
       return `Health Connect is ${health.availability} on this phone, so only the phone's own count can be shown.`;
     }
     if (!stepsAllowed(health)) {
-      const api = apiLevel();
-      return `Vokve is not allowed to read steps from Health Connect. Connect it on the Step Tracking screen.${
-        Number.isFinite(api) && api < 34
-          ? ' If Health Connect\'s own app lists Vokve as allowed, this is its rate limit instead: on Android 13 and older even the permission check is rate-limited, and a refused check reads as "nothing granted". Wait 15 minutes rather than connecting again.'
-          : ''
-      }`;
+      return 'Vokve is not allowed to read steps from Health Connect. Connect it on the Step Tracking screen.';
     }
   }
   const c = trackerConfig.ok ? trackerConfig.value : null;

@@ -607,7 +607,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 | E | `PATCH /me` | Must not set `profileCompletedAt` (P1) |
 | E | `POST /me/complete-profile` | Only setter of `profileCompletedAt` |
 | N | `GET /me/profile` | `ProfileSummary` — level, tier, rank, stats, badges, completeness + gaps. Computed on read (P4, P6, P9) |
-| N | `GET/PUT /me/settings` | Mirror of `settingsStore` |
+| N | `GET/PUT /me/settings` | Mirror of `settingsStore`. A `dailyStepGoal` outside ⚙ `activity.goal` (3,000–20,000) is a 422 on the field; saving one stamps `stepGoalSetAt` (D-55) |
 | N | `GET/PUT /me/notification-preferences` | Mirror of `notificationSettingsStore` |
 | N | `GET/PUT /me/privacy` | Analytics, personalised offers, name shared with the referrer — each enforced (P7) |
 | N | `PUT /me/password` | Revokes every other session; answers with the count (O10) |
@@ -629,10 +629,11 @@ Every screen in the app, what it renders, where that data comes from today, what
 | N | `GET /activity/today` | Same shape, one day |
 | N | `GET /activity/day?date=` | One day, same shape as today |
 | N | `GET /activity/range` | `?from&to&granularity=hour\|day\|week\|month` → `{ points[{start,end,steps,verifiedSteps}], totals, best }`. `week` = consecutive 7-day blocks from `from` (W1–W5 of a month); `month` = calendar months, clipped |
-| N | `GET /activity/config` | The phone tracker's set-up (⚙ `activity.tracker`) and sync policy (⚙ `activity.sync`), passed to react-native-step-tracker-pro as is |
+| N | `GET /activity/config` | The phone tracker's set-up (⚙ `activity.tracker` — Health Connect read, and written with the phone's own steps per minute, A23) and sync policy (⚙ `activity.sync`), passed to react-native-step-tracker-pro as is |
+| N | `GET /activity/goal` | `StepGoal`: the goal now, a suggestion (recent days or the profile's activity level, + ⚙ 2,000, up to the age/BMI target), `basedOn {age, bmi, recentSteps}`, `min/max/increment` (⚙ `activity.goal`) and `chosenAt`. Saved through `PUT /me/settings` (D-55, P11) |
 | N | `GET /activity/sources?date=` | How a day was matched: each device's own count (recovered/flagged taken off), every Health Connect app with its status (`used`/`lower`/`not_counted`/`unverified`/`blocked`/`not_computed`) and a server-written note, the raw records by app, the uploads, plain-language `explanation`, and — only where ⚙ `activity.inspector.showChecks` allows — the layer scores and flags |
 | N | `POST /activity/ingest/nonce` | Single-use value the next signed snapshot carries (10 min) |
-| N | `POST /activity/ingest` | One day's **signed step snapshot** (react-native-step-tracker-pro `getSignedSnapshot`) + Play Integrity on request — see the example in §15 |
+| N | `POST /activity/ingest` | One day's **signed step snapshot** (react-native-step-tracker-pro `getSignedSnapshot`) + Play Integrity on request — see the example in §15. Cut to the time the account was signed in on the phone before it is scored (A22, D-56) |
 | N | `GET/POST/DELETE /health/connections[/:provider]` | Provider consent + sync cursor |
 | N | `GET /home` | Optional aggregate: today + weekly + streak + hydration + unread count |
 

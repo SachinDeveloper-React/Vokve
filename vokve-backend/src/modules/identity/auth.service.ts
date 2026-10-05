@@ -6,6 +6,7 @@ import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { hashToken, newRefreshToken, signAccessToken, signStepUpToken } from '../../lib/tokens.js';
 import { authResponseSchema, genderSchema, type AuthResponse } from '../../contracts/index.js';
+import { startCounting, stopCounting } from '../devices/service.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { AuditLogModel } from '../platform/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from './models.js';
@@ -171,6 +172,7 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
     case 'login': {
       const user = await UserModel.findById(challenge.userId);
       if (!user || user.deletedAt) throw Errors.unauthorized();
+      await signedInOn(user, meta);
       return issueSession(user, meta);
     }
     case 'step_up': {
@@ -221,7 +223,18 @@ export async function signIn(identifier: string, password: string, meta: Meta): 
   if (!user.phoneVerifiedAt && !user.emailVerifiedAt) {
     throw new ApiError(403, 'CONTACT_NOT_VERIFIED', 'Verify your email or phone number to continue.');
   }
+  await signedInOn(user, meta);
   return issueSession(user, meta);
+}
+
+/**
+ * Signing in again on an install this account already has: its steps count
+ * from now (D-56). Only a sign-in — a code or a step-up taken while signed
+ * in leaves counting as it is. An install that is another account's, or
+ * new, starts when it registers; a period still open simply carries on.
+ */
+async function signedInOn(user: UserDoc, meta: Meta): Promise<void> {
+  if (meta.deviceId) await startCounting(user._id, meta.deviceId);
 }
 
 /** Constant-time-ish: always run one bcrypt compare so a missing user is not faster. */
@@ -348,6 +361,8 @@ export async function refreshSession(refreshToken: string, meta: Meta) {
 export async function signOut(userId: string, deviceId?: string) {
   const filter = deviceId ? { userId, deviceId, revokedAt: null } : { userId, revokedAt: null };
   await RefreshTokenModel.updateMany(filter, { $set: { revokedAt: new Date() } });
+  // Signed out, the phone stops counting for this account (D-56).
+  await stopCounting(userId, deviceId ? { deviceId } : {});
   return { ok: true };
 }
 

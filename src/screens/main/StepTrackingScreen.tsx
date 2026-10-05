@@ -7,6 +7,7 @@ import { BackgroundCountingCard } from '../../components/steps/BackgroundCountin
 import {
   HealthConnectCard,
   healthConnectCardState,
+  healthConnectWrites,
 } from '../../components/steps/HealthConnectCard';
 import {
   StepCountingCard,
@@ -17,6 +18,7 @@ import { StepSyncCard } from '../../components/steps/StepSyncCard';
 import { StepTrackingHeader } from '../../components/steps/StepTrackingHeader';
 import { Screen } from '../../components/ui/Screen';
 import {
+  allowHealthConnectWrites,
   connectHealthConnect,
   disconnectHealthConnect,
   enableStepTracking,
@@ -33,7 +35,9 @@ import {
   useBackgroundRestrictions,
   useBackgroundRisk,
   useHealthConnectStatus,
+  useHealthConnectWrites,
   useLastStepSyncAt,
+  useOtherDevicesStepsToday,
   usePendingStepDays,
   usePhoneStepsToday,
   useServerToday,
@@ -83,6 +87,7 @@ export const StepTrackingScreen = () => {
   const supported = useStepsSupported();
   const trackingState = useTrackingState();
   const phoneSteps = usePhoneStepsToday();
+  const otherDevicesSteps = useOtherDevicesStepsToday();
   const snapshot = useTodaySnapshot();
   const background = useBackgroundRestrictions();
   const risk = useBackgroundRisk();
@@ -92,6 +97,7 @@ export const StepTrackingScreen = () => {
   const pendingDays = usePendingStepDays();
   const serverToday = useServerToday();
   const healthStatus = useHealthConnectStatus();
+  const writesEnabled = useHealthConnectWrites();
 
   const [busy, setBusy] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -193,6 +199,11 @@ export const StepTrackingScreen = () => {
     () => run(openHealthConnectSettings),
     [run],
   );
+  const hcWrites = healthConnectWrites(healthStatus, writesEnabled);
+  const onAllowHealthWrites = useCallback(
+    () => run(allowHealthConnectWrites),
+    [run],
+  );
   // Android 13 and below only (see DISCONNECT_IN_APP): there the
   // revocation is immediate, and asked about first.
   const disconnectActions = useMemo(
@@ -255,6 +266,7 @@ export const StepTrackingScreen = () => {
           state={countingState}
           steps={phoneSteps}
           sourceName={sourceName}
+          otherDevicesSteps={otherDevicesSteps}
           permissionDenied={permissionDenied}
           busy={busy}
           onTurnOn={onTurnOn}
@@ -275,8 +287,10 @@ export const StepTrackingScreen = () => {
         {countingState !== 'unsupported' ? (
           <HealthConnectCard
             state={hcState}
+            writes={hcWrites}
             disconnectInApp={DISCONNECT_IN_APP}
             onConnect={onConnectHealth}
+            onAllowWrites={onAllowHealthWrites}
             onManage={onManageHealth}
             onDisconnect={() => setDisconnectOpen(true)}
           />

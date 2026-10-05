@@ -257,16 +257,77 @@ describe('step ingest: the fraud layers (RULES A14–A20, shadow mode)', () => {
     expect((await post(emulator.session, emuBody)).body.day.verified).toBe(false);
   });
 
-  it('two phones: the day is the better one’s, never the sum', async () => {
-    const first = await attested();
+  /** A second phone on the same account, attested. */
+  async function secondPhone(first: { session: Session }, model = 'Pixel 7') {
     const second = await request(app).post('/v1/devices/register').set(authed(first.session))
-      .send({ installId: `second-${Date.now()}`, platform: 'android', profile: { model: 'Pixel 7', app: { version: '1.0.0', build: '1' } } });
-    const other = await attested({ ...first.session, deviceId: second.body.deviceId });
+      .send({ installId: `second-${Date.now()}`, platform: 'android', profile: { model, app: { version: '1.0.0', build: '1' } } });
+    // Signed in on it since before the day's walks, like the first (D-56).
+    await DeviceModel.updateOne(
+      { _id: second.body.deviceId },
+      { $set: { counting: [{ from: new Date(Date.now() - 8 * 86_400_000), to: null }] } },
+    );
+    return attested({ ...first.session, deviceId: second.body.deviceId });
+  }
+
+  it('two phones carried on the same walk: a minute both counted counts once', async () => {
+    const first = await attested();
+    const other = await secondPhone(first);
 
     await post(first.session, await snapshotFor(first.session, first.key, { deviceSteps: 6000 }));
     const res = await post(other.session, await snapshotFor(other.session, other.key, { deviceSteps: 4000 }));
     expect(res.body.day).toMatchObject({ steps: 6000, verifiedSteps: 6000 });
     expect((await ActivityDailyModel.findById(`${first.session.userId}:${today()}`).lean())?.deviceCount).toBe(2);
+
+    const report = (await request(app).get(`/v1/activity/sources?date=${today()}`).set(authed(first.session))).body;
+    expect(report.explanation[0]).toContain('they make 6,000, no more than');
+  });
+
+  it('two phones on different walks: added minute by minute (D-53)', async () => {
+    // 629 on one phone in the morning; 72 on the other in the afternoon.
+    const first = await attested();
+    const other = await secondPhone(first);
+
+    await post(first.session, await snapshotFor(first.session, first.key, { deviceSteps: 629, perMinute: 37, walkingMinutes: 17 }));
+    const res = await post(other.session, await snapshotFor(other.session, other.key, {
+      deviceSteps: 72, perMinute: 72, walkingMinutes: 1, walkStartHour: 15,
+    }));
+    expect(res.body.day).toMatchObject({ steps: 701, verifiedSteps: 701, verified: true });
+
+    const report = (await request(app).get(`/v1/activity/sources?date=${today()}`).set(authed(first.session))).body;
+    expect(report.explanation[0]).toContain('Their steps are added minute by minute');
+    expect(report.explanation[0]).toContain('so the day has 701');
+    expect(report.devices.map((d: { answeredForDay: boolean }) => d.answeredForDay)).toEqual([true, true]);
+
+    // The day's hours are both walks.
+    const hours = await request(app).get(`/v1/activity/range?from=${today()}&to=${today()}&granularity=hour`).set(authed(first.session));
+    expect(hours.body.points[9].steps).toBe(629);
+    expect(hours.body.points[15].steps).toBe(72);
+  });
+
+  it('a phone that does not verify adds to what the day shows, never to what it verifies', async () => {
+    const first = await attested();
+    const other = await secondPhone(first);
+
+    await post(first.session, await snapshotFor(first.session, first.key, { deviceSteps: 629, perMinute: 37, walkingMinutes: 17 }));
+    const res = await post(other.session, await snapshotFor(other.session, other.key, {
+      deviceSteps: 72, perMinute: 72, walkingMinutes: 1, walkStartHour: 15, emulator: true,
+    }));
+    expect(res.body.day).toMatchObject({ steps: 701, verifiedSteps: 629 });
+  });
+
+  it("leaves Vokve's own records — the phone's count written out (D-57) — off the sources page's apps", async () => {
+    const { session, key } = await attested();
+    const record = (id: string, packageName: string, count: number) => ({
+      id, clientRecordId: null, clientRecordVersion: 0, packageName, recordingMethod: 'automatic',
+      device: { type: 'phone', manufacturer: 'Google', model: 'Pixel 8' }, startTime: Date.now() - 3_600_000, endTime: Date.now() - 3_000_000,
+      startZoneOffsetSeconds: 19800, endZoneOffsetSeconds: 19800, lastModifiedTime: Date.now(), recordType: 'steps', count,
+    });
+    await post(session, await snapshotFor(session, key, {
+      deviceSteps: 3000, records: [record('own', 'com.vokve', 3000), record('fit', 'com.fitbit.FitbitMobile', 800)],
+    }));
+
+    const report = (await request(app).get(`/v1/activity/sources?date=${today()}`).set(authed(session))).body;
+    expect(report.records.map((r: { packageName: string }) => r.packageName)).toEqual(['com.fitbit.FitbitMobile']);
   });
 
   it('keeps raw Health Connect records and motion windows once each, adding only what is new', async () => {
@@ -376,7 +437,8 @@ describe('reading steps back: config, ranges and sources', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       tracker: {
-        healthConnectReadTypes: ['steps', 'distance'], healthConnectWriteEnabled: false, gapRecovery: 'split', privacyPolicyUrl: 'https://vokve.app/privacy',
+        healthConnectReadTypes: ['steps', 'distance'], healthConnectWriteEnabled: true, healthConnectWriteGranularity: 'minute',
+        gapRecovery: 'split', privacyPolicyUrl: 'https://vokve.app/privacy',
         wearableTrust: 'catalog', wearableAllowlist: ['com.google.android.apps.fitness'],
       },
       sync: { intervalMinutes: 3, maxAgeDays: 7, include: ['minutes', 'motionWindows', 'healthConnectRecords'] },

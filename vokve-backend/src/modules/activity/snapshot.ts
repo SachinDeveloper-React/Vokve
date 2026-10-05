@@ -229,6 +229,13 @@ export interface DeviceDayEvidence {
   };
   /** Twenty-four local hours, midnight first. */
   hourly: number[];
+  /**
+   * The phone's own steps minute by minute, `[epoch minute, timed,
+   * untimed]`, oldest first and only minutes with steps — what lets several
+   * phones' days be added without counting a walk twice (D-53). Absent on
+   * days stored before it was kept.
+   */
+  minuteSteps?: [number, number, number][];
   motion: {
     status: 'enabled' | 'disabled' | 'absent';
     windows: number;
@@ -258,10 +265,16 @@ export interface DeviceDayEvidence {
   health: { recoveryCount: number; aggressiveOem: boolean; batteryOptimizationEnabled: boolean };
   records: { status: string; count: number; truncated: boolean };
   device: { manufacturer: string | null; model: string | null; sdkInt: number | null };
+  /**
+   * Set when the day was cut to the time the account was signed in on the
+   * phone (D-56): the spans that counted, and how many steps the cut left
+   * out. Everything above already describes the cut day.
+   */
+  counting?: { window: [number, number][]; leftOut: number };
 }
 
 /** The local hour of an instant, in the zone the phone reported. */
-function hourFinder(timezone: string, utcOffsetMinutes: number): (epochMs: number) => number {
+export function hourFinder(timezone: string, utcOffsetMinutes: number): (epochMs: number) => number {
   if (isValidTimeZone(timezone)) {
     const format = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', hourCycle: 'h23' });
     return epochMs => Number(format.format(new Date(epochMs))) % 24;
@@ -282,9 +295,17 @@ export function summarise(snapshot: SignedSnapshot, config: AppConfig['activity'
   let activeMinutes = 0;
   let nightSteps = 0;
   let peakMinuteSteps = 0;
+  // Timed and untimed steps per epoch minute: what several phones' days are
+  // added by, a minute at a time (D-53).
+  const byMinute = new Map<number, [number, number]>();
   for (const minute of minutes) {
     const hour = hourOf(minute.minuteStart);
     const all = minute.steps + minute.untimedSteps;
+    const at = Math.floor(minute.minuteStart / 60_000);
+    const slot = byMinute.get(at) ?? [0, 0];
+    slot[0] += minute.steps;
+    slot[1] += minute.untimedSteps;
+    byMinute.set(at, slot);
     hourly[hour] += all;
     timedSteps += minute.steps;
     untimedSteps += minute.untimedSteps;
@@ -365,6 +386,10 @@ export function summarise(snapshot: SignedSnapshot, config: AppConfig['activity'
       peakMinuteSteps,
     },
     hourly,
+    minuteSteps: [...byMinute]
+      .filter(([, [timed, untimed]]) => timed + untimed > 0)
+      .sort(([a], [b]) => a - b)
+      .map(([at, [timed, untimed]]) => [at, Math.round(timed), Math.round(untimed)]),
     motion: { status: snapshot.motionWindowsStatus ?? 'absent', windows: windows.length, ...motion },
     checks: {
       enabled: snapshot.integrity.enabled,

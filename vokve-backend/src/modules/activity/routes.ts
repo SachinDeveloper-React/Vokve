@@ -8,6 +8,7 @@ import { idempotent } from '../../middleware/idempotency.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
 import { activityGranularitySchema } from '../../contracts/index.js';
+import { getStepGoal } from './goal.service.js';
 import { ingestBody, ingestSnapshot, issueIngestNonce } from './ingest.service.js';
 import { clientActivityConfig, getRange, getSourcesReport } from './report.service.js';
 import { ActivityDailyModel } from './models.js';
@@ -29,6 +30,11 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 /** How the phone's tracker is set up and when it syncs — the server's to change. */
 activityRouter.get('/activity/config', async (_req, res) => {
   res.json(await clientActivityConfig());
+});
+
+/** The daily step goal: the member's, the one suggested for them, and the range (D-55). Saved through `PUT /me/settings`. */
+activityRouter.get('/activity/goal', async (req, res) => {
+  res.json(await getStepGoal(req.ctx.userId!, req.ctx.timezone));
 });
 
 /** Any one day, as `/activity/today` answers for today. */

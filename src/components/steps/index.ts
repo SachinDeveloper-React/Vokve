@@ -1,8 +1,15 @@
 export { StepTrackingHeader } from './StepTrackingHeader';
 export { StepCountingCard } from './StepCountingCard';
 export type { CountingState } from './StepCountingCard';
-export { HealthConnectCard, healthConnectCardState } from './HealthConnectCard';
-export type { HealthConnectCardState } from './HealthConnectCard';
+export {
+  HealthConnectCard,
+  healthConnectCardState,
+  healthConnectWrites,
+} from './HealthConnectCard';
+export type {
+  HealthConnectCardState,
+  HealthConnectWrites,
+} from './HealthConnectCard';
 export { BackgroundCountingCard } from './BackgroundCountingCard';
 export { StepSyncCard } from './StepSyncCard';
 export { StepTrackingPromptCard } from './StepTrackingPromptCard';

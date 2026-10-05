@@ -199,11 +199,23 @@ export const CONFIG_DEFAULTS = {
      * How the phone's step tracker (react-native-step-tracker-pro) is set
      * up, served by `GET /activity/config` and passed to it as they are —
      * so counting, Health Connect and the on-phone checks change without an
-     * app release. Read-only Health Connect; checks flag and remove nothing.
+     * app release. Health Connect is read for a watch's steps and written
+     * with the phone's own; checks flag and remove nothing.
      */
     tracker: {
       healthConnectReadTypes: ['steps', 'distance'] as ('steps' | 'distance' | 'totalCalories')[],
-      healthConnectWriteEnabled: false,
+      /**
+       * Write the steps this phone counts into Health Connect (D-57), so the
+       * user's other fitness apps see them. Steps only — the app declares
+       * `WRITE_STEPS` and nothing else, since distance and calories here are
+       * estimates. Only this phone's own count goes in: never a watch's
+       * steps read back out, nor the user's other phones', and nothing from
+       * before the sign-in (D-56). A day a watch already answers for is not
+       * written, so other apps never see the same walk twice.
+       */
+      healthConnectWriteEnabled: true,
+      /** A record per minute with steps, as Health Connect's guidance for steps asks; `day` writes one per day. */
+      healthConnectWriteGranularity: 'minute' as 'day' | 'minute',
       healthConnectIgnoreManualEntries: true,
       wearableTrust: 'catalog' as 'metadata' | 'catalog',
       /**
@@ -241,6 +253,39 @@ export const CONFIG_DEFAULTS = {
      * false to decide it.
      */
     inspector: { showChecks: null as boolean | null },
+    /**
+     * The daily step goal (D-55): the range a member may set it in, the step
+     * the goal screen's − and + move by, and how `GET /activity/goal`
+     * suggests one — where the member walks now (their recent days, or the
+     * activity level in their profile until there are enough of those), one
+     * stretch further, up to where the benefit levels off for their age and
+     * BMI. A member already past that keeps what they walk.
+     */
+    goal: {
+      min: 3000,
+      max: 20_000,
+      increment: 500,
+      recommend: {
+        /** Days read for where the member walks now — today left out — and how many must have steps. */
+        historyDays: 14,
+        minDaysWithSteps: 5,
+        /** A day's steps typical of each activity level, used until there are enough days. */
+        typicalByLevel: { sedentary: 4000, light: 6000, moderate: 8500, active: 11_000, athlete: 13_000 },
+        /** How far past where the member walks now a suggestion goes. */
+        stretch: 2000,
+        /** Where the benefit levels off, by age: the last band whose `from` the member has reached. */
+        targetByAge: [
+          { from: 0, steps: 12_000 },
+          { from: 18, steps: 10_000 },
+          { from: 60, steps: 8000 },
+          { from: 70, steps: 7000 },
+        ],
+        /** The target without a date of birth. */
+        defaultTarget: 10_000,
+        /** Added to the target by BMI band: more walking where weight is the thing to work on. */
+        bmiAdjust: { underweight: 0, healthy: 0, overweight: 1000, obese: 1000 },
+      },
+    },
     /** A day older than this, in the phone's own zone, is refused (RULES A8). */
     maxAgeDays: 7,
     /** A snapshot signed further ahead of the server's clock than this is flagged (A8). */

@@ -18,6 +18,7 @@ import {
   StepUploadModel,
 } from './models.js';
 import { rollupDay, type DeviceProof } from './rollup.service.js';
+import { countingWindow, cutToWindow, type CountingPeriod } from './counting.js';
 import { classifyWindow, signedSnapshotSchema, summarise, type SignedSnapshot } from './snapshot.js';
 
 /**
@@ -97,7 +98,7 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
 
   const device = await DeviceModel.findOne(
     { _id: ctx.deviceId, userId: ctx.userId, revokedAt: null },
-    { attestation: 1, playIntegrity: 1 },
+    { attestation: 1, playIntegrity: 1, counting: 1 },
   ).lean();
   const key = device?.attestation;
   if (!key?.keyId || !key.publicKey || key.keyId !== snapshot.keyId.toLowerCase()) {
@@ -175,6 +176,8 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
   await storeEvidence(ctx, parsed, {
     uploadId,
     localDay,
+    zone,
+    counting: device?.counting ?? null,
     signedAt,
     payloadSha256,
     keyId: key.keyId,
@@ -201,6 +204,10 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
 interface Stored {
   uploadId: string;
   localDay: string;
+  /** The phone's own zone, the one its day is counted in. */
+  zone: string;
+  /** When the account counted on this install (D-56); null where none were kept. */
+  counting: CountingPeriod[] | null;
   signedAt: Date;
   payloadSha256: string;
   keyId: string;
@@ -276,6 +283,13 @@ async function storeEvidence(ctx: IngestContext, parsed: SignedSnapshot, stored:
     return;
   }
 
+  // Only the steps taken while the account was signed in on this phone are
+  // its own (D-56): the day is cut to that time before it is judged.
+  const window = countingWindow(stored.counting, stored.localDay, stored.zone);
+  const cut = window ? cutToWindow(parsed, window) : null;
+  const evidence = summarise(cut?.snapshot ?? parsed, config.activity);
+  if (window && cut) evidence.counting = { window, leftOut: cut.leftOut };
+
   await DeviceDayModel.updateOne(
     { _id: dayId },
     {
@@ -285,7 +299,7 @@ async function storeEvidence(ctx: IngestContext, parsed: SignedSnapshot, stored:
         localDay: stored.localDay,
         uploadId: stored.uploadId,
         signedAt: stored.signedAt,
-        evidence: summarise(parsed, config.activity),
+        evidence,
         proof: stored.proof,
       },
       $max: markers,

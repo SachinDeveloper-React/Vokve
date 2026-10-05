@@ -49,11 +49,14 @@ jest.mock('@react-native-community/netinfo', () => ({
 }));
 
 // Firebase Messaging has no JS-only implementation; the app only ever asks
-// it for permission and a token, so that is all the double provides.
+// it whether it may notify, for permission and for a token, so that is all
+// the double provides. Allowed by default, so screens do not stop at the
+// notification permission unless a test says so.
 jest.mock('@react-native-firebase/messaging', () => ({
   AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2, EPHEMERAL: 3 },
   getMessaging: jest.fn(() => ({})),
   getToken: jest.fn().mockResolvedValue('fcm-test-token'),
+  hasPermission: jest.fn().mockResolvedValue(1),
   requestPermission: jest.fn().mockResolvedValue(1),
   onTokenRefresh: jest.fn(() => jest.fn()),
 }));

@@ -419,18 +419,81 @@ export function weightedScore(layers: Record<LayerName, number | null>, weights:
   return weight === 0 ? 0 : Math.round(total / weight);
 }
 
+/**
+ * The user's phones added minute by minute (D-53): in each minute, the most
+ * any one phone counted. Walks taken on different phones add up; a walk
+ * with two phones in the pocket counts once, since both counted the same
+ * minutes.
+ */
+export interface PhoneUnion {
+  /** Every phone's own count, added so. */
+  phones: number;
+  /** The verified phones' clean counts, added so. */
+  verified: number;
+  /** Minutes of the union with at least ⚙ `activity.activeMinuteSteps` timed steps. */
+  activeMinutes: number;
+  /** The union's steps per epoch minute — the day's hours come from these. */
+  minutes: Map<number, number>;
+}
+
+export function unionPhones(inputs: DeviceInput[], scored: DeviceScore[], activeMinuteSteps: number): PhoneUnion {
+  const shown = new Map<number, number>();
+  const clean = new Map<number, number>();
+  const timed = new Map<number, number>();
+  const higher = (map: Map<number, number>, at: number, steps: number) => {
+    if (steps > (map.get(at) ?? 0)) map.set(at, steps);
+  };
+  // Steps a phone's minutes do not hold — counted before minutes were kept,
+  // or by a phone that keeps none — cannot be lined up with another phone's,
+  // so only the largest such remainder is added.
+  let unplaced = 0;
+  let unplacedClean = 0;
+  for (const input of inputs) {
+    const score = scored.find(s => s.deviceId === input.deviceId);
+    const minutes = input.evidence.minuteSteps ?? [];
+    let placed = 0;
+    let placedTimed = 0;
+    for (const [at, timedSteps, untimedSteps] of minutes) {
+      placed += timedSteps + untimedSteps;
+      placedTimed += timedSteps;
+      higher(shown, at, timedSteps + untimedSteps);
+      higher(timed, at, timedSteps);
+    }
+    unplaced = Math.max(unplaced, input.evidence.deviceSteps - placed);
+    if (!score?.verified) continue;
+    // A verified phone's clean count — less what it recovered and flagged —
+    // spread over its timed minutes, so it never adds more than it verified.
+    const scale = placedTimed > score.phoneClean ? score.phoneClean / placedTimed : 1;
+    for (const [at, timedSteps] of minutes) higher(clean, at, timedSteps * scale);
+    unplacedClean = Math.max(unplacedClean, score.phoneClean - placedTimed);
+  }
+  const sum = (map: Map<number, number>) => [...map.values()].reduce((a, b) => a + b, 0);
+  return {
+    phones: Math.round(sum(shown) + Math.max(0, unplaced)),
+    verified: Math.round(sum(clean) + Math.max(0, unplacedClean)),
+    activeMinutes: [...timed.values()].filter(steps => steps >= activeMinuteSteps).length,
+    minutes: shown,
+  };
+}
+
 export interface DayScore {
   best: DeviceScore;
   devices: DeviceScore[];
   /** Every device's flags, once per kind. */
   flags: DayFlag[];
   displaySteps: number;
+  /** What the day verified: the phones' union, or the best phone's own answer when that is more. */
+  verifiedSteps: number;
+  union: PhoneUnion;
 }
 
 /**
- * A user's day across their devices. Never added together — the same walk
- * is counted by every phone in the pocket — the day is the best verified
- * device's; every device's flags are kept, so a rooted second phone is on
+ * A user's day across their devices. Their phones are added minute by
+ * minute (D-53) — see [PhoneUnion] — and a phone whose own answer is more
+ * than that, from a watch in its Health Connect, answers instead: a watch's
+ * steps carry no minutes here, so they are never added to another phone's.
+ * With one phone the union is that phone's count, and the day is exactly
+ * what it was. Every device's flags are kept, so a rooted second phone is on
  * the record whichever phone pays.
  */
 export function scoreDay(devices: DeviceInput[], history: HistoryDay[], now: Date, config: AppConfig): DayScore {
@@ -447,7 +510,15 @@ export function scoreDay(devices: DeviceInput[], history: HistoryDay[], now: Dat
       flags.push(f);
     }
   }
-  return { best, devices: scored, flags, displaySteps: Math.max(...scored.map(s => s.displaySteps)) };
+  const union = unionPhones(devices, scored, config.activity.activeMinuteSteps);
+  return {
+    best,
+    devices: scored,
+    flags,
+    displaySteps: Math.max(union.phones, ...scored.map(s => s.displaySteps)),
+    verifiedSteps: Math.max(union.verified, best.verifiedSteps),
+    union,
+  };
 }
 
 function round2(value: number): number {

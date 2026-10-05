@@ -56,6 +56,7 @@ import type {
   ShopCategorySummary,
   ShopItem,
   ShopSort,
+  StepGoal,
   StepIngestResult,
   StepSourcesReport,
   StreakRestoreResult,
@@ -280,6 +281,8 @@ export interface ActivityApi {
   range(query: ActivityRangeQuery): Promise<ActivityRange>;
   /** How the tracker on this phone is set up and when it syncs. */
   config(): Promise<ActivityConfig>;
+  /** The step goal, the one suggested and the range (D-55); saved through `SettingsApi.update`. */
+  goal(): Promise<StepGoal>;
   /** Where a day's steps came from, and how the server matched them. */
   sources(date: string): Promise<StepSourcesReport>;
   /** The single-use value the next signed snapshot carries. */

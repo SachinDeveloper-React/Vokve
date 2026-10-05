@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { getConfig } from '../../config/remote.js';
 import { activityLevelSchema, fitnessGoalSchema, genderSchema, unitSystemSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
@@ -84,8 +85,24 @@ meRouter.get('/me/settings', async (req, res) => {
   res.json(settingsOut(s!));
 });
 
+/**
+ * The step goal's range is ⚙ `activity.goal` (D-55), so it is checked here;
+ * the schema's bounds above stay as the outer limit (X9). Saving a goal —
+ * even the one already set — records that the member chose it, which is how
+ * the set-up after sign-in knows not to ask again on their next phone.
+ */
 meRouter.put('/me/settings', validate('body', settingsBody), async (req, res) => {
-  const s = await UserSettingsModel.findOneAndUpdate({ _id: req.ctx.userId }, { $set: req.body }, { upsert: true, new: true }).lean();
+  const set: Record<string, unknown> = { ...req.body };
+  if (req.body.dailyStepGoal !== undefined) {
+    const { min, max } = (await getConfig()).activity.goal;
+    if (req.body.dailyStepGoal < min || req.body.dailyStepGoal > max) {
+      throw Errors.validation({
+        dailyStepGoal: `Choose a goal between ${min.toLocaleString('en-IN')} and ${max.toLocaleString('en-IN')} steps.`,
+      });
+    }
+    set.stepGoalSetAt = new Date();
+  }
+  const s = await UserSettingsModel.findOneAndUpdate({ _id: req.ctx.userId }, { $set: set }, { upsert: true, new: true }).lean();
   if (req.body.units) await UserModel.updateOne({ _id: req.ctx.userId }, { $set: { units: req.body.units } });
   res.json(settingsOut(s!));
 });

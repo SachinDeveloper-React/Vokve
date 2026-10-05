@@ -14,7 +14,7 @@ import { markEarned } from '../streak/service.js';
 import { scoreDay, type DeviceInput, type DayFlag } from './layers.js';
 import { ActivityDailyModel, DeviceDayModel } from './models.js';
 import { creditStepsForDay, getDay } from './service.js';
-import type { DeviceDayEvidence } from './snapshot.js';
+import { hourFinder, type DeviceDayEvidence } from './snapshot.js';
 
 /**
  * One user's day, scored from every device that sent it (ARCHITECTURE §5.3
@@ -26,6 +26,13 @@ import type { DeviceDayEvidence } from './snapshot.js';
  * as it now stands; idempotent, so running it again changes nothing that
  * has not changed.
  */
+
+/** Steps per epoch minute into twenty-four local hours, midnight first. */
+function hoursOf(minutes: Map<number, number>, hourOf: (epochMs: number) => number): number[] {
+  const hours = Array.from({ length: 24 }, () => 0);
+  for (const [at, steps] of minutes) hours[hourOf(at * 60_000)] += steps;
+  return hours;
+}
 
 /** Metres per step from height (the tracker's own coefficient); 170 cm when unknown. */
 const strideMetres = (heightCm: number | null | undefined) => ((heightCm ?? 170) * 0.414) / 100;
@@ -106,7 +113,8 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
         userId,
         localDay,
         steps: score.displaySteps,
-        verifiedSteps: best.verifiedSteps,
+        verifiedSteps: score.verifiedSteps,
+        phonesAdded: { steps: score.union.phones, verified: score.union.verified },
         devices: score.devices.map(device => {
           const evidence = inputs.find(input => input.deviceId === device.deviceId)!.evidence;
           return {
@@ -127,8 +135,8 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
       'activity.day_scored',
     );
   }
-  // The phone that counted the most supplies the pedometer figure and the
-  // hours; never a sum of phones.
+  // The phone that counted the most supplies the pedometer figure, kept for
+  // the day-to-day checks (A17), which compare a phone with itself.
   const counting = inputs.reduce((a, b) => (b.evidence.deviceSteps > a.evidence.deviceSteps ? b : a)).evidence;
 
   // The other app the phone showed for the day, when it showed one the
@@ -138,10 +146,17 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
     ? bestEvidence.sources.find(source => source.packageName === bestEvidence.resolved.packageName) ?? null
     : null;
 
-  // The hours of whichever source answered for the day: a watch's own split
-  // when it won or was shown and the tracker had one, the counting phone's
-  // minutes else.
-  const hourly = best.winner?.hourlySteps ?? shown?.hourlySteps ?? counting.hourly;
+  // Several phones whose minutes added up to more than any one of them
+  // answered: the day is their union, and so are its hours (D-53).
+  const phonesAdded = inputs.length > 1 &&
+    score.union.phones > Math.max(...score.devices.map(device => device.displaySteps));
+
+  // The hours of whichever source answered for the day: the phones' union
+  // when it did, a watch's own split when it won or was shown and the
+  // tracker had one, the counting phone's minutes else.
+  const hourly = phonesAdded
+    ? hoursOf(score.union.minutes, hourFinder(bestEvidence.timezone, bestEvidence.utcOffsetMinutes))
+    : best.winner?.hourlySteps ?? shown?.hourlySteps ?? counting.hourly;
 
   const measured = best.winner && best.winner.distanceSource === 'health_connect' && best.winner.distance > 0;
   const distanceKm = measured
@@ -155,14 +170,14 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
       $setOnInsert: { _id: `${userId}:${localDay}`, userId, localDay },
       $set: {
         steps: score.displaySteps,
-        verifiedSteps: best.verifiedSteps,
+        verifiedSteps: score.verifiedSteps,
         pedometerSteps: counting.deviceSteps,
         distanceKm: Math.round(distanceKm * 100) / 100,
-        activeMinutes: counting.minutes.activeMinutes,
+        activeMinutes: Math.max(score.union.activeMinutes, counting.minutes.activeMinutes),
         stepCalories: Math.round(stepCalories * 10) / 10,
         hourly,
         source: best.source,
-        verified: best.verified,
+        verified: best.verified || score.verifiedSteps > 0,
         plausibility: best.plausibility,
         layers: best.layers,
         flags: score.flags.filter(f => f.severity !== 'info').map(f => f.kind),
@@ -170,6 +185,8 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
         deviceCount: inputs.length,
         breakdown: {
           bestDeviceId: best.deviceId,
+          // The phones added minute by minute, for the sources page (D-53).
+          union: { phones: score.union.phones, verified: score.union.verified, added: phonesAdded },
           devices: score.devices.map(device => {
             const input = inputs.find(i => i.deviceId === device.deviceId)!;
             return {
@@ -194,6 +211,8 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
               flags: device.flags.map(f => ({ kind: f.kind, layer: f.layer, severity: f.severity })),
               sources: device.sources,
               sourcesStatus: input.evidence.sourcesStatus,
+              // Cut to the time the account was signed in on it (D-56).
+              counting: input.evidence.counting ?? null,
               signedAt: input.evidence.signedAt,
               proof: { key: input.key, play: input.play },
             };
@@ -219,9 +238,9 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
   // daily ceiling leaves rather than crowding the steps out of it (RULES E8).
   let coinsHeld = 0;
   let releaseAfter: Date | null = null;
-  if (config.coins.steps.enabled && best.verifiedSteps > 0) {
+  if (config.coins.steps.enabled && score.verifiedSteps > 0) {
     const tier = (await UserModel.findById(userId, { trust: 1 }).lean())?.trust?.tier ?? 'normal';
-    const credit = await creditStepsForDay(userId, localDay, best.verifiedSteps, tier);
+    const credit = await creditStepsForDay(userId, localDay, score.verifiedSteps, tier);
     if (credit.status === 'held') {
       coinsHeld = credit.granted;
       releaseAfter = credit.releaseAfter;
@@ -232,9 +251,9 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
   // streak, where ⚙ `streak.earnedBy.stepGoal` says they do (D-44). Verified
   // only: an unverified day shows its steps but keeps no streak.
   let streakEarned = false;
-  if (config.streak.earnedBy.stepGoal && best.verifiedSteps > 0) {
+  if (config.streak.earnedBy.stepGoal && score.verifiedSteps > 0) {
     const goal = (await UserSettingsModel.findById(userId, { dailyStepGoal: 1 }).lean())?.dailyStepGoal ?? 10_000;
-    if (best.verifiedSteps >= goal) {
+    if (score.verifiedSteps >= goal) {
       streakEarned = await markEarned(userId, localDay, 'steps', zone, { now }).catch(err => {
         logger.warn({ err, userId, localDay }, 'streak.mark_failed');
         return false;

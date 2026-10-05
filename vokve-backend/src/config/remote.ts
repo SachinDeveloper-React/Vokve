@@ -38,11 +38,18 @@ export function invalidateConfig(): void {
   cached = null;
 }
 
-/** RULES E8c: no per-source cap may exceed the daily ceiling. */
+/**
+ * RULES E8c: no per-source cap may exceed the daily ceiling. And a step
+ * goal range a member could not pick from (D-55).
+ */
 function validate(config: AppConfig): void {
   for (const [source, cap] of Object.entries(config.coins.sourceCaps)) {
     if (cap > config.coins.dailyCap) {
       throw new Error(`coins.sourceCaps.${source} (${cap}) exceeds coins.dailyCap (${config.coins.dailyCap})`);
     }
+  }
+  const { min, max, increment } = config.activity.goal;
+  if (!(min > 0 && min < max && increment > 0)) {
+    throw new Error(`activity.goal: ${min}–${max} by ${increment} is not a range a goal can be set in`);
   }
 }

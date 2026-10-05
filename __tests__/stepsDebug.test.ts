@@ -26,6 +26,17 @@ const at = (hour: number, minute = 0) =>
 const hours = (counts: Record<number, number>) =>
   Array.from({ length: 24 }, (_, hour) => counts[hour] ?? 0);
 
+const QUIET = {
+  readsLimited: false,
+  readsRetryAfterMs: 0,
+  writesLimited: false,
+  writesRetryAfterMs: 0,
+  readsLast15Minutes: 12,
+  readsLast24Hours: 140,
+  writesLast15Minutes: 0,
+  writesLast24Hours: 0,
+};
+
 const CONNECTED = {
   available: true,
   availability: 'available',
@@ -33,6 +44,7 @@ const CONNECTED = {
   grantedPermissions: ['android.permission.health.READ_STEPS'],
   missingPermissions: ['android.permission.health.READ_DISTANCE'],
   undeclaredPermissions: [],
+  rateLimit: QUIET,
 } as unknown as HealthConnectStatus;
 
 const googleFit = {
@@ -67,6 +79,7 @@ const snapshot = (date: string, overrides: Record<string, unknown> = {}) => ({
   coverageStartAt: 0,
   sources: [googleFit],
   sourcesStatus: 'read',
+  otherDevicesSteps: 300,
   resolved: {
     date,
     steps: 2000,
@@ -127,7 +140,8 @@ const INITIAL = useStepsStore.getState();
 
 beforeEach(() => {
   jest.clearAllMocks();
-  useStepsStore.setState({ ...INITIAL, healthConnect: CONNECTED }, true);
+  useStepsStore.setState(INITIAL, true);
+  tracker.getHealthConnectStatus.mockResolvedValue(CONNECTED);
 
   tracker.getConfig.mockResolvedValue({
     stepSource: 'auto',
@@ -154,8 +168,17 @@ test('lists every app and record, and says why the watch walk does not show', as
   expect(setup).toContain(
     'steps allowed: yes · granted [READ_STEPS] · missing [READ_DISTANCE]',
   );
+  expect(setup).toContain(
+    'Health Connect calls by the tracker: reads 12 in 15 min / 140 in 24 h (ok)',
+  );
+  // D-57: whether this phone's steps go out, and whether it may.
+  expect(setup).toMatch(/Health Connect writes: (OFF|on, per (day|minute) · allowed: (yes|no|\?))/);
 
+  expect(day).toContain('Counting from sign-in: not set (whole days count)');
   expect(day).toContain('Shown: 2,000 from this phone · best other app 1,500');
+  expect(day).toContain(
+    'Other phones today, from the server: 300 — the notification and the live count show 2,300',
+  );
   expect(day).toContain(
     "Why: Google Fit has 1,500, not more than the phone's 2,000.",
   );
@@ -187,30 +210,22 @@ test('lists every app and record, and says why the watch walk does not show', as
     healthConnectRecordTypes: ['steps'],
   });
   expect(tracker.getHealthConnectRecords).not.toHaveBeenCalled();
-  expect(tracker.getHealthConnectStatus).not.toHaveBeenCalled();
 });
 
 test('says plainly when Health Connect is refusing the app for calling it too often', async () => {
   // As on the phone: the grants read back as none, nothing was read, and
   // asking directly names the reason.
-  useStepsStore.setState({
-    healthConnect: {
-      ...CONNECTED,
-      stepsGranted: false,
-      grantedPermissions: [],
-      missingPermissions: [
-        'android.permission.health.READ_STEPS',
-        'android.permission.health.READ_DISTANCE',
-      ],
-    } as HealthConnectStatus,
+  tracker.getHealthConnectStatus.mockResolvedValue({
+    ...CONNECTED,
+    rateLimit: { ...QUIET, readsLimited: true, readsRetryAfterMs: 30_000 },
   });
   tracker.getVerificationSnapshot.mockImplementation(async (date: string) =>
     snapshot(date, {
       deviceSteps: 0,
       sources: [],
-      sourcesStatus: 'not_consulted',
+      sourcesStatus: 'rate_limited',
       healthConnectRecords: {
-        status: 'not_granted',
+        status: 'rate_limited',
         recordTypes: ['steps'],
         records: [],
         truncated: false,
@@ -226,8 +241,11 @@ test('says plainly when Health Connect is refusing the app for calling it too of
     ),
   );
 
-  const [, day, , , records] = await report();
+  const [setup, day, , , records] = await report();
 
+  expect(setup).toContain(
+    'reads 12 in 15 min / 140 in 24 h (HELD BACK for 30 s)',
+  );
   expect(day).toContain("Why: Health Connect is refusing Vokve's calls");
   expect(day).toContain('Leave Vokve closed for 15 minutes');
   expect(records).toContain(
@@ -237,12 +255,10 @@ test('says plainly when Health Connect is refusing the app for calling it too of
 });
 
 test('a permission that is really missing is said to be missing', async () => {
-  useStepsStore.setState({
-    healthConnect: {
-      ...CONNECTED,
-      stepsGranted: false,
-      grantedPermissions: [],
-    } as HealthConnectStatus,
+  tracker.getHealthConnectStatus.mockResolvedValue({
+    ...CONNECTED,
+    stepsGranted: false,
+    grantedPermissions: [],
   });
   tracker.getVerificationSnapshot.mockImplementation(async (date: string) =>
     snapshot(date, {

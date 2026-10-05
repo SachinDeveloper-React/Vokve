@@ -3,6 +3,7 @@ import { activityApi } from '../services/api/endpoints';
 import type {
   ActivityRange,
   DailyActivity,
+  StepGoal,
   StepSourcesReport,
 } from '../types/models';
 import { useServerRead, type Loaded } from './useServerRead';
@@ -25,4 +26,12 @@ export function useActivityDay(date: string): Loaded<DailyActivity> {
 /** Where a day's steps came from, and how they were matched (`GET /activity/sources`). */
 export function useStepSources(date: string): Loaded<StepSourcesReport> {
   return useServerRead(`sources:${date}`, () => activityApi.sources(date));
+}
+
+/**
+ * The step goal, the one the server suggests and the range a goal may be
+ * set in (`GET /activity/goal`, D-55).
+ */
+export function useStepGoal(): Loaded<StepGoal> {
+  return useServerRead('step-goal', () => activityApi.goal());
 }

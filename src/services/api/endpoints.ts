@@ -49,6 +49,7 @@ import {
   leaderboardHistorySchema,
   leaderboardRulesSchema,
   pageSchema,
+  stepGoalSchema,
   stepIngestResultSchema,
   stepSourcesReportSchema,
   streakRestoreResultSchema,
@@ -305,6 +306,7 @@ const realActivityApi: ActivityApi = {
     ),
   config: () =>
     request(activityConfigSchema, client => client.get('/activity/config')),
+  goal: () => request(stepGoalSchema, client => client.get('/activity/goal')),
   sources: date =>
     request(stepSourcesReportSchema, client =>
       client.get('/activity/sources', { params: { date } }),
@@ -863,6 +865,7 @@ export const activityApi: ActivityApi = {
   day: date => pick(mockActivityApi, realActivityApi).day(date),
   range: query => pick(mockActivityApi, realActivityApi).range(query),
   config: () => pick(mockActivityApi, realActivityApi).config(),
+  goal: () => pick(mockActivityApi, realActivityApi).goal(),
   sources: date => pick(mockActivityApi, realActivityApi).sources(date),
   ingestNonce: () => pick(mockActivityApi, realActivityApi).ingestNonce(),
   ingest: (payload, options) =>

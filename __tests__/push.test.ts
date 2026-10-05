@@ -4,6 +4,8 @@
  * the right device, that a refusal is respected and reaches nobody, that a
  * rotated token is re-sent and an unchanged one is not, and that sign-out
  * withdraws it so the next person on the phone hears nothing of the last.
+ * The system dialog is the notification screen's to show, after sign-in
+ * (D-54): the sign-in itself only checks.
  *
  * @format
  */
@@ -18,10 +20,15 @@ jest.mock('../src/services/device', () => ({
 import {
   AuthorizationStatus,
   getToken,
+  hasPermission,
   onTokenRefresh,
   requestPermission,
 } from '@react-native-firebase/messaging';
-import { registerForPush, unregisterFromPush } from '../src/services/push';
+import {
+  enablePushNotifications,
+  registerForPush,
+  unregisterFromPush,
+} from '../src/services/push';
 import { getDeviceId } from '../src/services/device';
 
 const { deviceApi } = jest.requireMock('../src/services/api/endpoints') as {
@@ -35,7 +42,10 @@ beforeEach(async () => {
   deviceApi.setPushToken.mockClear();
   (getDeviceId as jest.Mock).mockReturnValue('dev_1');
   (getToken as jest.Mock).mockResolvedValue('fcm-test-token');
-  (requestPermission as jest.Mock).mockResolvedValue(
+  (requestPermission as jest.Mock)
+    .mockClear()
+    .mockResolvedValue(AuthorizationStatus.AUTHORIZED);
+  (hasPermission as jest.Mock).mockResolvedValue(
     AuthorizationStatus.AUTHORIZED,
   );
   (onTokenRefresh as jest.Mock).mockReset().mockReturnValue(jest.fn());
@@ -58,8 +68,31 @@ test('a refusal is respected: nothing is sent, and the caller is told', async ()
     AuthorizationStatus.DENIED,
   );
 
-  expect(await registerForPush()).toBe(false);
+  expect(await enablePushNotifications()).toBe(false);
   expect(deviceApi.setPushToken).not.toHaveBeenCalled();
+});
+
+test('signing in only checks: no dialog, and no token while nothing is allowed', async () => {
+  (hasPermission as jest.Mock).mockResolvedValue(
+    AuthorizationStatus.NOT_DETERMINED,
+  );
+
+  expect(await registerForPush()).toBe(false);
+  expect(requestPermission).not.toHaveBeenCalled();
+  expect(deviceApi.setPushToken).not.toHaveBeenCalled();
+});
+
+test('the notification screen asks, then hands the token over', async () => {
+  (hasPermission as jest.Mock).mockResolvedValue(
+    AuthorizationStatus.NOT_DETERMINED,
+  );
+
+  expect(await enablePushNotifications()).toBe(true);
+  expect(requestPermission).toHaveBeenCalledTimes(1);
+  expect(deviceApi.setPushToken).toHaveBeenCalledWith(
+    'dev_1',
+    'fcm-test-token',
+  );
 });
 
 test('a rotated token is re-sent; the same one is not', async () => {

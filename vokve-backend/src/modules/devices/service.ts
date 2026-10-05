@@ -86,9 +86,16 @@ export async function registerDevice(userId: string, body: RegisterDeviceBody, r
       deviceId: device._id, after: { accounts: shared + 1 } });
   }
 
-  // Bind the session that made this call to the device (RULES DV7).
-  if (refreshTokenHash) {
-    await RefreshTokenModel.updateOne({ tokenHash: refreshTokenHash }, { $set: { deviceId: device._id } });
+  // Bind the session that made this call to the device (RULES DV7). A
+  // session meeting this install for the first time is a sign-in here, and
+  // so is a new install: counting starts now (D-56). A launch restoring a
+  // session finds it bound already, and counting carries on as it was.
+  const before = refreshTokenHash
+    ? await RefreshTokenModel.findOneAndUpdate({ tokenHash: refreshTokenHash }, { $set: { deviceId: device._id } }).lean()
+    : null;
+  const inserted = device.firstSeenAt?.getTime() === now.getTime();
+  if (inserted || (before && before.deviceId !== device._id)) {
+    await startCounting(userId, device._id, now);
   }
 
   const min = config.app.minVersion[body.platform];
@@ -115,6 +122,42 @@ export async function listDevices(userId: string) {
   }));
 }
 
+/** Periods kept per install: weeks of signing in and out, far past the days still open to sync. */
+const MAX_COUNTING_PERIODS = 50;
+
+/**
+ * A sign-in on this install: its steps are the account's from now (D-56).
+ * A period already open — a second sign-in path for the same session, or a
+ * sign-out the server never heard about — carries on instead.
+ */
+export async function startCounting(userId: string, deviceId: string, at = new Date()): Promise<void> {
+  await DeviceModel.updateOne(
+    { _id: deviceId, userId, counting: { $not: { $elemMatch: { to: null } } } },
+    { $push: { counting: { $each: [{ from: at, to: null }], $slice: -MAX_COUNTING_PERIODS } } },
+  );
+}
+
+/**
+ * A sign-out: the account's steps on these installs stop here (D-56). One
+ * install, every install but one (signing the others out), or all of them.
+ * An install that never kept periods has none open, and is left alone.
+ */
+export async function stopCounting(
+  userId: string,
+  which: { deviceId?: string; except?: string } = {},
+  at = new Date(),
+): Promise<void> {
+  await DeviceModel.updateMany(
+    {
+      userId,
+      ...(which.deviceId ? { _id: which.deviceId } : which.except ? { _id: { $ne: which.except } } : {}),
+      counting: { $elemMatch: { to: null } },
+    },
+    { $set: { 'counting.$[open].to': at } },
+    { arrayFilters: [{ 'open.to': null }] },
+  );
+}
+
 export async function revokeDevice(userId: string, deviceId: string, actorDeviceId?: string) {
   const device = await DeviceModel.findOneAndUpdate(
     { _id: deviceId, userId, revokedAt: null },
@@ -124,6 +167,7 @@ export async function revokeDevice(userId: string, deviceId: string, actorDevice
   // Revocation must be immediate — drop the heartbeat debounce so the next request re-checks the DB.
   await getKV().del(heartbeatKey(deviceId));
   await RefreshTokenModel.updateMany({ userId, deviceId, revokedAt: null }, { $set: { revokedAt: new Date() } });
+  await stopCounting(userId, { deviceId });
   await AuditLogModel.create({ actorType: 'user', actorId: userId, deviceId: actorDeviceId, action: 'device.revoke',
     subjectType: 'device', subjectId: deviceId });
 }
