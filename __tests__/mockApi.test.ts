@@ -701,17 +701,42 @@ describe('the shop, orders and addresses', () => {
     });
   });
 
-  test('the basket keeps lines by item and size, checks sizes, and quotes the split', async () => {
+  test('the basket keeps lines by item, size and colour, checks both, and quotes the split', async () => {
     await signIn();
     await expectApiError(
-      () => mockCartApi.setLine({ itemId: 'tee', quantity: 1 }),
+      () => mockCartApi.setLine({ itemId: 'tee', quantity: 1, color: 'Black' }),
       'validation',
     );
-    await mockCartApi.setLine({ itemId: 'tee', quantity: 2, size: 'M' });
-    const cart = await mockCartApi.setLine({ itemId: 'cap', quantity: 1 });
-    expect(cart.lines.map(l => [l.item.id, l.quantity, l.size])).toEqual([
-      ['tee', 2, 'M'],
-      ['cap', 1, null],
+    await expectApiError(
+      () => mockCartApi.setLine({ itemId: 'tee', quantity: 1, size: 'M' }),
+      'validation',
+    );
+    await expectApiError(
+      () =>
+        mockCartApi.setLine({
+          itemId: 'tee',
+          quantity: 1,
+          size: 'M',
+          color: 'Pink',
+        }),
+      'validation',
+    );
+    await mockCartApi.setLine({
+      itemId: 'tee',
+      quantity: 2,
+      size: 'M',
+      color: 'Black',
+    });
+    const cart = await mockCartApi.setLine({
+      itemId: 'cap',
+      quantity: 1,
+      color: 'Red',
+    });
+    expect(
+      cart.lines.map(l => [l.item.id, l.quantity, l.size, l.color]),
+    ).toEqual([
+      ['tee', 2, 'M', 'Black'],
+      ['cap', 1, null, null],
     ]);
     expect(cart.count).toBe(3);
     // ₹1,598 + ₹449 = ₹2,047 of goods, over the free-shipping line; 30% is 2,456 coins, capped by the wallet.
@@ -727,6 +752,7 @@ describe('the shop, orders and addresses', () => {
       itemId: 'tee',
       quantity: 0,
       size: 'M',
+      color: 'Black',
     });
     expect(fewer.lines.map(l => l.item.id)).toEqual(['cap']);
     expect((await mockCartApi.clear()).count).toBe(0);
@@ -750,7 +776,7 @@ describe('the shop, orders and addresses', () => {
     await signIn();
     // A ₹449 cap: 30% at ₹0.25 a coin is 538 coins; ₹49 to ship under ₹999.
     const q = await mockCheckoutApi.quote(
-      [{ itemId: 'cap', quantity: 1, size: null }],
+      [{ itemId: 'cap', quantity: 1, size: null, color: null }],
       'max',
     );
     expect(q).toMatchObject({
@@ -766,7 +792,7 @@ describe('the shop, orders and addresses', () => {
     expect(
       (
         await mockCheckoutApi.quote(
-          [{ itemId: 'cap', quantity: 1, size: null }],
+          [{ itemId: 'cap', quantity: 1, size: null, color: null }],
           100,
         )
       ).payable,
@@ -774,7 +800,7 @@ describe('the shop, orders and addresses', () => {
     expect(
       (
         await mockCheckoutApi.quote(
-          [{ itemId: 'kettlebell-8', quantity: 1, size: null }],
+          [{ itemId: 'kettlebell-8', quantity: 1, size: null, color: null }],
           'max',
         )
       ).shipping,
@@ -787,7 +813,7 @@ describe('the shop, orders and addresses', () => {
       () =>
         mockCheckoutApi.place(
           {
-            lines: [{ itemId: 'cap', quantity: 1, size: null }],
+            lines: [{ itemId: 'cap', quantity: 1, size: null, color: null }],
             addressId: 'nope',
             coins: 0,
           },
@@ -800,7 +826,7 @@ describe('the shop, orders and addresses', () => {
 
     const placed = await mockCheckoutApi.place(
       {
-        lines: [{ itemId: 'cap', quantity: 1, size: null }],
+        lines: [{ itemId: 'cap', quantity: 1, size: null, color: null }],
         addressId: home.id,
         coins: 300,
       },
@@ -849,7 +875,7 @@ describe('the shop, orders and addresses', () => {
       () =>
         mockCheckoutApi.place(
           {
-            lines: [{ itemId: 'cap', quantity: 1, size: null }],
+            lines: [{ itemId: 'cap', quantity: 1, size: null, color: null }],
             addressId: home.id,
             coins: 9999,
           },
@@ -863,7 +889,7 @@ describe('the shop, orders and addresses', () => {
     await signIn();
     const home = await mockAddressApi.create(ADDRESS);
     const hoodie = {
-      lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }],
+      lines: [{ itemId: 'hoodie', quantity: 1, size: 'L', color: 'Navy' }],
       addressId: home.id,
       coins: MOCK_STEP_UP_THRESHOLD,
     };
@@ -900,12 +926,87 @@ describe('the shop, orders and addresses', () => {
     );
   });
 
+  test('coupons: the basket takes one that fits, refuses one that does not, the order spends it and a cancel gives it back', async () => {
+    await signIn();
+    const home = await mockAddressApi.create(ADDRESS);
+    await expectApiError(
+      () => mockCartApi.applyCoupon('WELCOME10'),
+      'validation',
+    );
+    await mockCartApi.setLine({ itemId: 'resistance-bands', quantity: 1 });
+    // ₹649 of goods: under FIT50's ₹799, over WELCOME10's ₹499.
+    await expectApiError(() => mockCartApi.applyCoupon('fit50'), 'validation');
+    const cart = await mockCartApi.applyCoupon(' welcome10 ');
+    expect(cart.quote.coupon).toMatchObject({
+      code: 'WELCOME10',
+      discount: 6490,
+      problem: null,
+    });
+    expect(cart.quote.total).toBe(64900 - 6490 + 4900);
+
+    const placed = await mockCheckoutApi.place(
+      { fromCart: true, addressId: home.id, coins: 0, couponCode: 'WELCOME10' },
+      { idempotencyKey: 'coupon-1' },
+    );
+    expect(placed.order.coupon).toMatchObject({
+      code: 'WELCOME10',
+      discount: 6490,
+    });
+    expect((await mockCartApi.get()).quote.coupon).toBeNull();
+
+    // Once per member; a cancel gives it back.
+    await mockCartApi.setLine({ itemId: 'resistance-bands', quantity: 1 });
+    await expectApiError(
+      () => mockCartApi.applyCoupon('WELCOME10'),
+      'validation',
+    );
+    await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'coupon-c' });
+    expect(
+      (await mockCartApi.applyCoupon('WELCOME10')).quote.coupon?.code,
+    ).toBe('WELCOME10');
+    expect((await mockCartApi.removeCoupon()).quote.coupon).toBeNull();
+  });
+
+  test('delivery preferences: kept trimmed, filled in under what the checkout sends, and copied onto the order', async () => {
+    await signIn();
+    expect(await mockAddressApi.deliveryPreferences()).toEqual({
+      instructions: '',
+      whatsappUpdates: false,
+      leaveAtDoor: false,
+    });
+    expect(
+      await mockAddressApi.setDeliveryPreferences({
+        instructions: ' Ring twice ',
+        leaveAtDoor: true,
+      }),
+    ).toEqual({
+      instructions: 'Ring twice',
+      whatsappUpdates: false,
+      leaveAtDoor: true,
+    });
+    const home = await mockAddressApi.create(ADDRESS);
+    const placed = await mockCheckoutApi.place(
+      {
+        lines: [{ itemId: 'cap', quantity: 1, size: null, color: null }],
+        addressId: home.id,
+        coins: 0,
+        delivery: { whatsappUpdates: true },
+      },
+      { idempotencyKey: 'delivery-1' },
+    );
+    expect(placed.order.delivery).toEqual({
+      instructions: 'Ring twice',
+      whatsappUpdates: true,
+      leaveAtDoor: true,
+    });
+  });
+
   test('reviews: one per user, verified for a buyer, summarised onto the item', async () => {
     await signIn();
     const home = await mockAddressApi.create(ADDRESS);
     const placed = await mockCheckoutApi.place(
       {
-        lines: [{ itemId: 'yoga-mat', quantity: 1, size: null }],
+        lines: [{ itemId: 'yoga-mat', quantity: 1, size: null, color: null }],
         addressId: home.id,
         coins: 0,
       },

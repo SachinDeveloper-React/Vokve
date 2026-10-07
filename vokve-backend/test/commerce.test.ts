@@ -2,12 +2,13 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { AppConfigModel } from '../src/modules/platform/models.js';
 import { invalidateConfig } from '../src/config/remote.js';
-import { OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel } from '../src/modules/commerce/models.js';
+import { CouponModel, CouponUsageModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel } from '../src/modules/commerce/models.js';
 import { expireUnpaidOrders } from '../src/modules/commerce/service.js';
 import { CoinLedgerModel } from '../src/modules/economy/models.js';
 import { credit } from '../src/modules/economy/service.js';
 import { UserModel } from '../src/modules/identity/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
+import { setWhatsAppTransport } from '../src/lib/whatsapp.js';
 import { app, authed, signUpAndRegister, type Session } from './helpers.js';
 
 const DAY = '2026-09-14';
@@ -96,6 +97,19 @@ describe('commerce: catalogue, config and addresses', () => {
     const inStock = await request(app).get('/v1/shop/items').query({ category: 'clothing', inStock: 'true' }).set(authed(session));
     expect(inStock.body.data.some((i: { id: string }) => i.id === 'cap')).toBe(false);
     expect((await request(app).get('/v1/shop/items/nope').set(authed(session))).status).toBe(404);
+
+    // The product page's details ride on the item; an item with none has empty sections, and an older single photo reads as a gallery.
+    const tee = (await request(app).get('/v1/shop/items/tee').set(authed(session))).body;
+    expect(tee).toMatchObject({
+      ribbon: 'Premium Quality', images: [],
+      colors: [{ name: 'Black', hex: '#111111' }, { name: 'Navy' }, { name: 'Grey' }, { name: 'Charcoal' }],
+      highlights: [{ icon: 'fabric', label: 'Fabric', value: 'Dry Fit Polyester' }],
+      specs: [{ icon: 'category' }, { icon: 'material' }, { icon: 'care' }],
+    });
+    expect(tee.features.map((f: { icon: string }) => f.icon)).toEqual(['breathable', 'lightweight', 'stretch', 'durable']);
+    await ShopItemModel.updateOne({ _id: 'tennis-balls' }, { $set: { imageUrl: 'https://cdn.example/tennis.jpg' } });
+    expect((await request(app).get('/v1/shop/items/tennis-balls').set(authed(session))).body)
+      .toMatchObject({ ribbon: null, colors: [], highlights: [], features: [], specs: [], images: ['https://cdn.example/tennis.jpg'] });
   });
 
   it('searches by prefix across title, tags and subcategory, sorts by price, and pages with a cursor', async () => {
@@ -137,8 +151,11 @@ describe('commerce: catalogue, config and addresses', () => {
     const config = await request(app).get('/v1/shop/config').set(authed(session));
     expect(config.status).toBe(200);
     expect(config.body).toEqual({
-      currency: 'INR', coinValuePaise: COIN, coinShareMax: 0.3, shippingFeePaise: SHIPPING, freeShippingAbovePaise: 99900,
-      maxQuantityPerLine: 5, paymentProvider: 'mock', paymentKeyId: null, stepUpThreshold: 1000,
+      currency: 'INR', coinValuePaise: COIN, paymentMode: 'mixed', coinShareMin: 0, coinShareMax: 0.3, shippingFeePaise: SHIPPING,
+      freeShippingAbovePaise: 99900, maxQuantityPerLine: 5, paymentProvider: 'mock', paymentKeyId: null, stepUpThreshold: 1000,
+      paymentMethods: ['coins', 'coins_upi', 'upi', 'card', 'netbanking'],
+      deliveryEstimate: '2–4 working days', returnPolicy: 'Free cancellation until it ships', couponsEnabled: true,
+      deliveryNotice: 'Delivery partners may call you for verification if needed.', offersWhatsAppUpdates: true,
     });
   });
 
@@ -182,24 +199,29 @@ describe('commerce: wishlist and cart (RULES R14)', () => {
     expect((await request(app).get('/v1/wishlist/ids').set(authed(other))).body.data).toEqual([]);
   });
 
-  it('keeps lines by item and size, checks sizes and the per-line cap, quotes the basket, and empties at zero', async () => {
+  it('keeps lines by item, size and colour, checks sizes, colours and the per-line cap, quotes the basket, and empties at zero', async () => {
     const { session } = await shopper(2_000);
     const empty = await request(app).get('/v1/cart').set(authed(session));
     expect(empty.body).toMatchObject({ lines: [], count: 0, quote: { subtotal: 0, shipping: 0, total: 0, coinsMax: 0, payable: 0 } });
 
     // A sized item needs its size; a wrong one is refused; a one-size item ignores any size sent.
-    const noSize = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1 });
+    const noSize = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, color: 'Black' });
     expect(noSize.status).toBe(422);
     expect(noSize.body.error).toMatchObject({ code: 'SIZE_REQUIRED', details: { sizes: ['S', 'M', 'L', 'XL', 'XXL'] } });
-    expect((await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, size: 'XS' })).body.error.code).toBe('SIZE_INVALID');
+    expect((await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, size: 'XS', color: 'Black' })).body.error.code).toBe('SIZE_INVALID');
     expect((await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'nope', quantity: 1 })).status).toBe(404);
+    // Likewise a coloured item needs one of its colours, by name.
+    const noColor = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, size: 'M' });
+    expect(noColor.status).toBe(422);
+    expect(noColor.body.error).toMatchObject({ code: 'COLOR_REQUIRED', details: { colors: ['Black', 'Navy', 'Grey', 'Charcoal'] } });
+    expect((await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, size: 'M', color: 'Pink' })).body.error.code).toBe('COLOR_INVALID');
 
-    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 2, size: 'M' });
-    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, size: 'L' });
-    const cart = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'cap', quantity: 1, size: 'M' });
+    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 2, size: 'M', color: 'Black' });
+    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 1, size: 'L', color: 'Black' });
+    const cart = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'cap', quantity: 1, size: 'M', color: 'Red' });
     expect(cart.status).toBe(200);
-    expect(cart.body.lines.map((l: { item: { id: string }; quantity: number; size: string | null }) => [l.item.id, l.quantity, l.size]))
-      .toEqual([['tee', 2, 'M'], ['tee', 1, 'L'], ['cap', 1, null]]);
+    expect(cart.body.lines.map((l: { item: { id: string }; quantity: number; size: string | null; color: string | null }) => [l.item.id, l.quantity, l.size, l.color]))
+      .toEqual([['tee', 2, 'M', 'Black'], ['tee', 1, 'L', 'Black'], ['cap', 1, null, null]]);
     expect(cart.body.count).toBe(4);
     // Three tees and a cap: ₹2,397 + ₹449 = ₹2,846 of goods, over the free-shipping line; 30% is 3,415 coins, the wallet holds 2,000.
     expect(cart.body.quote).toMatchObject({
@@ -212,7 +234,7 @@ describe('commerce: wishlist and cart (RULES R14)', () => {
     expect(over.body.error).toMatchObject({ code: 'QUANTITY_LIMIT', details: { max: 5 } });
 
     // Zero removes; the size says which of the two tee lines.
-    const fewer = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 0, size: 'L' });
+    const fewer = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'tee', quantity: 0, size: 'L', color: 'Black' });
     expect(fewer.body.lines).toHaveLength(2);
     const gone = await request(app).delete('/v1/cart/lines/cap').set(authed(session));
     expect(gone.body.lines.map((l: { item: { id: string } }) => l.item.id)).toEqual(['tee']);
@@ -234,6 +256,8 @@ describe('commerce: wishlist and cart (RULES R14)', () => {
       coinValuePaise: COIN, coinsMax: 538, coinsApplied: 538, coinsValue: 538 * COIN, payable: 49800 - 538 * COIN, needsStepUp: false,
     });
     expect(q.body.lines[0]).toMatchObject({ itemId: 'cap', title: 'VOKVE Cap', quantity: 1, size: null, price: 44900, lineTotal: 44900, inStock: true });
+    // The art the till's item rows draw; null while the item carries no picture.
+    expect(q.body.lines[0]).toHaveProperty('image', null);
 
     // Fewer coins than allowed is the user's choice; more is clamped; none is all money.
     expect((await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], coins: 100 })).body).toMatchObject({ coinsApplied: 100, payable: 49800 - 2500 });
@@ -291,6 +315,18 @@ describe('commerce: checkout and payment (RULES R2–R4, R11–R13, O8, T5)', ()
       address: { name: 'Asha Verma', city: 'Bengaluru' },
     });
     expect(placed.body.payment).toMatchObject({ provider: 'mock', orderId: placed.body.order.id, amount: 37300, currency: 'INR', keyId: null });
+
+    // What the confirmation screen reads: a reference a member can say out
+    // loud, the window it promised, and the channels its news will reach.
+    const order = placed.body.order;
+    expect(order.number).toMatch(/^VKV\d{6}\d{4,6}$/);
+    expect(order.items[0]).toMatchObject({ coinPrice: 1796, image: null });
+    const days = (iso: string) =>
+      Math.round((new Date(iso).getTime() - new Date(order.placedAt).getTime()) / 86_400_000);
+    expect(days(order.estimatedDelivery.from)).toBe(4);
+    expect(days(order.estimatedDelivery.to)).toBe(7);
+    // No SMS provider exists, so it is never promised (D-31).
+    expect(order.trackingChannels).toEqual(['email']);
 
     // Held at once: the coins, the unit, and the basket line is gone.
     expect((await ShopInventoryModel.findById('cap').lean())!.onHand).toBe(before - 1);
@@ -360,7 +396,7 @@ describe('commerce: checkout and payment (RULES R2–R4, R11–R13, O8, T5)', ()
 
   it('a thousand coins or more in one order needs a step-up, which is single-use and belongs to its user', async () => {
     const { session, addressId } = await shopper(3_000);
-    const hoodie = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }], addressId, coins: 1_500 };
+    const hoodie = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L', color: 'Navy' }], addressId, coins: 1_500 };
 
     const noToken = await request(app).post('/v1/checkout').set(authed(session)).send(hoodie);
     expect(noToken.status).toBe(403);
@@ -371,7 +407,7 @@ describe('commerce: checkout and payment (RULES R2–R4, R11–R13, O8, T5)', ()
     const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, stepUpToken: token });
     expect(placed.status).toBe(200);
     expect(placed.body.balance).toBe(1_500);
-    expect(placed.body.order.items[0]).toMatchObject({ itemId: 'hoodie', size: 'L' });
+    expect(placed.body.order.items[0]).toMatchObject({ itemId: 'hoodie', size: 'L', color: 'Navy' });
 
     const reused = await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, stepUpToken: token });
     expect(reused.body.error.code).toBe('STEP_UP_INVALID');
@@ -516,5 +552,322 @@ describe('commerce: reviews (RULES R15)', () => {
     await request(app).delete('/v1/shop/items/yoga-mat/reviews/me').set(authed(other));
     expect((await request(app).get('/v1/shop/items/yoga-mat').set(authed(session))).body.rating).toEqual({ average: 5, count: 1 });
     expect((await request(app).delete('/v1/shop/items/yoga-mat/reviews/me').set(authed(other))).status).toBe(404);
+  });
+});
+
+describe('commerce: how an order is paid (RULES R1, R11, D-59)', () => {
+  it('coins only: every price is in coins, the delivery too, and the order takes exactly that many', async () => {
+    await setCommerce({ paymentMode: 'coins' });
+    const { session, addressId } = await shopper(5_000);
+
+    expect((await request(app).get('/v1/shop/config').set(authed(session))).body).toMatchObject({ paymentMode: 'coins', coinShareMin: 1, coinShareMax: 1 });
+    // ₹449 at ₹0.25 a coin.
+    expect((await request(app).get('/v1/shop/items/cap').set(authed(session))).body).toMatchObject({ coinPrice: 1796, coinsMax: 1796, coinsMin: 1796 });
+
+    // Under ₹999 of goods, so ₹49 to ship — 196 coins.
+    const q = (await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }] })).body;
+    expect(q).toMatchObject({
+      paymentMode: 'coins', coinsMin: 1992, coinsMax: 1992, coinsApplied: 1992, coinsShort: 0, payable: 0,
+      inCoins: { goods: 1796, discount: 0, shipping: 196, total: 1992 },
+      lines: [{ itemId: 'cap', coinPrice: 1796, lineCoins: 1796 }],
+    });
+
+    const under = await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 1_000 });
+    expect(under.body.error).toMatchObject({ code: 'COINS_UNDER_MINIMUM', details: { coinsMin: 1992 } });
+    const token = await stepUp(session);
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 1992, stepUpToken: token });
+    expect(placed.status).toBe(200);
+    expect(placed.body.payment).toBeNull();
+    expect(placed.body.order).toMatchObject({ status: 'placed', coinsUsed: 1992, payable: 0, inCoins: { total: 1992 } });
+    expect(placed.body.balance).toBe(3_008);
+  });
+
+  it('coins only: a wallet short of the price is told by how much, and cannot order', async () => {
+    await setCommerce({ paymentMode: 'coins' });
+    const { session, addressId } = await shopper(1_000);
+    const q = (await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }] })).body;
+    expect(q).toMatchObject({ coinsMin: 1992, coinsMax: 1_000, coinsShort: 992, coinsApplied: 1992 });
+    const refused = await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 1992 });
+    expect(refused.body.error).toMatchObject({ code: 'INSUFFICIENT_COINS', details: { required: 1992, balance: 1_000 } });
+    expect(await OrderModel.countDocuments({ userId: session.userId })).toBe(0);
+  });
+
+  it('money only: coins cannot go towards anything', async () => {
+    await setCommerce({ paymentMode: 'money' });
+    const { session, addressId } = await shopper(2_000);
+    expect((await request(app).get('/v1/shop/config').set(authed(session))).body).toMatchObject({ paymentMode: 'money', coinShareMin: 0, coinShareMax: 0 });
+    expect((await request(app).get('/v1/shop/items/cap').set(authed(session))).body).toMatchObject({ coinsMax: 0, coinsMin: 0 });
+    const q = (await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }] })).body;
+    expect(q).toMatchObject({ paymentMode: 'money', coinsMax: 0, coinsApplied: 0, payable: 44900 + SHIPPING, inCoins: null });
+    expect((await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 1 })).body.error.code)
+      .toBe('COINS_OVER_LIMIT');
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 0 });
+    expect(placed.body.order).toMatchObject({ status: 'pending_payment', coinsUsed: 0, payable: 44900 + SHIPPING });
+  });
+
+  it('mixed with a fixed share: always 20% coins, no more and no fewer', async () => {
+    await setCommerce({ paymentMode: 'mixed', coinShareMin: 0.2, coinShareMax: 0.2 });
+    const { session, addressId } = await shopper(2_000);
+    // 20% of ₹449 is ₹89.80: 359 whole coins, worth ₹89.75.
+    expect((await request(app).get('/v1/shop/items/cap').set(authed(session))).body).toMatchObject({ coinsMin: 359, coinsMax: 359 });
+    const q = (await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], coins: 0 })).body;
+    expect(q).toMatchObject({ coinsMin: 359, coinsMax: 359, coinsApplied: 359, payable: 44900 + SHIPPING - 359 * COIN });
+    const send = (coins: number) => request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins });
+    expect((await send(0)).body.error).toMatchObject({ code: 'COINS_UNDER_MINIMUM', details: { coinsMin: 359 } });
+    expect((await send(400)).body.error.code).toBe('COINS_OVER_LIMIT');
+    expect((await send(359)).body.order).toMatchObject({ coinsUsed: 359, payable: 44900 + SHIPPING - 359 * COIN });
+  });
+
+  it('an item carries its own way of being bought, and a basket of several kinds is quoted line by line (RULES R11)', async () => {
+    const { session, addressId } = await shopper(5_000);
+    const item = (id: string) => request(app).get(`/v1/shop/items/${id}`).set(authed(session));
+    const quoteFor = (lines: { itemId: string; quantity: number }[]) =>
+      request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines });
+
+    // Wrist wraps are a coins reward (₹349 → 1,396 coins), the foam roller
+    // is money only (₹699), and the cap follows the shop — 30% in coins.
+    expect((await item('wrist-wraps')).body).toMatchObject({ paymentMode: 'coins', coinPrice: 1396, coinsMin: 1396, coinsMax: 1396 });
+    expect((await item('foam-roller')).body).toMatchObject({ paymentMode: 'money', coinsMin: 0, coinsMax: 0 });
+    expect((await item('cap')).body).toMatchObject({ paymentMode: 'mixed', coinsMin: 0, coinsMax: 538 });
+
+    // Coins alone: the delivery is in coins too, and coins is the only way to pay.
+    const coinsOnly = (await quoteFor([{ itemId: 'wrist-wraps', quantity: 1 }])).body;
+    expect(coinsOnly).toMatchObject({
+      paymentMode: 'coins', coinsMin: 1592, coinsMax: 1592, payable: 0,
+      inCoins: { goods: 1396, discount: 0, shipping: 196, total: 1592 },
+      paymentMethods: ['coins'],
+      lines: [{ itemId: 'wrist-wraps', paymentMode: 'coins' }],
+    });
+
+    // Money alone: no coins may go near it, so only the gateway is offered.
+    const moneyOnly = (await quoteFor([{ itemId: 'foam-roller', quantity: 1 }])).body;
+    expect(moneyOnly).toMatchObject({
+      paymentMode: 'money', coinsMin: 0, coinsMax: 0, payable: 69900 + SHIPPING, inCoins: null,
+      paymentMethods: ['upi', 'card', 'netbanking'],
+    });
+
+    // One of each: the wraps must take their 1,396 coins and the roller
+    // none, so the order is part coins and part money — and nothing else.
+    const both = (await quoteFor([{ itemId: 'wrist-wraps', quantity: 1 }, { itemId: 'foam-roller', quantity: 1 }])).body;
+    expect(both).toMatchObject({
+      paymentMode: 'mixed', coinsMin: 1396, coinsMax: 1396, shipping: 0,
+      total: 34900 + 69900, payable: 34900 + 69900 - 1396 * COIN,
+      inCoins: null, paymentMethods: ['coins_upi'],
+    });
+
+    // The shop's own share still rules the items that set no mode.
+    expect((await quoteFor([{ itemId: 'cap', quantity: 1 }])).body).toMatchObject({
+      coinsMin: 0, coinsMax: 538, paymentMethods: ['coins_upi', 'upi', 'card', 'netbanking'],
+    });
+
+    // And the coins order places for coins, with no gateway involved.
+    const token = await stepUp(session);
+    const placed = await request(app).post('/v1/checkout').set(authed(session))
+      .send({ lines: [{ itemId: 'wrist-wraps', quantity: 1 }], addressId, coins: 1592, paymentMethod: 'coins', stepUpToken: token });
+    expect(placed.status).toBe(200);
+    expect(placed.body.payment).toBeNull();
+    expect(placed.body.order).toMatchObject({ status: 'placed', coinsUsed: 1592, payable: 0, payment: { method: 'coins', status: 'not_required' } });
+  });
+
+  it('the payment page is offered only the methods the mode allows, and a method that does not match the order is refused (RULES R12)', async () => {
+    const { session, addressId } = await shopper(5_000);
+    const config = () => request(app).get('/v1/shop/config').set(authed(session));
+    const place = (body: Record<string, unknown>) =>
+      request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, ...body });
+
+    // Mixed: all five, in the order the owner set them.
+    expect((await config()).body.paymentMethods).toEqual(['coins', 'coins_upi', 'upi', 'card', 'netbanking']);
+
+    // The cap takes 538 coins at most and leaves ₹363.50 — part coins, part money.
+    expect((await place({ coins: 538, paymentMethod: 'coins' })).body.error).toMatchObject({
+      code: 'PAYMENT_METHOD_MISMATCH', details: { method: 'coins', payable: 36350 },
+    });
+    // Coins are set, so a gateway-only method is not what this order is.
+    expect((await place({ coins: 538, paymentMethod: 'upi' })).body.error.code).toBe('PAYMENT_METHOD_MISMATCH');
+    // No coins, so there is nothing for "coins and then the rest" to do.
+    expect((await place({ coins: 0, paymentMethod: 'coins_upi' })).body.error.code).toBe('PAYMENT_METHOD_MISMATCH');
+
+    const split = await place({ coins: 538, paymentMethod: 'coins_upi' });
+    expect(split.status).toBe(200);
+    expect(split.body.order.payment).toMatchObject({ method: 'coins_upi', status: 'pending' });
+    expect(split.body.payment).toMatchObject({ method: 'coins_upi', amount: 36350 });
+
+    const card = await place({ coins: 0, paymentMethod: 'card' });
+    expect(card.status).toBe(200);
+    expect(card.body.order.payment).toMatchObject({ method: 'card', amount: 44900 + SHIPPING });
+
+    // A method the owner has switched off is not on the menu at all.
+    await setCommerce({ paymentMethods: ['coins', 'coins_upi', 'upi'] });
+    expect((await place({ coins: 0, paymentMethod: 'card' })).body.error).toMatchObject({
+      code: 'PAYMENT_METHOD_UNAVAILABLE', details: { method: 'card' },
+    });
+    await setCommerce({});
+
+    // A money-only shop takes no coins, so the split is not what this order is.
+    await setCommerce({ paymentMode: 'money' });
+    expect((await config()).body.paymentMethods).toEqual(['upi', 'card', 'netbanking']);
+    expect((await place({ coins: 0, paymentMethod: 'coins_upi' })).body.error).toMatchObject({
+      code: 'PAYMENT_METHOD_MISMATCH', details: { method: 'coins_upi', coins: 0 },
+    });
+
+    // A coins-only shop offers nothing else, and the order needs no gateway at all.
+    await setCommerce({ paymentMode: 'coins' });
+    expect((await config()).body.paymentMethods).toEqual(['coins']);
+    const token = await stepUp(session);
+    const coinsOnly = await place({ coins: 1992, paymentMethod: 'coins', stepUpToken: token });
+    expect(coinsOnly.status).toBe(200);
+    expect(coinsOnly.body.payment).toBeNull();
+    expect(coinsOnly.body.order.payment).toMatchObject({ method: 'coins', status: 'not_required' });
+
+    // The owner may narrow the menu, but not to nothing.
+    await setCommerce({ paymentMode: 'mixed', paymentMethods: ['upi'] });
+    expect((await config()).body.paymentMethods).toEqual(['upi']);
+    await setCommerce({ paymentMode: 'money', paymentMethods: ['coins'] });
+    expect((await config()).status).toBe(500);
+    await setCommerce({ paymentMethods: ['bitcoin'] });
+    expect((await config()).status).toBe(500);
+    await setCommerce({});
+  });
+
+  it('refuses a payment setup the till could not work with', async () => {
+    const session = await signUpAndRegister();
+    await setCommerce({ coinShareMin: 0.5, coinShareMax: 0.2 });
+    expect((await request(app).get('/v1/shop/config').set(authed(session))).status).toBe(500);
+    await setCommerce({ paymentMode: 'barter' });
+    expect((await request(app).get('/v1/shop/config').set(authed(session))).status).toBe(500);
+    await setCommerce({});
+  });
+});
+
+describe('commerce: coupons (RULES R16)', () => {
+  it('applies only a coupon that fits the basket, takes it off the goods, is spent by the order and given back on cancel', async () => {
+    const { session, addressId } = await shopper(2_000);
+    const apply = (code: string) => request(app).put('/v1/cart/coupon').set(authed(session)).send({ code });
+    expect((await apply('welcome10')).body.error.code).toBe('CART_EMPTY');
+    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'resistance-bands', quantity: 1 });
+    expect((await apply('NOPE')).body.error.code).toBe('COUPON_INVALID');
+    // ₹649 of a ₹799 minimum.
+    expect((await apply('fit50')).body.error).toMatchObject({ code: 'COUPON_MIN_ORDER', message: 'Add ₹150 more to use FIT50.', details: { minSubtotal: 79900 } });
+
+    // 10% of ₹649; the coins share is of the goods after it, and shipping is still due under ₹999.
+    const applied = await apply(' welcome10 ');
+    expect(applied.status).toBe(200);
+    expect(applied.body.quote).toMatchObject({
+      subtotal: 64900, coupon: { code: 'WELCOME10', title: '10% off, up to ₹150', discount: 6490, problem: null },
+      shipping: SHIPPING, total: 64900 - 6490 + SHIPPING, coinsMax: Math.floor(((64900 - 6490) * 0.3) / COIN),
+    });
+
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ fromCart: true, addressId, coins: 0, couponCode: 'WELCOME10' });
+    expect(placed.status).toBe(200);
+    expect(placed.body.order).toMatchObject({ coupon: { code: 'WELCOME10', discount: 6490 }, total: 64900 - 6490 + SHIPPING });
+    expect((await request(app).get('/v1/cart').set(authed(session))).body.quote.coupon).toBeNull();
+    expect((await CouponModel.findById('WELCOME10').lean())!.redemptions).toBe(1);
+
+    // Once per member.
+    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'resistance-bands', quantity: 1 });
+    expect((await apply('WELCOME10')).body.error.code).toBe('COUPON_ALREADY_USED');
+    // Cancelling gives it back, to the pool and to the member.
+    await request(app).post(`/v1/orders/${placed.body.order.id}/cancel`).set(authed(session));
+    expect((await CouponModel.findById('WELCOME10').lean())!.redemptions).toBe(0);
+    expect((await apply('WELCOME10')).status).toBe(200);
+    expect((await request(app).delete('/v1/cart/coupon').set(authed(session))).body.quote.coupon).toBeNull();
+  });
+
+  it('keeps a coupon the basket stopped qualifying for, quoted with why; a checkout sent it anyway is refused', async () => {
+    const { session, addressId } = await shopper(2_000);
+    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'yoga-mat', quantity: 1 });
+    expect((await request(app).put('/v1/cart/coupon').set(authed(session)).send({ code: 'FIT50' })).status).toBe(200);
+    await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'yoga-mat', quantity: 0 });
+    const cart = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'cap', quantity: 1 });
+    expect(cart.body.quote.coupon).toMatchObject({ code: 'FIT50', discount: 0, problem: 'Add ₹350 more to use FIT50.' });
+    expect(cart.body.quote.total).toBe(44900 + SHIPPING);
+
+    // The app sends a coupon only when it showed it applying: sent anyway, it is refused rather than charged without.
+    const refused = await request(app).post('/v1/checkout').set(authed(session)).send({ fromCart: true, addressId, coins: 0, couponCode: 'FIT50' });
+    expect(refused.body.error.code).toBe('COUPON_MIN_ORDER');
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ fromCart: true, addressId, coins: 0 });
+    expect(placed.body.order).toMatchObject({ coupon: null, total: 44900 + SHIPPING });
+  });
+
+  it('two orders racing for a once-per-member coupon: exactly one gets it', async () => {
+    const { session, addressId } = await shopper(2_000);
+    const results = await Promise.all([1, 2].map(() =>
+      request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'resistance-bands', quantity: 1 }], addressId, coins: 0, couponCode: 'WELCOME10' })));
+    expect(results.map(r => r.status).sort()).toEqual([200, 422]);
+    expect((await CouponUsageModel.findById(`WELCOME10:${session.userId}`).lean())!.count).toBe(1);
+    expect((await CouponModel.findById('WELCOME10').lean())!.redemptions).toBe(1);
+  });
+
+  it('a limited coupon runs out for everyone, and a coins-only shop takes a coupon off in coins', async () => {
+    await CouponModel.create({ _id: 'LAST1', title: '₹100 off', kind: 'flat', value: 10_000, maxRedemptions: 1 });
+    const a = await shopper(2_000);
+    const b = await shopper(2_000);
+    for (const s of [a, b]) {
+      await request(app).put('/v1/cart/lines').set(authed(s.session)).send({ itemId: 'cap', quantity: 1 });
+      expect((await request(app).put('/v1/cart/coupon').set(authed(s.session)).send({ code: 'LAST1' })).status).toBe(200);
+    }
+    const checkoutAs = (s: typeof a) =>
+      request(app).post('/v1/checkout').set(authed(s.session)).send({ fromCart: true, addressId: s.addressId, coins: 0, couponCode: 'LAST1' });
+    expect((await checkoutAs(a)).status).toBe(200);
+    expect((await checkoutAs(b)).body.error.code).toBe('COUPON_USED_UP');
+
+    // In coins: ₹100 is 400 coins off.
+    await setCommerce({ paymentMode: 'coins' });
+    await CouponModel.create({ _id: 'COINS100', title: '₹100 off', kind: 'flat', value: 10_000 });
+    const q = (await request(app).post('/v1/checkout/quote').set(authed(b.session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], couponCode: 'coins100' })).body;
+    expect(q.inCoins).toEqual({ goods: 1796, discount: 400, shipping: 196, total: 1592 });
+    expect(q).toMatchObject({ coinsMin: 1592, payable: 0, coupon: { code: 'COINS100', discount: 10_000 } });
+  });
+});
+
+describe('commerce: delivery preferences (RULES R17)', () => {
+  it('start with nothing asked for, keep what the member sets, and refuse an over-long note', async () => {
+    const { session } = await shopper();
+    const read = () => request(app).get('/v1/me/delivery-preferences').set(authed(session));
+    const write = (body: object) => request(app).put('/v1/me/delivery-preferences').set(authed(session)).send(body);
+    expect((await read()).body).toEqual({ instructions: '', whatsappUpdates: false, leaveAtDoor: false });
+    expect((await write({ instructions: '  Leave at the gate  ', whatsappUpdates: true })).body)
+      .toEqual({ instructions: 'Leave at the gate', whatsappUpdates: true, leaveAtDoor: false });
+    expect((await read()).body).toEqual({ instructions: 'Leave at the gate', whatsappUpdates: true, leaveAtDoor: false });
+    expect((await write({ instructions: 'x'.repeat(121) })).status).toBe(422);
+    expect((await request(app).get('/v1/me/delivery-preferences')).status).toBe(401);
+
+    // Turned off by the owner, WhatsApp is neither offered nor kept.
+    await setCommerce({ whatsappUpdates: false });
+    expect((await request(app).get('/v1/shop/config').set(authed(session))).body.offersWhatsAppUpdates).toBe(false);
+    expect((await write({ whatsappUpdates: true })).body.whatsappUpdates).toBe(false);
+    await setCommerce({});
+  });
+
+  it('are copied onto the order — what the checkout sent over the saved ones — and the order\'s news goes by WhatsApp when asked', async () => {
+    const sent: { phone: string; text: string }[] = [];
+    setWhatsAppTransport(async (phone, text) => { sent.push({ phone, text }); });
+    try {
+      const { session, addressId } = await shopper(2_000);
+      await request(app).put('/v1/me/delivery-preferences').set(authed(session)).send({ instructions: 'Ring twice', leaveAtDoor: true });
+      // Coins cover it, so it is placed at once and its news goes out now.
+      await setCommerce({ coinShareMax: 1, shippingFeePaise: 0 });
+      const order = (delivery?: object) => request(app).post('/v1/checkout').set(authed(session))
+        .send({ lines: [{ itemId: 'shaker', quantity: 1 }], addressId, coins: 996, ...(delivery ? { delivery } : {}) });
+
+      const placed = await order({ whatsappUpdates: true });
+      expect(placed.status).toBe(200);
+      expect(placed.body.order.delivery).toEqual({ instructions: 'Ring twice', whatsappUpdates: true, leaveAtDoor: true });
+      // Asked for and deliverable, so the confirmation screen may promise it.
+      expect(placed.body.order.trackingChannels).toEqual(['email', 'whatsapp']);
+      const phone = (await UserModel.findById(session.userId).lean())!.phone;
+      expect(sent).toEqual([{ phone, text: expect.stringContaining('Order placed') }]);
+      await request(app).post(`/v1/orders/${placed.body.order.id}/cancel`).set(authed(session));
+      expect(sent[1].text).toContain('Order cancelled');
+
+      // An order that did not ask takes the saved preferences, which did not either.
+      const quiet = await order();
+      expect(quiet.body.order.delivery).toEqual({ instructions: 'Ring twice', whatsappUpdates: false, leaveAtDoor: true });
+      expect(sent).toHaveLength(2);
+      expect((await order({ instructions: 'y'.repeat(121) })).status).toBe(422);
+    } finally {
+      setWhatsAppTransport(null);
+      await setCommerce({});
+    }
   });
 });

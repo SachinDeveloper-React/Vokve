@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { addressApi } from '../services/api/endpoints';
 import type { AddressInput } from '../services/api/contracts';
 import { toApiError } from '../services/api/errors';
-import type { Address } from '../types/models';
+import type { Address, DeliveryPreferences } from '../types/models';
 import { logger } from '../utils/logger';
 import { mmkvStorage } from './index';
 
@@ -15,8 +15,21 @@ interface AddressesState {
   isSyncing: boolean;
   /** Set while a create / update / delete is in flight. */
   isSaving: boolean;
+  /**
+   * How the member likes orders handed over (RULES R17) — what the shipping
+   * page opens with. Null until the server has said.
+   */
+  delivery: DeliveryPreferences | null;
 
   hydrateFromServer: () => Promise<void>;
+  hydrateDelivery: () => Promise<void>;
+  /**
+   * Saves the preferences and takes the server's answer back — the note
+   * trimmed, WhatsApp off where it is not offered. Throws the `ApiError`.
+   */
+  saveDelivery: (
+    patch: Partial<DeliveryPreferences>,
+  ) => Promise<DeliveryPreferences>;
   /**
    * Each write goes to the server first and the list is replaced from the
    * answer: an address is a thing the courier reads, so an optimistic copy
@@ -44,6 +57,7 @@ export const useAddressesStore = create<AddressesState>()(
       syncedAt: null,
       isSyncing: false,
       isSaving: false,
+      delivery: null,
 
       hydrateFromServer: async () => {
         if (get().isSyncing) {
@@ -64,6 +78,28 @@ export const useAddressesStore = create<AddressesState>()(
             toApiError(error),
           );
           set({ isSyncing: false });
+        }
+      },
+
+      hydrateDelivery: async () => {
+        try {
+          set({ delivery: await addressApi.deliveryPreferences() });
+        } catch (error) {
+          logger.warn(
+            'addressesStore',
+            'Delivery preferences sync failed',
+            toApiError(error),
+          );
+        }
+      },
+
+      saveDelivery: async patch => {
+        try {
+          const delivery = await addressApi.setDeliveryPreferences(patch);
+          set({ delivery });
+          return delivery;
+        } catch (error) {
+          throw toApiError(error);
         }
       },
 
@@ -140,6 +176,7 @@ export const useAddressesStore = create<AddressesState>()(
           syncedAt: null,
           isSyncing: false,
           isSaving: false,
+          delivery: null,
         }),
     }),
     {
@@ -149,6 +186,7 @@ export const useAddressesStore = create<AddressesState>()(
       partialize: state => ({
         addresses: state.addresses,
         syncedAt: state.syncedAt,
+        delivery: state.delivery,
       }),
     },
   ),

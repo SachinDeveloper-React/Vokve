@@ -30,6 +30,9 @@ import { ReferralScreen } from '../screens/main/ReferralScreen';
 import { AboutScreen } from '../screens/main/AboutScreen';
 import { CartScreen } from '../screens/main/CartScreen';
 import { CheckoutScreen } from '../screens/main/CheckoutScreen';
+import { PaymentScreen } from '../screens/main/PaymentScreen';
+import { OrderConfirmationScreen } from '../screens/main/OrderConfirmationScreen';
+import { ShippingAddressScreen } from '../screens/main/ShippingAddressScreen';
 import { EditProfileScreen } from '../screens/main/EditProfileScreen';
 import { HelpSupportScreen } from '../screens/main/HelpSupportScreen';
 import { PrivacyScreen } from '../screens/main/PrivacyScreen';
@@ -249,8 +252,23 @@ export const RootNavigator = () => {
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen
+              name="ShippingAddress"
+              component={ShippingAddressScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="Checkout"
               component={CheckoutScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Payment"
+              component={PaymentScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="OrderConfirmation"
+              component={OrderConfirmationScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

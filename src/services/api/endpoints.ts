@@ -6,6 +6,7 @@ import {
   activityConfigSchema,
   activityRangeSchema,
   addressSchema,
+  deliveryPreferencesSchema,
   appAboutSchema,
   appNotificationSchema,
   attestationChallengeSchema,
@@ -409,21 +410,30 @@ const realCartApi: CartApi = {
         itemId: line.itemId,
         quantity: line.quantity,
         size: line.size ?? null,
+        color: line.color ?? null,
       }),
     ),
-  removeLine: (itemId, size) =>
+  removeLine: (itemId, size, color) =>
     request(cartSchema, client =>
       client.delete(`/cart/lines/${encodeURIComponent(itemId)}`, {
-        params: { size: size ?? undefined },
+        params: { size: size ?? undefined, color: color ?? undefined },
       }),
     ),
+  applyCoupon: code =>
+    request(cartSchema, client => client.put('/cart/coupon', { code })),
+  removeCoupon: () =>
+    request(cartSchema, client => client.delete('/cart/coupon')),
   clear: () => request(cartSchema, client => client.delete('/cart')),
 };
 
 const realCheckoutApi: CheckoutApi = {
-  quote: (lines, coins) =>
+  quote: (lines, coins, couponCode) =>
     request(quoteSchema, client =>
-      client.post('/checkout/quote', { lines, coins }),
+      client.post('/checkout/quote', {
+        lines,
+        coins,
+        couponCode: couponCode ?? undefined,
+      }),
     ),
   place: (payload, { idempotencyKey }) =>
     request(checkoutResultSchema, client =>
@@ -746,6 +756,14 @@ const realAddressApi: AddressApi = {
     request(okSchema, client =>
       client.delete(`/me/addresses/${encodeURIComponent(id)}`),
     ),
+  deliveryPreferences: () =>
+    request(deliveryPreferencesSchema, client =>
+      client.get('/me/delivery-preferences'),
+    ),
+  setDeliveryPreferences: patch =>
+    request(deliveryPreferencesSchema, client =>
+      client.put('/me/delivery-preferences', patch),
+    ),
 };
 
 const realNotificationApi: NotificationApi = {
@@ -894,14 +912,16 @@ export const wishlistApi: WishlistApi = {
 export const cartApi: CartApi = {
   get: () => pick(mockCartApi, realCartApi).get(),
   setLine: line => pick(mockCartApi, realCartApi).setLine(line),
-  removeLine: (itemId, size) =>
-    pick(mockCartApi, realCartApi).removeLine(itemId, size),
+  removeLine: (itemId, size, color) =>
+    pick(mockCartApi, realCartApi).removeLine(itemId, size, color),
+  applyCoupon: code => pick(mockCartApi, realCartApi).applyCoupon(code),
+  removeCoupon: () => pick(mockCartApi, realCartApi).removeCoupon(),
   clear: () => pick(mockCartApi, realCartApi).clear(),
 };
 
 export const checkoutApi: CheckoutApi = {
-  quote: (lines, coins) =>
-    pick(mockCheckoutApi, realCheckoutApi).quote(lines, coins),
+  quote: (lines, coins, couponCode) =>
+    pick(mockCheckoutApi, realCheckoutApi).quote(lines, coins, couponCode),
   place: (payload, options) =>
     pick(mockCheckoutApi, realCheckoutApi).place(payload, options),
   pay: (orderId, proof, options) =>
@@ -989,6 +1009,10 @@ export const addressApi: AddressApi = {
   update: (id, patch) => pick(mockAddressApi, realAddressApi).update(id, patch),
   setDefault: id => pick(mockAddressApi, realAddressApi).setDefault(id),
   remove: id => pick(mockAddressApi, realAddressApi).remove(id),
+  deliveryPreferences: () =>
+    pick(mockAddressApi, realAddressApi).deliveryPreferences(),
+  setDeliveryPreferences: patch =>
+    pick(mockAddressApi, realAddressApi).setDeliveryPreferences(patch),
 };
 
 export const notificationPreferencesApi: NotificationPreferencesApi = {

@@ -7,8 +7,9 @@ import type { ShopItem } from '../../types/models';
 /**
  * The one way anything goes into the basket, wherever the tap came from.
  *
- * A sized item cannot be added from a card — there is no size yet — so
- * the tap opens the item instead, where the sizes are; everything else
+ * A sized or coloured item cannot be added from a card — there is no
+ * size or colour yet — so the tap opens the item instead, where they are
+ * picked; everything else
  * goes straight in with a toast that offers the basket. The errors the
  * server can answer with are worded here once (`QUANTITY_LIMIT`,
  * `OUT_OF_STOCK`), so a card and the product page say the same thing.
@@ -19,16 +20,24 @@ export function useAddToCart() {
   const add = useCartStore(s => s.add);
 
   return useCallback(
-    async (item: ShopItem, size: string | null = null, quantity = 1) => {
-      if (item.sizes.length > 0 && !size) {
+    async (
+      item: ShopItem,
+      size: string | null = null,
+      quantity = 1,
+      color: string | null = null,
+    ) => {
+      if (
+        (item.sizes.length > 0 && !size) ||
+        (item.colors.length > 0 && !color)
+      ) {
         navigation.navigate('ProductDetail', { id: item.id });
         return false;
       }
       try {
-        await add(item, size, quantity);
+        await add(item, size, quantity, color);
         toast.show({
           title: 'Added to cart',
-          message: `${item.title}${size ? ` · ${size}` : ''}`,
+          message: [item.title, color, size].filter(Boolean).join(' · '),
           tone: 'success',
           action: {
             label: 'View cart',

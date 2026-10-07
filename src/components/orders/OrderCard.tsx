@@ -50,8 +50,12 @@ export const OrderCard = memo(({ order, onPress }: Props) => {
       accessibilityLabel={`${orderTitle(order)}, ${order.status.replace(
         '_',
         ' ',
-      )}, ${formatMoney(order.payable, order.currency)}${
-        order.coinsUsed > 0 ? ` and ${order.coinsUsed} coins` : ''
+      )}, ${
+        order.payable === 0 && order.coinsUsed > 0
+          ? `${order.coinsUsed} coins`
+          : `${formatMoney(order.payable, order.currency)}${
+              order.coinsUsed > 0 ? ` and ${order.coinsUsed} coins` : ''
+            }`
       }`}
     >
       <Card radius="xl" padding="md">
@@ -72,23 +76,33 @@ export const OrderCard = memo(({ order, onPress }: Props) => {
             <AppText variant="bodyStrong" numberOfLines={1}>
               {orderTitle(order)}
             </AppText>
-            <HStack align="center" gap="sm">
-              <AppText variant="bodyStrong">
-                {formatMoney(order.payable, order.currency)}
-              </AppText>
-              {order.coinsUsed > 0 ? (
-                <HStack align="center" gap="xxs">
-                  <AppText variant="micro" color="textTertiary">
-                    +
-                  </AppText>
-                  <CoinAmount
-                    amount={order.coinsUsed}
-                    size="sm"
-                    tint={colors.textSecondary}
-                  />
-                </HStack>
-              ) : null}
-            </HStack>
+            {order.payable === 0 && order.coinsUsed > 0 ? (
+              // Paid in coins alone: the rupees would only say "₹0".
+              <CoinAmount
+                amount={order.coinsUsed}
+                size="md"
+                tint={colors.textSecondary}
+                withUnit
+              />
+            ) : (
+              <HStack align="center" gap="sm">
+                <AppText variant="bodyStrong">
+                  {formatMoney(order.payable, order.currency)}
+                </AppText>
+                {order.coinsUsed > 0 ? (
+                  <HStack align="center" gap="xxs">
+                    <AppText variant="micro" color="textTertiary">
+                      +
+                    </AppText>
+                    <CoinAmount
+                      amount={order.coinsUsed}
+                      size="sm"
+                      tint={colors.textSecondary}
+                    />
+                  </HStack>
+                ) : null}
+              </HStack>
+            )}
           </VStack>
 
           <Icon as={ChevronRight} size="sm" color="textTertiary" />

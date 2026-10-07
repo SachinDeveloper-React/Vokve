@@ -1,7 +1,8 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { usePaymentMode, useShopStore } from '../../stores/shopStore';
 import { radius, spacing, useTheme } from '../../theme';
-import { formatMoney } from '../../utils/format';
+import { formatCoins, formatMoney } from '../../utils/format';
 import { BottomSheet } from '../disclosure/BottomSheet';
 import { Input } from '../form/Input';
 import { Pressable } from '../form/Pressable';
@@ -110,6 +111,56 @@ function rupeesOf(paise: number | undefined): string {
 }
 
 /**
+ * How the sheet reads and takes prices: rupees, or coins in a coins-only
+ * shop (RULES R11). The filter is paise either way — the server's unit —
+ * so a typed coin figure becomes paise at the till's coin value, the one
+ * conversion the contract leaves to the app.
+ */
+interface PriceUnit {
+  /** After "Min"/"Max" on the fields. */
+  short: string;
+  /** Read out with the fields. */
+  spoken: string;
+  toText: (paise: number | undefined) => string;
+  fromText: (text: string) => number | undefined;
+  format: (paise: number) => string;
+  band: (band: (typeof PRICE_BANDS)[number]) => string;
+}
+
+const RUPEES: PriceUnit = {
+  short: '₹',
+  spoken: 'rupees',
+  toText: rupeesOf,
+  fromText: paiseOf,
+  format: paise => formatMoney(paise),
+  band: band => band.label,
+};
+
+function coinUnit(coinValuePaise: number): PriceUnit {
+  const coinsOf = (paise: number) => Math.round(paise / coinValuePaise);
+  const words = (paise: number) => formatCoins(coinsOf(paise));
+  return {
+    short: 'coins',
+    spoken: 'coins',
+    toText: paise => (paise === undefined ? '' : String(coinsOf(paise))),
+    fromText: text => {
+      const coins = Number(text.replace(/[^\d]/g, ''));
+      return text.trim() !== '' && Number.isFinite(coins) && coins >= 0
+        ? coins * coinValuePaise
+        : undefined;
+    },
+    format: paise => `${words(paise)} coins`,
+    // A band's top is the last paisa under the next one, so its edge is one on.
+    band: ({ min, max }) =>
+      min === null
+        ? `Under ${words((max ?? 0) + 1)} coins`
+        : max === null
+        ? `Over ${words(min)} coins`
+        : `${words(min)} – ${words(max + 1)} coins`,
+  };
+}
+
+/**
  * The narrowing a catalogue page offers: a price band or a price of the
  * user's own, a star floor, deals, stock.
  *
@@ -121,61 +172,77 @@ function rupeesOf(paise: number | undefined): string {
  */
 export const ShopFilterSheet = memo(
   ({ visible, filters, onApply, onClose }: Props) => {
+    const mode = usePaymentMode();
+    const coinValue = useShopStore(s => s.config?.coinValuePaise ?? null);
+    const unit = useMemo(
+      () =>
+        mode === 'coins' && coinValue !== null ? coinUnit(coinValue) : RUPEES,
+      [coinValue, mode],
+    );
     const [draft, setDraft] = useState<ShopFilters>(filters);
-    const [minText, setMinText] = useState(rupeesOf(filters.minPrice));
-    const [maxText, setMaxText] = useState(rupeesOf(filters.maxPrice));
+    const [minText, setMinText] = useState(unit.toText(filters.minPrice));
+    const [maxText, setMaxText] = useState(unit.toText(filters.maxPrice));
 
     // Opening starts from what is applied, not from the last unapplied draft.
     useEffect(() => {
       if (visible) {
         setDraft(filters);
-        setMinText(rupeesOf(filters.minPrice));
-        setMaxText(rupeesOf(filters.maxPrice));
+        setMinText(unit.toText(filters.minPrice));
+        setMaxText(unit.toText(filters.maxPrice));
       }
-    }, [filters, visible]);
+    }, [filters, unit, visible]);
 
-    const pickBand = useCallback((min: number | null, max: number | null) => {
-      setDraft(current => {
-        const same =
-          (current.minPrice ?? null) === min &&
-          (current.maxPrice ?? null) === max;
-        const next = { ...current };
-        if (same) {
-          delete next.minPrice;
-          delete next.maxPrice;
-        } else {
-          if (min === null) delete next.minPrice;
-          else next.minPrice = min;
-          if (max === null) delete next.maxPrice;
-          else next.maxPrice = max;
-        }
-        setMinText(rupeesOf(next.minPrice));
-        setMaxText(rupeesOf(next.maxPrice));
-        return next;
-      });
-    }, []);
+    const pickBand = useCallback(
+      (min: number | null, max: number | null) => {
+        setDraft(current => {
+          const same =
+            (current.minPrice ?? null) === min &&
+            (current.maxPrice ?? null) === max;
+          const next = { ...current };
+          if (same) {
+            delete next.minPrice;
+            delete next.maxPrice;
+          } else {
+            if (min === null) delete next.minPrice;
+            else next.minPrice = min;
+            if (max === null) delete next.maxPrice;
+            else next.maxPrice = max;
+          }
+          setMinText(unit.toText(next.minPrice));
+          setMaxText(unit.toText(next.maxPrice));
+          return next;
+        });
+      },
+      [unit],
+    );
 
-    const onChangeMin = useCallback((text: string) => {
-      setMinText(text);
-      setDraft(current => {
-        const next = { ...current };
-        const value = paiseOf(text);
-        if (value === undefined) delete next.minPrice;
-        else next.minPrice = value;
-        return next;
-      });
-    }, []);
+    const onChangeMin = useCallback(
+      (text: string) => {
+        setMinText(text);
+        setDraft(current => {
+          const next = { ...current };
+          const value = unit.fromText(text);
+          if (value === undefined) delete next.minPrice;
+          else next.minPrice = value;
+          return next;
+        });
+      },
+      [unit],
+    );
 
-    const onChangeMax = useCallback((text: string) => {
-      setMaxText(text);
-      setDraft(current => {
-        const next = { ...current };
-        const value = paiseOf(text);
-        if (value === undefined) delete next.maxPrice;
-        else next.maxPrice = value;
-        return next;
-      });
-    }, []);
+    const onChangeMax = useCallback(
+      (text: string) => {
+        setMaxText(text);
+        setDraft(current => {
+          const next = { ...current };
+          const value = unit.fromText(text);
+          if (value === undefined) delete next.maxPrice;
+          else next.maxPrice = value;
+          return next;
+        });
+      },
+      [unit],
+    );
 
     const pickRating = useCallback((value: number) => {
       setDraft(current => {
@@ -221,9 +288,9 @@ export const ShopFilterSheet = memo(
     const summary =
       draft.minPrice !== undefined || draft.maxPrice !== undefined
         ? `${
-            draft.minPrice !== undefined ? formatMoney(draft.minPrice) : 'Any'
+            draft.minPrice !== undefined ? unit.format(draft.minPrice) : 'Any'
           } to ${
-            draft.maxPrice !== undefined ? formatMoney(draft.maxPrice) : 'any'
+            draft.maxPrice !== undefined ? unit.format(draft.maxPrice) : 'any'
           }`
         : 'Any price';
 
@@ -243,7 +310,7 @@ export const ShopFilterSheet = memo(
               {PRICE_BANDS.map(band => (
                 <Chip
                   key={band.label}
-                  label={band.label}
+                  label={unit.band(band)}
                   selected={bandSelected(band.min, band.max)}
                   onPress={() => pickBand(band.min, band.max)}
                 />
@@ -251,22 +318,22 @@ export const ShopFilterSheet = memo(
             </HStack>
             <HStack gap="sm">
               <Input
-                label="Min ₹"
+                label={`Min ${unit.short}`}
                 value={minText}
                 onChangeText={onChangeMin}
                 keyboardType="number-pad"
                 placeholder="0"
                 style={styles.field}
-                accessibilityLabel="Minimum price in rupees"
+                accessibilityLabel={`Minimum price in ${unit.spoken}`}
               />
               <Input
-                label="Max ₹"
+                label={`Max ${unit.short}`}
                 value={maxText}
                 onChangeText={onChangeMax}
                 keyboardType="number-pad"
                 placeholder="Any"
                 style={styles.field}
-                accessibilityLabel="Maximum price in rupees"
+                accessibilityLabel={`Maximum price in ${unit.spoken}`}
               />
             </HStack>
           </VStack>

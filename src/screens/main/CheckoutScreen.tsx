@@ -2,20 +2,22 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MapPin, ShieldCheck } from 'lucide-react-native';
+import { ChevronRight, Coins, Lock, ShieldCheck } from 'lucide-react-native';
 import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
-import { formatAddressLines } from '../../components/address/AddressCard';
-import { useToast } from '../../components/feedback/Toast';
-import { Pressable } from '../../components/form/Pressable';
+import { SecureRedemptionBanner } from '../../components/cart/SecureRedemptionBanner';
+import { CheckoutAddressCard } from '../../components/checkout/CheckoutAddressCard';
+import { CheckoutCard } from '../../components/checkout/CheckoutCard';
+import { CheckoutLineRow } from '../../components/checkout/CheckoutLineRow';
+import { CoinDeductionNote } from '../../components/checkout/CoinDeductionNote';
 import { Switch } from '../../components/form/Switch';
-import { HistoryHeader } from '../../components/history/HistoryHeader';
-import { Box } from '../../components/layout/Box';
 import { Divider } from '../../components/layout/Divider';
 import { HStack, VStack } from '../../components/layout/Stack';
-import { Emoji } from '../../components/media/Emoji';
 import { Icon } from '../../components/media/Icon';
+import { PayAmount } from '../../components/shop/PayAmount';
 import { PriceBreakdown } from '../../components/shop/PriceBreakdown';
+import { ShopPageHeader } from '../../components/shop/ShopPageHeader';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -24,26 +26,16 @@ import { Screen } from '../../components/ui/Screen';
 import { CoinAmount } from '../../components/wallet/CoinAmount';
 import { checkoutApi } from '../../services/api/endpoints';
 import { toApiError } from '../../services/api/errors';
-import {
-  useAddressesStore,
-  useDefaultAddress,
-} from '../../stores/addressesStore';
-import {
-  usePendingContactVerification,
-  useStepUpToken,
-} from '../../stores/authStore';
+import { useAddresses, useDefaultAddress } from '../../stores/addressesStore';
 import { useCart } from '../../stores/cartStore';
-import {
-  useCheckoutStore,
-  useIsPaying,
-  useIsPlacingOrder,
-  usePendingCheckout,
-  type CheckoutOutcome,
-} from '../../stores/checkoutStore';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useShopConfig } from '../../stores/shopStore';
-import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { moderateScale } from '../../theme/responsive';
+import {
+  spacing,
+  useTheme,
+  useThemedStyles,
+  type ThemeShape,
+} from '../../theme';
 import type { PurchaseLine, Quote } from '../../types/models';
 import type {
   RootStackParamList,
@@ -52,69 +44,65 @@ import type {
 import { withAlpha } from '../../utils/color';
 import { formatCoins, formatMoney } from '../../utils/format';
 
-const makeStyles = ({ spacing, colors }: ThemeShape) =>
+const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
   StyleSheet.create({
-    content: { paddingBottom: spacing.xxxl * 2, gap: spacing.md },
-    empty: { paddingVertical: spacing.xl },
-    art: {
-      width: moderateScale(44),
-      height: moderateScale(44),
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
+    content: { paddingBottom: space.xl, gap: space.base },
+    empty: { paddingVertical: space.xl },
     slider: { width: '100%', height: 40 },
     grow: { flex: 1 },
-    notice: { borderRadius: spacing.md, padding: spacing.md },
+    notice: { borderRadius: space.md, padding: space.md },
+    /** Bleeds through the screen's gutter so the rule runs edge to edge. */
     bar: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      paddingHorizontal: spacing.base,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
+      marginHorizontal: -space.base,
+      paddingHorizontal: space.base,
+      paddingTop: space.md,
       backgroundColor: colors.background,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.border,
-      gap: spacing.xs,
+      gap: space.sm,
     },
   });
 
 /**
- * The till (RULES R2–R4, R11–R13, O8): where it ships, what is in it, how
- * many coins to put towards it, and what is left to pay in money.
+ * The till (RULES R2–R4, R11–R13, R16, O8): where it ships, what is in it,
+ * the coins it takes, and what is left to pay in money.
  *
- * The quote is the server's — subtotal, shipping, the most coins allowed —
- * and the slider only moves the coins within it; the money that follows
- * is the one line of arithmetic the contract fixes (coins × value), so the
- * figure shown is the figure charged. Coins start at their maximum,
- * because a user who came to spend them should not have to ask; the
- * slider is for the ones who would rather keep some.
+ * The quote is the server's — subtotal, coupon, shipping, the least and
+ * the most coins allowed — and the slider only moves the coins between
+ * them; the money that follows is the one line of arithmetic the contract
+ * fixes (coins × value), so the figure shown is the figure charged. How
+ * much choice there is depends on the shop's payment mode: a coins-only
+ * order takes exactly its coins and a money-only one none, so neither has
+ * a slider; a split with a fixed share has none either. Coins start at
+ * their maximum, because a user who came to spend them should not have to
+ * ask; the slider is for the ones who would rather keep some. A coins-only
+ * shop has no choice to offer at all, so the panel goes entirely and the
+ * coins read from the summary and the wallet pill in the corner.
  *
  * A "Buy now" arrives with its own lines and leaves the basket alone; a
- * checkout from the cart buys the basket and empties it on the server.
+ * checkout from the cart buys the basket — with the coupon it showed
+ * applying — and empties it on the server.
  */
 export const CheckoutScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RootStackScreenProps<'Checkout'>['route']>();
-  const toast = useToast();
   const balance = useCoinBalance();
   const config = useShopConfig();
 
   const cart = useCart();
-  const address = useDefaultAddress();
-  const hydrateAddresses = useAddressesStore(s => s.hydrateFromServer);
-  const placeOrder = useCheckoutStore(s => s.placeOrder);
-  const resumeAfterStepUp = useCheckoutStore(s => s.resumeAfterStepUp);
-  const abandonCheckout = useCheckoutStore(s => s.abandonCheckout);
-  const pendingCheckout = usePendingCheckout();
-  const isPlacing = useIsPlacingOrder();
-  const isPaying = useIsPaying();
-  const stepUpToken = useStepUpToken();
-  const pendingContact = usePendingContactVerification();
+  // The address the shipping page chose, while it is still in the book;
+  // the default when the checkout was opened without one.
+  const addresses = useAddresses();
+  const fallbackAddress = useDefaultAddress();
+  const chosenId = route.params.addressId;
+  const address =
+    (chosenId ? addresses.find(a => a.id === chosenId) : undefined) ??
+    fallbackAddress;
+  const delivery = route.params.delivery;
 
   const fromCart = 'fromCart' in route.params;
   const lines: PurchaseLine[] = useMemo(
@@ -125,6 +113,7 @@ export const CheckoutScreen = () => {
             itemId: line.item.id,
             quantity: line.quantity,
             size: line.size,
+            color: line.color ?? null,
           })),
     [cart, route.params],
   );
@@ -133,8 +122,14 @@ export const CheckoutScreen = () => {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [useCoins, setUseCoins] = useState(true);
   const [coins, setCoins] = useState<number | null>(null);
+  // The basket's coupon comes along when the basket showed it applying; a
+  // "Buy now" has none. The payment page drops it if the till refuses it.
+  const couponCode =
+    fromCart && cart?.quote.coupon && !cart.quote.coupon.problem
+      ? cart.quote.coupon.code
+      : null;
 
-  /** Asks the till for its figures; the coins follow the answer's ceiling. */
+  /** Asks the till for its figures; the coins follow the answer's bounds. */
   const fetchQuote = useCallback(async () => {
     if (lines.length === 0) {
       setQuote(null);
@@ -142,22 +137,38 @@ export const CheckoutScreen = () => {
     }
     setQuoteError(null);
     try {
-      const result = await checkoutApi.quote(lines, 'max');
+      const result = await checkoutApi.quote(lines, 'max', couponCode);
       setQuote(result);
       setCoins(current =>
-        current === null ? result.coinsMax : Math.min(current, result.coinsMax),
+        current === null
+          ? result.coinsMax
+          : Math.min(Math.max(current, result.coinsMin), result.coinsMax),
       );
     } catch (error) {
       setQuoteError(toApiError(error).message);
     }
-  }, [lines]);
+  }, [couponCode, lines]);
 
   useEffect(() => {
     fetchQuote();
   }, [fetchQuote]);
 
-  const coinsApplied =
-    useCoins && quote ? Math.min(coins ?? 0, quote.coinsMax) : 0;
+  // What the order takes: everything in a coins-only shop (or when the
+  // wallet is short, to show what it would take); otherwise the slider's
+  // pick, kept between the floor and the ceiling, or none with the switch off.
+  const coinsApplied = useMemo(() => {
+    if (!quote) return 0;
+    if (quote.paymentMode === 'coins' || quote.coinsShort > 0) {
+      return quote.coinsMin;
+    }
+    if (!useCoins && quote.coinsMin === 0) return 0;
+    return Math.min(
+      Math.max(coins ?? quote.coinsMax, quote.coinsMin),
+      quote.coinsMax,
+    );
+  }, [coins, quote, useCoins]);
+  const appliedCoupon =
+    quote?.coupon && !quote.coupon.problem ? quote.coupon : null;
   const figures = useMemo(() => {
     if (!quote) return null;
     const coinsValue = coinsApplied * quote.coinValuePaise;
@@ -169,9 +180,16 @@ export const CheckoutScreen = () => {
       shipping: quote.shipping,
       coinsApplied,
       coinsValue,
-      payable: quote.total - coinsValue,
+      payable: Math.max(0, quote.total - coinsValue),
+      coupon: appliedCoupon,
+      inCoins: quote.inCoins,
     };
-  }, [coinsApplied, quote]);
+  }, [appliedCoupon, coinsApplied, quote]);
+  const short = quote?.coinsShort ?? 0;
+  const itemCount = useMemo(
+    () => (quote?.lines ?? []).reduce((sum, line) => sum + line.quantity, 0),
+    [quote],
+  );
   // Before the till's rules arrive the server is the one to ask for the
   // code (`STEP_UP_REQUIRED`), and the store already answers that.
   const needsStepUp =
@@ -186,153 +204,87 @@ export const CheckoutScreen = () => {
     }
     navigation.navigate('Cart');
   }, [navigation]);
-  const onPressAddress = useCallback(() => {
-    if (address) {
-      navigation.navigate('Addresses', { select: true });
-    } else {
-      navigation.navigate('AddressForm');
-    }
-  }, [address, navigation]);
-
-  /** What each outcome says to the user, in one place for the first try and the resume. */
-  const announce = useCallback(
-    (outcome: CheckoutOutcome) => {
-      switch (outcome.status) {
-        case 'placed':
-          toast.show({
-            title: 'Order placed',
-            message:
-              outcome.order.coinsUsed > 0
-                ? `${formatCoins(outcome.order.coinsUsed)} coins used${
-                    outcome.order.payable > 0
-                      ? ` and ${formatMoney(
-                          outcome.order.payable,
-                          outcome.order.currency,
-                        )} paid`
-                      : ''
-                  }.`
-                : `${formatMoney(
-                    outcome.order.payable,
-                    outcome.order.currency,
-                  )} paid.`,
-            tone: 'success',
-          });
-          navigation.replace('OrderDetail', { id: outcome.order.id });
-          return;
-        case 'step_up_required':
-          // The OTP screen is opening over this one.
-          return;
-        case 'address_required':
-          hydrateAddresses();
-          toast.show({
-            title: 'Add a delivery address first',
-            message: 'Tell us where to send it.',
-            tone: 'warning',
-          });
-          navigation.navigate('AddressForm');
-          return;
-        case 'payment_pending':
-          toast.show({
-            title: 'Order saved, payment pending',
-            message:
-              outcome.error?.message ??
-              'Pay for it from the order page before the window closes.',
-            tone: 'info',
-            durationMs: 6000,
-          });
-          navigation.replace('OrderDetail', { id: outcome.order.id });
-          return;
-        case 'failed':
-          toast.show({
-            title:
-              outcome.error.code === 'OUT_OF_STOCK'
-                ? 'Sold out'
-                : outcome.error.code === 'COINS_OVER_LIMIT' ||
-                  outcome.error.code === 'INSUFFICIENT_COINS'
-                ? 'Coins changed'
-                : "Couldn't place the order",
-            message: outcome.error.message,
-            tone: 'error',
-          });
-          if (
-            outcome.error.code === 'OUT_OF_STOCK' ||
-            outcome.error.code === 'COINS_OVER_LIMIT' ||
-            outcome.error.code === 'INSUFFICIENT_COINS'
-          ) {
-            fetchQuote();
-          }
-      }
-    },
-    [fetchQuote, hydrateAddresses, navigation, toast],
+  const onPressWallet = useCallback(
+    () => navigation.navigate('Main', { screen: 'Wallet' }),
+    [navigation],
   );
+  const onPressEditCart = useCallback(
+    () => navigation.navigate('Cart'),
+    [navigation],
+  );
+  // Changing the address is the shipping page's job: back to it when it is
+  // the page underneath, opened afresh when the checkout came another way.
+  const onPressAddress = useCallback(() => {
+    if (!address) {
+      navigation.navigate('AddressForm');
+      return;
+    }
+    const state = navigation.getState();
+    if (state.routes[state.index - 1]?.name === 'ShippingAddress') {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate(
+      'ShippingAddress',
+      'lines' in route.params
+        ? { lines: route.params.lines }
+        : { fromCart: true },
+    );
+  }, [address, navigation, route.params]);
 
-  const onConfirm = useCallback(async () => {
+  /**
+   * On to the payment page with everything settled here: where it goes,
+   * how it is handed over, the coins chosen and the coupon that applied.
+   * The order itself is placed there, once a way to pay is picked.
+   */
+  const onContinue = useCallback(() => {
     if (!address) {
       onPressAddress();
       return;
     }
-    const outcome = await placeOrder({
-      lines: fromCart ? undefined : lines,
-      fromCart: fromCart || undefined,
+    navigation.navigate('Payment', {
+      ...('lines' in route.params
+        ? { lines: route.params.lines }
+        : { fromCart: true }),
       addressId: address.id,
+      delivery,
       coins: coinsApplied,
+      couponCode: appliedCoupon?.code ?? null,
     });
-    announce(outcome);
   }, [
     address,
-    announce,
+    appliedCoupon,
     coinsApplied,
-    fromCart,
-    lines,
+    delivery,
+    navigation,
     onPressAddress,
-    placeOrder,
+    route.params,
   ]);
 
-  // The step-up came back with a token: finish what it interrupted.
-  useEffect(() => {
-    if (!stepUpToken || !pendingCheckout) {
-      return;
-    }
-    resumeAfterStepUp().then(outcome => {
-      if (outcome) {
-        announce(outcome);
-      }
-    });
-  }, [announce, pendingCheckout, resumeAfterStepUp, stepUpToken]);
-
-  // The OTP screen closed without a token — the user backed out.
-  useEffect(() => {
-    if (pendingCheckout && !pendingContact && !stepUpToken) {
-      abandonCheckout();
-      toast.show({ title: 'Checkout cancelled', tone: 'info' });
-    }
-  }, [abandonCheckout, pendingCheckout, pendingContact, stepUpToken, toast]);
-
-  const busy = isPlacing || isPaying;
   const soldOut = quote?.lines.find(line => !line.inStock) ?? null;
+  // The panel is for the split in between: an order of coins-only goods has
+  // nothing to decide, and one of money-only goods no coins to decide about.
+  // The quote's mode is the order's own, which an item may set (RULES R11).
+  const showCoinsPanel =
+    quote !== null &&
+    quote.paymentMode !== 'coins' &&
+    quote.paymentMode !== 'money';
 
   return (
     <Screen edges={['top']}>
+      <ShopPageHeader
+        title="Checkout"
+        subtitle="Review your order before payment"
+        balance={balance}
+        onPressBack={onPressBack}
+        onPressBalance={onPressWallet}
+      />
+
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <HistoryHeader
-          coins={balance}
-          onPressBack={onPressBack}
-          title="Checkout"
-          subtitle={
-            quote
-              ? `${quote.lines.reduce((sum, line) => sum + line.quantity, 0)} ${
-                  quote.lines.length === 1 && quote.lines[0].quantity === 1
-                    ? 'item'
-                    : 'items'
-                }`
-              : ' '
-          }
-        />
-
         <EmailVerificationBanner reason="place an order" />
 
         {lines.length === 0 ? (
@@ -359,91 +311,49 @@ export const CheckoutScreen = () => {
           </View>
         ) : (
           <>
-            <Pressable
-              onPress={onPressAddress}
-              feedback="opacity"
-              accessibilityRole="button"
-              accessibilityLabel={
-                address ? 'Change delivery address' : 'Add a delivery address'
+            <SecureRedemptionBanner
+              title="Secure Checkout"
+              caption="Your order details are protected and secure"
+              trailing={ShieldCheck}
+            />
+
+            <CheckoutAddressCard
+              address={address}
+              delivery={delivery}
+              onPressChange={onPressAddress}
+            />
+
+            <CheckoutCard
+              title="Order Items"
+              action={
+                fromCart
+                  ? { label: 'Edit Cart', onPress: onPressEditCart }
+                  : undefined
               }
             >
-              <Card radius="xl" padding="base">
-                <HStack align="start" gap="md">
-                  <Icon as={MapPin} size="lg" tint={colors.primary} />
-                  <VStack flex={1} gap="xxs">
-                    <HStack align="center" justify="between">
-                      <AppText variant="label" color="textSecondary">
-                        {address
-                          ? `Deliver to · ${address.label}`
-                          : 'Delivery address'}
-                      </AppText>
-                      <AppText variant="micro" color="primary">
-                        {address ? 'Change' : 'Add'}
-                      </AppText>
-                    </HStack>
-                    {address ? (
-                      <>
-                        <AppText variant="body">{address.name}</AppText>
-                        {formatAddressLines(address).map(line => (
-                          <AppText
-                            key={line}
-                            variant="caption"
-                            color="textSecondary"
-                          >
-                            {line}
-                          </AppText>
-                        ))}
-                      </>
-                    ) : (
-                      <AppText variant="caption" color="textSecondary">
-                        Add where this should be sent.
-                      </AppText>
-                    )}
-                  </VStack>
-                </HStack>
-              </Card>
-            </Pressable>
+              {quote.lines.map((line, index) => (
+                <React.Fragment
+                  key={`${line.itemId}:${line.size ?? ''}:${line.color ?? ''}`}
+                >
+                  {index > 0 ? <Divider /> : null}
+                  <CheckoutLineRow
+                    line={line}
+                    currency={quote.currency}
+                    inCoins={quote.inCoins !== null}
+                  />
+                </React.Fragment>
+              ))}
+            </CheckoutCard>
 
-            <Card radius="xl" padding="base">
-              <VStack gap="md">
-                <AppText variant="label" color="textSecondary">
-                  Items
-                </AppText>
-                {quote.lines.map((line, index) => (
-                  <React.Fragment key={`${line.itemId}:${line.size ?? ''}`}>
-                    {index > 0 ? <Divider /> : null}
-                    <HStack align="center" gap="md">
-                      <Box bg="muted" radius="lg" style={styles.art}>
-                        <Emoji size={moderateScale(22)} label={line.title}>
-                          {line.emoji}
-                        </Emoji>
-                      </Box>
-                      <VStack flex={1} gap="xxs">
-                        <AppText variant="bodyStrong" numberOfLines={1}>
-                          {line.title}
-                        </AppText>
-                        <AppText variant="micro" color="textTertiary">
-                          {[
-                            line.size ? `Size ${line.size}` : null,
-                            `Qty ${line.quantity}`,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                          {!line.inStock ? ' · Sold out' : ''}
-                        </AppText>
-                      </VStack>
-                      <AppText variant="bodyStrong">
-                        {formatMoney(line.lineTotal, quote.currency)}
-                      </AppText>
-                    </HStack>
-                  </React.Fragment>
-                ))}
-              </VStack>
-            </Card>
-
-            <Card radius="xl" padding="base">
-              <VStack gap="md">
-                {quote.coinsMax > 0 ? (
+            {showCoinsPanel ? (
+              <CheckoutCard title="Use Your Coins" icon={Coins}>
+                {quote.coinsMax === 0 && quote.coinsMin === 0 ? (
+                  <AppText variant="micro" color="textTertiary">
+                    {Math.floor(balance) === 0
+                      ? 'Earn coins by walking and training, and put them towards your next order.'
+                      : 'No coins can go towards this order.'}
+                  </AppText>
+                ) : quote.coinsMin === 0 ? (
                   <Switch
                     label="Pay with coins"
                     helper={`Up to ${formatCoins(quote.coinsMax)} coins${
@@ -457,42 +367,54 @@ export const CheckoutScreen = () => {
                     onChange={setUseCoins}
                   />
                 ) : (
-                  <VStack gap="xxs">
-                    <AppText variant="label" color="textSecondary">
-                      Pay with coins
-                    </AppText>
-                    <AppText variant="micro" color="textTertiary">
-                      {Math.floor(balance) === 0
-                        ? 'Earn coins by walking and training, and put them towards your next order.'
-                        : 'No coins can go towards this order.'}
-                    </AppText>
-                  </VStack>
+                  <AppText variant="micro" color="textTertiary">
+                    {quote.coinsMin >= quote.coinsMax
+                      ? `${formatCoins(quote.coinsMin)} coins${
+                          config
+                            ? ` (${Math.round(
+                                config.coinShareMin * 100,
+                              )}% of the items)`
+                            : ''
+                        } go towards this order · you have ${formatCoins(
+                          Math.floor(balance),
+                        )}`
+                      : `At least ${formatCoins(
+                          quote.coinsMin,
+                        )} and up to ${formatCoins(
+                          quote.coinsMax,
+                        )} coins · you have ${formatCoins(
+                          Math.floor(balance),
+                        )}`}
+                  </AppText>
                 )}
 
-                {useCoins && quote.coinsMax > 0 ? (
-                  <VStack gap="xs">
-                    <Slider
-                      style={styles.slider}
-                      minimumValue={0}
-                      maximumValue={quote.coinsMax}
-                      step={1}
-                      value={coinsApplied}
-                      onValueChange={setCoins}
-                      minimumTrackTintColor={colors.gold}
-                      maximumTrackTintColor={colors.border}
-                      thumbTintColor={colors.gold}
-                      accessibilityLabel="Coins to use"
-                    />
-                    <HStack align="center" justify="between">
-                      <CoinAmount amount={coinsApplied} size="md" />
-                      <AppText
-                        variant="bodyStrong"
-                        style={{ color: colors.success }}
-                      >
-                        {`− ${formatMoney(figures.coinsValue, quote.currency)}`}
-                      </AppText>
-                    </HStack>
-                  </VStack>
+                {short === 0 &&
+                quote.coinsMax > quote.coinsMin &&
+                (useCoins || quote.coinsMin > 0) ? (
+                  <Slider
+                    style={styles.slider}
+                    minimumValue={quote.coinsMin}
+                    maximumValue={quote.coinsMax}
+                    step={1}
+                    value={coinsApplied}
+                    onValueChange={setCoins}
+                    minimumTrackTintColor={colors.gold}
+                    maximumTrackTintColor={colors.border}
+                    thumbTintColor={colors.gold}
+                    accessibilityLabel="Coins to use"
+                  />
+                ) : null}
+
+                {coinsApplied > 0 ? (
+                  <HStack align="center" justify="between">
+                    <CoinAmount amount={coinsApplied} size="md" />
+                    <AppText
+                      variant="bodyStrong"
+                      style={{ color: colors.success }}
+                    >
+                      {`− ${formatMoney(figures.coinsValue, quote.currency)}`}
+                    </AppText>
+                  </HStack>
                 ) : null}
 
                 {needsStepUp && config ? (
@@ -521,47 +443,118 @@ export const CheckoutScreen = () => {
                     </AppText>
                   </HStack>
                 ) : null}
-              </VStack>
-            </Card>
+              </CheckoutCard>
+            ) : null}
 
-            <Card radius="xl" padding="base">
-              <VStack gap="md">
-                <AppText variant="label" color="textSecondary">
-                  Summary
-                </AppText>
-                <PriceBreakdown figures={figures} />
-              </VStack>
-            </Card>
+            <CheckoutCard title="Order Summary">
+              <PriceBreakdown
+                figures={figures}
+                count={itemCount}
+                itemsLabel="Subtotal"
+                emptyCouponLabel={
+                  config?.couponsEnabled ? 'Coupon / Discount' : undefined
+                }
+                payableLabel="Total Payable"
+                total={
+                  figures.inCoins ? (
+                    <PayAmount
+                      quote={{
+                        coinsApplied: figures.inCoins.total,
+                        payable: 0,
+                        currency: quote.currency,
+                      }}
+                      size="md"
+                    />
+                  ) : (
+                    <AppText
+                      variant="h3"
+                      style={{ color: colors.brandAccent }}
+                    >
+                      {formatMoney(figures.payable, quote.currency)}
+                    </AppText>
+                  )
+                }
+              />
+            </CheckoutCard>
+
+            {short === 0 ? (
+              <CoinDeductionNote
+                coins={coinsApplied}
+                payable={figures.payable}
+                currency={quote.currency}
+              />
+            ) : null}
           </>
         )}
       </ScrollView>
 
       {quote && figures && lines.length > 0 ? (
-        <View style={styles.bar}>
+        <View
+          style={[
+            styles.bar,
+            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+          ]}
+        >
           {soldOut ? (
             <AppText variant="micro" color="warning" center>
               {`${soldOut.title} is sold out — remove it to continue.`}
             </AppText>
+          ) : short > 0 ? (
+            <AppText variant="micro" color="warning" center>
+              {`You need ${formatCoins(short)} more coins for this order.`}
+            </AppText>
           ) : null}
-          <Button
-            label={
-              !address
-                ? 'Add a delivery address'
-                : figures.payable === 0
-                ? `Place order · ${formatCoins(coinsApplied)} coins`
-                : needsStepUp
-                ? `Confirm & pay ${formatMoney(
-                    figures.payable,
-                    quote.currency,
-                  )}`
-                : `Pay ${formatMoney(figures.payable, quote.currency)}`
-            }
-            variant="brand"
-            fullWidth
-            loading={busy}
-            disabled={busy || soldOut !== null}
-            onPress={onConfirm}
-          />
+
+          <HStack align="center" gap="xs">
+            <VStack flex={1} gap="xxs">
+              <AppText variant="bodyStrong">You Pay</AppText>
+              <PayAmount
+                quote={{
+                  coinsApplied,
+                  payable: figures.payable,
+                  currency: quote.currency,
+                }}
+                size="lg"
+              />
+            </VStack>
+            <View style={styles.grow}>
+              <Button
+                // label={
+                //   !address
+                //     ? 'Add a delivery address'
+                //     : short > 0
+                //     ? 'Not enough coins'
+                //     : 'Continue to Payment'
+                // }
+                label={
+                  !address
+                    ? 'Add a delivery address'
+                    : short > 0
+                    ? 'Not enough coins'
+                    : 'Continue to Payment'
+                }
+                variant="brand"
+                fullWidth
+                disabled={soldOut !== null || (address !== null && short > 0)}
+                onPress={onContinue}
+                iconPosition="trailing"
+                icon={
+                  <Icon
+                    as={ChevronRight}
+                    size="sm"
+                    tint={colors.primaryForeground}
+                  />
+                }
+              />
+            </View>
+          </HStack>
+
+          <HStack align="center" justify="center" gap="xs">
+            <Icon as={Lock} size="xs" tint={colors.success} />
+            <AppText variant="micro" style={{ color: colors.success }}>
+              100% Secure Checkout
+            </AppText>
+          </HStack>
         </View>
       ) : null}
     </Screen>

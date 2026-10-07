@@ -7,6 +7,8 @@ import type {
   Cart,
   Challenge,
   CheckoutResult,
+  DeliveryPreferences,
+  PaymentMethod,
   PurchaseLine,
   Quote,
   Review,
@@ -396,8 +398,21 @@ export interface CartApi {
     itemId: string;
     quantity: number;
     size?: string | null;
+    color?: string | null;
   }): Promise<Cart>;
-  removeLine(itemId: string, size?: string | null): Promise<Cart>;
+  removeLine(
+    itemId: string,
+    size?: string | null,
+    color?: string | null,
+  ): Promise<Cart>;
+  /**
+   * Puts a coupon on the basket (RULES R16). Refused with the reason when
+   * it does not apply now: `COUPON_INVALID`, `COUPON_EXPIRED`,
+   * `COUPON_MIN_ORDER` (`details.minSubtotal`), `COUPON_ALREADY_USED`,
+   * `COUPON_USED_UP`, `COUPONS_DISABLED`, `CART_EMPTY` (422).
+   */
+  applyCoupon(code: string): Promise<Cart>;
+  removeCoupon(): Promise<Cart>;
   clear(): Promise<Cart>;
 }
 
@@ -406,8 +421,22 @@ export interface CheckoutPayload {
   lines?: PurchaseLine[];
   fromCart?: boolean;
   addressId: string;
-  /** The coins to put towards it; the quote said how many may. */
+  /** The coins to put towards it; the quote said how many may, and how many must. */
   coins: number;
+  /**
+   * The coupon the quote showed applying — left out when it showed one not
+   * applying, so the order is charged what was shown.
+   */
+  couponCode?: string;
+  /** How it should be handed over (RULES R17); the saved preferences fill the rest. */
+  delivery?: Partial<DeliveryPreferences>;
+  /**
+   * How the member chose to pay on the payment page (RULES R12). The server
+   * checks it against the sums: `PAYMENT_METHOD_UNAVAILABLE` when the shop
+   * does not take it, `PAYMENT_METHOD_MISMATCH` when the order is not the
+   * shape that method pays for.
+   */
+  paymentMethod?: PaymentMethod;
   /** The step-up proof, when the server asked for one. */
   stepUpToken?: string;
 }
@@ -431,14 +460,22 @@ export interface PaymentProof {
 }
 
 export interface CheckoutApi {
-  /** The till's arithmetic for some lines, with nothing placed. */
-  quote(lines: PurchaseLine[], coins: number | 'max'): Promise<Quote>;
+  /**
+   * The till's arithmetic for some lines, with nothing placed. A coupon
+   * that does not apply comes back with its `problem` rather than refused.
+   */
+  quote(
+    lines: PurchaseLine[],
+    coins: number | 'max',
+    couponCode?: string | null,
+  ): Promise<Quote>;
   /**
    * Places the order (RULES R2–R4, R11–R13). The errors a screen branches
    * on: `STEP_UP_REQUIRED` (403), `ADDRESS_REQUIRED` (422),
-   * `COINS_OVER_LIMIT` (422, `details.coinsMax`), `INSUFFICIENT_COINS`
-   * (422), `OUT_OF_STOCK` (409), `SIZE_REQUIRED` / `QUANTITY_LIMIT` (422),
-   * `CART_EMPTY` (422).
+   * `COINS_OVER_LIMIT` (422, `details.coinsMax`), `COINS_UNDER_MINIMUM`
+   * (422, `details.coinsMin`), `INSUFFICIENT_COINS` (422), `OUT_OF_STOCK`
+   * (409), `SIZE_REQUIRED` / `QUANTITY_LIMIT` (422), `CART_EMPTY` (422),
+   * and a coupon that stopped applying, `COUPON_*` (422).
    */
   place(
     payload: CheckoutPayload,
@@ -473,6 +510,12 @@ export interface AddressApi {
   update(id: string, patch: Partial<AddressInput>): Promise<Address>;
   setDefault(id: string): Promise<Address>;
   remove(id: string): Promise<{ ok: boolean }>;
+  /** The member's delivery preferences (RULES R17): what the shipping page opens with. */
+  deliveryPreferences(): Promise<DeliveryPreferences>;
+  /** Saves them; WhatsApp updates come back off where they are not offered. */
+  setDeliveryPreferences(
+    patch: Partial<DeliveryPreferences>,
+  ): Promise<DeliveryPreferences>;
 }
 
 export interface ReferralApi {

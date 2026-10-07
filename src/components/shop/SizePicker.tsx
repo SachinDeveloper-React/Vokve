@@ -11,6 +11,8 @@ interface Props {
   onChange: (size: string) => void;
   /** Shown under the label while nothing is picked and the user has tried to go on. */
   error?: string | null;
+  /** Drops the "Size" label row, for a page that heads the picker itself. */
+  showLabel?: boolean;
 }
 
 /**
@@ -19,21 +21,23 @@ interface Props {
  * wrong for the rest, and a wrong size is the return nobody wants.
  */
 export const SizePicker = memo(
-  ({ sizes, value, onChange, error = null }: Props) => {
+  ({ sizes, value, onChange, error = null, showLabel = true }: Props) => {
     const { colors } = useTheme();
     return (
       <VStack gap="sm">
-        <HStack align="center" justify="between">
-          <AppText variant="label" color="textSecondary">
-            Size
-          </AppText>
-          {value ? (
-            <AppText
-              variant="micro"
-              color="textTertiary"
-            >{`Selected: ${value}`}</AppText>
-          ) : null}
-        </HStack>
+        {showLabel ? (
+          <HStack align="center" justify="between">
+            <AppText variant="label" color="textSecondary">
+              Size
+            </AppText>
+            {value ? (
+              <AppText
+                variant="micro"
+                color="textTertiary"
+              >{`Selected: ${value}`}</AppText>
+            ) : null}
+          </HStack>
+        ) : null}
         <HStack gap="sm" wrap>
           {sizes.map(size => {
             const selected = size === value;

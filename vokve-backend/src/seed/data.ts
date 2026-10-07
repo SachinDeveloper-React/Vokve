@@ -48,6 +48,11 @@ export const APP_RELEASES = [
  * goods, ⚙ `commerce.coinValuePaise` each), so at 30% and ₹0.25 a coin a
  * ₹799 tee takes up to 958 coins — about a fortnight of training.
  * `popularity` is a starting figure; every order adds to it.
+ *
+ * `paymentMode` is an item's own (RULES R11): the small rewards a member
+ * walks their way to are `coins` and take nothing else, the heavy goods
+ * are `money`, and everything without one follows ⚙ `commerce.paymentMode`
+ * — coins towards part of the bill, money for the rest.
  */
 const listed = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000);
 
@@ -57,20 +62,20 @@ export const SHOP_ITEMS = [
   { _id: 'tank-top', title: 'Mesh Tank Top', description: 'Lightweight mesh-back tank for leg day and summer runs.', price: 59900, mrp: 89900, category: 'clothing', subcategory: 'T-shirts', emoji: '🎽', badge: null, isDeal: false, featured: false, tags: ['vest', 'sleeveless', 'tank'], sizes: ['S', 'M', 'L', 'XL'], popularity: 140, listedAt: listed(60), sort: 2 },
   { _id: 'hoodie', title: 'VOKVE Hoodie', description: 'Heavyweight cotton hoodie for the walk to the gym.', price: 149900, mrp: 219900, category: 'clothing', subcategory: 'Hoodies', emoji: '🧥', badge: null, isDeal: false, featured: true, tags: ['sweatshirt', 'jumper', 'winter'], sizes: ['S', 'M', 'L', 'XL', 'XXL'], popularity: 210, listedAt: listed(90), sort: 3 },
   { _id: 'shorts', title: 'Training Shorts', description: 'Quick-dry shorts with a zipped phone pocket.', price: 69900, mrp: 99900, category: 'clothing', subcategory: 'Bottoms', emoji: '🩳', badge: null, isDeal: true, featured: true, tags: ['gym shorts', 'running'], sizes: ['S', 'M', 'L', 'XL'], popularity: 260, listedAt: listed(80), sort: 4 },
-  { _id: 'joggers', title: 'Tapered Joggers', description: 'Four-way stretch joggers with a cuffed ankle.', price: 109900, mrp: null, category: 'clothing', subcategory: 'Bottoms', emoji: '👖', badge: 'new_arrival', isDeal: false, featured: false, tags: ['track pants', 'trousers', 'sweatpants'], sizes: ['S', 'M', 'L', 'XL'], popularity: 90, listedAt: listed(7), sort: 5 },
+  { _id: 'joggers', title: 'Tapered Joggers', description: 'Four-way stretch joggers with a cuffed ankle.', price: 109900, mrp: null, category: 'clothing', subcategory: 'Bottoms', emoji: '👖', badge: 'new_arrival', isDeal: false, paymentMode: 'money', featured: false, tags: ['track pants', 'trousers', 'sweatpants'], sizes: ['S', 'M', 'L', 'XL'], popularity: 90, listedAt: listed(7), sort: 5 },
   { _id: 'sports-bra', title: 'Support Sports Bra', description: 'Medium-support bra with a racerback and wide underband.', price: 89900, mrp: 129900, category: 'clothing', subcategory: 'Tops', emoji: '🩱', badge: null, isDeal: false, featured: false, tags: ['bra', 'women', 'top'], sizes: ['S', 'M', 'L', 'XL'], popularity: 170, listedAt: listed(45), sort: 6 },
   { _id: 'cap', title: 'VOKVE Cap', description: 'Curved-peak cap, one size, embroidered logo.', price: 44900, mrp: 59900, category: 'clothing', subcategory: 'Headwear', emoji: '🧢', badge: 'limited', isDeal: false, featured: false, tags: ['hat', 'sun'], sizes: [], popularity: 180, listedAt: listed(100), sort: 7 },
-  { _id: 'socks', title: 'Cushioned Socks · 3 pack', description: 'Ankle socks with a cushioned sole and arch band.', price: 29900, mrp: 44900, category: 'clothing', subcategory: 'Socks', emoji: '🧦', badge: null, isDeal: true, featured: false, tags: ['ankle socks', 'pack'], sizes: [], popularity: 300, listedAt: listed(30), sort: 8 },
+  { _id: 'socks', title: 'Cushioned Socks · 3 pack', description: 'Ankle socks with a cushioned sole and arch band.', price: 29900, mrp: 44900, category: 'clothing', subcategory: 'Socks', emoji: '🧦', badge: null, isDeal: true, paymentMode: 'coins', featured: false, tags: ['ankle socks', 'pack'], sizes: [], popularity: 300, listedAt: listed(30), sort: 8 },
 
   // ── Gym ──────────────────────────────────────────────────────────────────
   { _id: 'yoga-mat', title: 'Yoga Mat', description: '6mm non-slip mat with a carry strap.', price: 99900, mrp: 149900, category: 'gym', subcategory: 'Mats', emoji: '🧘', badge: 'popular', isDeal: false, featured: true, tags: ['exercise mat', 'stretching', 'pilates'], sizes: [], popularity: 290, listedAt: listed(110), sort: 10 },
   { _id: 'resistance-bands', title: 'Resistance Band Set', description: 'Five loops, light through extra heavy.', price: 64900, mrp: 89900, category: 'gym', subcategory: 'Bands', emoji: '🔗', badge: null, isDeal: false, featured: true, tags: ['loop bands', 'booty bands', 'home workout'], sizes: [], popularity: 240, listedAt: listed(70), sort: 11 },
-  { _id: 'wrist-wraps', title: 'Wrist Wraps', description: 'Elastic wraps for press days.', price: 34900, mrp: 49900, category: 'gym', subcategory: 'Support', emoji: '🧤', badge: null, isDeal: true, featured: false, tags: ['lifting', 'bench', 'support'], sizes: [], popularity: 120, listedAt: listed(50), sort: 12 },
+  { _id: 'wrist-wraps', title: 'Wrist Wraps', description: 'Elastic wraps for press days.', price: 34900, mrp: 49900, category: 'gym', subcategory: 'Support', emoji: '🧤', badge: null, isDeal: true, paymentMode: 'coins', featured: false, tags: ['lifting', 'bench', 'support'], sizes: [], popularity: 120, listedAt: listed(50), sort: 12 },
   { _id: 'lifting-straps', title: 'Lifting Straps', description: 'Padded cotton straps for deadlifts and rows.', price: 39900, mrp: null, category: 'gym', subcategory: 'Support', emoji: '🪢', badge: null, isDeal: false, featured: false, tags: ['deadlift', 'grip', 'straps'], sizes: [], popularity: 110, listedAt: listed(40), sort: 13 },
   { _id: 'gym-gloves', title: 'Grip Gym Gloves', description: 'Half-finger gloves with a silicone palm.', price: 49900, mrp: 69900, category: 'gym', subcategory: 'Support', emoji: '🥊', badge: null, isDeal: false, featured: false, tags: ['gloves', 'grip', 'weights'], sizes: ['S', 'M', 'L', 'XL'], popularity: 130, listedAt: listed(65), sort: 14 },
-  { _id: 'foam-roller', title: 'Foam Roller', description: 'High-density 45cm roller for recovery days.', price: 69900, mrp: 99900, category: 'gym', subcategory: 'Recovery', emoji: '🧻', badge: null, isDeal: false, featured: false, tags: ['recovery', 'massage', 'mobility'], sizes: [], popularity: 150, listedAt: listed(55), sort: 15 },
+  { _id: 'foam-roller', title: 'Foam Roller', description: 'High-density 45cm roller for recovery days.', price: 69900, mrp: 99900, category: 'gym', subcategory: 'Recovery', emoji: '🧻', badge: null, isDeal: false, paymentMode: 'money', featured: false, tags: ['recovery', 'massage', 'mobility'], sizes: [], popularity: 150, listedAt: listed(55), sort: 15 },
   { _id: 'kettlebell-8', title: 'Kettlebell 8 kg', description: 'Cast-iron kettlebell with a powder-coat grip.', price: 179900, mrp: null, category: 'gym', subcategory: 'Weights', emoji: '🏋️', badge: 'new_arrival', isDeal: false, featured: false, tags: ['kettlebell', 'weights', 'strength'], sizes: [], popularity: 60, listedAt: listed(10), sort: 16 },
-  { _id: 'jump-rope', title: 'Speed Rope', description: 'Ball-bearing speed rope, adjustable length.', price: 29900, mrp: 44900, category: 'gym', subcategory: 'Cardio', emoji: '➰', badge: null, isDeal: true, featured: false, tags: ['skipping rope', 'jump rope', 'cardio'], sizes: [], popularity: 200, listedAt: listed(85), sort: 17 },
+  { _id: 'jump-rope', title: 'Speed Rope', description: 'Ball-bearing speed rope, adjustable length.', price: 29900, mrp: 44900, category: 'gym', subcategory: 'Cardio', emoji: '➰', badge: null, isDeal: true, paymentMode: 'coins', featured: false, tags: ['skipping rope', 'jump rope', 'cardio'], sizes: [], popularity: 200, listedAt: listed(85), sort: 17 },
 
   // ── Sports ───────────────────────────────────────────────────────────────
   { _id: 'football', title: 'Match Football · Size 5', description: 'Machine-stitched size 5 ball for turf and grass.', price: 94900, mrp: 129900, category: 'sports', subcategory: 'Football', emoji: '⚽', badge: 'popular', isDeal: false, featured: true, tags: ['soccer', 'ball', 'football'], sizes: [], popularity: 230, listedAt: listed(75), sort: 20 },
@@ -88,6 +93,245 @@ export const SHOP_ITEMS = [
   { _id: 'gym-bag', title: 'Duffel Gym Bag', description: '30 L duffel with a shoe compartment and wet pocket.', price: 129900, mrp: 179900, category: 'accessories', subcategory: 'Bags', emoji: '🎒', badge: 'new_arrival', isDeal: false, featured: false, tags: ['bag', 'duffel', 'kit bag'], sizes: [], popularity: 70, listedAt: listed(5), sort: 33 },
   { _id: 'sweatbands', title: 'Sweatband Set', description: 'Headband and two wristbands in cotton terry.', price: 19900, mrp: 29900, category: 'accessories', subcategory: 'Wearables', emoji: '🎗️', badge: null, isDeal: true, featured: false, tags: ['headband', 'wristband', 'sweat'], sizes: [], popularity: 90, listedAt: listed(48), sort: 34 },
 ] as const;
+
+/**
+ * What a product page shows beyond the shelf card: the colours a line can
+ * name (checked at the till like sizes), the fact or two by the price, the
+ * key features, and the rest of the facts. Items with no entry show none of
+ * those sections. No photos yet — the page draws the emoji until the
+ * catalogue has them.
+ */
+const BLACK = { name: 'Black', hex: '#111111' };
+const NAVY = { name: 'Navy', hex: '#1E2B5C' };
+const GREY = { name: 'Grey', hex: '#8C8C8C' };
+const CHARCOAL = { name: 'Charcoal', hex: '#2B2F38' };
+const WHITE = { name: 'White', hex: '#F2F2F2' };
+const CARE_COLD = { icon: 'care', label: 'Care Instructions', value: 'Machine wash cold, do not bleach' };
+
+export const SHOP_ITEM_DETAILS: Record<string, {
+  ribbon?: string;
+  colors?: { name: string; hex: string }[];
+  highlights?: { icon: string; label: string; value: string }[];
+  features?: { icon: string; title: string; caption: string }[];
+  specs?: { icon: string; label: string; value: string }[];
+}> = {
+  tee: {
+    ribbon: 'Premium Quality',
+    colors: [BLACK, NAVY, GREY, CHARCOAL],
+    highlights: [{ icon: 'fabric', label: 'Fabric', value: 'Dry Fit Polyester' }],
+    features: [
+      { icon: 'breathable', title: 'Breathable', caption: 'Keeps you cool and dry' },
+      { icon: 'lightweight', title: 'Lightweight', caption: 'Ultra light for maximum comfort' },
+      { icon: 'stretch', title: 'Stretchable', caption: 'Flexible fabric for better movement' },
+      { icon: 'durable', title: 'Durable', caption: 'Long lasting and strong' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      { icon: 'material', label: 'Material', value: '100% Polyester' },
+      CARE_COLD,
+    ],
+  },
+  'tank-top': {
+    colors: [BLACK, WHITE, { name: 'Olive', hex: '#556B2F' }],
+    highlights: [{ icon: 'fabric', label: 'Fabric', value: 'Mesh-back Polyester' }],
+    features: [
+      { icon: 'breathable', title: 'Breathable', caption: 'Mesh back lets heat out' },
+      { icon: 'lightweight', title: 'Lightweight', caption: 'Barely there on a run' },
+      { icon: 'quick_dry', title: 'Quick Dry', caption: 'Sweat dries off fast' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      { icon: 'material', label: 'Material', value: '92% Polyester, 8% Elastane' },
+      CARE_COLD,
+    ],
+  },
+  hoodie: {
+    ribbon: 'Heavyweight Cotton',
+    colors: [BLACK, { name: 'Grey Melange', hex: '#9A9A9A' }, NAVY],
+    highlights: [{ icon: 'fabric', label: 'Fabric', value: '400 GSM Cotton Fleece' }],
+    features: [
+      { icon: 'insulated', title: 'Warm', caption: 'Brushed fleece inside' },
+      { icon: 'durable', title: 'Durable', caption: 'Double-stitched seams' },
+      { icon: 'check', title: 'Pocket', caption: 'Fits a phone and keys' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Outerwear' },
+      { icon: 'material', label: 'Material', value: '80% Cotton, 20% Polyester' },
+      { icon: 'care', label: 'Care Instructions', value: 'Wash inside out, tumble dry low' },
+    ],
+  },
+  shorts: {
+    colors: [BLACK, NAVY],
+    highlights: [{ icon: 'fabric', label: 'Fabric', value: 'Quick-dry Polyester' }],
+    features: [
+      { icon: 'quick_dry', title: 'Quick Dry', caption: 'Sweat dries off fast' },
+      { icon: 'stretch', title: 'Stretchable', caption: 'Four-way stretch' },
+      { icon: 'check', title: 'Zip Pocket', caption: 'Your phone stays put' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      { icon: 'material', label: 'Material', value: '88% Polyester, 12% Spandex' },
+      CARE_COLD,
+    ],
+  },
+  joggers: {
+    colors: [BLACK, CHARCOAL],
+    highlights: [{ icon: 'fabric', label: 'Fabric', value: 'Four-way Stretch Knit' }],
+    features: [
+      { icon: 'stretch', title: 'Stretchable', caption: 'Moves the way you do' },
+      { icon: 'lightweight', title: 'Lightweight', caption: 'Warm without the weight' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      { icon: 'material', label: 'Material', value: '75% Polyester, 25% Elastane' },
+      CARE_COLD,
+    ],
+  },
+  'sports-bra': {
+    colors: [BLACK, { name: 'Berry', hex: '#8E2C48' }],
+    highlights: [{ icon: 'fit', label: 'Support', value: 'Medium' }],
+    features: [
+      { icon: 'breathable', title: 'Breathable', caption: 'Ventilated racerback' },
+      { icon: 'stretch', title: 'Stretchable', caption: 'Moves with you' },
+      { icon: 'quick_dry', title: 'Quick Dry', caption: 'Wicks sweat away' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: "Women's Activewear" },
+      { icon: 'material', label: 'Material', value: '78% Nylon, 22% Spandex' },
+      { icon: 'care', label: 'Care Instructions', value: 'Hand wash cold' },
+    ],
+  },
+  cap: {
+    highlights: [{ icon: 'fit', label: 'Fit', value: 'One size, adjustable strap' }],
+    features: [
+      { icon: 'breathable', title: 'Breathable', caption: 'Vented crown panels' },
+      { icon: 'lightweight', title: 'Lightweight', caption: 'Unstructured crown' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: '100% Cotton twill' },
+      { icon: 'care', label: 'Care Instructions', value: 'Spot clean only' },
+    ],
+  },
+  socks: {
+    highlights: [{ icon: 'material', label: 'Material', value: 'Cotton blend' }],
+    features: [
+      { icon: 'cushioned', title: 'Cushioned', caption: 'Padded sole' },
+      { icon: 'breathable', title: 'Breathable', caption: 'Mesh top' },
+    ],
+    specs: [
+      { icon: 'sizes', label: 'Fits', value: 'UK 6–11' },
+      { icon: 'info', label: 'Pack', value: '3 pairs' },
+      CARE_COLD,
+    ],
+  },
+  'yoga-mat': {
+    ribbon: 'Non-slip',
+    highlights: [{ icon: 'dimensions', label: 'Size', value: '183 × 61 cm, 6 mm' }],
+    features: [
+      { icon: 'grip', title: 'Non-slip', caption: 'Grips on both sides' },
+      { icon: 'cushioned', title: 'Cushioned', caption: '6 mm of padding' },
+      { icon: 'lightweight', title: 'Lightweight', caption: '1 kg with strap' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'TPE, latex-free' },
+      { icon: 'care', label: 'Care Instructions', value: 'Wipe clean with a damp cloth' },
+    ],
+  },
+  'resistance-bands': {
+    highlights: [{ icon: 'info', label: 'Set', value: '5 loops, 2–20 kg' }],
+    features: [
+      { icon: 'stretch', title: 'Five Levels', caption: 'Light to extra heavy' },
+      { icon: 'durable', title: 'Durable', caption: 'Layered latex' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Natural latex' },
+      { icon: 'care', label: 'Care Instructions', value: 'Keep out of direct sun' },
+    ],
+  },
+  'gym-gloves': {
+    colors: [BLACK, GREY],
+    features: [
+      { icon: 'grip', title: 'Grip', caption: 'Silicone palm' },
+      { icon: 'breathable', title: 'Breathable', caption: 'Mesh back' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Neoprene and silicone' },
+      { icon: 'care', label: 'Care Instructions', value: 'Hand wash, air dry' },
+    ],
+  },
+  'foam-roller': {
+    highlights: [{ icon: 'dimensions', label: 'Size', value: '45 × 15 cm' }],
+    features: [
+      { icon: 'durable', title: 'Firm', caption: 'Holds its shape' },
+      { icon: 'lightweight', title: 'Lightweight', caption: 'Easy to carry' },
+    ],
+    specs: [{ icon: 'material', label: 'Material', value: 'High-density EVA foam' }],
+  },
+  'kettlebell-8': {
+    highlights: [{ icon: 'weight', label: 'Weight', value: '8 kg' }],
+    features: [
+      { icon: 'durable', title: 'Durable', caption: 'Solid cast iron' },
+      { icon: 'grip', title: 'Grip', caption: 'Powder-coat handle' },
+    ],
+    specs: [{ icon: 'material', label: 'Material', value: 'Cast iron, powder coat' }],
+  },
+  football: {
+    highlights: [{ icon: 'sizes', label: 'Size', value: '5 (official)' }],
+    features: [
+      { icon: 'durable', title: 'Durable', caption: 'Machine-stitched panels' },
+      { icon: 'check', title: 'All Surfaces', caption: 'Turf and grass' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'PU leather' },
+      { icon: 'weight', label: 'Weight', value: '410–450 g' },
+    ],
+  },
+  'steel-bottle': {
+    ribbon: 'Cold for 24 hours',
+    colors: [BLACK, { name: 'Steel', hex: '#A7ADB4' }, { name: 'Orange', hex: '#E8572A' }],
+    highlights: [{ icon: 'capacity', label: 'Capacity', value: '750 ml' }],
+    features: [
+      { icon: 'insulated', title: 'Insulated', caption: 'Cold 24 h, hot 12 h' },
+      { icon: 'waterproof', title: 'Leak-proof', caption: 'Screw-top seal' },
+      { icon: 'durable', title: 'Durable', caption: 'Food-grade 18/8 steel' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Stainless steel 18/8' },
+      { icon: 'care', label: 'Care Instructions', value: 'Hand wash only' },
+    ],
+  },
+  shaker: {
+    highlights: [{ icon: 'capacity', label: 'Capacity', value: '600 ml' }],
+    features: [{ icon: 'waterproof', title: 'Leak-proof', caption: 'Snap-lock lid' }],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'BPA-free plastic' },
+      { icon: 'care', label: 'Care Instructions', value: 'Dishwasher safe, top rack' },
+    ],
+  },
+  'gym-bag': {
+    colors: [BLACK, NAVY],
+    highlights: [{ icon: 'capacity', label: 'Capacity', value: '30 L' }],
+    features: [
+      { icon: 'waterproof', title: 'Water-resistant', caption: 'Coated base' },
+      { icon: 'durable', title: 'Durable', caption: 'Ripstop polyester' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: '600D Polyester' },
+      { icon: 'dimensions', label: 'Size', value: '50 × 28 × 25 cm' },
+    ],
+  },
+};
+
+/**
+ * Two starter coupons (RULES R16), so the basket's coupon box has something
+ * to accept. Operators add and retire the rest in `coupons`; the seed only
+ * inserts these if absent, so an edit — or a redemption count — survives a
+ * re-seed.
+ */
+export const COUPONS = [
+  { _id: 'WELCOME10', title: '10% off, up to ₹150', kind: 'percent', value: 10, maxDiscount: 15000, minSubtotal: 49900, perUserLimit: 1, maxRedemptions: null, startsAt: null, endsAt: null, active: true },
+  { _id: 'FIT50', title: '₹50 off orders of ₹799 or more', kind: 'flat', value: 5000, maxDiscount: null, minSubtotal: 79900, perUserLimit: 3, maxRedemptions: null, startsAt: null, endsAt: null, active: true },
+];
 
 /** A demo quantity to start; the limited cap with three, and one sold-out line so that state can be seen. */
 export const SHOP_STOCK = SHOP_ITEMS.map(item => ({

@@ -5,6 +5,84 @@ import { logger } from './logger.js';
 
 export type PaymentProvider = 'mock' | 'razorpay';
 
+/** Every way an order can be paid for, in the order the payment page lists them. */
+export const PAYMENT_METHODS = ['coins', 'coins_upi', 'upi', 'card', 'netbanking'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/** The methods that need money collected: the gateway is in it. */
+const GATEWAY_METHODS: readonly PaymentMethod[] = ['coins_upi', 'upi', 'card', 'netbanking'];
+/** The methods that spend coins. */
+const COIN_METHODS: readonly PaymentMethod[] = ['coins', 'coins_upi'];
+
+export function isGatewayMethod(method: PaymentMethod): boolean {
+  return GATEWAY_METHODS.includes(method);
+}
+
+export function spendsCoins(method: PaymentMethod): boolean {
+  return COIN_METHODS.includes(method);
+}
+
+/**
+ * The methods a shop can actually offer, from the ones ⚙
+ * `commerce.paymentMethods` lists: a coins-only shop takes coins and
+ * nothing else, a money-only shop cannot take them at all, and a mixed
+ * shop takes whichever of the five the owner left on. The order the owner
+ * configured is the order the payment page draws, so the default method is
+ * theirs to choose rather than the client's.
+ */
+export function offeredMethods(paymentMode: 'coins' | 'money' | 'mixed', configured: readonly string[]): PaymentMethod[] {
+  const known = configured.filter((m): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m));
+  if (paymentMode === 'coins') return known.filter(m => m === 'coins');
+  if (paymentMode === 'money') return known.filter(m => !spendsCoins(m));
+  return known;
+}
+
+/**
+ * The ways one order can be paid: the shop's menu, kept to the ones its
+ * own sums allow (RULES R12).
+ *
+ * `coins` needs the wallet's ceiling to clear the whole bill; `coins_upi`
+ * needs some allowed number of coins to leave money still owing; a gateway
+ * on its own needs the order to force no coins at all. An order of
+ * coins-only goods therefore offers `coins` and nothing else, and one with
+ * a coins-only line beside a money one offers only `coins_upi` — which is
+ * exactly what it is.
+ */
+/** The owner's menu, with anything this build does not know dropped. */
+export function knownMethods(configured: readonly string[]): PaymentMethod[] {
+  return configured.filter((m): m is PaymentMethod => (PAYMENT_METHODS as readonly string[]).includes(m));
+}
+
+export function methodsForOrder(
+  configured: readonly string[],
+  order: { coinsMin: number; coinsMax: number; total: number; coinValuePaise: number },
+): PaymentMethod[] {
+  const { coinsMin, coinsMax, total, coinValuePaise: value } = order;
+  // The fewest coins that still count as spending any.
+  const leastSpent = Math.max(coinsMin, 1);
+  return knownMethods(configured).filter(method => {
+    if (method === 'coins') return coinsMax > 0 && total <= coinsMax * value;
+    if (method === 'coins_upi') return coinsMax >= leastSpent && total > leastSpent * value;
+    return coinsMin === 0 && total > 0;
+  });
+}
+
+/** What Razorpay calls the method, so its checkout opens on that tab; undefined leaves it open. */
+function gatewayMethodHint(method: PaymentMethod | null | undefined): string | undefined {
+  switch (method) {
+    case 'upi':
+      return 'upi';
+    case 'card':
+      return 'card';
+    case 'netbanking':
+      return 'netbanking';
+    default:
+      // `coins_upi` deliberately leaves the choice open: the member said
+      // "coins and then something", not which something.
+      return undefined;
+  }
+}
+
 export interface GatewayOrder {
   provider: PaymentProvider;
   /** The gateway's own id for the order — what the app opens the checkout with. */
@@ -41,7 +119,7 @@ export function paymentKeyId(): string | null {
   return env.PAYMENT_PROVIDER === 'razorpay' ? env.RAZORPAY_KEY_ID ?? null : null;
 }
 
-export async function createGatewayOrder(input: { orderId: string; amountPaise: number; currency: string }): Promise<GatewayOrder> {
+export async function createGatewayOrder(input: { orderId: string; amountPaise: number; currency: string; method?: PaymentMethod | null }): Promise<GatewayOrder> {
   if (env.PAYMENT_PROVIDER === 'mock') {
     return { provider: 'mock', providerOrderId: `mockord_${input.orderId}`, keyId: null };
   }
@@ -49,7 +127,9 @@ export async function createGatewayOrder(input: { orderId: string; amountPaise: 
   const res = await fetch('https://api.razorpay.com/v1/orders', {
     method: 'POST',
     headers: { authorization: `Basic ${auth}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ amount: input.amountPaise, currency: input.currency, receipt: input.orderId, notes: { orderId: input.orderId } }),
+    // `method` locks the gateway order to the one the member picked, so the
+    // sheet cannot be paid a way the order was not quoted for.
+    body: JSON.stringify({ amount: input.amountPaise, currency: input.currency, receipt: input.orderId, notes: { orderId: input.orderId }, method: gatewayMethodHint(input.method) }),
   });
   if (!res.ok) {
     logger.error({ status: res.status, body: await res.text().catch(() => '') }, 'payments.razorpay.order_failed');

@@ -1,163 +1,89 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Pressable } from '../../components/form/Pressable';
-import { HistoryHeader } from '../../components/history/HistoryHeader';
-import { Box } from '../../components/layout/Box';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChevronRight } from 'lucide-react-native';
+import { CartLineCard } from '../../components/cart/CartLineCard';
+import { CartPromiseStrip } from '../../components/cart/CartPromiseStrip';
+import { CouponCard } from '../../components/cart/CouponCard';
+import { CouponSheet } from '../../components/cart/CouponSheet';
+import { OrderSummaryCard } from '../../components/cart/OrderSummaryCard';
+import { SecureRedemptionBanner } from '../../components/cart/SecureRedemptionBanner';
+import { useToast } from '../../components/feedback/Toast';
 import { HStack, VStack } from '../../components/layout/Stack';
-import { Emoji } from '../../components/media/Emoji';
-import { Price } from '../../components/shop/Price';
-import { PriceBreakdown } from '../../components/shop/PriceBreakdown';
-import { QuantityStepper } from '../../components/shop/QuantityStepper';
+import { Icon } from '../../components/media/Icon';
+import { PayAmount } from '../../components/shop/PayAmount';
+import { ShopPageHeader } from '../../components/shop/ShopPageHeader';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
-import { CoinAmount } from '../../components/wallet/CoinAmount';
-import { useToast } from '../../components/feedback/Toast';
+import { toApiError } from '../../services/api/errors';
 import { useAuthStatus } from '../../stores/authStore';
-import { useCart, useCartLineBusy, useCartStore } from '../../stores/cartStore';
+import { cartLineKey, useCart, useCartStore } from '../../stores/cartStore';
 import { useCoinBalance } from '../../stores/coinsStore';
-import { useShopConfig } from '../../stores/shopStore';
-import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { moderateScale } from '../../theme/responsive';
+import { usePaymentMode, useShopConfig } from '../../stores/shopStore';
+import {
+  spacing,
+  useTheme,
+  useThemedStyles,
+  type ThemeShape,
+} from '../../theme';
 import type { CartLine } from '../../types/models';
-import { formatMoney } from '../../utils/format';
+import { formatCoins } from '../../utils/format';
 
-const makeStyles = ({ spacing, colors }: ThemeShape) =>
+const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
   StyleSheet.create({
-    content: { paddingBottom: spacing.xxxl * 2, gap: spacing.md },
-    empty: { paddingVertical: spacing.xl },
-    art: {
-      width: moderateScale(64),
-      height: moderateScale(64),
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    soldOut: { opacity: 0.5 },
+    content: { paddingBottom: space.xl, gap: space.base },
+    empty: { paddingVertical: space.xl },
+    grow: { flex: 1 },
+    /** Bleeds through the screen's gutter so the rule runs edge to edge. */
     bar: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      paddingHorizontal: spacing.base,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
+      marginHorizontal: -space.base,
+      paddingHorizontal: space.base,
+      paddingTop: space.md,
       backgroundColor: colors.background,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.border,
-      gap: spacing.xs,
+      gap: space.sm,
     },
   });
 
-interface LineProps {
-  line: CartLine;
-  max: number;
-  onChangeQuantity: (line: CartLine, quantity: number) => void;
-  onPressItem: (id: string) => void;
-}
-
-const CartLineRow = ({
-  line,
-  max,
-  onChangeQuantity,
-  onPressItem,
-}: LineProps) => {
-  const styles = useThemedStyles(makeStyles);
-  const busy = useCartLineBusy(line.item.id, line.size);
-  const change = useCallback(
-    (quantity: number) => onChangeQuantity(line, quantity),
-    [line, onChangeQuantity],
-  );
-  const open = useCallback(
-    () => onPressItem(line.item.id),
-    [line.item.id, onPressItem],
-  );
-
-  return (
-    <Card radius="xl" padding="md">
-      <HStack align="center" gap="md">
-        <Pressable
-          onPress={open}
-          feedback="opacity"
-          accessibilityRole="button"
-          accessibilityLabel={`${line.item.title}, view details`}
-        >
-          <Box
-            bg="muted"
-            radius="lg"
-            style={[styles.art, !line.item.inStock && styles.soldOut]}
-          >
-            <Emoji size={moderateScale(32)} label={line.item.title}>
-              {line.item.emoji}
-            </Emoji>
-          </Box>
-        </Pressable>
-        <VStack flex={1} gap="xs">
-          <AppText variant="bodyStrong" numberOfLines={2}>
-            {line.item.title}
-          </AppText>
-          {line.size ? (
-            <AppText
-              variant="micro"
-              color="textSecondary"
-            >{`Size ${line.size}`}</AppText>
-          ) : null}
-          <Price
-            price={line.item.price}
-            mrp={line.item.mrp}
-            currency={line.item.currency}
-            size="sm"
-            hideDiscount
-          />
-          {!line.item.inStock ? (
-            <AppText variant="micro" color="warning">
-              Sold out — remove it to check out
-            </AppText>
-          ) : null}
-          <HStack align="center" justify="between">
-            <QuantityStepper
-              value={line.quantity}
-              max={max}
-              onChange={change}
-              busy={busy}
-              removable
-              label={line.item.title}
-            />
-            <AppText variant="bodyStrong">
-              {formatMoney(line.item.price * line.quantity, line.item.currency)}
-            </AppText>
-          </HStack>
-        </VStack>
-      </HStack>
-    </Card>
-  );
-};
-
 /**
- * The basket: every line with its stepper, and what checking out would
- * cost with as many coins as the wallet allows.
+ * The basket, laid out for redeeming: a word that the order is safe, every
+ * line as a card with its stepper and bin, the coupon box, the order's sums
+ * and what the member pays, the three promises, and the way on.
  *
- * The quote at the bottom is the server's, refreshed with every change,
- * so the figure a user sees here is the one the checkout opens with. The
- * button is the only way on; a sold-out line blocks it, because the till
- * would refuse the order and this is the place to fix it.
+ * Every figure is the server's (RULES R11–R14, R16): the basket comes back
+ * from each change with its quote, so what this page says the member pays
+ * is what the checkout opens with — in coins, in rupees, or both, as the
+ * shop's payment mode has it. The way on is shut, with the reason above it,
+ * while a line is sold out or the wallet is short of the coins the order
+ * must take: the till would refuse the order, and this is where to fix it.
  */
 export const CartScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const toast = useToast();
   const balance = useCoinBalance();
   const config = useShopConfig();
+  const mode = usePaymentMode();
   const isSignedIn = useAuthStatus() === 'authenticated';
 
   const cart = useCart();
   const isSyncing = useCartStore(s => s.isSyncing);
   const syncError = useCartStore(s => s.syncError);
+  const busyKeys = useCartStore(s => s.busy);
   const hydrate = useCartStore(s => s.hydrateFromServer);
   const setQuantity = useCartStore(s => s.setQuantity);
+  const applyCoupon = useCartStore(s => s.applyCoupon);
+  const removeCoupon = useCartStore(s => s.removeCoupon);
+
+  const [couponSheetOpen, setCouponSheetOpen] = useState(false);
+  const [removingCoupon, setRemovingCoupon] = useState(false);
 
   useEffect(() => {
     if (isSignedIn) {
@@ -172,6 +98,10 @@ export const CartScreen = () => {
     }
     navigation.navigate('Main', { screen: 'Shop' });
   }, [navigation]);
+  const onPressWallet = useCallback(
+    () => navigation.navigate('Main', { screen: 'Wallet' }),
+    [navigation],
+  );
   const onPressItem = useCallback(
     (id: string) => navigation.navigate('ProductDetail', { id }),
     [navigation],
@@ -180,19 +110,15 @@ export const CartScreen = () => {
     () => navigation.navigate('Main', { screen: 'Shop' }),
     [navigation],
   );
-  const onPressOrders = useCallback(
-    () => navigation.navigate('Orders'),
-    [navigation],
-  );
   const onCheckout = useCallback(
-    () => navigation.navigate('Checkout', { fromCart: true }),
+    () => navigation.navigate('ShippingAddress', { fromCart: true }),
     [navigation],
   );
 
   const onChangeQuantity = useCallback(
     async (line: CartLine, quantity: number) => {
       try {
-        await setQuantity(line.item, quantity, line.size);
+        await setQuantity(line.item, quantity, line.size, line.color ?? null);
       } catch (error) {
         toast.show({
           title: "Couldn't update your cart",
@@ -204,12 +130,97 @@ export const CartScreen = () => {
     [setQuantity, toast],
   );
 
+  const onRemove = useCallback(
+    async (line: CartLine) => {
+      try {
+        await setQuantity(line.item, 0, line.size, line.color ?? null);
+        toast.show({
+          title: 'Removed from cart',
+          message: line.item.title,
+          tone: 'info',
+          action: {
+            label: 'Undo',
+            onPress: () => {
+              setQuantity(
+                line.item,
+                line.quantity,
+                line.size,
+                line.color ?? null,
+              ).catch(() => {});
+            },
+          },
+        });
+      } catch (error) {
+        toast.show({
+          title: "Couldn't remove it",
+          message: (error as Error).message,
+          tone: 'warning',
+        });
+      }
+    },
+    [setQuantity, toast],
+  );
+
+  /** Resolves to null when the code applied, or to why it did not. */
+  const onApplyCoupon = useCallback(
+    async (code: string) => {
+      try {
+        const next = await applyCoupon(code);
+        const applied = next.quote.coupon;
+        toast.show({
+          title: 'Coupon applied',
+          message: applied ? `${applied.code} · ${applied.title}` : code,
+          tone: 'success',
+        });
+        return null;
+      } catch (error) {
+        return toApiError(error).message;
+      }
+    },
+    [applyCoupon, toast],
+  );
+
+  const onRemoveCoupon = useCallback(async () => {
+    setRemovingCoupon(true);
+    try {
+      await removeCoupon();
+    } catch (error) {
+      toast.show({
+        title: "Couldn't remove the coupon",
+        message: (error as Error).message,
+        tone: 'warning',
+      });
+    } finally {
+      setRemovingCoupon(false);
+    }
+  }, [removeCoupon, toast]);
+
   const lines = cart?.lines ?? [];
-  const hasSoldOut = lines.some(line => !line.item.inStock);
   const quote = cart?.quote ?? null;
+  const quoteLines = useMemo(
+    () =>
+      new Map(
+        (quote?.lines ?? []).map(line => [
+          cartLineKey(line.itemId, line.size, line.color),
+          line,
+        ]),
+      ),
+    [quote],
+  );
+  const hasSoldOut = lines.some(line => !line.item.inStock);
+  const short = quote?.coinsShort ?? 0;
+  const blocked = hasSoldOut || short > 0;
 
   return (
     <Screen edges={['top']}>
+      <ShopPageHeader
+        title="My Cart"
+        subtitle="Review your items before checkout"
+        balance={balance}
+        onPressBack={onPressBack}
+        onPressBalance={onPressWallet}
+      />
+
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -222,19 +233,6 @@ export const CartScreen = () => {
           />
         }
       >
-        <HistoryHeader
-          coins={balance}
-          onPressBack={onPressBack}
-          title="Cart"
-          subtitle={
-            cart === null
-              ? ' '
-              : cart.count === 0
-              ? 'Nothing in it yet'
-              : `${cart.count} ${cart.count === 1 ? 'item' : 'items'}`
-          }
-        />
-
         {cart === null ? (
           <Card radius="xl" style={styles.empty}>
             <EmptyState
@@ -250,75 +248,109 @@ export const CartScreen = () => {
           <Card radius="xl" style={styles.empty}>
             <EmptyState
               title="Your cart is empty"
-              message="Anything you add from the shop lands here, ready to check out with coins and money."
+              message="Anything you add from the shop lands here, ready to check out."
               actionLabel="Browse the shop"
               onAction={onPressShop}
             />
           </Card>
         ) : (
           <>
-            {lines.map(line => (
-              <CartLineRow
-                key={`${line.item.id}:${line.size ?? ''}`}
-                line={line}
-                max={config?.maxQuantityPerLine ?? line.quantity}
-                onChangeQuantity={onChangeQuantity}
-                onPressItem={onPressItem}
-              />
-            ))}
+            <SecureRedemptionBanner
+              title={
+                mode === 'money'
+                  ? '100% Secure Checkout'
+                  : '100% Secure Redemption'
+              }
+              caption="Your items are safe and will be delivered to you"
+            />
 
-            {quote ? (
-              <Card radius="xl" padding="base">
-                <VStack gap="md">
-                  <AppText variant="label" color="textSecondary">
-                    Estimate
-                  </AppText>
-                  <PriceBreakdown figures={quote} />
-                  {quote.coinsMax > 0 ? (
-                    <HStack align="center" gap="xs" wrap>
-                      <AppText variant="micro" color="textSecondary">
-                        Up to
-                      </AppText>
-                      <CoinAmount amount={quote.coinsMax} size="sm" />
-                      <AppText variant="micro" color="textSecondary">
-                        can go towards this order — choose how many at checkout.
-                      </AppText>
-                    </HStack>
-                  ) : null}
-                </VStack>
-              </Card>
+            {lines.map(line => {
+              const key = cartLineKey(line.item.id, line.size, line.color);
+              return (
+                <CartLineCard
+                  key={key}
+                  line={line}
+                  quoteLine={quoteLines.get(key)}
+                  mode={mode}
+                  max={config?.maxQuantityPerLine ?? line.quantity}
+                  busy={busyKeys.includes(key)}
+                  onChangeQuantity={onChangeQuantity}
+                  onRemove={onRemove}
+                  onPressItem={onPressItem}
+                />
+              );
+            })}
+
+            {config?.couponsEnabled && quote ? (
+              <CouponCard
+                coupon={quote.coupon}
+                mode={mode}
+                currency={quote.currency}
+                coinDiscount={quote.inCoins?.discount ?? null}
+                busy={removingCoupon}
+                onPressApply={() => setCouponSheetOpen(true)}
+                onPressRemove={onRemoveCoupon}
+              />
             ) : null}
 
-            <Pressable
-              onPress={onPressOrders}
-              feedback="opacity"
-              accessibilityRole="button"
-              accessibilityLabel="My orders"
-            >
-              <AppText variant="caption" color="primary" center>
-                Looking for something you already bought? My orders
-              </AppText>
-            </Pressable>
+            {quote ? (
+              <OrderSummaryCard quote={quote} count={cart.count} />
+            ) : null}
+
+            <CartPromiseStrip
+              mode={mode}
+              deliveryEstimate={config?.deliveryEstimate ?? null}
+              returnPolicy={config?.returnPolicy ?? null}
+            />
           </>
         )}
       </ScrollView>
 
       {lines.length > 0 && quote ? (
-        <View style={styles.bar}>
-          {hasSoldOut ? (
+        <View
+          style={[
+            styles.bar,
+            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+          ]}
+        >
+          {blocked ? (
             <AppText variant="micro" color="warning" center>
-              Remove the sold-out item to check out.
+              {hasSoldOut
+                ? 'Remove the sold-out item to check out.'
+                : `You need ${formatCoins(short)} more coins for this order.`}
             </AppText>
           ) : null}
-          <Button
-            label={`Checkout · ${formatMoney(quote.payable, quote.currency)}`}
-            variant="brand"
-            fullWidth
-            disabled={hasSoldOut}
-            onPress={onCheckout}
-          />
+          <HStack align="center" gap="xs">
+            <VStack flex={1} gap="xxs">
+              <AppText variant="bodyStrong">You Pay</AppText>
+              <PayAmount quote={quote} size="lg" />
+            </VStack>
+            <View style={styles.grow}>
+              <Button
+                label="Proceed to Checkout"
+                variant="brand"
+                fullWidth
+                disabled={blocked}
+                onPress={onCheckout}
+                iconPosition="trailing"
+                icon={
+                  <Icon
+                    as={ChevronRight}
+                    size="sm"
+                    tint={colors.primaryForeground}
+                  />
+                }
+              />
+            </View>
+          </HStack>
         </View>
       ) : null}
+
+      <CouponSheet
+        visible={couponSheetOpen}
+        onClose={() => setCouponSheetOpen(false)}
+        onApply={onApplyCoupon}
+      />
     </Screen>
   );
 };

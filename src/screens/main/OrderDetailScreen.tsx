@@ -9,6 +9,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { CreditCard, MapPin, PackageX, Truck } from 'lucide-react-native';
 import { formatAddressLines } from '../../components/address/AddressCard';
+import { deliverySummary } from '../../components/address/deliverySummary';
 import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { useToast } from '../../components/feedback/Toast';
 import { HistoryHeader } from '../../components/history/HistoryHeader';
@@ -335,6 +336,7 @@ export const OrderDetailScreen = () => {
                         <AppText variant="bodyStrong">{line.title}</AppText>
                         <AppText variant="micro" color="textTertiary">
                           {[
+                            line.color,
                             line.size ? `Size ${line.size}` : null,
                             `Qty ${line.quantity}`,
                           ]
@@ -362,10 +364,14 @@ export const OrderDetailScreen = () => {
                     coinsApplied: order.coinsUsed,
                     coinsValue: order.coinsValue,
                     payable: order.payable,
+                    coupon: order.coupon,
+                    inCoins: order.inCoins,
                   }}
                   payableLabel={
-                    order.payment.status === 'paid' ||
-                    order.payment.status === 'refunded'
+                    order.inCoins
+                      ? 'Paid in coins'
+                      : order.payment.status === 'paid' ||
+                        order.payment.status === 'refunded'
                       ? 'Paid'
                       : order.payable === 0
                       ? 'To pay'
@@ -429,6 +435,11 @@ export const OrderDetailScreen = () => {
                       {line}
                     </AppText>
                   ))}
+                  {deliverySummary(order.delivery) ? (
+                    <AppText variant="micro" color="textTertiary">
+                      {deliverySummary(order.delivery)}
+                    </AppText>
+                  ) : null}
                 </VStack>
               </HStack>
             </Card>

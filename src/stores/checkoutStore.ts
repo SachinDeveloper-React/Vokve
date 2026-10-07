@@ -2,7 +2,13 @@ import { create } from 'zustand';
 import { checkoutApi } from '../services/api/endpoints';
 import { ApiError, toApiError } from '../services/api/errors';
 import { collectPayment } from '../services/payments';
-import type { Order, PaymentIntent, PurchaseLine } from '../types/models';
+import type {
+  DeliveryPreferences,
+  Order,
+  PaymentIntent,
+  PaymentMethod,
+  PurchaseLine,
+} from '../types/models';
 import { uuid } from '../utils/uuid';
 import { useAuthStore } from './authStore';
 import { useCartStore } from './cartStore';
@@ -16,6 +22,12 @@ export interface CheckoutAttempt {
   fromCart?: boolean;
   addressId: string;
   coins: number;
+  /** The coupon the quote showed applying (RULES R16); left out otherwise. */
+  couponCode?: string;
+  /** How it should be handed over, as set on the shipping page (RULES R17). */
+  delivery?: Partial<DeliveryPreferences>;
+  /** What the payment page chose to pay it with (RULES R12). */
+  paymentMethod?: PaymentMethod;
   /**
    * Fixed for the attempt's life, so the retry after a step-up — or after a
    * dropped connection — replays the same order rather than placing a
@@ -122,6 +134,7 @@ export const useCheckoutStore = create<CheckoutState>()((set, get) => ({
     }
     const intent: PaymentIntent = {
       provider: order.payment.provider,
+      method: order.payment.method,
       orderId: order.id,
       providerOrderId: order.payment.providerOrderId,
       amount: order.payment.amount,
@@ -167,6 +180,9 @@ async function runAttempt(
         fromCart: attempt.fromCart,
         addressId: attempt.addressId,
         coins: attempt.coins,
+        couponCode: attempt.couponCode,
+        delivery: attempt.delivery,
+        paymentMethod: attempt.paymentMethod,
         stepUpToken: stepUpToken ?? undefined,
       },
       { idempotencyKey: attempt.idempotencyKey },

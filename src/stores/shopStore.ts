@@ -3,10 +3,13 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { shopApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
-import type {
-  ShopCategorySummary,
-  ShopConfig,
-  ShopItem,
+import {
+  shopConfigSchema,
+  shopItemSchema,
+  type PaymentMode,
+  type ShopCategorySummary,
+  type ShopConfig,
+  type ShopItem,
 } from '../types/models';
 import { logger } from '../utils/logger';
 import { mmkvStorage } from './index';
@@ -48,6 +51,25 @@ const EMPTY_SHOP = {
   config: null,
   syncedAt: null,
 } satisfies Partial<ShopState>;
+
+/**
+ * Reads a stored shop back through the contracts, so a cache written by an
+ * older build gets the fields added since — with their defaults — instead
+ * of handing a screen an item with no `colors` to read. An item that no
+ * longer parses at all is dropped; the next sync brings it back.
+ */
+function revive(stored: Partial<ShopState>): Partial<ShopState> {
+  const items = (stored.items ?? []).flatMap(raw => {
+    const parsed = shopItemSchema.safeParse(raw);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const config = shopConfigSchema.safeParse(stored.config);
+  return {
+    ...stored,
+    items,
+    config: config.success ? config.data : null,
+  };
+}
 
 /**
  * The catalogue and the rules it is sold under.
@@ -124,6 +146,10 @@ export const useShopStore = create<ShopState>()(
         const stored = persisted as Partial<ShopState> | null;
         return version >= 2 && stored?.syncedAt ? stored : EMPTY_SHOP;
       },
+      merge: (persisted, current) => ({
+        ...current,
+        ...revive((persisted ?? {}) as Partial<ShopState>),
+      }),
       partialize: state => ({
         items: state.items,
         categories: state.categories,
@@ -152,5 +178,12 @@ export const useShopConfig = (): ShopConfig | null => {
   }, [config]);
   return config;
 };
+/**
+ * How the shop takes payment — coins, money, or a split (RULES R11). Read
+ * as a split until the rules arrive, which shows both and so never hides a
+ * price the member needs.
+ */
+export const usePaymentMode = (): PaymentMode =>
+  useShopStore(s => s.config?.paymentMode ?? 'mixed');
 export const useShopItem = (id: string) =>
   useShopStore(s => s.items.find(item => item.id === id) ?? null);

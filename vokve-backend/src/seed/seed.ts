@@ -3,7 +3,7 @@ import { logger } from '../lib/logger.js';
 import { SupportFaqModel } from '../modules/account/models.js';
 import { AppReleaseModel } from '../modules/devices/models.js';
 import { AppConfigModel } from '../modules/platform/models.js';
-import { ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
+import { CouponModel, ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
 import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.js';
 import { AchievementDefinitionModel, ChallengeDefinitionModel } from '../modules/challenges/models.js';
 import { ContentTipModel } from '../modules/content/models.js';
@@ -11,7 +11,7 @@ import { DietPlanTemplateModel, FoodItemModel } from '../modules/nutrition/model
 import { addDays } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 import {
-  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, DIET_PLAN_TEMPLATES, EXERCISES, FOOD_ITEMS, SHOP_ITEMS, SHOP_STOCK,
+  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLAN_TEMPLATES, EXERCISES, FOOD_ITEMS, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
   SUPPORT_FAQS, WORKOUT_TEMPLATES,
 } from './data.js';
 
@@ -21,10 +21,17 @@ export async function seed(): Promise<void> {
   await Promise.all(WORKOUT_TEMPLATES.map(t => WorkoutTemplateModel.updateOne({ _id: t._id }, { $set: t }, { upsert: true })));
   // Catalogue rows are the seed's to overwrite — copy, tags, price — except
   // `popularity`, which is what selling has added to the starting figure.
-  await Promise.all(SHOP_ITEMS.map(({ popularity, ...i }) =>
-    ShopItemModel.updateOne({ _id: i._id }, { $set: i, $setOnInsert: { popularity } }, { upsert: true })));
+  // The product-page details are set in full every time, so a detail
+  // taken out of the seed is taken off the page too.
+  await Promise.all(SHOP_ITEMS.map(({ popularity, ...i }) => {
+    const details = { ribbon: null, colors: [], highlights: [], features: [], specs: [], ...SHOP_ITEM_DETAILS[i._id] };
+    // `paymentMode: null` first, so dropping an item's own mode from the seed puts it back on the shop's.
+    return ShopItemModel.updateOne({ _id: i._id }, { $set: { paymentMode: null, ...i, ...details }, $setOnInsert: { popularity } }, { upsert: true });
+  }));
   // Stock is only ever *created* by the seed: a re-seed must not undo sales.
   await Promise.all(SHOP_STOCK.map(s => ShopInventoryModel.updateOne({ _id: s._id }, { $setOnInsert: s }, { upsert: true })));
+  // Coupons too: an operator's edit and the redemption count outlive a re-seed.
+  await Promise.all(COUPONS.map(c => CouponModel.updateOne({ _id: c._id }, { $setOnInsert: c }, { upsert: true })));
   await Promise.all(APP_RELEASES.map(r => AppReleaseModel.updateOne({ platform: r.platform, version: r.version, build: r.build }, { $set: r }, { upsert: true })));
   // Help articles are the seed's to keep current: support edits land in the
   // collection, and a re-seed restores the wording the app shipped with.

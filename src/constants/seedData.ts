@@ -6,9 +6,11 @@ import type {
   FoodEntry,
   FoodItem,
   LeaderboardEntry,
+  PaymentMode,
   PlannedMeal,
   Referral,
   ShopItem,
+  ShopSpec,
   VitalReading,
   WorkoutTemplate,
 } from '../types/models';
@@ -296,7 +298,10 @@ export const seedCoinTransactions: CoinTransaction[] = [
  * the first sync. `isDeal` and `featured` are flags on an item rather than
  * shelves of their own, because a deal is still a bottle or a mat (R9).
  */
-export const shopItems: ShopItem[] = [
+const shopItemRows: Omit<
+  ShopItem,
+  DetailKey | 'coinsMin' | 'coinPrice' | 'paymentMode'
+>[] = [
   {
     id: 'tee',
     title: 'VOKVE Training Tee',
@@ -831,6 +836,384 @@ export const shopItems: ShopItem[] = [
     inStock: true,
   },
 ];
+
+/** What the product page shows beyond the card, as the server seeds it. */
+type DetailKey =
+  | 'images'
+  | 'ribbon'
+  | 'colors'
+  | 'highlights'
+  | 'features'
+  | 'specs';
+
+const BLACK = { name: 'Black', hex: '#111111' };
+const NAVY = { name: 'Navy', hex: '#1E2B5C' };
+const GREY = { name: 'Grey', hex: '#8C8C8C' };
+const CHARCOAL = { name: 'Charcoal', hex: '#2B2F38' };
+const WHITE = { name: 'White', hex: '#F2F2F2' };
+const CARE_COLD: ShopSpec = {
+  icon: 'care',
+  label: 'Care Instructions',
+  value: 'Machine wash cold, do not bleach',
+};
+
+const shopItemDetails: Record<string, Partial<Pick<ShopItem, DetailKey>>> = {
+  tee: {
+    ribbon: 'Premium Quality',
+    colors: [BLACK, NAVY, GREY, CHARCOAL],
+    highlights: [
+      { icon: 'fabric', label: 'Fabric', value: 'Dry Fit Polyester' },
+    ],
+    features: [
+      {
+        icon: 'breathable',
+        title: 'Breathable',
+        caption: 'Keeps you cool and dry',
+      },
+      {
+        icon: 'lightweight',
+        title: 'Lightweight',
+        caption: 'Ultra light for maximum comfort',
+      },
+      {
+        icon: 'stretch',
+        title: 'Stretchable',
+        caption: 'Flexible fabric for better movement',
+      },
+      { icon: 'durable', title: 'Durable', caption: 'Long lasting and strong' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      { icon: 'material', label: 'Material', value: '100% Polyester' },
+      CARE_COLD,
+    ],
+  },
+  'tank-top': {
+    colors: [BLACK, WHITE, { name: 'Olive', hex: '#556B2F' }],
+    highlights: [
+      { icon: 'fabric', label: 'Fabric', value: 'Mesh-back Polyester' },
+    ],
+    features: [
+      {
+        icon: 'breathable',
+        title: 'Breathable',
+        caption: 'Mesh back lets heat out',
+      },
+      {
+        icon: 'lightweight',
+        title: 'Lightweight',
+        caption: 'Barely there on a run',
+      },
+      {
+        icon: 'quick_dry',
+        title: 'Quick Dry',
+        caption: 'Sweat dries off fast',
+      },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      {
+        icon: 'material',
+        label: 'Material',
+        value: '92% Polyester, 8% Elastane',
+      },
+      CARE_COLD,
+    ],
+  },
+  hoodie: {
+    ribbon: 'Heavyweight Cotton',
+    colors: [BLACK, { name: 'Grey Melange', hex: '#9A9A9A' }, NAVY],
+    highlights: [
+      { icon: 'fabric', label: 'Fabric', value: '400 GSM Cotton Fleece' },
+    ],
+    features: [
+      { icon: 'insulated', title: 'Warm', caption: 'Brushed fleece inside' },
+      { icon: 'durable', title: 'Durable', caption: 'Double-stitched seams' },
+      { icon: 'check', title: 'Pocket', caption: 'Fits a phone and keys' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Outerwear' },
+      {
+        icon: 'material',
+        label: 'Material',
+        value: '80% Cotton, 20% Polyester',
+      },
+      {
+        icon: 'care',
+        label: 'Care Instructions',
+        value: 'Wash inside out, tumble dry low',
+      },
+    ],
+  },
+  shorts: {
+    colors: [BLACK, NAVY],
+    highlights: [
+      { icon: 'fabric', label: 'Fabric', value: 'Quick-dry Polyester' },
+    ],
+    features: [
+      {
+        icon: 'quick_dry',
+        title: 'Quick Dry',
+        caption: 'Sweat dries off fast',
+      },
+      { icon: 'stretch', title: 'Stretchable', caption: 'Four-way stretch' },
+      { icon: 'check', title: 'Zip Pocket', caption: 'Your phone stays put' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      {
+        icon: 'material',
+        label: 'Material',
+        value: '88% Polyester, 12% Spandex',
+      },
+      CARE_COLD,
+    ],
+  },
+  joggers: {
+    colors: [BLACK, CHARCOAL],
+    highlights: [
+      { icon: 'fabric', label: 'Fabric', value: 'Four-way Stretch Knit' },
+    ],
+    features: [
+      {
+        icon: 'stretch',
+        title: 'Stretchable',
+        caption: 'Moves the way you do',
+      },
+      {
+        icon: 'lightweight',
+        title: 'Lightweight',
+        caption: 'Warm without the weight',
+      },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: 'Unisex Activewear' },
+      {
+        icon: 'material',
+        label: 'Material',
+        value: '75% Polyester, 25% Elastane',
+      },
+      CARE_COLD,
+    ],
+  },
+  'sports-bra': {
+    colors: [BLACK, { name: 'Berry', hex: '#8E2C48' }],
+    highlights: [{ icon: 'fit', label: 'Support', value: 'Medium' }],
+    features: [
+      {
+        icon: 'breathable',
+        title: 'Breathable',
+        caption: 'Ventilated racerback',
+      },
+      { icon: 'stretch', title: 'Stretchable', caption: 'Moves with you' },
+      { icon: 'quick_dry', title: 'Quick Dry', caption: 'Wicks sweat away' },
+    ],
+    specs: [
+      { icon: 'category', label: 'Category', value: "Women's Activewear" },
+      { icon: 'material', label: 'Material', value: '78% Nylon, 22% Spandex' },
+      { icon: 'care', label: 'Care Instructions', value: 'Hand wash cold' },
+    ],
+  },
+  cap: {
+    highlights: [
+      { icon: 'fit', label: 'Fit', value: 'One size, adjustable strap' },
+    ],
+    features: [
+      {
+        icon: 'breathable',
+        title: 'Breathable',
+        caption: 'Vented crown panels',
+      },
+      {
+        icon: 'lightweight',
+        title: 'Lightweight',
+        caption: 'Unstructured crown',
+      },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: '100% Cotton twill' },
+      { icon: 'care', label: 'Care Instructions', value: 'Spot clean only' },
+    ],
+  },
+  socks: {
+    highlights: [
+      { icon: 'material', label: 'Material', value: 'Cotton blend' },
+    ],
+    features: [
+      { icon: 'cushioned', title: 'Cushioned', caption: 'Padded sole' },
+      { icon: 'breathable', title: 'Breathable', caption: 'Mesh top' },
+    ],
+    specs: [
+      { icon: 'sizes', label: 'Fits', value: 'UK 6–11' },
+      { icon: 'info', label: 'Pack', value: '3 pairs' },
+      CARE_COLD,
+    ],
+  },
+  'yoga-mat': {
+    ribbon: 'Non-slip',
+    highlights: [
+      { icon: 'dimensions', label: 'Size', value: '183 × 61 cm, 6 mm' },
+    ],
+    features: [
+      { icon: 'grip', title: 'Non-slip', caption: 'Grips on both sides' },
+      { icon: 'cushioned', title: 'Cushioned', caption: '6 mm of padding' },
+      { icon: 'lightweight', title: 'Lightweight', caption: '1 kg with strap' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'TPE, latex-free' },
+      {
+        icon: 'care',
+        label: 'Care Instructions',
+        value: 'Wipe clean with a damp cloth',
+      },
+    ],
+  },
+  'resistance-bands': {
+    highlights: [{ icon: 'info', label: 'Set', value: '5 loops, 2–20 kg' }],
+    features: [
+      {
+        icon: 'stretch',
+        title: 'Five Levels',
+        caption: 'Light to extra heavy',
+      },
+      { icon: 'durable', title: 'Durable', caption: 'Layered latex' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Natural latex' },
+      {
+        icon: 'care',
+        label: 'Care Instructions',
+        value: 'Keep out of direct sun',
+      },
+    ],
+  },
+  'gym-gloves': {
+    colors: [BLACK, GREY],
+    features: [
+      { icon: 'grip', title: 'Grip', caption: 'Silicone palm' },
+      { icon: 'breathable', title: 'Breathable', caption: 'Mesh back' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Neoprene and silicone' },
+      { icon: 'care', label: 'Care Instructions', value: 'Hand wash, air dry' },
+    ],
+  },
+  'foam-roller': {
+    highlights: [{ icon: 'dimensions', label: 'Size', value: '45 × 15 cm' }],
+    features: [
+      { icon: 'durable', title: 'Firm', caption: 'Holds its shape' },
+      { icon: 'lightweight', title: 'Lightweight', caption: 'Easy to carry' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'High-density EVA foam' },
+    ],
+  },
+  'kettlebell-8': {
+    highlights: [{ icon: 'weight', label: 'Weight', value: '8 kg' }],
+    features: [
+      { icon: 'durable', title: 'Durable', caption: 'Solid cast iron' },
+      { icon: 'grip', title: 'Grip', caption: 'Powder-coat handle' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Cast iron, powder coat' },
+    ],
+  },
+  football: {
+    highlights: [{ icon: 'sizes', label: 'Size', value: '5 (official)' }],
+    features: [
+      { icon: 'durable', title: 'Durable', caption: 'Machine-stitched panels' },
+      { icon: 'check', title: 'All Surfaces', caption: 'Turf and grass' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'PU leather' },
+      { icon: 'weight', label: 'Weight', value: '410–450 g' },
+    ],
+  },
+  'steel-bottle': {
+    ribbon: 'Cold for 24 hours',
+    colors: [
+      BLACK,
+      { name: 'Steel', hex: '#A7ADB4' },
+      { name: 'Orange', hex: '#E8572A' },
+    ],
+    highlights: [{ icon: 'capacity', label: 'Capacity', value: '750 ml' }],
+    features: [
+      { icon: 'insulated', title: 'Insulated', caption: 'Cold 24 h, hot 12 h' },
+      { icon: 'waterproof', title: 'Leak-proof', caption: 'Screw-top seal' },
+      { icon: 'durable', title: 'Durable', caption: 'Food-grade 18/8 steel' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'Stainless steel 18/8' },
+      { icon: 'care', label: 'Care Instructions', value: 'Hand wash only' },
+    ],
+  },
+  shaker: {
+    highlights: [{ icon: 'capacity', label: 'Capacity', value: '600 ml' }],
+    features: [
+      { icon: 'waterproof', title: 'Leak-proof', caption: 'Snap-lock lid' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: 'BPA-free plastic' },
+      {
+        icon: 'care',
+        label: 'Care Instructions',
+        value: 'Dishwasher safe, top rack',
+      },
+    ],
+  },
+  'gym-bag': {
+    colors: [BLACK, NAVY],
+    highlights: [{ icon: 'capacity', label: 'Capacity', value: '30 L' }],
+    features: [
+      { icon: 'waterproof', title: 'Water-resistant', caption: 'Coated base' },
+      { icon: 'durable', title: 'Durable', caption: 'Ripstop polyester' },
+    ],
+    specs: [
+      { icon: 'material', label: 'Material', value: '600D Polyester' },
+      { icon: 'dimensions', label: 'Size', value: '50 × 28 × 25 cm' },
+    ],
+  },
+};
+
+/**
+ * The items the catalogue sells one way only, as the backend seeds them
+ * (RULES R11): the small things a member walks their way to are bought
+ * with coins alone, the ones that are not a reward with money alone.
+ * Everything else follows the shop and takes coins towards part of it.
+ */
+const ITEM_PAYMENT_MODE: Record<string, PaymentMode> = {
+  socks: 'coins',
+  'wrist-wraps': 'coins',
+  'jump-rope': 'coins',
+  joggers: 'money',
+  'foam-roller': 'money',
+};
+
+export const shopItems: ShopItem[] = shopItemRows.map(row => {
+  const paymentMode = ITEM_PAYMENT_MODE[row.id] ?? 'mixed';
+  // The server's figures at its defaults, ₹0.25 a coin: all of a
+  // coins-only item, none of a money-only one, the share of the rest.
+  const coinPrice = Math.ceil(row.price / 25);
+  return {
+    images: [],
+    ribbon: null,
+    colors: [],
+    highlights: [],
+    features: [],
+    specs: [],
+    ...shopItemDetails[row.id],
+    ...row,
+    paymentMode,
+    coinPrice,
+    coinsMin: paymentMode === 'coins' ? coinPrice : 0,
+    coinsMax:
+      paymentMode === 'coins'
+        ? coinPrice
+        : paymentMode === 'money'
+        ? 0
+        : row.coinsMax,
+  };
+});
 
 /**
  * ISO timestamp at a clock time on a day in the recent past — `at(1, 18, 30)`

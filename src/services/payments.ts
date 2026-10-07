@@ -24,11 +24,25 @@ export interface PaymentProof {
  *   const result = await RazorpayCheckout.open({
  *     key: intent.keyId, order_id: intent.providerOrderId,
  *     amount: intent.amount, currency: intent.currency, name: 'VOKVE',
+ *     ...(gatewayMethod(intent.method) ? { method: gatewayMethod(intent.method) } : {}),
  *   });
  *   return { providerPaymentId: result.razorpay_payment_id, signature: result.razorpay_signature };
  *
- * and a dismissed sheet (`error.code === 0`) resolves null.
+ * and a dismissed sheet (`error.code === 0`) resolves null. The method is
+ * the member's own choice from the payment page, so the sheet opens on the
+ * tab they picked rather than making them pick twice; the server has
+ * already locked its gateway order to it.
  */
+export function gatewayMethod(
+  method: PaymentIntent['method'],
+): 'upi' | 'card' | 'netbanking' | null {
+  // `coins` never reaches a gateway, and `coins_upi` deliberately leaves
+  // the choice open: the member said "coins and then something".
+  return method === 'upi' || method === 'card' || method === 'netbanking'
+    ? method
+    : null;
+}
+
 export async function collectPayment(
   intent: PaymentIntent,
 ): Promise<PaymentProof | null> {

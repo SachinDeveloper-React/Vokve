@@ -46,23 +46,29 @@ interface Props {
  * The card's body leads to the item; only the small "Add" puts it in the
  * basket, and a sized item does not even do that from here — a tee with
  * no size is not a thing that can be packed, so the tap opens the page
- * where the sizes are. The coins line says what the wallet can do towards
- * it, which is what a user of this shop is scrolling for.
+ * where the sizes are; the same goes for a colour. The price reads the way
+ * the shop takes payment — coins, rupees, or rupees with the coins that
+ * may go towards them, which is what a user of a mixed shop is scrolling
+ * for.
  *
  * Sold-out items stay on the shelf with their art dimmed rather than
  * disappearing: a user saving up for one needs to be able to see it.
  */
 export const ShopItemCard = memo(({ item, onPress, fill = false }: Props) => {
   const { colors } = useTheme();
+  // How *this* item is bought, not how the shop is (RULES R11).
+  const mode = item.paymentMode;
   const addToCart = useAddToCart();
   const handlePress = useCallback(() => onPress(item), [item, onPress]);
+  // A size or a colour is chosen on the item's page, so the button goes there.
+  const needsChoice = item.sizes.length > 0 || item.colors.length > 0;
   const handleAdd = useCallback(() => {
-    if (item.sizes.length > 0) {
+    if (needsChoice) {
       onPress(item);
       return;
     }
     addToCart(item);
-  }, [addToCart, item, onPress]);
+  }, [addToCart, item, needsChoice, onPress]);
 
   return (
     <Card radius="xl" padding="md" style={fill ? styles.fill : styles.card}>
@@ -105,13 +111,24 @@ export const ShopItemCard = memo(({ item, onPress, fill = false }: Props) => {
             count={item.rating.count}
             emptyLabel="No reviews yet"
           />
-          <Price
-            price={item.price}
-            mrp={item.mrp}
-            currency={item.currency}
-            size="sm"
-          />
-          {item.coinsMax > 0 ? (
+          {mode === 'coins' ? (
+            // A coins-only shop prices in coins: the rupees would be a
+            // figure nobody pays.
+            <CoinAmount
+              amount={item.coinPrice}
+              size="md"
+              tint={colors.brandAccent}
+              withUnit
+            />
+          ) : (
+            <Price
+              price={item.price}
+              mrp={item.mrp}
+              currency={item.currency}
+              size="sm"
+            />
+          )}
+          {mode === 'mixed' && item.coinsMax > 0 ? (
             <HStack align="center" gap="xxs">
               <AppText variant="micro" color="textSecondary">
                 up to
@@ -126,6 +143,8 @@ export const ShopItemCard = memo(({ item, onPress, fill = false }: Props) => {
             item.inStock
               ? item.sizes.length > 0
                 ? 'Choose size'
+                : item.colors.length > 0
+                ? 'Choose colour'
                 : 'Add'
               : 'Sold out'
           }
@@ -134,7 +153,7 @@ export const ShopItemCard = memo(({ item, onPress, fill = false }: Props) => {
           fullWidth
           disabled={!item.inStock}
           icon={
-            item.inStock && item.sizes.length === 0 ? (
+            item.inStock && !needsChoice ? (
               <Icon
                 as={ShoppingCart}
                 size="xs"

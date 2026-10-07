@@ -1,98 +1,104 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ChevronLeft,
-  ChevronRight,
-  PackageCheck,
-  ShoppingCart,
+  CircleCheck,
+  RotateCcw,
+  Ruler,
+  Star,
   Truck,
 } from 'lucide-react-native';
-import { Pressable } from '../../components/form/Pressable';
-import { Box } from '../../components/layout/Box';
-import { Divider } from '../../components/layout/Divider';
 import { HStack, VStack } from '../../components/layout/Stack';
-import { Emoji } from '../../components/media/Emoji';
 import { Icon } from '../../components/media/Icon';
-import { presentationOf } from '../../components/shop/categories';
-import { Price } from '../../components/shop/Price';
-import { QuantityStepper } from '../../components/shop/QuantityStepper';
-import { RatingStars } from '../../components/shop/RatingStars';
-import { ReviewCard } from '../../components/shop/ReviewCard';
-import { ShopItemBadge } from '../../components/shop/ShopItemBadge';
+import { ColorSwatchPicker } from '../../components/shop/ColorSwatchPicker';
+import { PayAmount } from '../../components/shop/PayAmount';
+import { ProductFeatureGrid } from '../../components/shop/ProductFeatureGrid';
+import { ProductGallery } from '../../components/shop/ProductGallery';
+import {
+  ProductInfoCard,
+  type ProductInfoRow,
+} from '../../components/shop/ProductInfoCard';
+import { SPEC_ICONS } from '../../components/shop/productIcons';
+import { ShopPageHeader } from '../../components/shop/ShopPageHeader';
 import { SizePicker } from '../../components/shop/SizePicker';
-import { WishlistButton } from '../../components/shop/WishlistButton';
-import { useAddToCart } from '../../components/shop/useAddToCart';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { IconButton } from '../../components/ui/IconButton';
 import { Screen } from '../../components/ui/Screen';
 import { CoinAmount } from '../../components/wallet/CoinAmount';
-import { useReviews } from '../../hooks/useReviews';
-import { shopApi } from '../../services/api/endpoints';
-import { useCartCount } from '../../stores/cartStore';
+import { checkoutApi, shopApi } from '../../services/api/endpoints';
 import { useCoinBalance } from '../../stores/coinsStore';
 import {
+  usePaymentMode,
   useShopConfig,
   useShopItem,
   useShopStore,
 } from '../../stores/shopStore';
-import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { moderateScale } from '../../theme/responsive';
-import type { Review, ShopItem } from '../../types/models';
+import {
+  spacing,
+  useTheme,
+  useThemedStyles,
+  type ThemeShape,
+} from '../../theme';
+import type { Quote, ShopItem } from '../../types/models';
 import type { RootStackScreenProps } from '../../types/navigation';
+import { withAlpha } from '../../utils/color';
 import { formatCoins, formatMoney } from '../../utils/format';
 
-const makeStyles = ({ spacing, colors }: ThemeShape) =>
+const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
   StyleSheet.create({
-    content: { paddingBottom: spacing.xxxl * 2, gap: spacing.base },
-    header: { paddingTop: spacing.sm },
-    art: {
-      height: moderateScale(220),
-      alignItems: 'center',
-      justifyContent: 'center',
+    content: { paddingBottom: space.xl, gap: space.xl },
+    column: { flex: 1 },
+    ribbon: {
+      alignSelf: 'flex-start',
+      paddingVertical: space.xs,
+      paddingHorizontal: space.md,
+      borderRadius: 999,
+      backgroundColor: withAlpha(colors.brandAccent, 0.16),
     },
-    badge: { position: 'absolute', top: spacing.md, left: spacing.md },
-    soldOut: { opacity: 0.5 },
-    /** The buttons sit over the scroll, so the last content pads past them. */
+    brand: { color: colors.brandAccent },
+    unit: { fontWeight: '600' },
+    struck: { textDecorationLine: 'line-through' },
+    empty: { paddingVertical: space.xl },
+    /** Bleeds through the screen's gutter so the rule runs edge to edge. */
     bar: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      paddingHorizontal: spacing.base,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
+      marginHorizontal: -space.base,
+      paddingHorizontal: space.base,
+      paddingTop: space.md,
       backgroundColor: colors.background,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.border,
       flexDirection: 'row',
-      gap: spacing.sm,
+      alignItems: 'center',
+      gap: space.base,
     },
-    grow: { flex: 1 },
-    empty: { paddingVertical: spacing.xl },
-    histogramBar: { height: 6, borderRadius: 3, flex: 1 },
   });
 
-/** How many reviews the page shows before "See all". */
-const REVIEW_PREVIEW = 3;
-
 /**
- * One item in full: what it is, what it costs in money and in coins, its
- * sizes, how many, what people thought, and the two ways to buy it.
+ * One item in full, laid out as a redemption: photos and the facts that
+ * sell it side by side, the colour and size to choose, the key features,
+ * the product information, and what it will cost with the coins the
+ * wallet holds.
  *
- * The page reads the shelf's copy of the item at once and asks the server
- * for a fresh one on arrival — stock and rating are the two things about
- * an item that change by the hour, and a deep link lands here with no
- * copy at all. "Add to cart" leaves the user here to keep browsing; "Buy
- * now" takes exactly this line to the till and leaves the basket as it
- * was.
+ * The page reads the shelf's copy at once and asks the server for a fresh
+ * one on arrival — stock changes by the hour, and a deep link lands here
+ * with no copy at all. The price reads the way the shop takes payment: in
+ * coins in a coins-only shop, in rupees in a money-only one, and in rupees
+ * with the coins that may go towards it in a mixed one (RULES R11). "You
+ * Pay" is the till's own quote for one of this item at the most coins
+ * allowed, shipping included, so the figure here is the figure the
+ * checkout opens with; the app never sums its own split. "Redeem Now"
+ * takes exactly this line on — to the shipping page, then the till,
+ * where the coins can still be changed — and leaves the basket as it was,
+ * unless the wallet is short of what the order must take, which is said
+ * here instead.
  */
 export const ProductDetailScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const route = useRoute<RootStackScreenProps<'ProductDetail'>['route']>();
   const { id } = route.params;
@@ -100,21 +106,23 @@ export const ProductDetailScreen = () => {
   const cached = useShopItem(id);
   const upsertItem = useShopStore(s => s.upsertItem);
   const config = useShopConfig();
+  const shopMode = usePaymentMode();
   const balance = useCoinBalance();
-  const cartCount = useCartCount();
-  const addToCart = useAddToCart();
+  const wholeCoins = Math.floor(balance);
 
   const [fetched, setFetched] = useState<ShopItem | null>(null);
   const [isLoading, setLoading] = useState(cached === null);
   const item = fetched ?? cached;
+  // How *this* item is bought (RULES R11): its own mode, or the shop's
+  // while the item itself has not arrived.
+  const mode = item?.paymentMode ?? shopMode;
 
+  const [color, setColor] = useState<string | null>(null);
   const [size, setSize] = useState<string | null>(null);
   const [sizeError, setSizeError] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState(1);
+  const [quote, setQuote] = useState<Quote | null>(null);
 
-  const reviews = useReviews(id, 'recent', REVIEW_PREVIEW);
-
-  // Fresh stock and rating, and the whole item for a deep link.
+  // Fresh stock, and the whole item for a deep link.
   useEffect(() => {
     let cancelled = false;
     shopApi
@@ -133,6 +141,47 @@ export const ProductDetailScreen = () => {
     };
   }, [id, upsertItem]);
 
+  // The first colour is picked to begin with, as the swatches show it; a
+  // colour no longer offered after a refresh falls back to the first again.
+  const colorNames = item?.colors.map(c => c.name).join('|') ?? '';
+  useEffect(() => {
+    if (!item || item.colors.length === 0) {
+      setColor(null);
+      return;
+    }
+    setColor(current =>
+      current && item.colors.some(c => c.name === current)
+        ? current
+        : item.colors[0].name,
+    );
+    // Keyed on the names so a refetch of the same item does not reset it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorNames]);
+
+  // The till's figure for one unit. A sized item is quoted at its first
+  // size until one is picked — the price is the same in every size, and
+  // the server will not quote a sized line without one.
+  const quoteSize =
+    item && item.sizes.length > 0 ? size ?? item.sizes[0] : null;
+  const ready = item !== null && (item.colors.length === 0 || color !== null);
+  useEffect(() => {
+    if (!item || !ready) return;
+    let cancelled = false;
+    checkoutApi
+      .quote([{ itemId: item.id, quantity: 1, size: quoteSize, color }], 'max')
+      .then(result => {
+        if (!cancelled) setQuote(result);
+      })
+      .catch(() => {
+        if (!cancelled) setQuote(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The price and stock that matter are re-read with the item itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id, item?.price, ready, quoteSize, color, wholeCoins]);
+
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -140,21 +189,10 @@ export const ProductDetailScreen = () => {
     }
     navigation.navigate('Main', { screen: 'Shop' });
   }, [navigation]);
-  const onPressCart = useCallback(
-    () => navigation.navigate('Cart'),
+
+  const onPressWallet = useCallback(
+    () => navigation.navigate('Main', { screen: 'Wallet' }),
     [navigation],
-  );
-  const onPressReviews = useCallback(
-    () => navigation.navigate('Reviews', { itemId: id }),
-    [id, navigation],
-  );
-  const onWriteReview = useCallback(
-    () => navigation.navigate('WriteReview', { itemId: id }),
-    [id, navigation],
-  );
-  const onEditReview = useCallback(
-    (_review: Review) => navigation.navigate('WriteReview', { itemId: id }),
-    [id, navigation],
   );
 
   const onChangeSize = useCallback((value: string) => {
@@ -162,81 +200,74 @@ export const ProductDetailScreen = () => {
     setSizeError(null);
   }, []);
 
-  /** A sized item with no size picked is stopped here, with the reason under the sizes. */
-  const requireSize = useCallback(() => {
-    if (item && item.sizes.length > 0 && !size) {
+  const onRedeem = useCallback(() => {
+    if (!item) return;
+    if (item.sizes.length > 0 && !size) {
       setSizeError('Pick a size first.');
-      return false;
+      return;
     }
-    return true;
-  }, [item, size]);
-
-  const onAddToCart = useCallback(() => {
-    if (!item || !requireSize()) return;
-    addToCart(item, size, quantity);
-  }, [addToCart, item, quantity, requireSize, size]);
-
-  const onBuyNow = useCallback(() => {
-    if (!item || !requireSize()) return;
-    navigation.navigate('Checkout', {
-      lines: [{ itemId: item.id, quantity, size }],
+    navigation.navigate('ShippingAddress', {
+      lines: [{ itemId: item.id, quantity: 1, size, color }],
     });
-  }, [item, navigation, quantity, requireSize, size]);
+  }, [color, item, navigation, size]);
 
-  // Both lines wait for the till's rules: a split or a delivery promise
-  // drawn from rules the app made up could disagree with the checkout.
-  const coinsLine = useMemo(() => {
-    if (!item || item.coinsMax === 0 || config === null) return null;
-    const coins = Math.min(item.coinsMax * quantity, Math.floor(balance));
-    const worth = coins * config.coinValuePaise;
-    return { coins, worth, capped: coins < item.coinsMax * quantity };
-  }, [balance, config, item, quantity]);
+  const short = (quote?.coinsShort ?? 0) > 0;
 
-  const deliveryLine = useMemo(() => {
-    if (config === null) return null;
-    if (config.freeShippingAbovePaise === null) {
-      return config.shippingFeePaise === 0
-        ? 'Free delivery'
-        : `Delivery ${formatMoney(config.shippingFeePaise, config.currency)}`;
+  const facts = useMemo<ProductInfoRow[]>(() => {
+    if (!item) return [];
+    const rows = item.highlights.map(spec => ({
+      icon: SPEC_ICONS[spec.icon],
+      label: spec.label,
+      value: spec.value,
+    }));
+    if (item.sizes.length > 0) {
+      rows.push({
+        icon: Ruler,
+        label: 'Sizes Available',
+        value: item.sizes.join(', '),
+      });
     }
-    if (config.shippingFeePaise === 0) return 'Free delivery';
-    return `Free delivery on orders over ${formatMoney(
-      config.freeShippingAbovePaise,
-      config.currency,
-    )} · ${formatMoney(config.shippingFeePaise, config.currency)} otherwise`;
-  }, [config]);
+    return rows;
+  }, [item]);
 
-  const presentation = item ? presentationOf(item.category) : null;
+  const infoRows = useMemo<ProductInfoRow[]>(() => {
+    if (!item) return [];
+    const rows: ProductInfoRow[] = item.specs.map(spec => ({
+      icon: SPEC_ICONS[spec.icon],
+      label: spec.label,
+      value: spec.value,
+    }));
+    if (config?.deliveryEstimate) {
+      rows.push({
+        icon: Truck,
+        label: 'Delivery',
+        value: config.deliveryEstimate,
+      });
+    }
+    if (config?.returnPolicy) {
+      rows.push({
+        icon: RotateCcw,
+        label: 'Return Policy',
+        value: config.returnPolicy,
+      });
+    }
+    return rows;
+  }, [config, item]);
 
   return (
     <Screen edges={['top']}>
+      <ShopPageHeader
+        title="Product Details"
+        subtitle="Redeem your favorite products"
+        balance={balance}
+        onPressBack={onPressBack}
+        onPressBalance={onPressWallet}
+      />
+
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <HStack align="center" justify="between" style={styles.header}>
-          <Pressable
-            onPress={onPressBack}
-            feedback="opacity"
-            visualSize={24}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-          >
-            <Icon as={ChevronLeft} size="lg" color="text" />
-          </Pressable>
-          <HStack align="center" gap="md">
-            {item ? <WishlistButton item={item} size="md" /> : null}
-            <IconButton
-              icon={ShoppingCart}
-              onPress={onPressCart}
-              badge={cartCount}
-              accessibilityLabel={
-                cartCount > 0 ? `Cart, ${cartCount} items` : 'Cart'
-              }
-            />
-          </HStack>
-        </HStack>
-
         {!item ? (
           <Card radius="xl" style={styles.empty}>
             <EmptyState
@@ -250,252 +281,216 @@ export const ProductDetailScreen = () => {
           </Card>
         ) : (
           <>
-            <View>
-              <Box
-                bg="muted"
-                radius="xxl"
-                style={[styles.art, !item.inStock && styles.soldOut]}
-              >
-                <Emoji size={moderateScale(96)} label={item.title}>
-                  {item.emoji}
-                </Emoji>
-              </Box>
-              {item.badge ? (
-                <View style={styles.badge}>
-                  <ShopItemBadge badge={item.badge} />
-                </View>
-              ) : null}
-            </View>
+            <HStack gap="base" align="start">
+              <View style={styles.column}>
+                <ProductGallery item={item} />
+              </View>
 
-            <VStack gap="sm">
-              <AppText variant="label" color="textTertiary">
-                {[presentation?.label, item.subcategory]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </AppText>
-              <AppText variant="h2">{item.title}</AppText>
-              <Pressable
-                onPress={onPressReviews}
-                feedback="opacity"
-                accessibilityRole="button"
-                accessibilityLabel={
-                  item.rating.count > 0
-                    ? `Rated ${item.rating.average.toFixed(1)}, ${
-                        item.rating.count
-                      } reviews, see all`
-                    : 'No reviews yet, be the first'
-                }
-              >
-                <HStack align="center" gap="xs">
-                  <RatingStars
-                    value={item.rating.average}
-                    size="sm"
-                    count={item.rating.count}
-                  />
-                  <AppText variant="micro" color="primary">
-                    {item.rating.count > 0
-                      ? 'See reviews'
-                      : 'Be the first to review'}
-                  </AppText>
-                </HStack>
-              </Pressable>
-              <Price
-                price={item.price}
-                mrp={item.mrp}
-                currency={item.currency}
-                size="lg"
-              />
-              {coinsLine ? (
-                <HStack align="center" gap="xs" wrap>
-                  <AppText variant="caption" color="textSecondary">
-                    Pay up to
-                  </AppText>
-                  <CoinAmount amount={coinsLine.coins} size="sm" />
-                  <AppText variant="caption" color="textSecondary">
-                    {`with coins (${formatMoney(
-                      coinsLine.worth,
-                      item.currency,
-                    )} off)${
-                      coinsLine.capped
-                        ? ` · you have ${formatCoins(Math.floor(balance))}`
-                        : ''
-                    }`}
-                  </AppText>
-                </HStack>
-              ) : null}
-            </VStack>
-
-            {item.sizes.length > 0 ? (
-              <SizePicker
-                sizes={item.sizes}
-                value={size}
-                onChange={onChangeSize}
-                error={sizeError}
-              />
-            ) : null}
-
-            <HStack align="center" justify="between">
-              <AppText variant="label" color="textSecondary">
-                Quantity
-              </AppText>
-              <QuantityStepper
-                value={quantity}
-                max={config?.maxQuantityPerLine ?? quantity}
-                onChange={setQuantity}
-                label={item.title}
-              />
-            </HStack>
-
-            <Card radius="xl" padding="base">
-              <VStack gap="sm">
-                <AppText variant="label" color="textSecondary">
-                  About
-                </AppText>
-                <AppText variant="body">{item.description}</AppText>
-                <Divider />
-                {deliveryLine ? (
-                  <HStack align="center" gap="sm">
-                    <Icon as={Truck} size="sm" tint={colors.primary} />
-                    <AppText variant="caption" color="textSecondary">
-                      {deliveryLine}
+              <VStack gap="md" style={styles.column}>
+                <AppText variant="h2">{item.title}</AppText>
+                {item.ribbon ? (
+                  <HStack align="center" gap="xs" style={styles.ribbon}>
+                    <Icon as={Star} size="xs" tint={colors.brandAccent} />
+                    <AppText variant="micro" style={styles.brand}>
+                      {item.ribbon}
                     </AppText>
                   </HStack>
                 ) : null}
-                <HStack align="center" gap="sm">
-                  <Icon
-                    as={PackageCheck}
-                    size="sm"
-                    tint={item.inStock ? colors.success : colors.warning}
-                  />
+                {item.description ? (
                   <AppText variant="caption" color="textSecondary">
-                    {item.inStock
-                      ? 'In stock — ships in 2–4 days'
-                      : 'Sold out — save it to be told when it is back'}
+                    {item.description}
                   </AppText>
-                </HStack>
-              </VStack>
-            </Card>
-
-            <VStack gap="md">
-              <HStack align="center" justify="between">
-                <AppText variant="h3">Reviews</AppText>
-                {reviews.summary && reviews.summary.count > REVIEW_PREVIEW ? (
-                  <Pressable
-                    onPress={onPressReviews}
-                    feedback="opacity"
-                    accessibilityRole="button"
-                    accessibilityLabel={`See all ${reviews.summary.count} reviews`}
-                  >
-                    <HStack align="center" gap="xxs">
-                      <AppText variant="micro" color="primary">
-                        {`See all ${reviews.summary.count}`}
-                      </AppText>
-                      <Icon as={ChevronRight} size="xs" color="primary" />
-                    </HStack>
-                  </Pressable>
                 ) : null}
-              </HStack>
 
-              {reviews.summary && reviews.summary.count > 0 ? (
-                <Card radius="xl" padding="base">
-                  <HStack align="center" gap="lg">
-                    <VStack align="center" gap="xxs">
-                      <AppText variant="metric">
-                        {reviews.summary.average.toFixed(1)}
+                {facts.map(fact => (
+                  <HStack key={fact.label} gap="sm" align="start">
+                    <Icon as={fact.icon} size="sm" color="textSecondary" />
+                    <VStack flex={1}>
+                      <AppText variant="caption">{fact.label}</AppText>
+                      <AppText variant="caption" color="textSecondary">
+                        {fact.value}
                       </AppText>
-                      <RatingStars value={reviews.summary.average} size="xs" />
-                      <AppText variant="micro" color="textTertiary">
-                        {`${reviews.summary.count} ${
-                          reviews.summary.count === 1 ? 'review' : 'reviews'
-                        }`}
-                      </AppText>
-                    </VStack>
-                    <VStack gap="xxs" flex={1}>
-                      {[5, 4, 3, 2, 1].map(star => {
-                        const n = reviews.summary!.histogram[star - 1];
-                        const share =
-                          reviews.summary!.count === 0
-                            ? 0
-                            : n / reviews.summary!.count;
-                        return (
-                          <HStack key={star} align="center" gap="sm">
-                            <AppText
-                              variant="micro"
-                              color="textSecondary"
-                            >{`${star}★`}</AppText>
-                            <View
-                              style={[
-                                styles.histogramBar,
-                                { backgroundColor: colors.muted },
-                              ]}
-                            >
-                              <View
-                                style={[
-                                  styles.histogramBar,
-                                  {
-                                    backgroundColor: colors.gold,
-                                    flex: undefined,
-                                    width: `${Math.round(share * 100)}%`,
-                                  },
-                                ]}
-                              />
-                            </View>
-                            <AppText variant="micro" color="textTertiary">
-                              {String(n)}
-                            </AppText>
-                          </HStack>
-                        );
-                      })}
                     </VStack>
                   </HStack>
-                </Card>
-              ) : null}
+                ))}
 
-              {reviews.reviews.map(review => (
-                <ReviewCard
-                  key={review.id}
-                  review={review}
-                  onEdit={onEditReview}
+                <VStack gap="xxs">
+                  <AppText variant="bodyStrong">Price</AppText>
+                  {mode === 'coins' ? (
+                    <HStack align="baseline" gap="xxs" wrap>
+                      <CoinAmount
+                        amount={item.coinPrice}
+                        size="lg"
+                        tint={colors.brandAccent}
+                      />
+                      <AppText
+                        variant="micro"
+                        style={[styles.brand, styles.unit]}
+                      >
+                        coins
+                      </AppText>
+                    </HStack>
+                  ) : (
+                    <HStack align="baseline" gap="xs" wrap>
+                      <AppText variant="h1" style={styles.brand}>
+                        {formatMoney(item.price, item.currency)}
+                      </AppText>
+                      {item.mrp !== null && item.mrp > item.price ? (
+                        <AppText
+                          variant="caption"
+                          color="textTertiary"
+                          style={styles.struck}
+                        >
+                          {formatMoney(item.mrp, item.currency)}
+                        </AppText>
+                      ) : null}
+                    </HStack>
+                  )}
+                  {mode === 'mixed' && item.coinsMax > 0 ? (
+                    <HStack align="center" gap="xxs" wrap>
+                      <AppText variant="micro" color="textSecondary">
+                        {item.coinsMin === 0
+                          ? 'Use up to'
+                          : item.coinsMin >= item.coinsMax
+                          ? 'Takes'
+                          : `Use ${formatCoins(item.coinsMin)} to`}
+                      </AppText>
+                      <CoinAmount
+                        amount={item.coinsMax}
+                        size="sm"
+                        tint={colors.brandAccent}
+                        withUnit
+                      />
+                    </HStack>
+                  ) : null}
+                  {!item.inStock ? (
+                    <AppText variant="micro" color="warning">
+                      Sold out — save it to hear when it is back
+                    </AppText>
+                  ) : null}
+                </VStack>
+              </VStack>
+            </HStack>
+
+            {item.colors.length > 0 ? (
+              <VStack gap="md">
+                <HStack align="center" justify="between">
+                  <AppText variant="h3">Select Color</AppText>
+                  {color ? (
+                    <AppText variant="micro" color="textTertiary">
+                      {color}
+                    </AppText>
+                  ) : null}
+                </HStack>
+                <ColorSwatchPicker
+                  colors={item.colors}
+                  value={color}
+                  onChange={setColor}
                 />
-              ))}
+              </VStack>
+            ) : null}
 
-              {reviews.error ? (
-                <AppText variant="caption" color="textSecondary" center>
-                  {reviews.error}
-                </AppText>
-              ) : null}
+            {item.sizes.length > 0 ? (
+              <VStack gap="md">
+                <HStack align="center" justify="between">
+                  <AppText variant="h3">Select Size</AppText>
+                  {size ? (
+                    <AppText variant="micro" color="textTertiary">
+                      {size}
+                    </AppText>
+                  ) : null}
+                </HStack>
+                <SizePicker
+                  sizes={item.sizes}
+                  value={size}
+                  onChange={onChangeSize}
+                  error={sizeError}
+                  showLabel={false}
+                />
+              </VStack>
+            ) : null}
 
-              <Button
-                label={reviews.mine ? 'Edit your review' : 'Write a review'}
-                variant="secondary"
-                onPress={onWriteReview}
-                fullWidth
-              />
-            </VStack>
+            {item.features.length > 0 ? (
+              <VStack gap="md">
+                <AppText variant="h3">Key Features</AppText>
+                <ProductFeatureGrid features={item.features} />
+              </VStack>
+            ) : null}
+
+            {infoRows.length > 0 ? (
+              <VStack gap="md">
+                <AppText variant="h3">Product Information</AppText>
+                <ProductInfoCard rows={infoRows} />
+              </VStack>
+            ) : null}
           </>
         )}
       </ScrollView>
 
       {item ? (
-        <View style={styles.bar}>
-          <View style={styles.grow}>
+        <View
+          style={[
+            styles.bar,
+            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+          ]}
+        >
+          <VStack flex={1} gap="xxs">
+            <AppText variant="bodyStrong">You Pay</AppText>
+            {quote ? (
+              <PayAmount quote={quote} size="lg" />
+            ) : mode === 'coins' ? (
+              <CoinAmount
+                amount={item.coinPrice}
+                size="lg"
+                tint={colors.brandAccent}
+                withUnit
+              />
+            ) : (
+              <AppText variant="h2" style={styles.brand}>
+                {formatMoney(item.price, item.currency)}
+              </AppText>
+            )}
+            {quote && quote.coinsShort > 0 ? (
+              <AppText variant="micro" color="warning">
+                {`You need ${formatCoins(quote.coinsShort)} more coins`}
+              </AppText>
+            ) : quote && quote.shipping > 0 ? (
+              <AppText variant="micro" color="textTertiary">
+                {quote.inCoins
+                  ? `incl. ${formatCoins(
+                      quote.inCoins.shipping,
+                    )} coins delivery`
+                  : `incl. ${formatMoney(
+                      quote.shipping,
+                      quote.currency,
+                    )} delivery`}
+              </AppText>
+            ) : null}
+          </VStack>
+
+          <VStack flex={1} gap="xs">
             <Button
-              label="Add to cart"
-              variant="secondary"
-              fullWidth
-              disabled={!item.inStock}
-              onPress={onAddToCart}
-            />
-          </View>
-          <View style={styles.grow}>
-            <Button
-              label={item.inStock ? 'Buy now' : 'Sold out'}
+              label={
+                !item.inStock
+                  ? 'Sold out'
+                  : short
+                  ? 'Not enough coins'
+                  : 'Redeem Now'
+              }
               variant="brand"
               fullWidth
-              disabled={!item.inStock}
-              onPress={onBuyNow}
+              disabled={!item.inStock || short}
+              onPress={onRedeem}
             />
-          </View>
+            <HStack align="center" justify="center" gap="xxs">
+              <Icon as={CircleCheck} size="xs" color="success" />
+              <AppText variant="micro" color="success">
+                {mode === 'money'
+                  ? '100% Secure Checkout'
+                  : '100% Secure Redemption'}
+              </AppText>
+            </HStack>
+          </VStack>
         </View>
       ) : null}
     </Screen>

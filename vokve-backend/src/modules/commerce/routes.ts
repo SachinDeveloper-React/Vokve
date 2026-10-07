@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { purchaseLineSchema, shopCategorySchema, shopSortSchema } from '../../contracts/index.js';
+import { paymentMethodSchema, purchaseLineSchema, shopCategorySchema, shopSortSchema } from '../../contracts/index.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { idempotent } from '../../middleware/idempotency.js';
@@ -9,12 +9,12 @@ import { validate } from '../../middleware/validate.js';
 import { requireVerifiedContacts } from '../../middleware/verified.js';
 import {
   addToWishlist, addressBody, cancelOrder, checkout, clearCart, countOrders, createAddress, deleteAddress, deleteReview, getCart, getItem, getOrder,
-  listAddresses, listCategories, listItems, listOrders, listReviews, listWishlist, payOrder, quote, removeCartLine, removeFromWishlist, reviewBody,
-  setCartLine, setDefaultAddress, shopConfig, updateAddress, upsertReview, wishlistIds,
+  applyCoupon, deliveryPreferencesBody, getDeliveryPreferences, listAddresses, listCategories, listItems, listOrders, listReviews, listWishlist, payOrder, quote, removeCartLine, removeCoupon,
+  removeFromWishlist, reviewBody, setCartLine, setDefaultAddress, setDeliveryPreferences, shopConfig, updateAddress, upsertReview, wishlistIds,
 } from './service.js';
 
 export const commerceRouter = Router();
-commerceRouter.use(['/shop', '/cart', '/wishlist', '/checkout', '/orders', '/me/addresses'], requireAuth, requireDevice);
+commerceRouter.use(['/shop', '/cart', '/wishlist', '/checkout', '/orders', '/me/addresses', '/me/delivery-preferences'], requireAuth, requireDevice);
 
 // ─── Catalogue ─────────────────────────────────────────────────────────────
 
@@ -115,9 +115,10 @@ const cartLineBody = z.object({
   /** Zero removes the line. */
   quantity: z.number().int().min(0).max(10),
   size: z.string().max(12).nullable().optional(),
+  color: z.string().max(24).nullable().optional(),
 }).strict();
 
-const cartLineQuery = z.object({ size: z.string().max(12).optional() });
+const cartLineQuery = z.object({ size: z.string().max(12).optional(), color: z.string().max(24).optional() });
 
 commerceRouter.get('/cart', async (req, res) => {
   res.json(await getCart(req.ctx.userId!));
@@ -126,31 +127,50 @@ commerceRouter.get('/cart', async (req, res) => {
 /** Sets a line's quantity — add, change, or remove at zero — and answers with the whole basket. */
 commerceRouter.put('/cart/lines', validate('body', cartLineBody), async (req, res) => {
   const body = req.body as z.infer<typeof cartLineBody>;
-  res.json(await setCartLine(req.ctx.userId!, { itemId: body.itemId, quantity: body.quantity, size: body.size ?? null }));
+  res.json(await setCartLine(req.ctx.userId!, { itemId: body.itemId, quantity: body.quantity, size: body.size ?? null, color: body.color ?? null }));
 });
 
 commerceRouter.delete('/cart/lines/:itemId', validate('query', cartLineQuery), async (req, res) => {
   const q = req.query as unknown as z.infer<typeof cartLineQuery>;
-  res.json(await removeCartLine(req.ctx.userId!, req.params.itemId as string, q.size ?? null));
+  res.json(await removeCartLine(req.ctx.userId!, req.params.itemId as string, q.size ?? null, q.color ?? null));
 });
 
 commerceRouter.delete('/cart', async (req, res) => {
   res.json(await clearCart(req.ctx.userId!));
 });
 
+const couponBody = z.object({ code: z.string().trim().min(1).max(24) }).strict();
+
+/**
+ * Puts a coupon on the basket (RULES R16); a code that does not apply is
+ * refused with why. Rate-limited per member, so codes cannot be guessed by
+ * trying them all.
+ */
+commerceRouter.put('/cart/coupon', rateLimit({ name: 'coupon-apply-user', max: 20, windowSeconds: 3600, by: 'user' }), validate('body', couponBody), async (req, res) => {
+  res.json(await applyCoupon(req.ctx.userId!, (req.body as z.infer<typeof couponBody>).code));
+});
+
+commerceRouter.delete('/cart/coupon', async (req, res) => {
+  res.json(await removeCoupon(req.ctx.userId!));
+});
+
 // ─── Checkout ──────────────────────────────────────────────────────────────
 
 const coinsField = z.union([z.number().int().nonnegative(), z.literal('max')]);
 
+const couponField = z.string().trim().min(1).max(24);
+
 const quoteBody = z.object({
   lines: z.array(purchaseLineSchema).min(1).max(20),
   coins: coinsField.default('max'),
+  /** Quoted with its `problem` when it does not apply, rather than refused. */
+  couponCode: couponField.nullable().optional(),
 }).strict();
 
 /** The till's arithmetic for some lines, with nothing placed — what "Buy now" shows first. */
 commerceRouter.post('/checkout/quote', validate('body', quoteBody), async (req, res) => {
   const body = req.body as z.infer<typeof quoteBody>;
-  res.json(await quote(req.ctx.userId!, body.lines, body.coins));
+  res.json(await quote(req.ctx.userId!, body.lines, body.coins, body.couponCode ?? null));
 });
 
 const checkoutBody = z.object({
@@ -158,6 +178,12 @@ const checkoutBody = z.object({
   fromCart: z.boolean().optional(),
   addressId: z.string().min(1),
   coins: z.number().int().nonnegative().default(0),
+  /** The coupon the quote showed applying (RULES R16); refused if it no longer does. */
+  couponCode: couponField.optional(),
+  /** How it should be handed over (RULES R17); the saved preferences fill what is left out. */
+  delivery: deliveryPreferencesBody.optional(),
+  /** How the member chose to pay on the payment page (RULES R12). */
+  paymentMethod: paymentMethodSchema.optional(),
   /** The step-up proof, when the coins ask for one (RULES O8). */
   stepUpToken: z.string().optional(),
 }).strict().refine(b => Boolean(b.fromCart) !== Boolean(b.lines?.length), { message: 'Send either lines or fromCart.' });
@@ -170,7 +196,8 @@ const checkoutBody = z.object({
 commerceRouter.post('/checkout', requireVerifiedContacts, validate('body', checkoutBody), idempotent, async (req, res) => {
   const body = req.body as z.infer<typeof checkoutBody>;
   res.json(await checkout({
-    userId: req.ctx.userId!, lines: body.lines, fromCart: body.fromCart, addressId: body.addressId, coins: body.coins, stepUpToken: body.stepUpToken,
+    userId: req.ctx.userId!, lines: body.lines, fromCart: body.fromCart, addressId: body.addressId, coins: body.coins, couponCode: body.couponCode,
+    delivery: body.delivery, paymentMethod: body.paymentMethod, stepUpToken: body.stepUpToken,
     idempotencyKey: req.ctx.idempotencyKey, trustTier: req.ctx.trustTier, deviceId: req.ctx.deviceId, appVersion: req.ctx.appVersion,
   }));
 });
@@ -231,4 +258,15 @@ commerceRouter.post('/me/addresses/:id/default', async (req, res) => {
 commerceRouter.delete('/me/addresses/:id', async (req, res) => {
   await deleteAddress(req.ctx.userId!, req.params.id as string);
   res.json({ ok: true });
+});
+
+// ─── Delivery preferences ──────────────────────────────────────────────────
+
+/** What the shipping page opens with (RULES R17). */
+commerceRouter.get('/me/delivery-preferences', async (req, res) => {
+  res.json(await getDeliveryPreferences(req.ctx.userId!));
+});
+
+commerceRouter.put('/me/delivery-preferences', validate('body', deliveryPreferencesBody), async (req, res) => {
+  res.json(await setDeliveryPreferences(req.ctx.userId!, req.body));
 });

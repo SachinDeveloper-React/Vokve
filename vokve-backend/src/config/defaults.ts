@@ -158,21 +158,63 @@ export const CONFIG_DEFAULTS = {
     upcomingDays: 30,
   },
   /**
-   * The shop's money side (RULES R1, R11–R13). Prices are paise; a coin is
-   * worth `coinValuePaise` at the till, and at most `coinShareMax` of the
-   * goods (0.3 = 30%) may be paid with coins — the rest is money. Set the
-   * share to 1 and an order can be coins alone; set it to 0 and the shop is
-   * cash only. Changed from `app_config` without a deploy, like every ⚙.
+   * The shop's money side (RULES R1, R11–R13). Prices are paise and a coin
+   * is worth `coinValuePaise` at the till. `paymentMode` says how an order
+   * is paid:
+   * - `mixed` — coins cover between `coinShareMin` and `coinShareMax` of the
+   *   goods (0.2 = 20%); the rest, and the delivery, is money. Equal shares
+   *   fix the split ("always 20% coins"); a zero minimum lets the member
+   *   choose how many.
+   * - `coins` — coins alone, the delivery too; no money is taken and the
+   *   shares are not read.
+   * - `money` — money alone; coins cannot be spent in the shop.
+   * Changed from `app_config` without a deploy, like every ⚙.
    */
   commerce: {
     currency: 'INR',
     coinValuePaise: 25,
+    paymentMode: 'mixed' as 'coins' | 'money' | 'mixed',
+    coinShareMin: 0,
     coinShareMax: 0.3,
     shippingFeePaise: 4900,
     freeShippingAbovePaise: 99900,
     maxQuantityPerLine: 5,
     /** How long an unpaid order holds its stock and coins before it is released. */
     paymentWindowMinutes: 30,
+    /**
+     * The ways the payment page offers to pay, in the order it lists them
+     * (RULES R12). `coins` is the wallet alone, `coins_upi` the wallet and
+     * then the gateway for the rest, and `upi` / `card` / `netbanking` the
+     * gateway alone, each opening its own tab. The mode narrows the list —
+     * a coins-only shop keeps only `coins`, a money-only one drops both
+     * coin methods — so this is the owner's menu, not the final one.
+     */
+    paymentMethods: ['coins', 'coins_upi', 'upi', 'card', 'netbanking'] as string[],
+    /**
+     * The delivery and returns lines on a product page, worded for the
+     * member. Null hides the row. They are promises, so they say what
+     * support actually does (FAQ "Can I cancel or return an order?").
+     */
+    deliveryEstimate: '2–4 working days' as string | null,
+    returnPolicy: 'Free cancellation until it ships' as string | null,
+    /** Offers the coupon box in the basket (RULES R16). Off, any coupon on a basket is ignored. */
+    couponsEnabled: true,
+    /**
+     * How long delivery takes, as a window the order promises when it is
+     * placed (RULES R5): `placedAt` plus these many days, both ends shown.
+     * `deliveryEstimate` is the same promise in words for a product page.
+     */
+    deliveryDaysMin: 4,
+    deliveryDaysMax: 7,
+    /** The line under the shipping page's delivery preferences. Null hides it. */
+    deliveryNotice: 'Delivery partners may call you for verification if needed.' as string | null,
+    /**
+     * Offers "Notify me on WhatsApp" on the shipping page (RULES R17) —
+     * and only where WhatsApp can be delivered: outside production the
+     * messages are logged; in production it waits for a provider in
+     * `lib/whatsapp.ts`, and the option stays hidden until then.
+     */
+    whatsappUpdates: true,
   },
   otp: {
     /**

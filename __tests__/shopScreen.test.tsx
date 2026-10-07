@@ -103,7 +103,9 @@ const cartWith = (
   quantity: number,
   size: string | null = null,
 ): Cart => ({
-  lines: [{ item, quantity, size, addedAt: new Date().toISOString() }],
+  lines: [
+    { item, quantity, size, color: null, addedAt: new Date().toISOString() },
+  ],
   count: quantity,
   quote: {
     currency: 'INR',
@@ -112,14 +114,21 @@ const cartWith = (
         itemId: item.id,
         title: item.title,
         emoji: item.emoji,
+        image: item.images[0] ?? null,
         quantity,
         size,
+        color: null,
         price: item.price,
         mrp: item.mrp,
         lineTotal: item.price * quantity,
+        coinPrice: item.coinPrice,
+        lineCoins: item.coinPrice * quantity,
+        paymentMode: item.paymentMode,
         inStock: true,
       },
     ],
+    paymentMode: 'mixed',
+    coupon: null,
     mrpTotal: (item.mrp ?? item.price) * quantity,
     discount: ((item.mrp ?? item.price) - item.price) * quantity,
     subtotal: item.price * quantity,
@@ -127,10 +136,14 @@ const cartWith = (
     total: item.price * quantity + 4900,
     coinValuePaise: 25,
     coinsMax: item.coinsMax * quantity,
+    coinsMin: 0,
+    coinsShort: 0,
     coinsApplied: item.coinsMax * quantity,
+    paymentMethods: ['coins_upi', 'upi', 'card', 'netbanking'] as const,
     coinsValue: item.coinsMax * quantity * 25,
     payable: item.price * quantity + 4900 - item.coinsMax * quantity * 25,
     needsStepUp: false,
+    inCoins: null,
   },
 });
 
@@ -175,13 +188,11 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
 beforeEach(() => {
   mockNavigate.mockClear();
-  shopApi.items
-    .mockReset()
-    .mockResolvedValue({
-      data: shopItems,
-      nextCursor: null,
-      total: shopItems.length,
-    });
+  shopApi.items.mockReset().mockResolvedValue({
+    data: shopItems,
+    nextCursor: null,
+    total: shopItems.length,
+  });
   shopApi.categories.mockReset().mockResolvedValue([]);
   shopApi.config.mockReset().mockResolvedValue(SHOP_CONFIG);
   cartApi.get.mockReset().mockRejectedValue(new Error('offline'));
@@ -431,6 +442,7 @@ describe('ShopScreen', () => {
       itemId: 'shaker',
       quantity: 1,
       size: null,
+      color: null,
     });
     expect(useCartStore.getState().cart?.count).toBe(1);
     expect(allText(tree)).toContain('Added to cart');

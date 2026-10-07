@@ -14,6 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/seed/seed.ts",
+    "item:mode": "tsx src/scripts/item-payment-mode.ts",
+    "coins:add": "tsx src/scripts/add-coins.ts",
     "lint": "eslint src test --ext .ts",
     "dev:memory": "tsx src/dev-memory.ts"
   },

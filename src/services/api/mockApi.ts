@@ -68,6 +68,8 @@ import {
   type VitalReading,
   type NotificationPreferences,
   type Order,
+  type PaymentMethod,
+  type PaymentMode,
   type PrivacySettings,
   type ProfileBadge,
   type ProfileSummary,
@@ -84,6 +86,8 @@ import {
   type StepIngestResult,
   type StreakRun,
   type StreakSummary,
+  type AppliedCoupon,
+  type DeliveryPreferences,
   type User,
   type UserSettings,
   type VerificationChallenge,
@@ -91,6 +95,7 @@ import {
   type WorkoutTemplate,
 } from '../../types/models';
 import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
+import { formatCoins, formatMoney } from '../../utils/format';
 import { logger } from '../../utils/logger';
 import { ApiError } from './errors';
 import type {
@@ -535,6 +540,9 @@ export const mockAuthApi: AuthApi = {
     mockAddresses = [];
     mockBalance = null;
     mockCart = [];
+    mockCartCoupon = null;
+    mockCouponUses = new Map();
+    mockDelivery = { ...NO_DELIVERY_PREFERENCES };
     mockWishlist = [];
     mockReviews = [];
     mockPrivacy = {
@@ -2245,8 +2253,72 @@ export const MOCK_SHOP_CONFIG: ShopConfig = {
   maxQuantityPerLine: 5,
   paymentProvider: 'mock',
   paymentKeyId: null,
+  paymentMethods: ['coins', 'coins_upi', 'upi', 'card', 'netbanking'],
   stepUpThreshold: 1000,
+  deliveryEstimate: '2–4 working days',
+  returnPolicy: 'Free cancellation until it ships',
+  paymentMode: 'mixed',
+  coinShareMin: 0,
+  couponsEnabled: true,
+  deliveryNotice: 'Delivery partners may call you for verification if needed.',
+  // The mock, like a server outside production, logs WhatsApp updates.
+  offersWhatsAppUpdates: true,
 };
+
+/**
+ * The server's `resolveMethod`, mirrored: the method and the sums have to
+ * agree, or the member is told to look again rather than charged a way
+ * they did not pick. No method at all is the older client, read from the
+ * sums.
+ */
+function mockResolveMethod(
+  chosen: PaymentMethod | undefined,
+  quote: Quote,
+): PaymentMethod | null {
+  const menu = MOCK_SHOP_CONFIG.paymentMethods;
+  if (!chosen) {
+    const implied: PaymentMethod =
+      quote.payable === 0
+        ? 'coins'
+        : quote.coinsApplied > 0
+        ? 'coins_upi'
+        : 'upi';
+    return quote.paymentMethods.includes(implied)
+      ? implied
+      : quote.paymentMethods[0] ?? null;
+  }
+  if (!menu.includes(chosen)) {
+    throw new ApiError(
+      'validation',
+      'That way of paying is not available right now.',
+      422,
+      { method: chosen, offered: quote.paymentMethods },
+      'PAYMENT_METHOD_UNAVAILABLE',
+    );
+  }
+  const spendsCoins = chosen === 'coins' || chosen === 'coins_upi';
+  const wrong = (message: string) =>
+    new ApiError(
+      'validation',
+      message,
+      422,
+      { method: chosen, coins: quote.coinsApplied, payable: quote.payable },
+      'PAYMENT_METHOD_MISMATCH',
+    );
+  if (chosen === 'coins' && quote.payable > 0) {
+    throw wrong('Your coins do not cover this order. Pick coins with UPI or a card.');
+  }
+  if (chosen === 'coins_upi' && (quote.coinsApplied === 0 || quote.payable === 0)) {
+    throw wrong('This order is not part coins and part money. Pick another way to pay.');
+  }
+  if (!spendsCoins && quote.coinsApplied > 0) {
+    throw wrong('This order is set to spend coins. Pick a way to pay that uses them.');
+  }
+  if (!spendsCoins && quote.payable === 0) {
+    throw wrong('There is nothing left to pay for this order.');
+  }
+  return chosen;
+}
 
 /** The coins at and above which the mock, like the server, asks for a step-up. */
 export const MOCK_STEP_UP_THRESHOLD = MOCK_SHOP_CONFIG.stepUpThreshold;
@@ -2262,6 +2334,7 @@ let mockCart: {
   itemId: string;
   quantity: number;
   size: string | null;
+  color: string | null;
   addedAt: string;
 }[] = [];
 let mockWishlist: { itemId: string; addedAt: string }[] = [];
@@ -2273,6 +2346,182 @@ let mockReviews: (Review & { userId: string })[] = [];
  * against start out equal.
  */
 let mockBalance: number | null = null;
+
+/** The starter coupons, as the server seeds them (RULES R16). */
+const MOCK_COUPONS: readonly {
+  code: string;
+  title: string;
+  kind: 'percent' | 'flat';
+  value: number;
+  maxDiscount: number | null;
+  minSubtotal: number;
+  perUserLimit: number;
+}[] = [
+  {
+    code: 'WELCOME10',
+    title: '10% off, up to ₹150',
+    kind: 'percent',
+    value: 10,
+    maxDiscount: 15000,
+    minSubtotal: 49900,
+    perUserLimit: 1,
+  },
+  {
+    code: 'FIT50',
+    title: '₹50 off orders of ₹799 or more',
+    kind: 'flat',
+    value: 5000,
+    maxDiscount: null,
+    minSubtotal: 79900,
+    perUserLimit: 3,
+  },
+];
+/** How many of the signed-in member's live orders hold each coupon. */
+let mockCouponUses = new Map<string, number>();
+let mockCartCoupon: string | null = null;
+
+const NO_DELIVERY_PREFERENCES: DeliveryPreferences = {
+  instructions: '',
+  whatsappUpdates: false,
+  leaveAtDoor: false,
+};
+let mockDelivery: DeliveryPreferences = { ...NO_DELIVERY_PREFERENCES };
+
+/** The server's settling of delivery preferences (RULES R17): trimmed, WhatsApp only where offered. */
+function settleDelivery(
+  patch: Partial<DeliveryPreferences> | undefined,
+): DeliveryPreferences {
+  const asked = { ...mockDelivery, ...patch };
+  if (asked.instructions.trim().length > 120) {
+    throw new ApiError(
+      'validation',
+      'Keep delivery instructions to 120 characters.',
+      422,
+      { instructions: 'Keep it to 120 characters.' },
+      'VALIDATION',
+    );
+  }
+  return {
+    instructions: asked.instructions.trim(),
+    whatsappUpdates:
+      asked.whatsappUpdates && MOCK_SHOP_CONFIG.offersWhatsAppUpdates,
+    leaveAtDoor: asked.leaveAtDoor,
+  };
+}
+
+/** `paise` in whole coins, rounded up — what it costs when coins pay all of it. */
+const mockCoinsFor = (paise: number) =>
+  Math.ceil(paise / MOCK_SHOP_CONFIG.coinValuePaise);
+
+/** The share of the goods coins must and may cover, as the mode means it. */
+function mockShares(): { min: number; max: number } {
+  if (MOCK_SHOP_CONFIG.paymentMode === 'coins') return { min: 1, max: 1 };
+  if (MOCK_SHOP_CONFIG.paymentMode === 'money') return { min: 0, max: 0 };
+  return {
+    min: MOCK_SHOP_CONFIG.coinShareMin,
+    max: MOCK_SHOP_CONFIG.coinShareMax,
+  };
+}
+
+/**
+ * How one item may be bought (RULES R11). The catalogue resolves each
+ * item's own mode; `mixed` is the one that still follows the shop, so a
+ * shop-wide mode and an item's own both land here.
+ */
+function mockModeOf(item: { paymentMode?: PaymentMode }): PaymentMode {
+  const own = item.paymentMode ?? 'mixed';
+  return own === 'mixed' ? MOCK_SHOP_CONFIG.paymentMode : own;
+}
+
+function mockCoinsCap(paise: number, mode: PaymentMode): number {
+  if (mode === 'coins') return mockCoinsFor(paise);
+  if (mode === 'money') return 0;
+  return Math.floor(
+    (paise * mockShares().max) / MOCK_SHOP_CONFIG.coinValuePaise,
+  );
+}
+
+function mockCoinsFloor(paise: number, mode: PaymentMode): number {
+  if (mode === 'coins') return mockCoinsFor(paise);
+  if (mode === 'money') return 0;
+  return Math.min(
+    mockCoinsCap(paise, mode),
+    Math.floor((paise * mockShares().min) / MOCK_SHOP_CONFIG.coinValuePaise),
+  );
+}
+
+/** The server's pro-rata split, with the last part carrying the rounding. */
+function mockApportion(amount: number, weights: number[]): number[] {
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  if (total <= 0 || amount <= 0) return weights.map(() => 0);
+  const parts = weights.map(w => Math.floor((amount * w) / total));
+  const given = parts.reduce((sum, part) => sum + part, 0);
+  if (parts.length > 0) parts[parts.length - 1] += amount - given;
+  return parts;
+}
+
+/** The ways one order can be paid — the server's `methodsForOrder`. */
+function mockMethodsForOrder(order: {
+  coinsMin: number;
+  coinsMax: number;
+  total: number;
+}): PaymentMethod[] {
+  const value = MOCK_SHOP_CONFIG.coinValuePaise;
+  const leastSpent = Math.max(order.coinsMin, 1);
+  return MOCK_SHOP_CONFIG.paymentMethods.filter(method => {
+    if (method === 'coins') {
+      return order.coinsMax > 0 && order.total <= order.coinsMax * value;
+    }
+    if (method === 'coins_upi') {
+      return order.coinsMax >= leastSpent && order.total > leastSpent * value;
+    }
+    return order.coinsMin === 0 && order.total > 0;
+  });
+}
+
+/** The server's coupon checks, for the one member the mock knows. */
+function checkMockCoupon(
+  code: string,
+  subtotal: number,
+): { applied: AppliedCoupon; errorCode: string | null } {
+  const row = MOCK_COUPONS.find(entry => entry.code === code);
+  const refuse = (errorCode: string, problem: string) => ({
+    applied: { code, title: row?.title ?? code, discount: 0, problem },
+    errorCode,
+  });
+  if (!row) return refuse('COUPON_INVALID', "That code isn't valid.");
+  if ((mockCouponUses.get(code) ?? 0) >= row.perUserLimit) {
+    return refuse(
+      'COUPON_ALREADY_USED',
+      row.perUserLimit === 1
+        ? "You've already used this coupon."
+        : `You've used this coupon ${row.perUserLimit} times already.`,
+    );
+  }
+  if (subtotal < row.minSubtotal) {
+    const short = row.minSubtotal - subtotal;
+    return refuse(
+      'COUPON_MIN_ORDER',
+      `Add ${
+        MOCK_SHOP_CONFIG.paymentMode === 'coins'
+          ? `${formatCoins(mockCoinsFor(short))} coins`
+          : formatMoney(short)
+      } more to use ${code}.`,
+    );
+  }
+  const off =
+    row.kind === 'percent'
+      ? Math.floor((subtotal * row.value) / 100)
+      : row.value;
+  const discount = Math.min(
+    subtotal,
+    row.maxDiscount === null ? off : Math.min(off, row.maxDiscount),
+  );
+  return {
+    applied: { code, title: row.title, discount, problem: null },
+    errorCode: null,
+  };
+}
 /** Step-up tokens handed out and not yet spent. */
 const mockStepUps = new Set<string>();
 
@@ -2302,13 +2551,14 @@ function ratingOf(itemId: string): ShopItem['rating'] {
 }
 
 function withStock(item: (typeof shopItems)[number]): ShopItem {
+  const mode = mockModeOf(item);
   return {
     ...item,
     inStock: (mockStock.get(item.id) ?? 0) > 0,
-    coinsMax: Math.floor(
-      (item.price * MOCK_SHOP_CONFIG.coinShareMax) /
-        MOCK_SHOP_CONFIG.coinValuePaise,
-    ),
+    paymentMode: mode,
+    coinsMax: mockCoinsCap(item.price, mode),
+    coinsMin: mockCoinsFloor(item.price, mode),
+    coinPrice: mockCoinsFor(item.price),
     rating: ratingOf(item.id),
   };
 }
@@ -2536,11 +2786,12 @@ export const mockWishlistApi: WishlistApi = {
   },
 };
 
-/** The server's line checks: the item, its size, the per-line cap. */
+/** The server's line checks: the item, its size and colour, the per-line cap. */
 function priceLine(line: PurchaseLine): {
   item: ShopItem;
   quantity: number;
   size: string | null;
+  color: string | null;
 } {
   const raw = shopItems.find(entry => entry.id === line.itemId);
   if (!raw)
@@ -2572,6 +2823,27 @@ function priceLine(line: PurchaseLine): {
       );
     size = line.size;
   }
+  let color: string | null = null;
+  if (item.colors.length > 0) {
+    const names = item.colors.map(c => c.name);
+    if (!line.color)
+      throw new ApiError(
+        'validation',
+        `Pick a colour for ${item.title}.`,
+        422,
+        { itemId: item.id, colors: names },
+        'COLOR_REQUIRED',
+      );
+    if (!names.includes(line.color))
+      throw new ApiError(
+        'validation',
+        `${item.title} does not come in ${line.color}.`,
+        422,
+        { itemId: item.id, colors: names },
+        'COLOR_INVALID',
+      );
+    color = line.color;
+  }
   if (line.quantity > MOCK_SHOP_CONFIG.maxQuantityPerLine) {
     throw new ApiError(
       'validation',
@@ -2581,11 +2853,20 @@ function priceLine(line: PurchaseLine): {
       'QUANTITY_LIMIT',
     );
   }
-  return { item, quantity: line.quantity, size };
+  return { item, quantity: line.quantity, size, color };
 }
 
-/** The server's quote arithmetic (RULES R11–R13), on the mock's balance. */
-function quoteFor(lines: PurchaseLine[], coins: number | 'max'): Quote {
+/**
+ * The server's quote arithmetic (RULES R11–R13, R16), on the mock's
+ * balance: the coupon off the goods, shipping on what is left, then the
+ * mode's split — coins between the share floor and cap, all of it in
+ * coins line by line, or none.
+ */
+function quoteFor(
+  lines: PurchaseLine[],
+  coins: number | 'max',
+  couponCode: string | null = null,
+): Quote {
   const priced = lines.map(priceLine);
   const cfg = MOCK_SHOP_CONFIG;
   const subtotal = priced.reduce(
@@ -2596,49 +2877,115 @@ function quoteFor(lines: PurchaseLine[], coins: number | 'max'): Quote {
     (sum, l) => sum + (l.item.mrp ?? l.item.price) * l.quantity,
     0,
   );
+  const coupon =
+    cfg.couponsEnabled && couponCode
+      ? checkMockCoupon(couponCode.trim().toUpperCase(), subtotal).applied
+      : null;
+  const couponOff =
+    coupon && !coupon.problem ? Math.min(coupon.discount, subtotal) : 0;
+  const goods = subtotal - couponOff;
   const shipping =
     priced.length === 0 ||
-    (cfg.freeShippingAbovePaise !== null &&
-      subtotal >= cfg.freeShippingAbovePaise)
+    (cfg.freeShippingAbovePaise !== null && goods >= cfg.freeShippingAbovePaise)
       ? 0
       : cfg.shippingFeePaise;
-  const total = subtotal + shipping;
-  const coinsMax = Math.max(
-    0,
-    Math.min(
-      Math.floor((subtotal * cfg.coinShareMax) / cfg.coinValuePaise),
-      Math.floor(currentBalance()),
-    ),
+  const total = goods + shipping;
+
+  // The coupon reaches each line in proportion to what it costs, so the
+  // coins a line then takes are of the price actually paid for it.
+  const offPerLine = mockApportion(
+    couponOff,
+    priced.map(l => l.item.price * l.quantity),
   );
+  const perLine = priced.map((l, index) => ({
+    mode: mockModeOf(l.item),
+    goods: l.item.price * l.quantity - offPerLine[index],
+  }));
+  const allCoins = perLine.length > 0 && perLine.every(l => l.mode === 'coins');
+
+  let floor: number;
+  let cap: number;
+  let inCoins: Quote['inCoins'] = null;
+  if (allCoins) {
+    const goodsCoins = priced.reduce(
+      (sum, l) => sum + mockCoinsFor(l.item.price) * l.quantity,
+      0,
+    );
+    const discountCoins = Math.min(
+      goodsCoins,
+      Math.floor(couponOff / cfg.coinValuePaise),
+    );
+    const shippingCoins = mockCoinsFor(shipping);
+    const totalCoins = goodsCoins - discountCoins + shippingCoins;
+    inCoins = {
+      goods: goodsCoins,
+      discount: discountCoins,
+      shipping: shippingCoins,
+      total: totalCoins,
+    };
+    floor = cap = totalCoins;
+  } else {
+    cap = Math.min(
+      perLine.reduce((sum, l) => sum + mockCoinsCap(l.goods, l.mode), 0),
+      Math.ceil(total / cfg.coinValuePaise),
+    );
+    floor = Math.min(
+      perLine.reduce((sum, l) => sum + mockCoinsFloor(l.goods, l.mode), 0),
+      cap,
+    );
+  }
+  const balance = Math.floor(currentBalance());
+  const coinsMax = Math.max(0, Math.min(cap, balance));
+  const coinsShort = Math.max(0, floor - balance);
   const coinsApplied =
-    coins === 'max'
+    coinsShort > 0
+      ? floor
+      : coins === 'max'
       ? coinsMax
-      : Math.max(0, Math.min(Math.floor(coins), coinsMax));
+      : Math.max(floor, Math.min(Math.floor(coins), coinsMax));
   const coinsValue = coinsApplied * cfg.coinValuePaise;
   return {
     currency: cfg.currency,
+    paymentMode:
+      perLine.length === 0
+        ? cfg.paymentMode
+        : allCoins
+        ? 'coins'
+        : perLine.every(l => l.mode === 'money')
+        ? 'money'
+        : 'mixed',
     lines: priced.map(l => ({
       itemId: l.item.id,
       title: l.item.title,
       emoji: l.item.emoji,
+      image: l.item.images[0] ?? null,
       quantity: l.quantity,
       size: l.size,
+      color: l.color,
       price: l.item.price,
       mrp: l.item.mrp,
       lineTotal: l.item.price * l.quantity,
+      coinPrice: mockCoinsFor(l.item.price),
+      lineCoins: mockCoinsFor(l.item.price) * l.quantity,
+      paymentMode: mockModeOf(l.item),
       inStock: (mockStock.get(l.item.id) ?? 0) >= l.quantity,
     })),
     mrpTotal,
     discount: mrpTotal - subtotal,
     subtotal,
+    coupon: coupon ? { ...coupon, discount: couponOff } : null,
     shipping,
     total,
     coinValuePaise: cfg.coinValuePaise,
     coinsMax,
+    coinsMin: floor,
+    coinsShort,
     coinsApplied,
     coinsValue,
-    payable: total - coinsValue,
+    paymentMethods: mockMethodsForOrder({ coinsMin: floor, coinsMax, total }),
+    payable: Math.max(0, total - coinsValue),
     needsStepUp: coinsApplied > 0 && coinsApplied >= cfg.stepUpThreshold,
+    inCoins,
   };
 }
 
@@ -2651,6 +2998,7 @@ function cartView(): Cart {
       item: withStock(shopItems.find(item => item.id === line.itemId)!),
       quantity: line.quantity,
       size: line.size,
+      color: line.color,
       addedAt: line.addedAt,
     })),
     count: mockCart.reduce((sum, line) => sum + line.quantity, 0),
@@ -2659,8 +3007,10 @@ function cartView(): Cart {
         itemId: l.itemId,
         quantity: l.quantity,
         size: l.size,
+        color: l.color,
       })),
       'max',
+      mockCartCoupon,
     ),
   };
 }
@@ -2673,14 +3023,19 @@ export const mockCartApi: CartApi = {
   async setLine(line) {
     await delay();
     const size = line.size ?? null;
+    const color = line.color ?? null;
     if (line.quantity > 0) {
       const priced = priceLine({
         itemId: line.itemId,
         quantity: line.quantity,
         size,
+        color,
       });
       const index = mockCart.findIndex(
-        l => l.itemId === priced.item.id && l.size === priced.size,
+        l =>
+          l.itemId === priced.item.id &&
+          l.size === priced.size &&
+          l.color === priced.color,
       );
       if (index >= 0)
         mockCart[index] = { ...mockCart[index], quantity: priced.quantity };
@@ -2691,30 +3046,78 @@ export const mockCartApi: CartApi = {
             itemId: priced.item.id,
             quantity: priced.quantity,
             size: priced.size,
+            color: priced.color,
             addedAt: new Date().toISOString(),
           },
         ];
     } else {
       mockCart = mockCart.filter(
-        l => !(l.itemId === line.itemId && l.size === size),
+        l =>
+          !(l.itemId === line.itemId && l.size === size && l.color === color),
       );
     }
     return cartView();
   },
-  async removeLine(itemId, size) {
-    return mockCartApi.setLine({ itemId, quantity: 0, size: size ?? null });
+  async removeLine(itemId, size, color) {
+    return mockCartApi.setLine({
+      itemId,
+      quantity: 0,
+      size: size ?? null,
+      color: color ?? null,
+    });
+  },
+  async applyCoupon(code) {
+    await delay();
+    if (!MOCK_SHOP_CONFIG.couponsEnabled) {
+      throw new ApiError(
+        'validation',
+        'Coupons are not available right now.',
+        422,
+        null,
+        'COUPONS_DISABLED',
+      );
+    }
+    const normalised = code.trim().toUpperCase();
+    const cart = cartView();
+    if (cart.lines.length === 0) {
+      throw new ApiError(
+        'validation',
+        'Add something to your cart before applying a coupon.',
+        422,
+        null,
+        'CART_EMPTY',
+      );
+    }
+    const check = checkMockCoupon(normalised, cart.quote.subtotal);
+    if (check.errorCode) {
+      throw new ApiError(
+        'validation',
+        check.applied.problem ?? "That code isn't valid.",
+        422,
+        { code: normalised },
+        check.errorCode,
+      );
+    }
+    mockCartCoupon = normalised;
+    return cartView();
+  },
+  async removeCoupon() {
+    await delay();
+    mockCartCoupon = null;
+    return cartView();
   },
   async clear() {
     await delay();
     mockCart = [];
+    mockCartCoupon = null;
     return cartView();
   },
 };
 
 export const mockCheckoutApi: CheckoutApi = {
-  async quote(lines, coins) {
+  async quote(lines, coins, couponCode) {
     await delay();
-    return quoteFor(lines, coins);
+    return quoteFor(lines, coins, couponCode ?? null);
   },
   async place(payload) {
     await delay();
@@ -2735,6 +3138,7 @@ export const mockCheckoutApi: CheckoutApi = {
           itemId: l.itemId,
           quantity: l.quantity,
           size: l.size,
+          color: l.color,
         }))
       : payload.lines ?? [];
     if (lines.length === 0)
@@ -2745,7 +3149,38 @@ export const mockCheckoutApi: CheckoutApi = {
         null,
         'CART_EMPTY',
       );
-    const q = quoteFor(lines, payload.coins);
+    // Settled first, so a refusal leaves the stock and the wallet alone.
+    const delivery = settleDelivery(payload.delivery);
+    const couponCode = payload.couponCode
+      ? payload.couponCode.trim().toUpperCase()
+      : null;
+    if (couponCode) {
+      const subtotal = lines
+        .map(priceLine)
+        .reduce((sum, l) => sum + l.item.price * l.quantity, 0);
+      const check = checkMockCoupon(couponCode, subtotal);
+      if (check.errorCode) {
+        throw new ApiError(
+          'validation',
+          check.applied.problem ?? "That code isn't valid.",
+          422,
+          { code: couponCode },
+          check.errorCode,
+        );
+      }
+    }
+    const q = quoteFor(lines, payload.coins, couponCode);
+    if (q.coinsShort > 0) {
+      throw new ApiError(
+        'validation',
+        `You have ${Math.floor(currentBalance())} coins; this order needs ${
+          q.coinsMin
+        }.`,
+        422,
+        { required: q.coinsMin, balance: Math.floor(currentBalance()) },
+        'INSUFFICIENT_COINS',
+      );
+    }
     if (payload.coins > q.coinsMax) {
       throw new ApiError(
         'validation',
@@ -2753,6 +3188,17 @@ export const mockCheckoutApi: CheckoutApi = {
         422,
         { coinsMax: q.coinsMax, requested: payload.coins },
         'COINS_OVER_LIMIT',
+      );
+    }
+    if (payload.coins < q.coinsMin) {
+      throw new ApiError(
+        'validation',
+        q.paymentMode === 'coins'
+          ? `This order takes ${q.coinsMin} coins.`
+          : `At least ${q.coinsMin} coins must go towards this order.`,
+        422,
+        { coinsMin: q.coinsMin, requested: payload.coins },
+        'COINS_UNDER_MINIMUM',
       );
     }
     const soldOut = q.lines.find(l => !l.inStock);
@@ -2764,6 +3210,7 @@ export const mockCheckoutApi: CheckoutApi = {
         { itemId: soldOut.itemId },
         'OUT_OF_STOCK',
       );
+    const paymentMethod = mockResolveMethod(payload.paymentMethod, q);
     if (q.needsStepUp) {
       if (!payload.stepUpToken) {
         throw new ApiError(
@@ -2791,19 +3238,37 @@ export const mockCheckoutApi: CheckoutApi = {
         (mockStock.get(line.itemId) ?? 0) - line.quantity,
       );
     mockBalance = currentBalance() - q.coinsApplied;
-    if (payload.fromCart) mockCart = [];
+    if (q.coupon) {
+      mockCouponUses.set(
+        q.coupon.code,
+        (mockCouponUses.get(q.coupon.code) ?? 0) + 1,
+      );
+    }
+    if (payload.fromCart) {
+      mockCart = [];
+      mockCartCoupon = null;
+    }
     const now = new Date();
     const pending = q.payable > 0;
     const orderId = nextId('ord');
+    const day = [
+      String(now.getFullYear() % 100).padStart(2, '0'),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('');
     const order: Order = {
       id: orderId,
+      number: `VKV${day}${String(mockOrders.length + 1001).padStart(4, '0')}`,
       status: pending ? 'pending_payment' : 'placed',
       items: q.lines.map(l => ({
         itemId: l.itemId,
         title: l.title,
         emoji: l.emoji,
+        image: l.image,
+        coinPrice: l.coinPrice,
         quantity: l.quantity,
         size: l.size,
+        color: l.color,
         price: l.price,
         mrp: l.mrp,
       })),
@@ -2811,12 +3276,21 @@ export const mockCheckoutApi: CheckoutApi = {
       subtotal: q.subtotal,
       discount: q.discount,
       shipping: q.shipping,
+      coupon: q.coupon
+        ? {
+            code: q.coupon.code,
+            title: q.coupon.title,
+            discount: q.coupon.discount,
+          }
+        : null,
       total: q.total,
+      inCoins: q.inCoins,
       coinsUsed: q.coinsApplied,
       coinsValue: q.coinsValue,
       payable: q.payable,
       payment: {
         provider: pending ? 'mock' : null,
+        method: paymentMethod,
         status: pending ? 'pending' : 'not_required',
         amount: q.payable,
         currency: q.currency,
@@ -2827,6 +3301,16 @@ export const mockCheckoutApi: CheckoutApi = {
           : null,
       },
       address: snapshotOf(address),
+      delivery,
+      // The server's window at its defaults: four to seven days out.
+      estimatedDelivery: {
+        from: new Date(now.getTime() + 4 * 86_400_000).toISOString(),
+        to: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+      },
+      // The mock, like a server outside production, can reach both.
+      trackingChannels: delivery.whatsappUpdates
+        ? ['email', 'whatsapp']
+        : ['email'],
       placedAt: now.toISOString(),
       updatedAt: now.toISOString(),
       trackingRef: null,
@@ -2839,6 +3323,7 @@ export const mockCheckoutApi: CheckoutApi = {
       payment: pending
         ? {
             provider: 'mock',
+            method: paymentMethod,
             orderId,
             providerOrderId: `mockord_${orderId}`,
             amount: q.payable,
@@ -2930,6 +3415,12 @@ export const mockOrderApi: OrderApi = {
       );
     }
     mockBalance = currentBalance() + order.coinsUsed;
+    if (order.coupon) {
+      mockCouponUses.set(
+        order.coupon.code,
+        Math.max(0, (mockCouponUses.get(order.coupon.code) ?? 0) - 1),
+      );
+    }
     const cancelled: Order = {
       ...order,
       status: 'cancelled',
@@ -2989,6 +3480,15 @@ export const mockAddressApi: AddressApi = {
       }));
     }
     return { ok: true };
+  },
+  async deliveryPreferences() {
+    await delay();
+    return { ...mockDelivery };
+  },
+  async setDeliveryPreferences(patch) {
+    await delay();
+    mockDelivery = settleDelivery(patch);
+    return { ...mockDelivery };
   },
 };
 

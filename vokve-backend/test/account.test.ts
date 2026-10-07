@@ -326,7 +326,7 @@ describe('account: export and deletion (RULES P5, P8)', () => {
     const session = await signUpAndRegister();
     await fund(session, 1_000);
     await OrderModel.create({
-      _id: 'ord-open', userId: session.userId, status: 'placed', currency: 'INR', subtotal: 44900, total: 49800,
+      _id: 'ord-open', number: 'VKV2610080001', userId: session.userId, status: 'placed', currency: 'INR', subtotal: 44900, total: 49800,
       payable: 42300, coinsUsed: 300, coinsValue: 7500, payment: { status: 'paid', amount: 42300, currency: 'INR' },
       items: [{ itemId: 'cap', title: 'VOKVE Cap', quantity: 1, price: 44900 }],
       addressSnapshot: { label: 'Home', name: 'Asha', phone: '+91', line1: '1', line2: '', city: 'B', state: 'K', postalCode: '560001', country: 'IN' },

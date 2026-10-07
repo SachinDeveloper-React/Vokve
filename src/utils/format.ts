@@ -257,6 +257,38 @@ export function formatMonthYear(isoDate: string): string {
   return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+/**
+ * A full date — `19 Sep 2026`. Written out for the same reason
+ * `formatMonthYear` is: the device's locale would otherwise translate the
+ * one date on an otherwise English receipt.
+ */
+export function formatDayMonthYear(isoDate: string): string {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+/**
+ * A delivery window as one line — `23 – 26 Sep 2026`, or
+ * `28 Sep – 2 Oct 2026` when it crosses a month. The parts both ends share
+ * are said once: a member reading when their parcel lands should not have
+ * to notice that "Sep" appears twice.
+ */
+export function formatDayRange(fromIso: string, toIso: string): string {
+  const from = new Date(fromIso);
+  const to = new Date(toIso);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return '';
+  if (from.getTime() === to.getTime()) return formatDayMonthYear(fromIso);
+  const sameYear = from.getFullYear() === to.getFullYear();
+  const sameMonth = sameYear && from.getMonth() === to.getMonth();
+  const head = sameMonth
+    ? String(from.getDate())
+    : sameYear
+    ? `${from.getDate()} ${MONTHS[from.getMonth()]}`
+    : formatDayMonthYear(fromIso);
+  return `${head} – ${formatDayMonthYear(toIso)}`;
+}
+
 /** `in 12 days` / `today` / `tomorrow` — how a deadline reads in a sentence. */
 export function formatDaysUntil(isoDate: string): string {
   const target = new Date(isoDate);

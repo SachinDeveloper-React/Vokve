@@ -19,18 +19,26 @@ import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import { useCartCount } from '../../stores/cartStore';
 import { useCoinBalance } from '../../stores/coinsStore';
 import {
+  usePaymentMode,
   useShopCategories,
   useShopItems,
   useShopStore,
 } from '../../stores/shopStore';
 import { useWishlistCount } from '../../stores/wishlistStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import type { ShopCategory, ShopItem } from '../../types/models';
+import type { PaymentMode, ShopCategory, ShopItem } from '../../types/models';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.base },
   });
+
+/** The line under the shop's name: what paying here means (RULES R11). */
+const SUBTITLE: Record<PaymentMode, string> = {
+  coins: 'Redeem your coins for gear you will use',
+  money: 'Gear up for every workout',
+  mixed: 'Gear up — pay with money, coins, or both',
+};
 
 /**
  * The shop's front: a search field, the featured shelf, the four category
@@ -62,6 +70,7 @@ export const ShopScreen = () => {
   const refreshCatalogueIfStale = useShopStore(s => s.refreshIfStale);
 
   const cartCount = useCartCount();
+  const paymentMode = usePaymentMode();
   const wishlistCount = useWishlistCount();
 
   const [filter, setFilter] = useState<ShopFilter>('all');
@@ -153,6 +162,7 @@ export const ShopScreen = () => {
           onPressCart={onOpenCart}
           onPressWishlist={onOpenWishlist}
           onPressAvatar={onOpenAccount}
+          subtitle={SUBTITLE[paymentMode]}
         />
 
         <ShopSearchBar onPress={onOpenSearch} />

@@ -99,14 +99,18 @@ const order = (
   coinsUsed = 300,
 ): Order => ({
   id,
+  number: `VKV2610${id.slice(-4).padStart(4, '0')}`,
   status,
   items: [
     {
       itemId: 'cap',
       title: 'VOKVE Cap',
       emoji: '🧢',
+      image: null,
+      coinPrice: 1796,
       quantity: 1,
       size: null,
+      color: null,
       price: 44900,
       mrp: 59900,
     },
@@ -115,12 +119,18 @@ const order = (
   subtotal: 44900,
   discount: 15000,
   shipping: 4900,
+  coupon: null,
   total: 49800,
+  inCoins: null,
+  delivery: null,
+  estimatedDelivery: null,
+  trackingChannels: ['email'],
   coinsUsed,
   coinsValue: coinsUsed * 25,
   payable: 49800 - coinsUsed * 25,
   payment: {
     provider: 'mock',
+    method: 'coins_upi' as const,
     status:
       status === 'cancelled'
         ? 'refunded'

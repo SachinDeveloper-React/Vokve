@@ -3,6 +3,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type {
   CoinSource,
+  DeliveryPreferences,
   MealSlot,
   ProfileGap,
   PurchaseLine,
@@ -10,6 +11,8 @@ import type {
   WorkoutTemplate,
 } from './models';
 
+/** What an order is made of: the basket, or exactly these lines. */
+export type OrderSource = { fromCart: true } | { lines: PurchaseLine[] };
 export type AuthStackParamList = {
   Welcome: undefined;
   /** `notice` is a one-line confirmation to show on arrival — "Password updated". */
@@ -182,10 +185,42 @@ export type RootStackParamList = {
   /** The basket. */
   Cart: undefined;
   /**
-   * The till. `fromCart` buys the basket; `lines` buys exactly these —
-   * "Buy now" from a product page — leaving the basket as it was.
+   * Where the order goes and how it is handed over (RULES R4, R17) — the
+   * step between the basket, or a product's "Redeem Now", and the till.
    */
-  Checkout: { fromCart: true } | { lines: PurchaseLine[] };
+  ShippingAddress: OrderSource;
+  /**
+   * The till. `fromCart` buys the basket; `lines` buys exactly these —
+   * "Redeem Now" from a product page — leaving the basket as it was. The
+   * shipping page passes the address it chose and the delivery
+   * preferences; opened without them, the default address and the saved
+   * preferences stand.
+   */
+  Checkout: OrderSource & {
+    addressId?: string;
+    delivery?: Partial<DeliveryPreferences>;
+  };
+  /**
+   * How the order is paid (RULES R12) — the page between the till and the
+   * money. It carries everything the checkout settled: where it goes, how
+   * it is handed over, the coins it chose and the coupon its quote showed
+   * applying. Picking a method here decides the coins the order finally
+   * takes, and "Pay Now" is what places it.
+   */
+  Payment: OrderSource & {
+    addressId: string;
+    delivery?: Partial<DeliveryPreferences>;
+    /** The coins the checkout settled on; a method may take more or fewer. */
+    coins: number;
+    /** The coupon the checkout's quote showed applying (RULES R16). */
+    couponCode?: string | null;
+  };
+  /**
+   * What came of an order, the moment it was placed (RULES R5, R12): the
+   * verdict, the reference, where it goes and when it should arrive. The
+   * payment page lands here; the receipt is a tap further on.
+   */
+  OrderConfirmation: { id: string };
   Wishlist: undefined;
   /** Every review of an item, paged, with the summary and a way to write one. */
   Reviews: { itemId: string };
