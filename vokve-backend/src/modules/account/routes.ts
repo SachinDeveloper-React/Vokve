@@ -9,10 +9,11 @@ import { validate } from '../../middleware/validate.js';
 import { signUpBody } from '../identity/auth.service.js';
 import { UserModel } from '../identity/models.js';
 import { createChallenge, isChannelUsable } from '../identity/otp.service.js';
+import { supportCategorySchema } from '../../contracts/index.js';
 import {
-  avatarBody, cancelDeletion, changePassword, changePasswordBody, createTicket, deleteAccountBody, exportAccount, getAbout,
+  appGuide, avatarBody, cancelDeletion, changePassword, changePasswordBody, createTicket, deleteAccountBody, exportAccount, getAbout,
   getDeletion, getMedia, getPrivacy, getProfileSummary, getTicket, listFaqs, listSessions, listTickets, privacyBody,
-  removeAvatar, replyBody, replyToTicket, scheduleDeletion, setAvatar, signOutOtherSessions, ticketBody, updatePrivacy,
+  removeAvatar, replyBody, replyToTicket, scheduleDeletion, setAvatar, signOutOtherSessions, supportHome, ticketBody, updatePrivacy,
 } from './service.js';
 
 export const accountRouter = Router();
@@ -182,7 +183,17 @@ accountRouter.delete('/me/deletion', async (req, res) => {
 
 const faqQuery = z.object({
   q: z.string().trim().max(60).optional(),
-  category: z.enum(['account', 'coins', 'orders', 'tracking', 'payments', 'other']).optional(),
+  category: supportCategorySchema.optional(),
+});
+
+/** The help centre's front page (RULES A9): the rows, the channels, the promise. */
+accountRouter.get('/support/home', async (req, res) => {
+  res.json(await supportHome(req.ctx.userId!));
+});
+
+/** The step-by-step guide behind the "App Guide" row. */
+accountRouter.get('/support/guide', async (_req, res) => {
+  res.json(await appGuide());
 });
 
 accountRouter.get('/support/faqs', validate('query', faqQuery), async (req, res) => {

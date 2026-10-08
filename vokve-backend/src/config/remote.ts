@@ -1,4 +1,5 @@
 import { offeredMethods, PAYMENT_METHODS } from '../lib/payments.js';
+import { supportCategorySchema, supportIconSchema, supportTintSchema, supportTopicKindSchema } from '../contracts/index.js';
 import { AppConfigModel } from '../modules/platform/models.js';
 import { CONFIG_DEFAULTS, type AppConfig } from './defaults.js';
 
@@ -44,8 +45,14 @@ export function invalidateConfig(): void {
  * range a member could not pick from (D-55). And a shop that could not
  * take payment (D-59, D-62): an unknown mode, coin shares outside 0–1 with
  * the floor above the ceiling, an unknown payment method, or a menu of
- * methods the mode leaves empty — a shop nobody could pay.
+ * methods the mode leaves empty — a shop nobody could pay. And a returns
+ * window or a tracking link an order page could not honour.
  */
+const SUPPORT_TOPIC_KINDS: readonly string[] = supportTopicKindSchema.options;
+const SUPPORT_ICONS: readonly string[] = supportIconSchema.options;
+const SUPPORT_TINTS: readonly string[] = supportTintSchema.options;
+const SUPPORT_CATEGORIES: readonly string[] = supportCategorySchema.options;
+
 function validate(config: AppConfig): void {
   for (const [source, cap] of Object.entries(config.coins.sourceCaps)) {
     if (cap > config.coins.dailyCap) {
@@ -70,5 +77,30 @@ function validate(config: AppConfig): void {
   }
   if (offeredMethods(paymentMode as 'coins' | 'money' | 'mixed', methods).length === 0) {
     throw new Error(`commerce.paymentMethods: [${methods.join(', ')}] leaves a '${paymentMode}' shop with no way to pay`);
+  }
+  // A help row the app cannot draw is a blank tile on a member's screen,
+  // and a row that opens nothing is a dead end (RULES P12).
+  for (const topic of config.support.topics) {
+    if (!SUPPORT_TOPIC_KINDS.includes(topic.kind)) {
+      throw new Error(`support.topics[${topic.id}].kind: '${topic.kind}' is not one of ${SUPPORT_TOPIC_KINDS.join(', ')}`);
+    }
+    if (!SUPPORT_ICONS.includes(topic.icon)) {
+      throw new Error(`support.topics[${topic.id}].icon: '${topic.icon}' is not one of ${SUPPORT_ICONS.join(', ')}`);
+    }
+    if (!SUPPORT_TINTS.includes(topic.tint)) {
+      throw new Error(`support.topics[${topic.id}].tint: '${topic.tint}' is not one of ${SUPPORT_TINTS.join(', ')}`);
+    }
+    if (topic.category !== null && !SUPPORT_CATEGORIES.includes(topic.category)) {
+      throw new Error(`support.topics[${topic.id}].category: '${topic.category}' is not one of ${SUPPORT_CATEGORIES.join(', ')}`);
+    }
+  }
+  const { returnWindowDays, trackingUrlTemplate } = config.commerce;
+  if (!(Number.isInteger(returnWindowDays) && returnWindowDays >= 0)) {
+    throw new Error(`commerce.returnWindowDays: ${returnWindowDays} is not a whole number of days`);
+  }
+  // A template without the reference would send every member to one page,
+  // which reads as tracking and is not.
+  if (trackingUrlTemplate !== null && !trackingUrlTemplate.includes('{ref}')) {
+    throw new Error("commerce.trackingUrlTemplate: must hold '{ref}', the order's tracking reference");
   }
 }

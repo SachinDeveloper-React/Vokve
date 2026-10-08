@@ -63,6 +63,29 @@ faqSchema.index({ active: 1, category: 1, sort: 1 });
 export const SupportFaqModel = model('SupportFaq', faqSchema);
 
 /**
+ * The app guide, one chapter per row, each carrying its own steps. A
+ * collection for the same reason the FAQs are one: the guide goes stale the
+ * day a screen changes, and support should be able to correct it then
+ * rather than at the next release.
+ */
+const guideSectionSchema = new Schema(
+  {
+    _id: { type: String, required: true },
+    title: { type: String, required: true },
+    summary: { type: String, default: '' },
+    /** Names the app can draw — validated against the contract on read. */
+    icon: { type: String, default: 'guide' },
+    tint: { type: String, default: 'primary' },
+    steps: [{ _id: false, title: { type: String, required: true }, body: { type: String, required: true } }],
+    sort: { type: Number, default: 0 },
+    active: { type: Boolean, default: true },
+  },
+  { timestamps: true, collection: 'support_guide_sections' },
+);
+guideSectionSchema.index({ active: 1, sort: 1 });
+export const SupportGuideSectionModel = model('SupportGuideSection', guideSectionSchema);
+
+/**
  * One conversation with support. The thread lives on the ticket rather than
  * in its own collection: a ticket is read whole, has a handful of messages,
  * and never needs to be queried across users by message.

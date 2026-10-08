@@ -35,6 +35,10 @@ import { OrderConfirmationScreen } from '../screens/main/OrderConfirmationScreen
 import { ShippingAddressScreen } from '../screens/main/ShippingAddressScreen';
 import { EditProfileScreen } from '../screens/main/EditProfileScreen';
 import { HelpSupportScreen } from '../screens/main/HelpSupportScreen';
+import { HelpTopicScreen } from '../screens/main/HelpTopicScreen';
+import { ContactUsScreen } from '../screens/main/ContactUsScreen';
+import { ReportIssueScreen } from '../screens/main/ReportIssueScreen';
+import { AppGuideScreen } from '../screens/main/AppGuideScreen';
 import { PrivacyScreen } from '../screens/main/PrivacyScreen';
 import { ProductDetailScreen } from '../screens/main/ProductDetailScreen';
 import { ReviewsScreen } from '../screens/main/ReviewsScreen';
@@ -304,6 +308,26 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="HelpSupport"
               component={HelpSupportScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="HelpTopic"
+              component={HelpTopicScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ContactUs"
+              component={ContactUsScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ReportIssue"
+              component={ReportIssueScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="AppGuide"
+              component={AppGuideScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

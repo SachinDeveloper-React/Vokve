@@ -8,6 +8,7 @@ import type {
   ProfileGap,
   PurchaseLine,
   ShopCategory,
+  SupportCategory,
   WorkoutTemplate,
 } from './models';
 
@@ -165,9 +166,11 @@ export type RootStackParamList = {
   /**
    * The address book. `select` opens it from a checkout: tapping an address
    * makes it the default and returns, which is how the checkout learns of
-   * the choice without state riding back through the route.
+   * the choice without state riding back through the route. With `orderId`
+   * it is one order already placed being moved instead, which leaves the
+   * default alone (RULES R5).
    */
-  Addresses: { select?: boolean } | undefined;
+  Addresses: { select?: boolean; orderId?: string } | undefined;
   /** `id` edits; without it, a new address. */
   AddressForm: { id?: string } | undefined;
   /**
@@ -235,8 +238,24 @@ export type RootStackParamList = {
   Security: undefined;
   /** The data choices, plus the export and the account deletion. */
   Privacy: undefined;
-  /** The help centre and the member's own tickets. */
+  /** The help centre's front page: its rows, its search, the way to a human. */
   HelpSupport: undefined;
+  /**
+   * One shelf of help articles. The title and the subtitle are the row's
+   * own, so the page is headed by what the member tapped; `category` is
+   * null for the shelf that holds everything (RULES P12).
+   */
+  HelpTopic: {
+    title: string;
+    subtitle?: string;
+    category: SupportCategory | null;
+  };
+  /** Every way of reaching support, and when there is somebody there. */
+  ContactUs: undefined;
+  /** The form that opens a ticket; `category` starts it on the right topic. */
+  ReportIssue: { category?: SupportCategory } | undefined;
+  /** How to use VOKVE, chapter by chapter. */
+  AppGuide: undefined;
   SupportTicket: { id: string };
   /** Version, update state, release notes and the legal links. */
   About: undefined;

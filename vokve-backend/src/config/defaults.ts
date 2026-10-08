@@ -209,6 +209,20 @@ export const CONFIG_DEFAULTS = {
     /** The line under the shipping page's delivery preferences. Null hides it. */
     deliveryNotice: 'Delivery partners may call you for verification if needed.' as string | null,
     /**
+     * How long after delivery an order may be sent back, and the line the
+     * order page promises it in (RULES R5). Zero days, or a null note,
+     * hides the returns row rather than promising nothing in words.
+     */
+    returnWindowDays: 7,
+    returnsNote: 'Easy returns within 7 days (as per policy).' as string | null,
+    /**
+     * Where the courier shows a parcel live. `{ref}` is replaced with the
+     * order's tracking reference, and null — or an order with no reference
+     * yet — leaves the app with nothing to open, which is why "Track Live"
+     * is drawn from this rather than guessed at.
+     */
+    trackingUrlTemplate: 'https://track.vokve.app/{ref}' as string | null,
+    /**
      * Offers "Notify me on WhatsApp" on the shipping page (RULES R17) —
      * and only where WhatsApp can be delivered: outside production the
      * messages are logged; in production it waits for a provider in
@@ -451,6 +465,37 @@ export const CONFIG_DEFAULTS = {
       licenses: 'https://vokve.app/licenses',
       website: 'https://vokve.app',
     },
+    /** E.164. Null drops that way of reaching support from the page. */
+    phone: '+918000000000' as string | null,
+    /** The WhatsApp number, E.164; null until a business account exists. */
+    whatsapp: null as string | null,
+    /** When support is at their desks; null when the line is always open. */
+    hours: 'Mon–Sat, 9 am – 7 pm IST' as string | null,
+    /**
+     * What the help page promises about answering. A commitment, so it is
+     * the server's to word and to change — never the app's.
+     */
+    responseTime: 'We usually reply within 24 hours.',
+    chatTitle: 'Chat with our Support Team',
+    chatLead: 'Still need help?',
+    /**
+     * The rows of the help centre, in the order it lists them (RULES P12).
+     * `kind` says what a row opens — a shelf of articles (`faq`, narrowed
+     * by `category`), the ways to reach us (`contact`), the form that opens
+     * a ticket (`report`), or the step-by-step guide (`guide`). The icon
+     * and the tint are names the app can draw; anything else is refused at
+     * load, because an unknown glyph is a blank tile on a member's screen.
+     */
+    topics: [
+      { id: 'faq', title: 'Frequently Asked Questions', subtitle: 'Find quick answers to common questions', kind: 'faq', category: null, icon: 'question', tint: 'destructive' },
+      { id: 'contact', title: 'Contact Us', subtitle: 'Get in touch with our support team', kind: 'contact', category: null, icon: 'mail', tint: 'primary' },
+      { id: 'report', title: 'Report an Issue', subtitle: 'Facing a problem? Let us know', kind: 'report', category: null, icon: 'alert', tint: 'success' },
+      { id: 'orders', title: 'Orders & Shipping', subtitle: 'Track orders, returns and replacements', kind: 'faq', category: 'orders', icon: 'package', tint: 'brandAccent' },
+      { id: 'coins', title: 'Coins & Rewards', subtitle: 'Learn about earning, redemption and expiry', kind: 'faq', category: 'coins', icon: 'coins', tint: 'gold' },
+      { id: 'account', title: 'Account & Login', subtitle: 'Manage your account, login issues', kind: 'faq', category: 'account', icon: 'user', tint: 'destructive' },
+      { id: 'privacy', title: 'Privacy & Security', subtitle: 'Your data and account safety', kind: 'faq', category: 'privacy', icon: 'shield', tint: 'purple' },
+      { id: 'guide', title: 'App Guide', subtitle: 'How to use VOKVE (step by step)', kind: 'guide', category: null, icon: 'guide', tint: 'success' },
+    ] as { id: string; title: string; subtitle: string; kind: string; category: string | null; icon: string; tint: string }[],
   },
   locale: { country: 'IN', timezone: 'Asia/Kolkata' },
 };

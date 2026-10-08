@@ -10,19 +10,25 @@ import {
   accountDeletionSchema,
   accountSessionSchema,
   appAboutSchema,
+  appGuideSchema,
   privacySettingsSchema,
   profileSummarySchema,
+  supportCategorySchema,
   supportFaqSchema,
+  supportHomeSchema,
   supportTicketSchema,
+  supportTopicSchema,
   type AccountDeletion,
   type AccountSession,
   type AppAbout,
+  type AppGuide,
   type PrivacySettings,
   type ProfileBadge,
   type ProfileGap,
   type ProfileSummary,
   type SupportCategory,
   type SupportFaq,
+  type SupportHome,
   type SupportTicket,
   type User,
 } from '../../contracts/index.js';
@@ -51,7 +57,7 @@ import { FoodEntryModel, FoodItemModel, NutritionProfileModel } from '../nutriti
 import { VitalReadingModel } from '../vitals/models.js';
 import { streakFigures } from '../streak/service.js';
 import { WorkoutModel } from '../training/models.js';
-import { AccountPrivacyModel, MediaModel, SupportFaqModel, SupportTicketModel } from './models.js';
+import { AccountPrivacyModel, MediaModel, SupportFaqModel, SupportGuideSectionModel, SupportTicketModel } from './models.js';
 import { toUser } from '../identity/serialize.js';
 
 // ─── Level and tiers (RULES P4) ────────────────────────────────────────────
@@ -697,6 +703,84 @@ function faqFilter(q: string | undefined, category: SupportCategory | undefined)
   return filter;
 }
 
+/**
+ * The help centre's front page (RULES P12): the rows, how to reach a human,
+ * and what we promise about answering.
+ *
+ * A `faq` row carries the number of articles behind it and is dropped when
+ * that is zero — a page of doors onto empty shelves is worse than a shorter
+ * page. The promise and the ways to reach us are ⚙, so support can change
+ * either without an app release.
+ */
+export async function supportHome(userId: string): Promise<SupportHome> {
+  const config = await getConfig();
+  const cfg = config.support;
+
+  // One grouped count for every shelf, rather than a query per row.
+  const counts = new Map<string, number>();
+  const grouped = await SupportFaqModel.aggregate<{ _id: string; count: number }>([
+    { $match: { active: true } },
+    { $group: { _id: '$category', count: { $sum: 1 } } },
+  ]);
+  let total = 0;
+  for (const row of grouped) {
+    counts.set(row._id, row.count);
+    total += row.count;
+  }
+
+  const hasGuide = (await SupportGuideSectionModel.countDocuments({ active: true })) > 0;
+  const topics = cfg.topics.flatMap(topic => {
+    if (topic.kind === 'guide' && !hasGuide) return [];
+    const count = topic.kind === 'faq' ? (topic.category ? counts.get(topic.category) ?? 0 : total) : null;
+    if (count === 0) return [];
+    return [supportTopicSchema.parse({ ...topic, count })];
+  });
+
+  // The conversation already going, if there is one: "Chat Now" carries it
+  // on rather than opening a second ticket about the same thing.
+  const open = await SupportTicketModel.findOne(
+    { userId, status: { $in: ['open', 'in_progress'] } },
+    { _id: 1 },
+  ).sort({ updatedAt: -1 }).lean();
+
+  const channels = [
+    { kind: 'email' as const, label: 'Email us', value: cfg.email, url: `mailto:${cfg.email}`, note: cfg.responseTime },
+    ...(cfg.phone ? [{ kind: 'phone' as const, label: 'Call us', value: cfg.phone, url: `tel:${cfg.phone}`, note: cfg.hours }] : []),
+    ...(cfg.whatsapp
+      ? [{ kind: 'whatsapp' as const, label: 'WhatsApp', value: cfg.whatsapp, url: `https://wa.me/${cfg.whatsapp.replace(/[^0-9]/g, '')}`, note: cfg.hours }]
+      : []),
+  ];
+
+  return supportHomeSchema.parse({
+    topics,
+    chat: {
+      title: cfg.chatTitle,
+      subtitle: cfg.chatLead,
+      responseTime: cfg.responseTime,
+      openTicketId: open?._id ?? null,
+    },
+    channels,
+    hours: cfg.hours,
+  });
+}
+
+/** The step-by-step guide, in the order it is meant to be read. */
+export async function appGuide(): Promise<AppGuide> {
+  const rows = await SupportGuideSectionModel.find({ active: true }).sort({ sort: 1, _id: 1 }).lean();
+  return appGuideSchema.parse({
+    title: 'App Guide',
+    subtitle: 'How to use VOKVE, step by step',
+    sections: rows.map(row => ({
+      id: row._id,
+      title: row.title,
+      summary: row.summary,
+      icon: row.icon,
+      tint: row.tint,
+      steps: row.steps.map(step => ({ title: step.title, body: step.body })),
+    })),
+  });
+}
+
 export async function listFaqs(q?: string, category?: SupportCategory): Promise<SupportFaq[]> {
   const rows = await SupportFaqModel.find(faqFilter(q, category)).sort({ sort: 1, _id: 1 }).limit(100).lean();
   return rows.map(row => supportFaqSchema.parse({ id: row._id, category: row.category, question: row.question, answer: row.answer }));
@@ -704,7 +788,7 @@ export async function listFaqs(q?: string, category?: SupportCategory): Promise<
 
 export const ticketBody = z.object({
   subject: z.string().trim().min(4, 'Say what it is about').max(120),
-  category: z.enum(['account', 'coins', 'orders', 'tracking', 'payments', 'other']),
+  category: supportCategorySchema,
   message: z.string().trim().min(20, 'Tell us a little more — at least 20 characters').max(2000),
 }).strict();
 

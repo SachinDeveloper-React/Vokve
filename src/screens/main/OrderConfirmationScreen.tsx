@@ -277,10 +277,13 @@ export const OrderConfirmationScreen = () => {
                       color: item.color,
                       lineTotal: item.price * item.quantity,
                       lineCoins: item.coinPrice * item.quantity,
+                      coinsUsed: item.coinsUsed,
+                      moneyPaid: item.moneyPaid,
                       inStock: true,
                     }}
                     currency={order.currency}
                     inCoins={order.inCoins !== null}
+                    showSplit
                   />
                 </React.Fragment>
               ))}

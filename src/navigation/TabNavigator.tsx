@@ -19,6 +19,7 @@ import { NativeTabNavigator } from './NativeTabNavigator';
  */
 export function pickTabNavigator(os: typeof Platform.OS) {
   return os === 'ios' ? NativeTabNavigator : JsTabNavigator;
+  // return NativeTabNavigator;
 }
 
 export const TabNavigator = pickTabNavigator(Platform.OS);

@@ -226,8 +226,14 @@ describe('commerce: wishlist and cart (RULES R14)', () => {
     // Three tees and a cap: ₹2,397 + ₹449 = ₹2,846 of goods, over the free-shipping line; 30% is 3,415 coins, the wallet holds 2,000.
     expect(cart.body.quote).toMatchObject({
       subtotal: 79900 * 3 + 44900, mrpTotal: 119900 * 3 + 59900, discount: 40000 * 3 + 15000, shipping: 0,
-      total: 284600, coinsMax: 2000, coinsApplied: 2000, coinsValue: 50000, payable: 234600, needsStepUp: true,
+      total: 284600, coinsMax: 2000, coinsApplied: 2000, coinsValue: 50000, payable: 234600,
     });
+    // The 2,000 coins the wallet holds are spread across the three lines,
+    // and what is left of each line's goods is money: the parts add back
+    // up to the basket (RULES R11).
+    const split = cart.body.quote.lines.map((l: { coinsUsed: number; coinsValue: number; moneyPaid: number }) => l);
+    expect(split.reduce((sum: number, l: { coinsUsed: number }) => sum + l.coinsUsed, 0)).toBe(2_000);
+    expect(split.reduce((sum: number, l: { coinsValue: number; moneyPaid: number }) => sum + l.coinsValue + l.moneyPaid, 0)).toBe(284600);
 
     const over = await request(app).put('/v1/cart/lines').set(authed(session)).send({ itemId: 'cap', quantity: 6 });
     expect(over.status).toBe(422);
@@ -253,9 +259,12 @@ describe('commerce: wishlist and cart (RULES R14)', () => {
     expect(q.status).toBe(200);
     expect(q.body).toMatchObject({
       currency: 'INR', subtotal: 44900, mrpTotal: 59900, discount: 15000, shipping: SHIPPING, total: 49800,
-      coinValuePaise: COIN, coinsMax: 538, coinsApplied: 538, coinsValue: 538 * COIN, payable: 49800 - 538 * COIN, needsStepUp: false,
+      coinValuePaise: COIN, coinsMax: 538, coinsApplied: 538, coinsValue: 538 * COIN, payable: 49800 - 538 * COIN,
     });
     expect(q.body.lines[0]).toMatchObject({ itemId: 'cap', title: 'VOKVE Cap', quantity: 1, size: null, price: 44900, lineTotal: 44900, inStock: true });
+    // One line, so the whole split is its own: 538 coins of the ₹449, the
+    // rest of the goods in money (the ₹49 delivery is the order's).
+    expect(q.body.lines[0]).toMatchObject({ coinsUsed: 538, coinsValue: 538 * COIN, moneyPaid: 44900 - 538 * COIN });
     // The art the till's item rows draw; null while the item carries no picture.
     expect(q.body.lines[0]).toHaveProperty('image', null);
 
@@ -268,9 +277,9 @@ describe('commerce: wishlist and cart (RULES R14)', () => {
     const poor = await shopper(200);
     expect((await request(app).post('/v1/checkout/quote').set(authed(poor.session)).send({ lines: [{ itemId: 'cap', quantity: 1 }] })).body.coinsMax).toBe(200);
 
-    // Over the free-shipping line nothing is charged to ship; a step-up is flagged from 1,000 coins.
+    // Over the free-shipping line nothing is charged to ship.
     const big = await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId: 'kettlebell-8', quantity: 1 }] });
-    expect(big.body).toMatchObject({ shipping: 0, coinsMax: 2000, needsStepUp: true });
+    expect(big.body).toMatchObject({ shipping: 0, coinsMax: 2000 });
 
     // The share is config: at 100% an order can be coins alone.
     await setCommerce({ coinShareMax: 1 });
@@ -394,30 +403,100 @@ describe('commerce: checkout and payment (RULES R2–R4, R11–R13, O8, T5)', ()
     expect(balances.filter(b => b === 1_000)).toHaveLength(5);
   });
 
-  it('a thousand coins or more in one order needs a step-up, which is single-use and belongs to its user', async () => {
+  it('spending coins asks for no code, however many: the member confirms the deduction in the app (D-66)', async () => {
     const { session, addressId } = await shopper(3_000);
+    // ₹1,499, mixed: 1,500 of the 1,798 coins the share allows, the rest money.
     const hoodie = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L', color: 'Navy' }], addressId, coins: 1_500 };
 
-    const noToken = await request(app).post('/v1/checkout').set(authed(session)).send(hoodie);
-    expect(noToken.status).toBe(403);
-    expect(noToken.body.error.code).toBe('STEP_UP_REQUIRED');
-    expect((await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, stepUpToken: 'nope' })).body.error.code).toBe('STEP_UP_INVALID');
-
-    const token = await stepUp(session);
-    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, stepUpToken: token });
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send(hoodie);
     expect(placed.status).toBe(200);
     expect(placed.body.balance).toBe(1_500);
-    expect(placed.body.order.items[0]).toMatchObject({ itemId: 'hoodie', size: 'L', color: 'Navy' });
+    expect(placed.body.order).toMatchObject({ status: 'pending_payment', coinsUsed: 1_500, coinsValue: 1_500 * COIN, payable: 149900 - 1_500 * COIN });
+    // A token offered anyway is simply unnecessary, not an error.
+    const token = await stepUp(session);
+    expect((await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, coins: 1_000, stepUpToken: token })).status).toBe(200);
+  });
 
-    const reused = await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, stepUpToken: token });
-    expect(reused.body.error.code).toBe('STEP_UP_INVALID');
-    const other = await shopper(3_000);
-    const theirs = await stepUp(other.session);
-    expect((await request(app).post('/v1/checkout').set(authed(session)).send({ ...hoodie, stepUpToken: theirs })).body.error.code).toBe('STEP_UP_INVALID');
+  it('records what each product took in coins and in money, so an order reads line by line (R11)', async () => {
+    const { session, addressId } = await shopper(3_000);
+    // One of each kind on one order: socks are coins-only (₹299), the cap
+    // mixed (₹449, 30% = 538 coins), the joggers money-only (₹1,099).
+    // ₹1,847 of goods ships free.
+    const lines = [{ itemId: 'socks', quantity: 1 }, { itemId: 'cap', quantity: 1 }, { itemId: 'joggers', quantity: 1, size: 'M', color: 'Black' }];
+    const q = await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines });
+    expect(q.body).toMatchObject({ paymentMode: 'mixed', shipping: 0, total: 184700, coinsApplied: 1_734, coinsValue: 1_734 * COIN, payable: 184700 - 1_734 * COIN });
 
-    // Under the threshold — or with no coins at all — no code is asked for.
-    expect((await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'shaker', quantity: 1 }], addressId, coins: 100 })).status).toBe(200);
-    expect((await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'kettlebell-8', quantity: 1 }], addressId, coins: 0 })).status).toBe(200);
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ lines, addressId, coins: 1_734 });
+    expect(placed.status).toBe(200);
+    expect(placed.body.order.items.map((i: { itemId: string; coinsUsed: number; coinsValue: number; moneyPaid: number }) =>
+      [i.itemId, i.coinsUsed, i.coinsValue, i.moneyPaid])).toEqual([
+      // The socks are bought with coins alone: ₹299 at ₹0.25 a coin.
+      ['socks', 1_196, 29900, 0],
+      // The cap takes its 30% in coins and the rest in money.
+      ['cap', 538, 13450, 44900 - 13450],
+      // The joggers take no coins at all.
+      ['joggers', 0, 0, 109900],
+    ]);
+
+    // The parts add back up to the order: coins to its coins, money to its payable.
+    const items = placed.body.order.items as { coinsUsed: number; moneyPaid: number }[];
+    expect(items.reduce((sum, i) => sum + i.coinsUsed, 0)).toBe(placed.body.order.coinsUsed);
+    expect(items.reduce((sum, i) => sum + i.moneyPaid, 0)).toBe(placed.body.order.payable);
+  });
+
+  it('a coins-only order takes the coins and is placed at once, with every line priced in coins (R11, D-66)', async () => {
+    await setCommerce({ paymentMode: 'coins' });
+    const { session, addressId } = await shopper(3_000);
+    // ₹249 shaker and ₹299 socks in coins: 996 + 1,196, delivery 196 coins.
+    const lines = [{ itemId: 'shaker', quantity: 1 }, { itemId: 'socks', quantity: 1 }];
+    const q = await request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines });
+    expect(q.body).toMatchObject({ paymentMode: 'coins', payable: 0, inCoins: { goods: 2_192, discount: 0, shipping: 196, total: 2_388 } });
+
+    const placed = await request(app).post('/v1/checkout').set(authed(session)).send({ lines, addressId, coins: 2_388 });
+    expect(placed.status).toBe(200);
+    // No money side at all: placed straight away, nothing to collect.
+    expect(placed.body).toMatchObject({ payment: null, balance: 3_000 - 2_388 });
+    expect(placed.body.order).toMatchObject({ status: 'placed', payable: 0, coinsUsed: 2_388 });
+    expect(placed.body.order.items.map((i: { itemId: string; coinsUsed: number; moneyPaid: number }) => [i.itemId, i.coinsUsed, i.moneyPaid]))
+      .toEqual([['shaker', 996, 0], ['socks', 1_196, 0]]);
+    // The lines carry the goods; the 196 delivery coins are the order's.
+    expect(placed.body.order.items.reduce((sum: number, i: { coinsUsed: number }) => sum + i.coinsUsed, 0) + placed.body.order.inCoins.shipping)
+      .toBe(placed.body.order.coinsUsed);
+    await setCommerce({});
+  });
+
+  it('the step-up retry under the same idempotency key places the order, rather than replaying the refusal (O8, D-62)', async () => {
+    // The one step-up left is the trust gate, so that is what parks an
+    // attempt now. The app keeps one key for the whole attempt, so the
+    // retry after the code is the same request with the code added.
+    await AppConfigModel.updateOne({ _id: 'trust' }, { $set: { value: { shadow: false } } }, { upsert: true });
+    invalidateConfig();
+    const { session, addressId } = await shopper(3_000);
+    await UserModel.updateOne({ _id: session.userId }, { $set: { 'trust.tier': 'watch' } });
+    const refreshed = await request(app).post('/v1/auth/refresh').set(authed(session)).send({ refreshToken: session.refreshToken });
+    const asWatch = { ...authed(session), authorization: `Bearer ${refreshed.body.accessToken}` };
+    const key = 'checkout-attempt-1';
+    const send = (body: Record<string, unknown>) =>
+      request(app).post('/v1/checkout').set(asWatch).set('Idempotency-Key', key).send(body);
+    const order = { lines: [{ itemId: 'shaker', quantity: 1 }], addressId, coins: 100 };
+
+    const refused = await send(order);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe('STEP_UP_REQUIRED');
+
+    const token = await stepUp(session);
+    const placed = await send({ ...order, stepUpToken: token });
+    expect(placed.status).toBe(200);
+
+    // And the key still does the job it is there for: a replay of the
+    // request that worked is the same order, never a second one.
+    const again = await send({ ...order, stepUpToken: token });
+    expect(again.status).toBe(200);
+    expect(again.body.order.id).toBe(placed.body.order.id);
+    expect(await OrderModel.countDocuments({ userId: session.userId })).toBe(1);
+
+    await AppConfigModel.updateOne({ _id: 'trust' }, { $set: { value: { shadow: true } } }, { upsert: true });
+    invalidateConfig();
   });
 
   it('a watch-tier user must step up for anything once trust is enforced; restricted cannot buy at all', async () => {
@@ -509,6 +588,145 @@ describe('commerce: orders, cancellation and expiry (RULES R5–R7)', () => {
     expect(expired.status).toBe(409);
     expect(expired.body.error.code).toBe('PAYMENT_EXPIRED');
     expect((await ShopInventoryModel.findById('cap').lean())!.onHand).toBe(before);
+  });
+});
+
+describe('commerce: the order page — tabs, timeline, address and buy again (RULES R5)', () => {
+  it('reads an order back with every stop it has made, the ones still ahead, and the promises the page makes', async () => {
+    const { session, addressId } = await shopper(3_000);
+    const order = await buy(session, addressId, [{ itemId: 'shaker' }], 100);
+
+    // Fresh from the till: placed, nothing else reached, and no live tracking to offer yet.
+    expect(order).toMatchObject({
+      status: 'placed',
+      headline: 'Your order is being prepared.',
+      trackingUrl: null,
+      addressChangeable: true,
+      returns: { eligible: false, windowDays: 7, until: null, note: 'Easy returns within 7 days (as per policy).' },
+    });
+    expect(order.timeline.map((stop: { status: string; done: boolean }) => [stop.status, stop.done])).toEqual([
+      ['placed', true], ['confirmed', false], ['shipped', false], ['delivered', false],
+    ]);
+    expect(order.timeline[0].at).toEqual(expect.any(String));
+    expect(order.timeline[1].at).toBeNull();
+
+    // The warehouse packs it and hands it to the courier; each stop keeps its own time.
+    const packedAt = new Date('2026-09-20T05:45:00.000Z');
+    const shippedAt = new Date('2026-09-21T13:10:00.000Z');
+    await OrderModel.updateOne({ _id: order.id }, {
+      $set: { status: 'shipped', trackingRef: 'DL 123/456' },
+      $push: { events: { $each: [{ from: 'placed', to: 'confirmed', actor: 'admin', at: packedAt }, { from: 'confirmed', to: 'shipped', actor: 'admin', at: shippedAt }] } },
+    });
+
+    const shipped = await request(app).get(`/v1/orders/${order.id}`).set(authed(session));
+    expect(shipped.body).toMatchObject({
+      status: 'shipped',
+      headline: 'Your order is on the way!',
+      // The reference is escaped into the ⚙ template, never pasted raw.
+      trackingUrl: 'https://track.vokve.app/DL%20123%2F456',
+      addressChangeable: false,
+      cancellable: false,
+    });
+    expect(shipped.body.timeline.map((stop: { title: string; at: string | null }) => [stop.title, stop.at])).toEqual([
+      ['Order Placed', expect.any(String)],
+      ['Packed', packedAt.toISOString()],
+      ['Shipped', shippedAt.toISOString()],
+      ['Delivered', null],
+    ]);
+
+    // Delivered today, the returns window is open and dated; a window that has run out closes it.
+    await OrderModel.updateOne({ _id: order.id }, { $set: { status: 'delivered' }, $push: { events: { from: 'shipped', to: 'delivered', actor: 'admin', at: new Date() } } });
+    const delivered = (await request(app).get(`/v1/orders/${order.id}`).set(authed(session))).body;
+    expect(delivered.returns).toMatchObject({ eligible: true, until: expect.any(String) });
+    expect(delivered.headline).toBe('Your order has been delivered.');
+
+    await setCommerce({ returnWindowDays: 0 });
+    expect((await request(app).get(`/v1/orders/${order.id}`).set(authed(session))).body.returns).toBeNull();
+    await setCommerce({});
+  });
+
+  it('a cancelled order ends on the timeline rather than showing stops it will never make', async () => {
+    const { session, addressId } = await shopper(3_000);
+    const order = await buy(session, addressId, [{ itemId: 'shaker' }], 100);
+    const cancelled = (await request(app).post(`/v1/orders/${order.id}/cancel`).set(authed(session))).body.order;
+
+    expect(cancelled.headline).toBe('Your order was cancelled.');
+    expect(cancelled.timeline.map((stop: { status: string; done: boolean }) => [stop.status, stop.done])).toEqual([
+      ['placed', true], ['cancelled', true],
+    ]);
+    expect(cancelled.returns.eligible).toBe(false);
+  });
+
+  it('each tab of the list holds the states a member would look for there', async () => {
+    const { session, addressId } = await shopper(5_000);
+    const [a, b, c] = [
+      await buy(session, addressId, [{ itemId: 'shaker' }], 100),
+      await buy(session, addressId, [{ itemId: 'shaker' }], 100),
+      await buy(session, addressId, [{ itemId: 'shaker' }], 100),
+    ];
+    await OrderModel.updateOne({ _id: b.id }, { $set: { status: 'shipped' } });
+    await OrderModel.updateOne({ _id: c.id }, { $set: { status: 'delivered' } });
+
+    const tab = async (status: string) =>
+      (await request(app).get('/v1/orders').query({ status }).set(authed(session))).body.data.map((o: { id: string }) => o.id);
+
+    expect(await tab('all')).toEqual([c.id, b.id, a.id]);
+    expect(await tab('processing')).toEqual([a.id]);
+    expect(await tab('shipped')).toEqual([b.id]);
+    expect(await tab('delivered')).toEqual([c.id]);
+    expect(await tab('cancelled')).toEqual([]);
+
+    await request(app).post(`/v1/orders/${a.id}/cancel`).set(authed(session));
+    expect(await tab('cancelled')).toEqual([a.id]);
+    expect(await tab('processing')).toEqual([]);
+
+    // A tab nobody ships is refused rather than quietly read as "all".
+    expect((await request(app).get('/v1/orders').query({ status: 'returned' }).set(authed(session))).status).toBe(422);
+  });
+
+  it('moves an order to another address until it is packed, taking a fresh snapshot of it', async () => {
+    const { session, addressId } = await shopper(3_000);
+    const order = await buy(session, addressId, [{ itemId: 'shaker' }], 100);
+    const second = await request(app).post('/v1/me/addresses').set(authed(session)).send({
+      ...ADDRESS, label: 'Work', name: 'Asha V', line1: '88 Residency Road', line2: '', postalCode: '560025',
+    });
+
+    const moved = await request(app).post(`/v1/orders/${order.id}/address`).set(authed(session)).send({ addressId: second.body.id });
+    expect(moved.status).toBe(200);
+    expect(moved.body.address).toMatchObject({ label: 'Work', line1: '88 Residency Road', postalCode: '560025' });
+    expect(moved.body.address).not.toHaveProperty('id');
+
+    // The snapshot outlives the row it was copied from.
+    await request(app).delete(`/v1/me/addresses/${second.body.id}`).set(authed(session));
+    expect((await request(app).get(`/v1/orders/${order.id}`).set(authed(session))).body.address.line1).toBe('88 Residency Road');
+
+    expect((await request(app).post(`/v1/orders/${order.id}/address`).set(authed(session)).send({ addressId: 'nope' })).status).toBe(404);
+
+    await OrderModel.updateOne({ _id: order.id }, { $set: { status: 'confirmed' } });
+    const late = await request(app).post(`/v1/orders/${order.id}/address`).set(authed(session)).send({ addressId: addressId });
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('ORDER_ADDRESS_LOCKED');
+  });
+
+  it('buys an order again into the basket, skipping what the catalogue no longer has', async () => {
+    const { session, addressId } = await shopper(6_000);
+    const order = await buy(session, addressId, [{ itemId: 'shaker' }, { itemId: 'cap' }], 100);
+
+    const again = await request(app).post(`/v1/orders/${order.id}/reorder`).set(authed(session)).set('Idempotency-Key', 'again-1');
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ added: 2, skipped: [] });
+    expect(again.body.cart.lines.map((l: { item: { id: string }; quantity: number }) => [l.item.id, l.quantity])).toEqual([
+      ['shaker', 1], ['cap', 1],
+    ]);
+
+    // A line the catalogue has let go is skipped with its reason; the rest still go in.
+    await request(app).delete('/v1/cart').set(authed(session));
+    await ShopItemModel.updateOne({ _id: 'cap' }, { $set: { active: false } });
+    const partial = await request(app).post(`/v1/orders/${order.id}/reorder`).set(authed(session)).set('Idempotency-Key', 'again-2');
+    expect(partial.body.added).toBe(1);
+    expect(partial.body.skipped).toEqual([{ title: 'VOKVE Cap', reason: 'One of the items is no longer available.' }]);
+    expect(partial.body.cart.lines).toHaveLength(1);
+    await ShopItemModel.updateOne({ _id: 'cap' }, { $set: { active: true } });
   });
 });
 

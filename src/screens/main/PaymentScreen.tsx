@@ -9,9 +9,10 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ChevronRight, Wallet } from 'lucide-react-native';
+import { ChevronRight, Coins, Wallet } from 'lucide-react-native';
 import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
 import { SecureRedemptionBanner } from '../../components/cart/SecureRedemptionBanner';
+import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { CheckoutCard } from '../../components/checkout/CheckoutCard';
 import { CheckoutLineRow } from '../../components/checkout/CheckoutLineRow';
 import { PaymentMethodOption } from '../../components/checkout/PaymentMethodOption';
@@ -153,6 +154,8 @@ export const PaymentScreen = () => {
   // The checkout's coupon rides along; dropped here if the till says it
   // stopped applying, so the figures shown are the ones charged.
   const [couponDropped, setCouponDropped] = useState(false);
+  /** Open while the member is being asked to confirm a coins-only order. */
+  const [isConfirmOpen, setConfirmOpen] = useState(false);
   const coupon = couponDropped ? null : couponCode ?? null;
 
   /** The till's figures at the most coins this order may take. */
@@ -355,7 +358,7 @@ export const PaymentScreen = () => {
     [fetchQuote, hydrateAddresses, navigation, toast],
   );
 
-  const onPay = useCallback(async () => {
+  const place = useCallback(async () => {
     if (!chosen) return;
     const outcome = await placeOrder({
       lines: fromCart ? undefined : lines,
@@ -378,6 +381,40 @@ export const PaymentScreen = () => {
     lines,
     placeOrder,
   ]);
+
+  /**
+   * An order the coins cover has no gateway to put itself in front of the
+   * member: nothing would open, the wallet would simply be lighter. So the
+   * app asks here, once, in plain figures — how many coins, and what is
+   * left afterwards — and the tap on the sheet is the consent.
+   *
+   * An order with money in it asks nothing: the gateway's own sheet is
+   * where that order is confirmed, and a second question before it would
+   * only be a door to open before a door.
+   */
+  const coinsOnly = coins > 0 && payable === 0;
+
+  const confirmActions = useMemo(
+    () => [
+      {
+        label: `Use ${formatCoins(coins)} coins`,
+        icon: Coins,
+        onPress: place,
+      },
+    ],
+    [coins, place],
+  );
+
+  const closeConfirm = useCallback(() => setConfirmOpen(false), []);
+
+  const onPay = useCallback(() => {
+    if (!chosen) return;
+    if (coinsOnly) {
+      setConfirmOpen(true);
+      return;
+    }
+    place();
+  }, [chosen, coinsOnly, place]);
 
   // The step-up came back with a token: finish what it interrupted.
   useEffect(() => {
@@ -592,7 +629,7 @@ export const PaymentScreen = () => {
           ) : null}
 
           <Button
-            label="Pay Now"
+            label={coinsOnly ? 'Redeem with Coins' : 'Pay Now'}
             variant="brand"
             size="lg"
             fullWidth
@@ -628,6 +665,22 @@ export const PaymentScreen = () => {
           </HStack>
         </View>
       ) : null}
+      <ActionSheet
+        visible={isConfirmOpen}
+        onClose={closeConfirm}
+        title="Confirm your coins"
+        message={
+          quote
+            ? `${formatCoins(coins)} coins will be taken from your wallet for ${
+                itemCount === 1 ? 'this item' : `these ${itemCount} items`
+              }. You will have ${formatCoins(
+                Math.max(0, Math.floor(balance) - coins),
+              )} left.`
+            : undefined
+        }
+        actions={confirmActions}
+        cancelLabel="Not now"
+      />
     </Screen>
   );
 };

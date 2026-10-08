@@ -208,6 +208,10 @@ const orderSchema = new Schema(
       color: { type: String, default: null },
       price: { type: Number, required: true, min: 1 },
       mrp: { type: Number, default: null },
+      /** What this line was paid with (RULES R11), as the till split it. */
+      coinsUsed: { type: Number, default: 0 },
+      coinsValue: { type: Number, default: 0 },
+      moneyPaid: { type: Number, default: 0 },
     }],
     addressSnapshot: { type: Schema.Types.Mixed, required: true },
     addressId: { type: String, default: null },

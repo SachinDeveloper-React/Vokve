@@ -19,6 +19,7 @@ import {
   deliveryPreferencesSchema,
   orderSchema,
   quoteSchema,
+  reorderResultSchema,
   reviewPageSchema,
   reviewSchema,
   shopCategorySchema,
@@ -31,7 +32,10 @@ import {
   type CheckoutResult,
   type DeliveryPreferences,
   type Order,
+  type OrderFilter,
+  type OrderTimelineEntry,
   type PaymentMode,
+  type ReorderResult,
   type TrackingChannel,
   type OrderStatus,
   type PurchaseLine,
@@ -160,6 +164,53 @@ function apportion(amount: number, weights: number[]): number[] {
   const given = parts.reduce((sum, part) => sum + part, 0);
   if (parts.length > 0) parts[parts.length - 1] += amount - given;
   return parts;
+}
+
+/**
+ * Hands `amount` coins out across the lines, each between its own floor and
+ * its own cap (RULES R11): every line takes its floor first, what is left
+ * is shared in proportion to the room each has above it, and a last walk
+ * settles the coin or two that rounding and the caps leave unplaced — so
+ * the parts always add back up to what the member is spending.
+ *
+ * This is what lets an order say what each product cost in coins rather
+ * than only what the basket cost altogether.
+ */
+function spreadCoins(amount: number, floors: number[], caps: number[]): number[] {
+  const given = floors.map((floor, index) => Math.min(floor, caps[index]));
+  const sum = (parts: number[]) => parts.reduce((total, part) => total + part, 0);
+  const left = amount - sum(given);
+  if (left > 0) {
+    const headroom = caps.map((cap, index) => Math.max(0, cap - given[index]));
+    const extra = apportion(Math.min(left, sum(headroom)), headroom);
+    extra.forEach((part, index) => { given[index] = Math.min(caps[index], given[index] + part); });
+  }
+  let residue = amount - sum(given);
+  for (let index = 0; index < given.length && residue !== 0; index += 1) {
+    const room = residue > 0 ? caps[index] - given[index] : given[index];
+    const step = Math.min(Math.abs(residue), Math.max(0, room));
+    given[index] += residue > 0 ? step : -step;
+    residue += residue > 0 ? -step : step;
+  }
+  return given;
+}
+
+/**
+ * What is left to pay in money on each line's goods, once its coins are
+ * counted. A coins-only line rounds its coins up, so they can be worth a
+ * few paise more than the goods; that overspill comes off what the other
+ * lines owe rather than being lost, so the lines still add up to the money
+ * the till actually charges for the goods.
+ */
+function settleMoney(goods: number[], coinsValue: number[]): number[] {
+  const settled = goods.map((amount, index) => Math.max(0, amount - coinsValue[index]));
+  let over = goods.reduce((sum, amount, index) => sum + Math.max(0, coinsValue[index] - amount), 0);
+  for (let index = 0; index < settled.length && over > 0; index += 1) {
+    const take = Math.min(settled[index], over);
+    settled[index] -= take;
+    over -= take;
+  }
+  return settled;
 }
 
 // ─── Catalogue ─────────────────────────────────────────────────────────────
@@ -339,6 +390,18 @@ function toAddress(row: AddressRow): Address {
     id: row._id, label: row.label, name: row.name, phone: row.phone, line1: row.line1, line2: row.line2,
     city: row.city, state: row.state, postalCode: row.postalCode, country: row.country, isDefault: row.isDefault,
   });
+}
+
+/**
+ * The address as an order keeps it (RULES R4): everything the courier
+ * needs and nothing the book owns — no id, no "default" — so an order
+ * outlives an edit or a deletion of the row it was copied from.
+ */
+function snapshotAddress(row: Pick<AddressRow, 'label' | 'name' | 'phone' | 'line1' | 'line2' | 'city' | 'state' | 'postalCode' | 'country'>): Omit<Address, 'id' | 'isDefault'> {
+  return {
+    label: row.label, name: row.name, phone: row.phone, line1: row.line1, line2: row.line2,
+    city: row.city, state: row.state, postalCode: row.postalCode, country: row.country,
+  };
 }
 
 /** Default first, then newest — the order the picker shows them in. */
@@ -742,13 +805,37 @@ function buildQuote(lines: PricedLine[], balance: number, coins: CoinsRequest, c
   const coinsShort = Math.max(0, floor - balance);
   const coinsApplied = coinsShort > 0 ? floor : coins === 'max' ? coinsMax : Math.max(floor, Math.min(Math.floor(coins), coinsMax));
   const coinsValue = coinsApplied * cfg.coinValuePaise;
+
+  // What each line is being paid with, at the coins this quote applies
+  // (RULES R11). In a coins-only order the coins are the price itself,
+  // less the coupon in coins — the delivery coins are the order's, not any
+  // line's. Everywhere else the coins the member spends are spread across
+  // the lines that may take them, and the rest of each line's goods is
+  // money.
+  const lineCoinsUsed = allCoins
+    ? (() => {
+        const goodsCoins = lines.map(l => coinsFor(l.item.price, cfg) * l.quantity);
+        const off = apportion(inCoins!.discount, goodsCoins);
+        return goodsCoins.map((amount, index) => amount - off[index]);
+      })()
+    : spreadCoins(
+        coinsApplied,
+        perLine.map(l => coinsFloorFor(l.goods, l.mode, cfg)),
+        perLine.map(l => coinsCapFor(l.goods, l.mode, cfg)),
+      );
+  const lineCoinsValue = lineCoinsUsed.map(used => used * cfg.coinValuePaise);
+  const lineMoney = allCoins
+    ? lines.map(() => 0)
+    : settleMoney(perLine.map(l => l.goods), lineCoinsValue);
+
   return quoteSchema.parse({
     currency: cfg.currency,
     paymentMode: perLine.length === 0 ? cfg.paymentMode : allCoins ? 'coins' : perLine.every(l => l.mode === 'money') ? 'money' : 'mixed',
-    lines: lines.map(l => ({
+    lines: lines.map((l, index) => ({
       itemId: l.item.id, title: l.item.title, emoji: l.item.emoji, image: l.item.images[0] ?? null, quantity: l.quantity, size: l.size, color: l.color,
       price: l.item.price, mrp: l.item.mrp, lineTotal: l.item.price * l.quantity,
       coinPrice: coinsFor(l.item.price, cfg), lineCoins: coinsFor(l.item.price, cfg) * l.quantity,
+      coinsUsed: lineCoinsUsed[index], coinsValue: lineCoinsValue[index], moneyPaid: lineMoney[index],
       paymentMode: modeOf(l.item, cfg), inStock: l.onHand >= l.quantity,
     })),
     mrpTotal, discount: mrpTotal - subtotal, subtotal,
@@ -758,7 +845,6 @@ function buildQuote(lines: PricedLine[], balance: number, coins: CoinsRequest, c
     paymentMethods: methodsForOrder(cfg.paymentMethods, { coinsMin: floor, coinsMax, total, coinValuePaise: cfg.coinValuePaise }),
     // A coins-only order rounds its coins up, so they can be worth a few paise more than the total.
     payable: Math.max(0, total - coinsValue),
-    needsStepUp: coinsApplied > 0 && coinsApplied >= cfg.stepUpThreshold,
     inCoins,
   });
 }
@@ -875,6 +961,50 @@ export async function removeCoupon(userId: string): Promise<Cart> {
 
 const CANCELLABLE: readonly OrderStatus[] = ['pending_payment', 'placed', 'confirmed'];
 
+/** The address may be moved until the parcel is packed and labelled (RULES R5). */
+const ADDRESS_CHANGEABLE: readonly OrderStatus[] = ['pending_payment', 'placed'];
+
+/** The stops an order makes on its way to the door, in order (RULES R5). */
+const JOURNEY: readonly OrderStatus[] = ['placed', 'confirmed', 'shipped', 'delivered'];
+
+/** What each state is called on the timeline — the member's word for it. */
+const STOP_TITLE: Record<OrderStatus, string> = {
+  pending_payment: 'Awaiting Payment',
+  placed: 'Order Placed',
+  confirmed: 'Packed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  refunded: 'Refunded',
+};
+
+/** The one line the order page leads with, for every state it can be in. */
+const HEADLINE: Record<OrderStatus, string> = {
+  pending_payment: 'Your order is held, waiting for payment.',
+  placed: 'Your order is being prepared.',
+  confirmed: 'Your order is packed and ready to ship.',
+  shipped: 'Your order is on the way!',
+  delivered: 'Your order has been delivered.',
+  cancelled: 'Your order was cancelled.',
+  refunded: 'Your order was refunded.',
+};
+
+/**
+ * Which states each tab of the orders list holds. A grouping, not a state:
+ * an order being paid for, placed or packed is all "processing" to the
+ * member waiting for it, and a refund is where they look for an order that
+ * never arrived.
+ */
+const FILTER_STATUSES: Record<OrderFilter, readonly OrderStatus[] | null> = {
+  all: null,
+  processing: ['pending_payment', 'placed', 'confirmed'],
+  shipped: ['shipped'],
+  delivered: ['delivered'],
+  cancelled: ['cancelled', 'refunded'],
+};
+
+type OrderEventRow = { from: string | null; to: string; actor: string; at: Date };
+
 type OrderRow = {
   _id: string; number: string; userId: string; status: string;
   estimatedDelivery?: { from: Date; to: Date } | null; currency: string; subtotal: number; discount: number; shipping: number; total: number;
@@ -883,13 +1013,75 @@ type OrderRow = {
   placedAt: Date; updatedAt?: Date; trackingRef: string | null;
   items: { itemId: string; title: string; emoji: string; quantity: number; size: string | null; color?: string | null; price: number; mrp: number | null }[];
   addressSnapshot: Omit<Address, 'id' | 'isDefault'>;
-  events?: { at: Date }[];
+  addressId?: string | null;
+  events?: OrderEventRow[];
   coupon?: { code: string; title: string; discount: number } | null;
   inCoins?: Quote['inCoins'];
   delivery?: DeliveryPreferences | null;
 };
 
-function toOrder(row: OrderRow): Order {
+/** When the order first reached each state, from the events it kept (RULES R5). */
+function reachedAt(row: OrderRow): Map<string, Date> {
+  const first = new Map<string, Date>();
+  for (const event of row.events ?? []) {
+    if (!first.has(event.to)) first.set(event.to, event.at);
+  }
+  // An order the coins covered is born `placed`; the oldest orders were
+  // born before events were kept at all. Either way it was placed when it
+  // says it was placed.
+  if (!first.has('placed') && row.status !== 'pending_payment') first.set('placed', row.placedAt);
+  return first;
+}
+
+/**
+ * Every stop this order has made, and the ones still ahead. The app draws
+ * the list it is given rather than deciding what comes next, so an order
+ * that stepped off the path — cancelled, refunded — ends there instead of
+ * showing three stops it will never make.
+ */
+function timelineOf(row: OrderRow, first: Map<string, Date>): OrderTimelineEntry[] {
+  const status = row.status as OrderStatus;
+  const reached = JOURNEY.indexOf(status);
+  const stops = JOURNEY.map((stop, index) => ({
+    status: stop,
+    title: STOP_TITLE[stop],
+    at: first.get(stop)?.toISOString() ?? null,
+    done: index <= reached,
+  }));
+  if (status === 'cancelled' || status === 'refunded') {
+    const ended = first.get(status) ?? row.updatedAt ?? row.placedAt;
+    return [
+      ...stops.filter(stop => stop.at !== null).map(stop => ({ ...stop, done: true })),
+      { status, title: STOP_TITLE[status], at: ended.toISOString(), done: true },
+    ];
+  }
+  if (status === 'pending_payment') {
+    return [{ status, title: STOP_TITLE[status], at: row.placedAt.toISOString(), done: true }, ...stops];
+  }
+  return stops;
+}
+
+/** What the member may still send back, and until when (⚙ `commerce.returnWindowDays`). */
+function returnsOf(row: OrderRow, first: Map<string, Date>, cfg: CommerceConfig): Order['returns'] {
+  if (cfg.returnWindowDays <= 0 || !cfg.returnsNote) return null;
+  const deliveredAt = first.get('delivered') ?? null;
+  const until = deliveredAt ? new Date(deliveredAt.getTime() + cfg.returnWindowDays * 86_400_000) : null;
+  return {
+    eligible: row.status === 'delivered' && until !== null && until.getTime() > Date.now(),
+    windowDays: cfg.returnWindowDays,
+    until: until?.toISOString() ?? null,
+    note: cfg.returnsNote,
+  };
+}
+
+/** The courier's live page for this parcel; null until there is a reference to open it with. */
+function trackingUrlOf(row: OrderRow, cfg: CommerceConfig): string | null {
+  if (!cfg.trackingUrlTemplate || !row.trackingRef) return null;
+  return cfg.trackingUrlTemplate.replace('{ref}', encodeURIComponent(row.trackingRef));
+}
+
+function toOrder(row: OrderRow, cfg: CommerceConfig): Order {
+  const first = reachedAt(row);
   const lastEvent = row.events?.[row.events.length - 1]?.at ?? row.placedAt;
   return orderSchema.parse({
     id: row._id, number: row.number, status: row.status, items: row.items, currency: row.currency,
@@ -907,27 +1099,99 @@ function toOrder(row: OrderRow): Order {
       : null,
     trackingChannels: trackingChannelsFor((row.delivery as DeliveryPreferences | null) ?? null),
     placedAt: row.placedAt.toISOString(), updatedAt: lastEvent.toISOString(), trackingRef: row.trackingRef,
+    trackingUrl: trackingUrlOf(row, cfg),
+    timeline: timelineOf(row, first),
+    headline: HEADLINE[row.status as OrderStatus],
+    returns: returnsOf(row, first, cfg),
+    addressChangeable: ADDRESS_CHANGEABLE.includes(row.status as OrderStatus),
     cancellable: CANCELLABLE.includes(row.status as OrderStatus),
   });
 }
 
-export async function listOrders(userId: string, cursor: string | undefined, limit = 20) {
-  const filter: Record<string, unknown> = { userId };
-  if (cursor) filter._id = { $lt: cursor }; // uuid v7 ids sort by time
-  const rows = await OrderModel.find(filter).sort({ _id: -1 }).limit(limit + 1).lean();
+/**
+ * One page of the member's orders, newest first, through one tab of the
+ * list. The tab is a filter on the query rather than something the app
+ * sifts out of a page it already has: a member on "Cancelled" would
+ * otherwise scroll through months of delivered orders to find two.
+ */
+export async function listOrders(userId: string, cursor: string | undefined, limit = 20, filter: OrderFilter = 'all') {
+  const statuses = FILTER_STATUSES[filter];
+  const query: Record<string, unknown> = { userId };
+  if (statuses) query.status = { $in: statuses };
+  if (cursor) query._id = { $lt: cursor }; // uuid v7 ids sort by time
+  const [cfg, rows] = await Promise.all([
+    commerceConfig(),
+    OrderModel.find(query).sort({ _id: -1 }).limit(limit + 1).lean(),
+  ]);
   const page = rows.slice(0, limit);
-  return { data: page.map(r => toOrder(r as unknown as OrderRow)), nextCursor: rows.length > limit ? page[page.length - 1]._id : null };
+  return { data: page.map(r => toOrder(r as unknown as OrderRow, cfg)), nextCursor: rows.length > limit ? page[page.length - 1]._id : null };
 }
 
 export async function getOrder(userId: string, id: string): Promise<Order> {
-  const row = await OrderModel.findOne({ _id: id, userId }).lean();
+  const [cfg, row] = await Promise.all([commerceConfig(), OrderModel.findOne({ _id: id, userId }).lean()]);
   if (!row) throw Errors.notFound('That order');
-  return toOrder(row as unknown as OrderRow);
+  return toOrder(row as unknown as OrderRow, cfg);
 }
 
 /** How many orders the shop's header counts (RULES R7) — an unpaid one is not yet an order. */
 export async function countOrders(userId: string): Promise<number> {
   return OrderModel.countDocuments({ userId, status: { $ne: 'pending_payment' } });
+}
+
+/**
+ * Sends an order to another of the member's addresses, while that is still
+ * true (RULES R5): once it is packed the label is printed, and changing it
+ * here would promise a door the parcel is not going to.
+ *
+ * The order takes a fresh snapshot, as it did at checkout — the address
+ * book may be edited or the row deleted afterwards and the order must
+ * still say where it went.
+ */
+export async function changeOrderAddress(userId: string, id: string, addressId: string): Promise<Order> {
+  const cfg = await commerceConfig();
+  const order = await OrderModel.findOne({ _id: id, userId });
+  if (!order) throw Errors.notFound('That order');
+  if (!ADDRESS_CHANGEABLE.includes(order.status as OrderStatus)) {
+    throw new ApiError(409, 'ORDER_ADDRESS_LOCKED', `An order that is ${order.status} is already on its way — contact support to change where it goes.`, { status: order.status });
+  }
+  const address = await AddressModel.findOne({ _id: addressId, userId, deletedAt: null }).lean();
+  if (!address) throw Errors.notFound('That address');
+  order.set('addressId', addressId);
+  order.set('addressSnapshot', snapshotAddress(address as unknown as AddressRow));
+  await order.save();
+  return toOrder(order.toObject() as unknown as OrderRow, cfg);
+}
+
+/**
+ * Puts an order's lines back in the basket (the list's "Buy Again").
+ *
+ * Each line is priced again as the catalogue stands now rather than as the
+ * order remembers it, so a price rise or a size that is gone is answered
+ * here and not at the till. A line that cannot go back is skipped with its
+ * reason instead of refusing the lot: an order of three things where one
+ * is delisted still puts two in the basket.
+ */
+export async function reorder(userId: string, id: string): Promise<ReorderResult> {
+  const cfg = await commerceConfig();
+  const row = (await OrderModel.findOne({ _id: id, userId }).lean()) as unknown as OrderRow | null;
+  if (!row) throw Errors.notFound('That order');
+  const doc = (await CartModel.findById(userId).lean()) as CartRow | null;
+  const lines = [...(doc?.lines ?? [])];
+  const skipped: { title: string; reason: string }[] = [];
+  let added = 0;
+  for (const item of row.items) {
+    try {
+      const [priced] = await priceLines([{ itemId: item.itemId, quantity: item.quantity, size: item.size, color: item.color ?? null }], cfg);
+      const index = lines.findIndex(l => l.itemId === priced.item.id && (l.size ?? null) === priced.size && (l.color ?? null) === priced.color);
+      if (index >= 0) lines[index] = { ...lines[index], quantity: priced.quantity };
+      else lines.push({ itemId: priced.item.id, quantity: priced.quantity, size: priced.size, color: priced.color, addedAt: new Date() });
+      added += 1;
+    } catch (err) {
+      skipped.push({ title: item.title, reason: err instanceof ApiError ? err.message : 'That item is no longer available.' });
+    }
+  }
+  if (added > 0) await CartModel.updateOne({ _id: userId }, { $set: { lines } }, { upsert: true });
+  return reorderResultSchema.parse({ cart: await getCart(userId), added, skipped });
 }
 
 // ─── Checkout ──────────────────────────────────────────────────────────────
@@ -1127,14 +1391,20 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
 
   const paymentMethod = resolveMethod(input.paymentMethod, q, cfg);
 
-  const needsStepUp = q.needsStepUp || (!config.trust.shadow && STEP_UP_TIERS.has(tier));
-  if (needsStepUp) await consumeStepUp(input.userId, input.stepUpToken, cfg.stepUpThreshold);
+  // Spending coins no longer asks for a code (D-66): coins are the shop's
+  // own currency, the app confirms the deduction with the member before it
+  // sends anything, and an OTP on every reward only taught members to
+  // expect one. The step-up that is left is the trust gate — an account
+  // under watch, once enforcement is out of shadow mode (RULES O8, T5).
+  if (!config.trust.shadow && STEP_UP_TIERS.has(tier)) {
+    await consumeStepUp(input.userId, input.stepUpToken, cfg.stepUpThreshold);
+  }
 
   const orderId = newId('ord');
   const now = new Date();
   const number = await nextOrderNumber(now);
   const window = deliveryWindowFrom(now, cfg);
-  const snapshot = { label: address.label, name: address.name, phone: address.phone, line1: address.line1, line2: address.line2, city: address.city, state: address.state, postalCode: address.postalCode, country: address.country };
+  const snapshot = snapshotAddress(address);
   const coinsMc = toMilli(q.coinsApplied);
   const pending = q.payable > 0;
   const status: OrderStatus = pending ? 'pending_payment' : 'placed';
@@ -1211,9 +1481,13 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
         provider: pending ? paymentProvider() : null, method: paymentMethod, status: pending ? 'pending' : 'not_required', amount: q.payable, currency: q.currency,
         providerOrderId: null, providerPaymentId: null, paidAt: null, expiresAt,
       },
-      items: priced.map(l => ({
+      // The quote's lines are these lines, in this order, so each item
+      // keeps the split it was charged at (RULES R11) rather than leaving
+      // support to divide a total between three products later.
+      items: priced.map((l, index) => ({
         itemId: l.item.id, title: l.item.title, emoji: l.item.emoji, image: l.item.images[0] ?? null, coinPrice: coinsFor(l.item.price, cfg),
         quantity: l.quantity, size: l.size, color: l.color, price: l.item.price, mrp: l.item.mrp,
+        coinsUsed: q.lines[index].coinsUsed, coinsValue: q.lines[index].coinsValue, moneyPaid: q.lines[index].moneyPaid,
       })),
       addressSnapshot: snapshot, addressId: address._id, placedAt: now, ledgerId,
       events: [{ from: null, to: status, actor: 'user', at: now }],
@@ -1249,7 +1523,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
     });
   }
 
-  return checkoutResultSchema.parse({ order: toOrder(result.order), balance: result.balance, payment });
+  return checkoutResultSchema.parse({ order: toOrder(result.order, cfg), balance: result.balance, payment });
 }
 
 /**
@@ -1272,10 +1546,11 @@ async function consumeStepUp(userId: string, token: string | undefined, threshol
  * itself, so a retry after a dropped connection is not a second capture.
  */
 export async function payOrder(userId: string, id: string, proof: PaymentProof): Promise<{ order: Order; balance: number }> {
+  const cfg = await commerceConfig();
   const order = await OrderModel.findOne({ _id: id, userId });
   if (!order) throw Errors.notFound('That order');
   const balance = toCoins((await CoinBalanceModel.findById(userId).lean())?.balanceMc ?? 0);
-  if (order.payment.status === 'paid') return { order: toOrder(order.toObject() as unknown as OrderRow), balance };
+  if (order.payment.status === 'paid') return { order: toOrder(order.toObject() as unknown as OrderRow, cfg), balance };
   if (order.status !== 'pending_payment') {
     throw Errors.conflict('ORDER_NOT_PENDING', `This order is ${order.status.replace('_', ' ')} and has no payment to take.`, { status: order.status });
   }
@@ -1302,7 +1577,7 @@ export async function payOrder(userId: string, id: string, proof: PaymentProof):
     message: `${first ? (order.items.length > 1 ? `${first.title} + ${order.items.length - 1} more` : first.title) : 'Your order'} is on its way to ${(order.addressSnapshot as { name: string }).name}.`,
     dedupeKey: `order-placed:${order._id}`,
   });
-  return { order: toOrder(order.toObject() as unknown as OrderRow), balance };
+  return { order: toOrder(order.toObject() as unknown as OrderRow, cfg), balance };
 }
 
 /**
@@ -1387,7 +1662,7 @@ async function releaseOrder(id: string, userId: string, actor: 'user' | 'system'
       logger.error({ orderId: id, paymentId: result.paidId }, 'commerce.refund_failed');
     }
   }
-  return { order: toOrder(result.row), balance: result.balance, already: result.already };
+  return { order: toOrder(result.row, await commerceConfig()), balance: result.balance, already: result.already };
 }
 
 /**

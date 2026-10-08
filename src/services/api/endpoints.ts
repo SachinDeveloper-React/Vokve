@@ -26,13 +26,16 @@ import {
   profileSummarySchema,
   quoteSchema,
   referralProgramSchema,
+  reorderResultSchema,
   referralSchema,
   reviewPageSchema,
   reviewSchema,
   shopCategorySummarySchema,
   shopConfigSchema,
   shopItemSchema,
+  appGuideSchema,
   supportFaqSchema,
+  supportHomeSchema,
   supportTicketSchema,
   dailyActivitySchema,
   deviceAttestationResultSchema,
@@ -450,9 +453,9 @@ const realCheckoutApi: CheckoutApi = {
 };
 
 const realOrderApi: OrderApi = {
-  list: cursor =>
+  list: (cursor, filter) =>
     request(pageSchema(orderSchema), client =>
-      client.get('/orders', { params: { cursor } }),
+      client.get('/orders', { params: { cursor, status: filter } }),
     ),
   get: id =>
     request(orderSchema, client =>
@@ -465,6 +468,16 @@ const realOrderApi: OrderApi = {
   cancel: (id, { idempotencyKey }) =>
     request(orderResultSchema, client =>
       client.post(`/orders/${encodeURIComponent(id)}/cancel`, undefined, {
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
+    ),
+  changeAddress: (id, addressId) =>
+    request(orderSchema, client =>
+      client.post(`/orders/${encodeURIComponent(id)}/address`, { addressId }),
+    ),
+  reorder: (id, { idempotencyKey }) =>
+    request(reorderResultSchema, client =>
+      client.post(`/orders/${encodeURIComponent(id)}/reorder`, undefined, {
         headers: { 'Idempotency-Key': idempotencyKey },
       }),
     ),
@@ -519,6 +532,8 @@ const realAccountApi: AccountApi = {
 };
 
 const realSupportApi: SupportApi = {
+  home: () => request(supportHomeSchema, client => client.get('/support/home')),
+  guide: () => request(appGuideSchema, client => client.get('/support/guide')),
   faqs: (query = {}) =>
     request(pageSchema(supportFaqSchema), client =>
       client.get('/support/faqs', {
@@ -929,10 +944,15 @@ export const checkoutApi: CheckoutApi = {
 };
 
 export const orderApi: OrderApi = {
-  list: cursor => pick(mockOrderApi, realOrderApi).list(cursor),
+  list: (cursor, filter) =>
+    pick(mockOrderApi, realOrderApi).list(cursor, filter),
   get: id => pick(mockOrderApi, realOrderApi).get(id),
   count: () => pick(mockOrderApi, realOrderApi).count(),
   cancel: (id, options) => pick(mockOrderApi, realOrderApi).cancel(id, options),
+  changeAddress: (id, addressId) =>
+    pick(mockOrderApi, realOrderApi).changeAddress(id, addressId),
+  reorder: (id, options) =>
+    pick(mockOrderApi, realOrderApi).reorder(id, options),
 };
 
 export const referralApi: ReferralApi = {
@@ -1052,6 +1072,8 @@ export const accountApi: AccountApi = {
 };
 
 export const supportApi: SupportApi = {
+  home: () => pick(mockSupportApi, realSupportApi).home(),
+  guide: () => pick(mockSupportApi, realSupportApi).guide(),
   faqs: query => pick(mockSupportApi, realSupportApi).faqs(query),
   tickets: () => pick(mockSupportApi, realSupportApi).tickets(),
   ticket: id => pick(mockSupportApi, realSupportApi).ticket(id),

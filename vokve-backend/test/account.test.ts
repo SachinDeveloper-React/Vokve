@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { AccountPrivacyModel, MediaModel, SupportTicketModel } from '../src/modules/account/models.js';
+import { AccountPrivacyModel, MediaModel, SupportFaqModel, SupportTicketModel } from '../src/modules/account/models.js';
+import { invalidateConfig } from '../src/config/remote.js';
 import { levelFor, purgeScheduledDeletions, tierTitleFor } from '../src/modules/account/service.js';
 import { ActivityDailyModel } from '../src/modules/activity/models.js';
 import { AddressModel, OrderModel } from '../src/modules/commerce/models.js';
@@ -354,6 +355,76 @@ describe('account: support and about', () => {
     const expiry = await request(app).get('/v1/support/faqs').query({ q: 'expire' }).set(authed(session));
     expect(expiry.body.data.map((f: { id: string }) => f.id)).toContain('faq-coins-expiry');
     expect((await request(app).get('/v1/support/faqs').query({ q: 'zzzqqq' }).set(authed(session))).body.data).toEqual([]);
+  });
+
+  it('serves the help centre\'s front page: the rows with their counts, the channels, and the promise (P12)', async () => {
+    const session = await signUpAndRegister();
+    const home = await request(app).get('/v1/support/home').set(authed(session));
+    expect(home.status).toBe(200);
+
+    // The design's eight rows, in the ⚙ order.
+    expect(home.body.topics.map((t: { id: string }) => t.id)).toEqual([
+      'faq', 'contact', 'report', 'orders', 'coins', 'account', 'privacy', 'guide',
+    ]);
+    // A shelf says how many articles are behind it; a page does not.
+    const byId = Object.fromEntries(home.body.topics.map((t: { id: string }) => [t.id, t]));
+    expect(byId.faq).toMatchObject({ kind: 'faq', category: null, icon: 'question', tint: 'destructive' });
+    expect(byId.faq.count).toBeGreaterThan(5);
+    expect(byId.coins).toMatchObject({ kind: 'faq', category: 'coins', count: 3 });
+    expect(byId.privacy).toMatchObject({ kind: 'faq', category: 'privacy', count: 3 });
+    expect(byId.contact).toMatchObject({ kind: 'contact', count: null });
+    expect(byId.guide).toMatchObject({ kind: 'guide', count: null });
+
+    // The promise is the server's, and so is the way to reach a human.
+    expect(home.body.chat).toMatchObject({
+      title: 'Chat with our Support Team',
+      responseTime: 'We usually reply within 24 hours.',
+      openTicketId: null,
+    });
+    expect(home.body.channels.map((c: { kind: string; url: string }) => [c.kind, c.url])).toEqual([
+      ['email', 'mailto:support@vokve.app'],
+      ['phone', 'tel:+918000000000'],
+    ]);
+    expect(home.body.hours).toBe('Mon–Sat, 9 am – 7 pm IST');
+
+    // A shelf nobody has written for is not offered at all.
+    await SupportFaqModel.updateMany({ category: 'privacy' }, { $set: { active: false } });
+    invalidateConfig();
+    const fewer = await request(app).get('/v1/support/home').set(authed(session));
+    expect(fewer.body.topics.map((t: { id: string }) => t.id)).not.toContain('privacy');
+    await SupportFaqModel.updateMany({ category: 'privacy' }, { $set: { active: true } });
+
+    // A conversation already going is what "Chat Now" carries on.
+    const ticket = await request(app).post('/v1/support/tickets').set(authed(session))
+      .send({ subject: 'Coins missing', category: 'coins', message: 'I walked 8,000 steps and saw no coins at all today.' });
+    expect((await request(app).get('/v1/support/home').set(authed(session))).body.chat.openTicketId).toBe(ticket.body.id);
+  });
+
+  it('serves the app guide as chapters of steps, in reading order', async () => {
+    const session = await signUpAndRegister();
+    const guide = await request(app).get('/v1/support/guide').set(authed(session));
+    expect(guide.status).toBe(200);
+    expect(guide.body.sections.map((s: { id: string }) => s.id)).toEqual([
+      'guide-start', 'guide-earn', 'guide-spend', 'guide-orders', 'guide-safe',
+    ]);
+    expect(guide.body.sections[0]).toMatchObject({
+      title: 'Getting started',
+      icon: 'guide',
+      tint: 'primary',
+    });
+    expect(guide.body.sections[0].steps[0]).toMatchObject({ title: 'Create your account' });
+    expect(guide.body.sections.every((s: { steps: unknown[] }) => s.steps.length > 0)).toBe(true);
+  });
+
+  it('privacy is a shelf of its own, and a ticket may be opened about it', async () => {
+    const session = await signUpAndRegister();
+    const privacy = await request(app).get('/v1/support/faqs').query({ category: 'privacy' }).set(authed(session));
+    expect(privacy.body.data.map((f: { id: string }) => f.id)).toContain('faq-privacy-health');
+
+    const ticket = await request(app).post('/v1/support/tickets').set(authed(session))
+      .send({ subject: 'Who sees my steps?', category: 'privacy', message: 'I want to understand who can see my health data in this app.' });
+    expect(ticket.status).toBe(201);
+    expect(ticket.body.category).toBe('privacy');
   });
 
   it('opens a ticket with the phone\'s details attached, threads a reply, and keeps it to its owner', async () => {

@@ -1,24 +1,25 @@
 import React, { memo, useCallback } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
-import { useTheme } from '../../theme';
+import { useThemedStyles, type ThemeShape } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
-import type { Order } from '../../types/models';
-import { formatMoney, formatRelativeDay } from '../../utils/format';
-import { Box } from '../layout/Box';
+import type { Order, OrderStatus } from '../../types/models';
+import { formatClockTime, formatDayMonthYear } from '../../utils/format';
+import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
+import { AppImage } from '../media/AppImage';
 import { Emoji } from '../media/Emoji';
 import { Icon } from '../media/Icon';
+import { PayAmount } from '../shop/PayAmount';
 import { AppText } from '../ui/AppText';
+import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Pressable } from '../form/Pressable';
-import { CoinAmount } from '../wallet/CoinAmount';
+import { OrderNumberRow } from './OrderNumberRow';
 import { OrderStatusPill } from './OrderStatusPill';
+import { OrderTrackerStrip } from './OrderTrackerStrip';
 
-interface Props {
-  order: Order;
-  onPress: (id: string) => void;
-}
+const ART = moderateScale(72);
 
 /** What the card calls the order: its one line, or the first with a count. */
 export function orderTitle(order: Order): string {
@@ -30,95 +31,182 @@ export function orderTitle(order: Order): string {
   return more > 0 ? `${unit} + ${more} more` : unit;
 }
 
+/** What the one button on a row does, which is whatever the order needs next. */
+export type OrderAction = 'track' | 'buy_again' | 'pay' | 'view';
+
 /**
- * One order in the list: what was bought, when, where it stands, what it cost.
- *
- * The status pill sits on the top line with the date rather than under the
- * title, because "where is it" is the question a user opens this list with,
- * and the eye lands on the first line.
+ * The action each state earns (RULES R5). A parcel in the world is worth
+ * tracking, a delivered one is worth buying again, an unpaid one is worth
+ * paying for; everything else only wants opening.
  */
-export const OrderCard = memo(({ order, onPress }: Props) => {
-  const { colors } = useTheme();
+const ACTION: Record<OrderStatus, { kind: OrderAction; label: string }> = {
+  pending_payment: { kind: 'pay', label: 'Pay Now' },
+  placed: { kind: 'view', label: 'View Details' },
+  confirmed: { kind: 'view', label: 'View Details' },
+  shipped: { kind: 'track', label: 'Track Order' },
+  delivered: { kind: 'buy_again', label: 'Buy Again' },
+  cancelled: { kind: 'buy_again', label: 'Buy Again' },
+  refunded: { kind: 'view', label: 'View Details' },
+};
+
+/** The stops are only worth drawing while the parcel is still on its way. */
+const IN_FLIGHT: readonly OrderStatus[] = [
+  'placed',
+  'confirmed',
+  'shipped',
+  'delivered',
+];
+
+interface Props {
+  order: Order;
+  onPress: (id: string) => void;
+  /** The row's button, when it is not simply "open this order". */
+  onAction?: (order: Order, action: OrderAction) => void;
+  /** That button's spinner, while the write it starts is in flight. */
+  busy?: boolean;
+}
+
+const makeStyles = ({ colors, radius }: ThemeShape) =>
+  StyleSheet.create({
+    art: {
+      width: ART,
+      height: ART,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.muted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    action: { minWidth: moderateScale(108) },
+  });
+
+/**
+ * One order in the list: its reference, when it was placed, where it
+ * stands, what is in it, what it cost, and the one thing worth doing with
+ * it next (RULES R5).
+ *
+ * The reference leads rather than the product, because this list is read
+ * with a support chat or a courier's message open beside it — "which of
+ * these is VOK2509191234" is the question — and the pill answering "where
+ * is it" sits on the same line. The stops below are drawn only while the
+ * parcel is still coming: a cancelled order with a half-lit track would
+ * read as one still on its way.
+ */
+export const OrderCard = memo(({ order, onPress, onAction, busy }: Props) => {
+  const styles = useThemedStyles(makeStyles);
   const handlePress = useCallback(() => onPress(order.id), [onPress, order.id]);
+  const action = ACTION[order.status];
+  const handleAction = useCallback(() => {
+    if (action.kind === 'view' || action.kind === 'pay' || !onAction) {
+      onPress(order.id);
+      return;
+    }
+    onAction(order, action.kind);
+  }, [action.kind, onAction, onPress, order]);
+
   const [first] = order.items;
+  const meta = [
+    first?.size ? `Size: ${first.size}` : null,
+    first?.color ? `Color: ${first.color}` : null,
+  ].filter(Boolean);
 
   return (
     <Pressable
       onPress={handlePress}
       feedback="scale"
       accessibilityRole="button"
-      accessibilityLabel={`${orderTitle(order)}, ${order.status.replace(
-        '_',
-        ' ',
-      )}, ${
-        order.payable === 0 && order.coinsUsed > 0
-          ? `${order.coinsUsed} coins`
-          : `${formatMoney(order.payable, order.currency)}${
-              order.coinsUsed > 0 ? ` and ${order.coinsUsed} coins` : ''
-            }`
+      accessibilityLabel={`Order ${order.number}, ${orderTitle(order)}, ${
+        order.status.replace('_', ' ')
       }`}
     >
-      <Card radius="xl" padding="md">
-        <HStack align="center" gap="md">
-          <Box bg="muted" radius="lg" style={styles.art}>
-            <Emoji size={moderateScale(28)} label={first?.title ?? 'Order'}>
-              {first?.emoji ?? '🎁'}
-            </Emoji>
-          </Box>
-
-          <VStack flex={1} gap="xxs">
-            <HStack align="center" justify="between" gap="sm">
-              <AppText variant="micro" color="textTertiary" numberOfLines={1}>
-                {formatRelativeDay(order.placedAt)}
-              </AppText>
+      <Card radius="xl" padding="base">
+        <VStack gap="md">
+          <HStack align="center" justify="between" gap="sm">
+            <OrderNumberRow number={order.number} />
+            <HStack align="center" gap="xs">
               <OrderStatusPill status={order.status} />
+              <Icon as={ChevronRight} size="sm" color="textTertiary" />
             </HStack>
-            <AppText variant="bodyStrong" numberOfLines={1}>
-              {orderTitle(order)}
+          </HStack>
+
+          <VStack gap="md">
+            <AppText variant="miniMicro" color="textTertiary">
+              {`${formatDayMonthYear(order.placedAt)}, ${formatClockTime(
+                order.placedAt,
+              )}`}
             </AppText>
-            {order.payable === 0 && order.coinsUsed > 0 ? (
-              // Paid in coins alone: the rupees would only say "₹0".
-              <CoinAmount
-                amount={order.coinsUsed}
-                size="md"
-                tint={colors.textSecondary}
-                withUnit
-              />
-            ) : (
-              <HStack align="center" gap="sm">
-                <AppText variant="bodyStrong">
-                  {formatMoney(order.payable, order.currency)}
+
+            <HStack align="start" gap="md">
+              <View style={styles.art}>
+                <AppImage
+                  uri={first?.image ?? null}
+                  width={ART - 2}
+                  height={ART - 2}
+                  radius="none"
+                  resizeMode="cover"
+                  accessibilityLabel={first?.title ?? 'Order'}
+                  fallback={
+                    <Emoji
+                      size={moderateScale(28)}
+                      label={first?.title ?? 'Order'}
+                    >
+                      {first?.emoji ?? '🎁'}
+                    </Emoji>
+                  }
+                />
+              </View>
+
+              <VStack flex={1} gap="xxs">
+                <AppText variant="bodyStrong" numberOfLines={2}>
+                  {orderTitle(order)}
                 </AppText>
-                {order.coinsUsed > 0 ? (
-                  <HStack align="center" gap="xxs">
-                    <AppText variant="micro" color="textTertiary">
-                      +
-                    </AppText>
-                    <CoinAmount
-                      amount={order.coinsUsed}
-                      size="sm"
-                      tint={colors.textSecondary}
-                    />
-                  </HStack>
+                {meta.length > 0 ? (
+                  <AppText variant="micro" color="textSecondary">
+                    {meta.join('  |  ')}
+                  </AppText>
                 ) : null}
-              </HStack>
-            )}
+                <AppText variant="micro" color="textSecondary">
+                  {`Qty: ${order.items.reduce(
+                    (sum, line) => sum + line.quantity,
+                    0,
+                  )}`}
+                </AppText>
+                <PayAmount
+                  quote={{
+                    coinsApplied: order.coinsUsed,
+                    payable: order.payable,
+                    currency: order.currency,
+                  }}
+                  size="md"
+                />
+              </VStack>
+
+              <View style={styles.action}>
+                <Button
+                  label={action.label}
+                  variant="brandOutline"
+                  size="sm"
+                  fullWidth
+                  loading={busy}
+                  disabled={busy}
+                  onPress={handleAction}
+                />
+              </View>
+            </HStack>
           </VStack>
 
-          <Icon as={ChevronRight} size="sm" color="textTertiary" />
-        </HStack>
+          {IN_FLIGHT.includes(order.status) ? (
+            <VStack gap="md">
+              <Divider />
+              <OrderTrackerStrip status={order.status} size="sm" />
+            </VStack>
+          ) : null}
+        </VStack>
       </Card>
     </Pressable>
   );
 });
 
 OrderCard.displayName = 'OrderCard';
-
-const styles = StyleSheet.create({
-  art: {
-    width: moderateScale(52),
-    height: moderateScale(52),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

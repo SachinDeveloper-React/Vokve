@@ -885,7 +885,7 @@ describe('the shop, orders and addresses', () => {
     );
   });
 
-  test('a thousand coins in one order asks for a step-up, and the code it issues works once', async () => {
+  test('spending coins asks for no code, and each line keeps what it was paid with (D-66, R11)', async () => {
     await signIn();
     const home = await mockAddressApi.create(ADDRESS);
     const hoodie = {
@@ -894,36 +894,44 @@ describe('the shop, orders and addresses', () => {
       coins: MOCK_STEP_UP_THRESHOLD,
     };
 
-    await expectApiError(
-      () => mockCheckoutApi.place(hoodie, { idempotencyKey: 'k' }),
-      'forbidden',
-    );
-
-    const challenge = await mockAuthApi.stepUp();
-    expect(challenge).toMatchObject({ channel: 'email', purpose: 'step_up' });
-    const verified = await mockAuthApi.verifyOtp(
-      challenge.verificationId,
-      MOCK_RULES.otp,
-    );
-    expect(verified.stepUpToken).toEqual(expect.any(String));
-
-    const placed = await mockCheckoutApi.place(
-      { ...hoodie, stepUpToken: verified.stepUpToken! },
-      { idempotencyKey: 'k' },
-    );
+    // No token, well past the old threshold: placed all the same.
+    const placed = await mockCheckoutApi.place(hoodie, { idempotencyKey: 'k' });
     expect(placed.order.coinsUsed).toBe(MOCK_STEP_UP_THRESHOLD);
-    expect(placed.order.items[0].size).toBe('L');
-
-    // The coins come back on cancel, and the same token is refused the second time.
-    await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c' });
-    await expectApiError(
-      () =>
-        mockCheckoutApi.place(
-          { ...hoodie, stepUpToken: verified.stepUpToken! },
-          { idempotencyKey: 'k2' },
-        ),
-      'forbidden',
+    expect(placed.order.items[0]).toMatchObject({
+      size: 'L',
+      coinsUsed: MOCK_STEP_UP_THRESHOLD,
+      coinsValue: MOCK_STEP_UP_THRESHOLD * 25,
+      // ₹1,499 of goods, less what the coins covered.
+      moneyPaid: 149900 - MOCK_STEP_UP_THRESHOLD * 25,
+    });
+    // The lines add back up to the order's own figures.
+    expect(placed.order.items.reduce((sum, i) => sum + i.coinsUsed, 0)).toBe(
+      placed.order.coinsUsed,
     );
+    expect(placed.order.items.reduce((sum, i) => sum + i.moneyPaid, 0)).toBe(
+      placed.order.payable,
+    );
+
+    await mockOrderApi.cancel(placed.order.id, { idempotencyKey: 'c' });
+  });
+
+  test('a coins-only line is quoted in coins alone, with the split it would be charged at (R11)', async () => {
+    await signIn();
+    // Wrist wraps are a coins-only item in the seed: ₹349 is 1,396 coins,
+    // and the delivery is in coins too.
+    const quote = await mockCheckoutApi.quote(
+      [{ itemId: 'wrist-wraps', quantity: 1, size: null, color: null }],
+      'max',
+    );
+
+    expect(quote).toMatchObject({ paymentMode: 'coins', payable: 0 });
+    expect(quote.inCoins).toMatchObject({ goods: 1_396, shipping: 196, total: 1_592 });
+    // The line carries the goods' coins; the delivery coins are the order's.
+    expect(quote.lines[0]).toMatchObject({
+      coinsUsed: 1_396,
+      coinsValue: 1_396 * 25,
+      moneyPaid: 0,
+    });
   });
 
   test('coupons: the basket takes one that fits, refuses one that does not, the order spends it and a cancel gives it back', async () => {

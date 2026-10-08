@@ -122,6 +122,9 @@ const QUOTE: Quote = {
       lineTotal: 44900,
       coinPrice: 1796,
       lineCoins: 1796,
+      coinsUsed: 538,
+      coinsValue: 13450,
+      moneyPaid: 44900 - 13450,
       paymentMode: 'mixed',
       inStock: true,
     },
@@ -140,7 +143,6 @@ const QUOTE: Quote = {
   paymentMethods: ['coins_upi', 'upi', 'card', 'netbanking'] as const,
   coinsValue: 13450,
   payable: 36350,
-  needsStepUp: false,
   inCoins: null,
 };
 

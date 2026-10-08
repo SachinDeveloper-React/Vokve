@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { paymentMethodSchema, purchaseLineSchema, shopCategorySchema, shopSortSchema } from '../../contracts/index.js';
+import { orderFilterSchema, paymentMethodSchema, purchaseLineSchema, shopCategorySchema, shopSortSchema } from '../../contracts/index.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { idempotent } from '../../middleware/idempotency.js';
@@ -10,7 +10,8 @@ import { requireVerifiedContacts } from '../../middleware/verified.js';
 import {
   addToWishlist, addressBody, cancelOrder, checkout, clearCart, countOrders, createAddress, deleteAddress, deleteReview, getCart, getItem, getOrder,
   applyCoupon, deliveryPreferencesBody, getDeliveryPreferences, listAddresses, listCategories, listItems, listOrders, listReviews, listWishlist, payOrder, quote, removeCartLine, removeCoupon,
-  removeFromWishlist, reviewBody, setCartLine, setDefaultAddress, setDeliveryPreferences, shopConfig, updateAddress, upsertReview, wishlistIds,
+  removeFromWishlist, reorder, reviewBody, setCartLine, setDefaultAddress, setDeliveryPreferences, shopConfig, updateAddress, upsertReview, wishlistIds,
+  changeOrderAddress,
 } from './service.js';
 
 export const commerceRouter = Router();
@@ -207,11 +208,13 @@ commerceRouter.post('/checkout', requireVerifiedContacts, validate('body', check
 const ordersQuery = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  /** Which tab of the list is being read; the grouping is the server's. */
+  status: orderFilterSchema.default('all'),
 });
 
 commerceRouter.get('/orders', validate('query', ordersQuery), async (req, res) => {
   const q = req.query as unknown as z.infer<typeof ordersQuery>;
-  res.json(await listOrders(req.ctx.userId!, q.cursor, q.limit));
+  res.json(await listOrders(req.ctx.userId!, q.cursor, q.limit, q.status));
 });
 
 /** The shop's header figure (RULES R7): orders, not purchase rows. */
@@ -235,6 +238,18 @@ commerceRouter.post('/orders/:id/pay', validate('body', payBody), idempotent, as
 
 commerceRouter.post('/orders/:id/cancel', idempotent, async (req, res) => {
   res.json(await cancelOrder(req.ctx.userId!, req.params.id as string, req.ctx.deviceId));
+});
+
+const orderAddressBody = z.object({ addressId: z.string().min(1).max(64) }).strict();
+
+/** Sends an order to another saved address, while it is still ours to redirect (RULES R5). */
+commerceRouter.post('/orders/:id/address', validate('body', orderAddressBody), async (req, res) => {
+  res.json(await changeOrderAddress(req.ctx.userId!, req.params.id as string, (req.body as z.infer<typeof orderAddressBody>).addressId));
+});
+
+/** "Buy Again": the order's lines back in the basket, priced as the catalogue stands now. */
+commerceRouter.post('/orders/:id/reorder', idempotent, async (req, res) => {
+  res.json(await reorder(req.ctx.userId!, req.params.id as string));
 });
 
 // ─── Addresses ─────────────────────────────────────────────────────────────

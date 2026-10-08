@@ -19,6 +19,10 @@ import { textOf } from './helpers/text';
 import { AboutScreen } from '../src/screens/main/AboutScreen';
 import { EditProfileScreen } from '../src/screens/main/EditProfileScreen';
 import { HelpSupportScreen } from '../src/screens/main/HelpSupportScreen';
+import { HelpTopicScreen } from '../src/screens/main/HelpTopicScreen';
+import { ContactUsScreen } from '../src/screens/main/ContactUsScreen';
+import { ReportIssueScreen } from '../src/screens/main/ReportIssueScreen';
+import { AppGuideScreen } from '../src/screens/main/AppGuideScreen';
 import { PrivacyScreen } from '../src/screens/main/PrivacyScreen';
 import { SecurityScreen } from '../src/screens/main/SecurityScreen';
 import { ToastProvider } from '../src/components/feedback/Toast';
@@ -31,7 +35,9 @@ import { useSettingsStore } from '../src/stores/settingsStore';
 import type {
   AccountSession,
   AppAbout,
+  AppGuide,
   SupportFaq,
+  SupportHome,
   SupportTicket,
   User,
 } from '../src/types/models';
@@ -72,6 +78,8 @@ jest.mock('../src/services/api/endpoints', () => ({
     cancelDeletion: jest.fn(),
   },
   supportApi: {
+    home: jest.fn(),
+    guide: jest.fn(),
     faqs: jest.fn(),
     tickets: jest.fn(),
     ticket: jest.fn(),
@@ -200,6 +208,46 @@ const FAQS: SupportFaq[] = [
   },
 ];
 
+/** The help centre as the server lays it out (RULES A9). */
+const SUPPORT_HOME: SupportHome = {
+  topics: [
+    { id: 'faq', title: 'Frequently Asked Questions', subtitle: 'Find quick answers to common questions', kind: 'faq', category: null, icon: 'question', tint: 'destructive', count: 2 },
+    { id: 'contact', title: 'Contact Us', subtitle: 'Get in touch with our support team', kind: 'contact', category: null, icon: 'mail', tint: 'primary', count: null },
+    { id: 'report', title: 'Report an Issue', subtitle: 'Facing a problem? Let us know', kind: 'report', category: null, icon: 'alert', tint: 'success', count: null },
+    { id: 'orders', title: 'Orders & Shipping', subtitle: 'Track orders, returns and replacements', kind: 'faq', category: 'orders', icon: 'package', tint: 'brandAccent', count: 1 },
+    { id: 'guide', title: 'App Guide', subtitle: 'How to use VOKVE (step by step)', kind: 'guide', category: null, icon: 'guide', tint: 'success', count: null },
+  ],
+  chat: {
+    title: 'Chat with our Support Team',
+    subtitle: 'Still need help?',
+    responseTime: 'We usually reply within 24 hours.',
+    openTicketId: null,
+  },
+  channels: [
+    { kind: 'email', label: 'Email us', value: 'support@vokve.app', url: 'mailto:support@vokve.app', note: 'We usually reply within 24 hours.' },
+    { kind: 'phone', label: 'Call us', value: '+918000000000', url: 'tel:+918000000000', note: 'Mon–Sat, 9 am – 7 pm IST' },
+  ],
+  hours: 'Mon–Sat, 9 am – 7 pm IST',
+};
+
+const GUIDE: AppGuide = {
+  title: 'App Guide',
+  subtitle: 'How to use VOKVE, step by step',
+  sections: [
+    {
+      id: 'guide-start',
+      title: 'Getting started',
+      summary: 'Set the app up once and it keeps count for you.',
+      icon: 'guide',
+      tint: 'primary',
+      steps: [
+        { title: 'Create your account', body: 'Sign up with your phone and email.' },
+        { title: 'Allow step tracking', body: 'VOKVE reads steps from your phone’s health service.' },
+      ],
+    },
+  ],
+};
+
 const TICKET: SupportTicket = {
   id: 'tkt-1',
   reference: 'VK-7Q2M',
@@ -278,6 +326,8 @@ beforeEach(() => {
     reason: null,
     graceDays: 14,
   });
+  supportApi.home.mockResolvedValue(SUPPORT_HOME);
+  supportApi.guide.mockResolvedValue(GUIDE);
   supportApi.faqs.mockResolvedValue(FAQS);
   supportApi.tickets.mockResolvedValue([]);
   useAuthStore.setState({
@@ -679,19 +729,64 @@ describe('PrivacyScreen', () => {
 });
 
 describe('HelpSupportScreen', () => {
-  test('searches the server as the box settles, and narrows by category', async () => {
+  test('lays the page out as the design has it: the server\'s rows, the chat card and the sign-off', async () => {
+    const tree = await render(<HelpSupportScreen />);
+    const text = allText(tree);
+
+    expect(supportApi.home).toHaveBeenCalled();
+    expect(text).toContain("We're here to help you");
+    // Every row is the server's, in the server's order.
+    expect(text).toContain('Frequently Asked Questions');
+    expect(text).toContain('Find quick answers to common questions');
+    expect(text).toContain('Contact Us');
+    expect(text).toContain('Report an Issue');
+    expect(text).toContain('Orders & Shipping');
+    expect(text).toContain('App Guide');
+    // The promise at the foot is the server's words, never ours.
+    expect(text).toContain('Chat with our Support Team');
+    expect(text).toContain('We usually reply within 24 hours.');
+    expect(text).toContain('Move More. Live Better.');
+    // The rows are the page until something is searched for.
+    expect(text).not.toContain('Do my coins expire?');
+  });
+
+  test('each row opens what its kind says, and the shelf rows carry their category', async () => {
+    const tree = await render(<HelpSupportScreen />);
+
+    await press(tree, 'Contact Us. Get in touch with our support team');
+    expect(mockNavigate).toHaveBeenCalledWith('ContactUs');
+
+    await press(tree, 'Report an Issue. Facing a problem? Let us know');
+    expect(mockNavigate).toHaveBeenCalledWith('ReportIssue', {});
+
+    await press(tree, 'App Guide. How to use VOKVE (step by step)');
+    expect(mockNavigate).toHaveBeenCalledWith('AppGuide');
+
+    await press(tree, 'Orders & Shipping. Track orders, returns and replacements');
+    expect(mockNavigate).toHaveBeenCalledWith('HelpTopic', {
+      title: 'Orders & Shipping',
+      subtitle: 'Track orders, returns and replacements',
+      category: 'orders',
+    });
+
+    // The shelf that holds everything sends no category at all.
+    await press(tree, 'Frequently Asked Questions. Find quick answers to common questions');
+    expect(mockNavigate).toHaveBeenLastCalledWith('HelpTopic', {
+      title: 'Frequently Asked Questions',
+      subtitle: 'Find quick answers to common questions',
+      category: null,
+    });
+  });
+
+  test('searching takes the page over and asks the server a beat behind the typing', async () => {
     jest.useFakeTimers();
     const tree = await render(<HelpSupportScreen />);
-    expect(supportApi.faqs).toHaveBeenCalledWith({
-      q: undefined,
-      category: undefined,
-    });
-    expect(allText(tree)).toContain('Do my coins expire?');
+    expect(supportApi.faqs).not.toHaveBeenCalled();
 
     const field = tree.root
       .findAll(
         n =>
-          n.props?.accessibilityLabel === 'Search help' &&
+          n.props?.accessibilityLabel === 'Search for help' &&
           typeof n.props.onChangeText === 'function',
       )
       .at(-1);
@@ -701,26 +796,96 @@ describe('HelpSupportScreen', () => {
     await ReactTestRenderer.act(async () => {
       jest.advanceTimersByTime(400);
     });
-    await settle();
-    expect(supportApi.faqs).toHaveBeenLastCalledWith({
-      q: 'expire',
-      category: undefined,
-    });
-
     jest.useRealTimers();
-    await press(tree, 'Orders');
-    expect(supportApi.faqs).toHaveBeenLastCalledWith({
-      q: 'expire',
-      category: 'orders',
-    });
+    await settle();
+
+    expect(supportApi.faqs).toHaveBeenLastCalledWith({ q: 'expire' });
+    const text = allText(tree);
+    expect(text).toContain('Do my coins expire?');
+    // The rows step aside while there is something in the box.
+    expect(text).not.toContain('Find quick answers to common questions');
   });
 
-  test('opening a ticket sends it and lands on its thread', async () => {
-    supportApi.createTicket.mockResolvedValue(TICKET);
+  test('"Chat Now" carries on the conversation already open, and starts one when there is none', async () => {
     const tree = await render(<HelpSupportScreen />);
+    await pressButton(tree, 'Chat Now');
+    expect(mockNavigate).toHaveBeenCalledWith('ReportIssue', {});
 
-    await pressButton(tree, 'Open a ticket');
-    await type(tree, 'Subject', 'Coins missing');
+    supportApi.home.mockResolvedValue({
+      ...SUPPORT_HOME,
+      chat: { ...SUPPORT_HOME.chat, openTicketId: 'tkt-1' },
+    });
+    const waiting = await render(<HelpSupportScreen />);
+    await pressButton(waiting, 'Continue');
+    expect(mockNavigate).toHaveBeenLastCalledWith('SupportTicket', {
+      id: 'tkt-1',
+    });
+  });
+});
+
+describe('HelpTopicScreen', () => {
+  test('asks for its own shelf and lists what is on it', async () => {
+    mockRouteParams = {
+      title: 'Orders & Shipping',
+      subtitle: 'Track orders, returns and replacements',
+      category: 'orders',
+    };
+    const text = allText(await render(<HelpTopicScreen />));
+
+    expect(supportApi.faqs).toHaveBeenCalledWith({
+      q: undefined,
+      category: 'orders',
+    });
+    expect(text).toContain('Orders & Shipping');
+    expect(text).toContain('Where is my order?');
+    // The way to a human rides along, with the server's promise on it.
+    expect(text).toContain('We usually reply within 24 hours.');
+  });
+
+  test('an empty shelf offers the form instead, already on its topic', async () => {
+    mockRouteParams = { title: 'Coins & Rewards', category: 'coins' };
+    supportApi.faqs.mockResolvedValue([]);
+    const tree = await render(<HelpTopicScreen />);
+
+    expect(allText(tree)).toContain('Nothing here yet');
+    await pressButton(tree, 'Report an issue');
+    expect(mockNavigate).toHaveBeenCalledWith('ReportIssue', {
+      category: 'coins',
+    });
+  });
+});
+
+describe('ContactUsScreen', () => {
+  test('lists the ways the server says support can be reached, and when', async () => {
+    const text = allText(await render(<ContactUsScreen />));
+
+    expect(text).toContain('Email us');
+    expect(text).toContain('support@vokve.app');
+    expect(text).toContain('Call us');
+    expect(text).toContain('+918000000000');
+    expect(text).toContain('Mon–Sat, 9 am – 7 pm IST');
+  });
+
+  test('a channel the server does not send is not offered', async () => {
+    supportApi.home.mockResolvedValue({
+      ...SUPPORT_HOME,
+      channels: [SUPPORT_HOME.channels[0]],
+      hours: null,
+    });
+    const text = allText(await render(<ContactUsScreen />));
+
+    expect(text).toContain('Email us');
+    expect(text).not.toContain('Call us');
+    expect(text).not.toContain('When we are in');
+  });
+});
+
+describe('ReportIssueScreen', () => {
+  test('sends what the member wrote and lands on its thread', async () => {
+    supportApi.createTicket.mockResolvedValue(TICKET);
+    const tree = await render(<ReportIssueScreen />);
+
+    await type(tree, 'What is it about?', 'Coins missing');
     await type(
       tree,
       'What happened?',
@@ -733,15 +898,32 @@ describe('HelpSupportScreen', () => {
       category: 'other',
       message: 'I walked 12,000 steps yesterday and nothing arrived.',
     });
-    expect(allText(tree)).toContain('Ticket VK-7Q2M opened');
+    expect(allText(tree)).toContain('Reported — VK-7Q2M');
     expect(mockNavigate).toHaveBeenCalledWith('SupportTicket', { id: 'tkt-1' });
   });
 
-  test('a message too short for the server is refused before it is sent', async () => {
-    const tree = await render(<HelpSupportScreen />);
+  test('opened from a shelf, the form starts on that topic', async () => {
+    supportApi.createTicket.mockResolvedValue(TICKET);
+    mockRouteParams = { category: 'orders' };
+    const tree = await render(<ReportIssueScreen />);
 
-    await pressButton(tree, 'Open a ticket');
-    await type(tree, 'Subject', 'Help');
+    await type(tree, 'What is it about?', 'Parcel never arrived');
+    await type(
+      tree,
+      'What happened?',
+      'It has said shipped for nine days and the courier page is blank.',
+    );
+    await pressButton(tree, 'Send to support');
+
+    expect(supportApi.createTicket).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'orders' }),
+    );
+  });
+
+  test('a message too short for the server is refused before it is sent', async () => {
+    const tree = await render(<ReportIssueScreen />);
+
+    await type(tree, 'What is it about?', 'Help');
     await type(tree, 'What happened?', 'broken');
     await pressButton(tree, 'Send to support');
 
@@ -749,14 +931,35 @@ describe('HelpSupportScreen', () => {
     expect(allText(tree)).toContain('at least 20 characters');
   });
 
-  test('existing tickets are listed with their reference and status', async () => {
+  test('what has already been reported is listed under the form', async () => {
     supportApi.tickets.mockResolvedValue([TICKET]);
-    const text = allText(await render(<HelpSupportScreen />));
+    const text = allText(await render(<ReportIssueScreen />));
 
-    expect(text).toContain('Your tickets');
+    expect(text).toContain('What you have reported');
     expect(text).toContain('Coins missing');
     expect(text).toContain('VK-7Q2M');
     expect(text).toContain('Open');
+  });
+});
+
+describe('AppGuideScreen', () => {
+  test('draws the server\'s chapters as numbered steps', async () => {
+    const text = allText(await render(<AppGuideScreen />));
+
+    expect(supportApi.guide).toHaveBeenCalled();
+    expect(text).toContain('Getting started');
+    expect(text).toContain('Set the app up once and it keeps count for you.');
+    expect(text).toContain('Create your account');
+    expect(text).toContain('Allow step tracking');
+    expect(text).toContain('1');
+    expect(text).toContain('2');
+  });
+
+  test('a guide nobody has written yet says so rather than showing an empty page', async () => {
+    supportApi.guide.mockResolvedValue({ ...GUIDE, sections: [] });
+    expect(allText(await render(<AppGuideScreen />))).toContain(
+      'The guide is on its way',
+    );
   });
 });
 

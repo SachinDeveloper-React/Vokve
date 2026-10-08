@@ -41,7 +41,6 @@ import type {
   RootStackParamList,
   RootStackScreenProps,
 } from '../../types/navigation';
-import { withAlpha } from '../../utils/color';
 import { formatCoins, formatMoney } from '../../utils/format';
 
 const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
@@ -50,7 +49,6 @@ const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
     empty: { paddingVertical: space.xl },
     slider: { width: '100%', height: 40 },
     grow: { flex: 1 },
-    notice: { borderRadius: space.md, padding: space.md },
     /** Bleeds through the screen's gutter so the rule runs edge to edge. */
     bar: {
       marginHorizontal: -space.base,
@@ -85,7 +83,7 @@ const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
  */
 export const CheckoutScreen = () => {
   const styles = useThemedStyles(makeStyles);
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -190,13 +188,6 @@ export const CheckoutScreen = () => {
     () => (quote?.lines ?? []).reduce((sum, line) => sum + line.quantity, 0),
     [quote],
   );
-  // Before the till's rules arrive the server is the one to ask for the
-  // code (`STEP_UP_REQUIRED`), and the store already answers that.
-  const needsStepUp =
-    config !== null &&
-    coinsApplied > 0 &&
-    coinsApplied >= config.stepUpThreshold;
-
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -417,32 +408,6 @@ export const CheckoutScreen = () => {
                   </HStack>
                 ) : null}
 
-                {needsStepUp && config ? (
-                  <HStack
-                    align="center"
-                    gap="sm"
-                    style={[
-                      styles.notice,
-                      {
-                        backgroundColor: withAlpha(
-                          colors.primary,
-                          isDark ? 0.18 : 0.1,
-                        ),
-                      },
-                    ]}
-                  >
-                    <Icon as={ShieldCheck} size="sm" tint={colors.primary} />
-                    <AppText
-                      variant="caption"
-                      color="textSecondary"
-                      style={styles.grow}
-                    >
-                      {`${formatCoins(
-                        config.stepUpThreshold,
-                      )} coins or more in one order — we'll ask for a code first.`}
-                    </AppText>
-                  </HStack>
-                ) : null}
               </CheckoutCard>
             ) : null}
 

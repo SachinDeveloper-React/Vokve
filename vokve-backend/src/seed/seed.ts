@@ -1,6 +1,6 @@
 import { connectMongo, disconnectMongo } from '../db/mongo.js';
 import { logger } from '../lib/logger.js';
-import { SupportFaqModel } from '../modules/account/models.js';
+import { SupportFaqModel, SupportGuideSectionModel } from '../modules/account/models.js';
 import { AppReleaseModel } from '../modules/devices/models.js';
 import { AppConfigModel } from '../modules/platform/models.js';
 import { CouponModel, ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
@@ -12,7 +12,7 @@ import { addDays } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 import {
   ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLAN_TEMPLATES, EXERCISES, FOOD_ITEMS, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
-  SUPPORT_FAQS, WORKOUT_TEMPLATES,
+  SUPPORT_FAQS, SUPPORT_GUIDE_SECTIONS, WORKOUT_TEMPLATES,
 } from './data.js';
 
 /** Idempotent: safe to run on every deploy. Never touches user data. */
@@ -36,6 +36,10 @@ export async function seed(): Promise<void> {
   // Help articles are the seed's to keep current: support edits land in the
   // collection, and a re-seed restores the wording the app shipped with.
   await Promise.all(SUPPORT_FAQS.map(f => SupportFaqModel.updateOne({ _id: f._id }, { $set: f }, { upsert: true })));
+  // The app guide goes stale the day a screen changes, so the seed owns its
+  // wording the same way: support's edits live in the collection, and a
+  // re-seed puts back the guide this release shipped with.
+  await Promise.all(SUPPORT_GUIDE_SECTIONS.map(s => SupportGuideSectionModel.updateOne({ _id: s._id }, { $set: s }, { upsert: true })));
   // The challenge board and the achievement shelf are the seed's wording, but
   // an opening day, once set, is never moved by a re-seed.
   const seededOn = new Date().toISOString().slice(0, 10);

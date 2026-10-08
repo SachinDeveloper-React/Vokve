@@ -13,6 +13,8 @@ import { Screen } from '../../components/ui/Screen';
 import { useAuthStatus } from '../../stores/authStore';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useAddresses, useAddressesStore } from '../../stores/addressesStore';
+import { useOrdersStore } from '../../stores/ordersStore';
+import { toApiError } from '../../services/api/errors';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { RootStackScreenProps } from '../../types/navigation';
 
@@ -38,11 +40,15 @@ export const AddressesScreen = () => {
   const route = useRoute<RootStackScreenProps<'Addresses'>['route']>();
   const toast = useToast();
   const selecting = route.params?.select === true;
+  /** Set when an order already placed is being moved, rather than the default set. */
+  const orderId = route.params?.orderId ?? null;
 
   const balance = useCoinBalance();
   const addresses = useAddresses();
   const isSyncing = useAddressesStore(s => s.isSyncing);
   const isSaving = useAddressesStore(s => s.isSaving);
+  const changeOrderAddress = useOrdersStore(s => s.changeAddress);
+  const movingId = useOrdersStore(s => s.movingId);
   const syncedAt = useAddressesStore(s => s.syncedAt);
   const hydrateFromServer = useAddressesStore(s => s.hydrateFromServer);
   const setDefault = useAddressesStore(s => s.setDefault);
@@ -92,16 +98,48 @@ export const AddressesScreen = () => {
     [setDefault, toast],
   );
 
-  // Selecting is making it the default and leaving; the checkout under this
-  // screen reads the default the moment it is back on top.
+  /**
+   * Selecting is making it the default and leaving; the checkout under this
+   * screen reads the default the moment it is back on top.
+   *
+   * Opened from an order already placed it is that order that moves, not
+   * the default: a member redirecting one parcel is not saying where
+   * everything after it should go. The server has the last word on whether
+   * it may still be moved (`ORDER_ADDRESS_LOCKED` once it is packed).
+   */
   const select = useCallback(
     async (id: string) => {
-      const ok = await makeDefault(id);
-      if (ok) {
+      if (orderId === null) {
+        const ok = await makeDefault(id);
+        if (ok) {
+          onPressBack();
+        }
+        return;
+      }
+      setBusyId(id);
+      try {
+        const order = await changeOrderAddress(orderId, id);
+        toast.show({
+          title: 'Address changed',
+          message: `${order.number} is now going to ${order.address.name}, ${order.address.city}.`,
+          tone: 'success',
+        });
         onPressBack();
+      } catch (error) {
+        const apiError = toApiError(error);
+        toast.show({
+          title:
+            apiError.code === 'ORDER_ADDRESS_LOCKED'
+              ? 'Too late to change it'
+              : "Couldn't change the address",
+          message: apiError.message,
+          tone: 'warning',
+        });
+      } finally {
+        setBusyId(null);
       }
     },
-    [makeDefault, onPressBack],
+    [changeOrderAddress, makeDefault, onPressBack, orderId, toast],
   );
 
   const askDelete = useCallback((id: string) => setDeletingId(id), []);
@@ -158,7 +196,9 @@ export const AddressesScreen = () => {
           onPressBack={onPressBack}
           title={selecting ? 'Deliver to' : 'Addresses'}
           subtitle={
-            selecting
+            orderId !== null
+              ? 'Choose where this order goes instead'
+              : selecting
               ? 'Choose where this reward goes'
               : 'Where your rewards are sent'
           }
@@ -180,7 +220,7 @@ export const AddressesScreen = () => {
                 key={address.id}
                 address={address}
                 mode={selecting ? 'select' : 'manage'}
-                busy={isSaving && busyId === address.id}
+                busy={(isSaving || movingId !== null) && busyId === address.id}
                 onSelect={select}
                 onEdit={editAddress}
                 onSetDefault={makeDefault}

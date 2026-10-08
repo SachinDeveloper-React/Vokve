@@ -1,116 +1,79 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  ChevronRight,
-  LifeBuoy,
-  MessageSquarePlus,
-  Search,
-} from 'lucide-react-native';
-import { BottomSheet } from '../../components/disclosure/BottomSheet';
+import { Search } from 'lucide-react-native';
+import { BrandSignOff } from '../../components/brand/BrandSignOff';
 import { useToast } from '../../components/feedback/Toast';
 import { FaqRow } from '../../components/account/FaqRow';
-import {
-  FormInput,
-  FormSelect,
-  FormTextArea,
-} from '../../components/form/fields';
 import { Input } from '../../components/form/Input';
-import { Pressable } from '../../components/form/Pressable';
-import { HistoryHeader } from '../../components/history/HistoryHeader';
 import { Divider } from '../../components/layout/Divider';
-import { HStack, VStack } from '../../components/layout/Stack';
+import { PageHeader } from '../../components/layout/PageHeader';
+import { VStack } from '../../components/layout/Stack';
 import { Icon } from '../../components/media/Icon';
+import { HelpTopicRow } from '../../components/support/HelpTopicRow';
+import { SupportChatCard } from '../../components/support/SupportChatCard';
 import { AppText } from '../../components/ui/AppText';
-import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
-import { Chip } from '../../components/ui/Chip';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
 import { supportApi } from '../../services/api/endpoints';
 import { toApiError } from '../../services/api/errors';
-import { useCoinBalance } from '../../stores/coinsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import {
-  supportTicketSchema,
-  type SupportTicketValues,
-} from '../../types/forms';
-import type {
-  SupportCategory,
-  SupportFaq,
-  SupportTicket,
-} from '../../types/models';
-import { formatRelativeDay } from '../../utils/format';
+import type { SupportFaq, SupportHome, SupportTopic } from '../../types/models';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
-    content: { paddingBottom: spacing.xxxl, gap: spacing.md },
-    loading: { paddingVertical: spacing.lg, alignItems: 'center' },
-    chips: { gap: spacing.xs },
-    grow: { flex: 1 },
-    row: { paddingVertical: spacing.sm },
+    content: { paddingBottom: spacing.xxl, gap: spacing.md },
+    loading: { paddingVertical: spacing.xxl, alignItems: 'center' },
+    rows: { gap: spacing.md },
+    signOff: { paddingTop: spacing.lg },
   });
-
-/** How each category reads on a chip, and in the ticket form's picker. */
-const CATEGORIES: { value: SupportCategory; label: string }[] = [
-  { value: 'account', label: 'Account' },
-  { value: 'coins', label: 'Coins' },
-  { value: 'orders', label: 'Orders' },
-  { value: 'tracking', label: 'Tracking' },
-  { value: 'payments', label: 'Payments' },
-  { value: 'other', label: 'Something else' },
-];
-
-const CATEGORY_LABEL: Record<SupportCategory, string> = Object.fromEntries(
-  CATEGORIES.map(entry => [entry.value, entry.label]),
-) as Record<SupportCategory, string>;
-
-/** How the ticket statuses read and what colour they take. */
-const STATUS_LABEL = {
-  open: 'Open',
-  in_progress: 'With support',
-  resolved: 'Resolved',
-  closed: 'Closed',
-} as const;
 
 /** How long the search box stays still before its text becomes a request. */
 const DEBOUNCE_MS = 250;
 
 /**
- * The help centre and the member's own tickets.
+ * The help centre's front page (RULES P12).
  *
- * The articles come from the server rather than the bundle, so support can
- * answer a wave of the same question by writing one row instead of waiting
- * for an app release. Searching goes to the server too — it matches the
- * tags an article carries, which is how "my coins are gone" finds the
- * article called "Do my coins expire?".
+ * Everything on it is the server's: the rows and their order, which shelf
+ * each one opens, and the promise at the foot about how soon we answer.
+ * That is the point of a help centre — support answers a wave of the same
+ * question by writing one row, not by waiting for an app release.
  *
- * Opening a ticket sends the app version and the device with it, because
- * those are the first two things support asks for and the last two anyone
- * wants to type.
+ * The search box searches articles rather than rows, and takes the page
+ * over while there is something in it: a member who types "refund" wants
+ * the answer, not a category to pick through. Searching goes to the server
+ * too, which matches the tags an article carries — which is how "my coins
+ * are gone" finds the article called "Do my coins expire?".
  */
 export const HelpSupportScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
-  const balance = useCoinBalance();
 
+  const [home, setHome] = useState<SupportHome | null>(null);
+  const [isLoading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<SupportCategory | null>(null);
-  const [faqs, setFaqs] = useState<SupportFaq[] | null>(null);
-  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [results, setResults] = useState<SupportFaq[] | null>(null);
   const [isSearching, setSearching] = useState(false);
-  const [isComposeOpen, setComposeOpen] = useState(false);
-  const [isSending, setSending] = useState(false);
 
-  const form = useForm<SupportTicketValues>({
-    resolver: zodResolver(supportTicketSchema),
-    defaultValues: { subject: '', category: 'other', message: '' },
-  });
+  useEffect(() => {
+    let cancelled = false;
+    supportApi
+      .home()
+      .then(result => {
+        if (!cancelled) setHome(result);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // The search follows the box a beat behind, so typing is not a request each.
   useEffect(() => {
@@ -119,15 +82,19 @@ export const HelpSupportScreen = () => {
   }, [text]);
 
   useEffect(() => {
+    if (query.length === 0) {
+      setResults(null);
+      return;
+    }
     let cancelled = false;
     setSearching(true);
     supportApi
-      .faqs({ q: query || undefined, category: category ?? undefined })
-      .then(result => {
-        if (!cancelled) setFaqs(result);
+      .faqs({ q: query })
+      .then(found => {
+        if (!cancelled) setResults(found);
       })
       .catch(() => {
-        if (!cancelled) setFaqs([]);
+        if (!cancelled) setResults([]);
       })
       .finally(() => {
         if (!cancelled) setSearching(false);
@@ -135,18 +102,7 @@ export const HelpSupportScreen = () => {
     return () => {
       cancelled = true;
     };
-  }, [category, query]);
-
-  const loadTickets = useCallback(() => {
-    supportApi
-      .tickets()
-      .then(setTickets)
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    loadTickets();
-  }, [loadTickets]);
+  }, [query]);
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -156,54 +112,60 @@ export const HelpSupportScreen = () => {
     navigation.navigate('Main', { screen: 'Account' });
   }, [navigation]);
 
-  const onPressCategory = useCallback(
-    (value: SupportCategory) => () =>
-      setCategory(current => (current === value ? null : value)),
-    [],
+  /** Each row goes where its kind says — the server decides which that is. */
+  const openTopic = useCallback(
+    (topic: SupportTopic) => {
+      switch (topic.kind) {
+        case 'contact':
+          navigation.navigate('ContactUs');
+          return;
+        case 'report':
+          navigation.navigate('ReportIssue', {});
+          return;
+        case 'guide':
+          navigation.navigate('AppGuide');
+          return;
+        default:
+          navigation.navigate('HelpTopic', {
+            title: topic.title,
+            subtitle: topic.subtitle,
+            category: topic.category,
+          });
+      }
+    },
+    [navigation],
   );
 
-  const onSubmit = form.handleSubmit(async values => {
-    setSending(true);
-    try {
-      const ticket = await supportApi.createTicket(values);
-      form.reset();
-      setComposeOpen(false);
-      loadTickets();
-      toast.show({
-        title: `Ticket ${ticket.reference} opened`,
-        message: 'We reply inside the app — you will get a notification.',
-        tone: 'success',
-      });
-      navigation.navigate('SupportTicket', { id: ticket.id });
-    } catch (error) {
-      const apiError = toApiError(error);
-      for (const [field, message] of Object.entries(apiError.fieldErrors)) {
-        if (field in values) {
-          form.setError(field as keyof SupportTicketValues, { message });
-        }
-      }
-      if (Object.keys(apiError.fieldErrors).length === 0) {
-        toast.show({
-          title: "Couldn't open the ticket",
-          message: apiError.message,
-          tone: 'error',
-        });
-      }
-    } finally {
-      setSending(false);
+  /**
+   * "Chat Now" carries on the conversation already open where there is one,
+   * and starts a new one where there is not — so a member with a ticket
+   * waiting is never handed a blank form about the same problem.
+   */
+  const onChat = useCallback(() => {
+    const openTicketId = home?.chat.openTicketId ?? null;
+    if (openTicketId) {
+      navigation.navigate('SupportTicket', { id: openTicketId });
+      return;
     }
-  });
+    navigation.navigate('ReportIssue', {});
+  }, [home?.chat.openTicketId, navigation]);
 
-  const heading = useMemo(() => {
-    if (query.length > 0) {
-      return `${faqs?.length ?? 0} ${
-        faqs?.length === 1 ? 'article' : 'articles'
-      } for "${query}"`;
-    }
-    return category
-      ? `${CATEGORY_LABEL[category]} questions`
-      : 'Common questions';
-  }, [category, faqs?.length, query]);
+  const onRetry = useCallback(() => {
+    setLoading(true);
+    supportApi
+      .home()
+      .then(setHome)
+      .catch(error =>
+        toast.show({
+          title: "Couldn't load help",
+          message: toApiError(error).message,
+          tone: 'warning',
+        }),
+      )
+      .finally(() => setLoading(false));
+  }, [toast]);
+
+  const searching = query.length > 0;
 
   return (
     <Screen edges={['top']}>
@@ -212,195 +174,88 @@ export const HelpSupportScreen = () => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <HistoryHeader
-          coins={balance}
-          onPressBack={onPressBack}
+        <PageHeader
           title="Help & Support"
-          subtitle="Answers first, and a human when they are not enough"
+          subtitle="We're here to help you"
+          onPressBack={onPressBack}
         />
 
         <Input
           value={text}
           onChangeText={setText}
-          placeholder="Search help — coins, delivery, steps…"
+          placeholder="Search for help (e.g. coins, orders, steps...)"
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
           leading={<Icon as={Search} size="md" color="textTertiary" />}
-          accessibilityLabel="Search help"
+          accessibilityLabel="Search for help"
         />
 
-        <HStack gap="xs" wrap style={styles.chips}>
-          {CATEGORIES.map(entry => (
-            <Pressable
-              key={entry.value}
-              onPress={onPressCategory(entry.value)}
-              feedback="opacity"
-              accessibilityRole="button"
-              accessibilityState={{ selected: category === entry.value }}
-              accessibilityLabel={entry.label}
-            >
-              <Chip
-                label={entry.label}
-                tint={
-                  category === entry.value
-                    ? colors.primary
-                    : colors.textSecondary
-                }
-              />
-            </Pressable>
-          ))}
-        </HStack>
-
-        <Card radius="xl" padding="base">
-          <VStack gap="xs">
-            <AppText variant="label" color="textSecondary">
-              {heading}
-            </AppText>
-
-            {faqs === null && isSearching ? (
-              <View style={styles.loading}>
-                <ActivityIndicator color={colors.primary} />
-              </View>
-            ) : (faqs ?? []).length === 0 ? (
-              <EmptyState
-                title="Nothing matched"
-                message="Try another word, or open a ticket and we will answer it ourselves."
-                actionLabel="Open a ticket"
-                onAction={() => setComposeOpen(true)}
-              />
-            ) : (
-              (faqs ?? []).map((faq, index) => (
-                <React.Fragment key={faq.id}>
-                  {index > 0 ? <Divider /> : null}
-                  <FaqRow
-                    faq={faq}
-                    defaultOpen={query.length > 0 && faqs!.length === 1}
-                  />
-                </React.Fragment>
-              ))
-            )}
-          </VStack>
-        </Card>
-
-        <Card radius="xl" padding="base">
-          <VStack gap="md">
-            <HStack align="center" gap="md">
-              <Icon as={LifeBuoy} size="md" tint={colors.primary} />
-              <VStack flex={1} gap="xxs">
-                <AppText variant="bodyStrong">Still stuck?</AppText>
-                <AppText variant="micro" color="textSecondary">
-                  Open a ticket and we reply inside the app. Your app version
-                  and device come along automatically.
-                </AppText>
-              </VStack>
-            </HStack>
-            <Button
-              label="Open a ticket"
-              variant="brand"
-              fullWidth
-              icon={
-                <Icon
-                  as={MessageSquarePlus}
-                  size="sm"
-                  tint={colors.primaryForeground}
-                />
-              }
-              onPress={() => setComposeOpen(true)}
-            />
-          </VStack>
-        </Card>
-
-        {tickets.length > 0 ? (
+        {searching ? (
           <Card radius="xl" padding="base">
             <VStack gap="xs">
               <AppText variant="label" color="textSecondary">
-                Your tickets
+                {results === null
+                  ? 'Searching…'
+                  : `${results.length} ${
+                      results.length === 1 ? 'answer' : 'answers'
+                    } for "${query}"`}
               </AppText>
-              {tickets.map((ticket, index) => (
-                <React.Fragment key={ticket.id}>
-                  {index > 0 ? <Divider /> : null}
-                  <Pressable
-                    onPress={() =>
-                      navigation.navigate('SupportTicket', { id: ticket.id })
-                    }
-                    feedback="opacity"
-                    accessibilityRole="button"
-                    accessibilityLabel={`${ticket.subject}, ${
-                      STATUS_LABEL[ticket.status]
-                    }`}
-                    style={styles.row}
-                  >
-                    <HStack align="center" gap="md">
-                      <VStack flex={1} gap="xxs">
-                        <AppText variant="bodyStrong" numberOfLines={1}>
-                          {ticket.subject}
-                        </AppText>
-                        <AppText variant="micro" color="textTertiary">
-                          {`${ticket.reference} · ${
-                            CATEGORY_LABEL[ticket.category]
-                          } · ${formatRelativeDay(ticket.updatedAt)}`}
-                        </AppText>
-                      </VStack>
-                      <Chip
-                        label={STATUS_LABEL[ticket.status]}
-                        tint={
-                          ticket.status === 'resolved'
-                            ? colors.success
-                            : ticket.status === 'closed'
-                            ? colors.textSecondary
-                            : colors.primary
-                        }
-                      />
-                      <Icon as={ChevronRight} size="sm" color="textTertiary" />
-                    </HStack>
-                  </Pressable>
-                </React.Fragment>
-              ))}
+
+              {results === null && isSearching ? (
+                <View style={styles.loading}>
+                  <ActivityIndicator color={colors.primary} />
+                </View>
+              ) : (results ?? []).length === 0 ? (
+                <EmptyState
+                  title="Nothing matched"
+                  message="Try another word, or tell us what happened and we will answer it ourselves."
+                  actionLabel="Report an issue"
+                  onAction={() => navigation.navigate('ReportIssue', {})}
+                />
+              ) : (
+                (results ?? []).map((faq, index) => (
+                  <React.Fragment key={faq.id}>
+                    {index > 0 ? <Divider /> : null}
+                    <FaqRow faq={faq} defaultOpen={results!.length === 1} />
+                  </React.Fragment>
+                ))
+              )}
             </VStack>
           </Card>
-        ) : null}
-      </ScrollView>
+        ) : isLoading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : home === null ? (
+          <Card radius="xl">
+            <EmptyState
+              title="Couldn't load help"
+              message="Check your connection and try again."
+              actionLabel="Try again"
+              onAction={onRetry}
+            />
+          </Card>
+        ) : (
+          <>
+            <View style={styles.rows}>
+              {home.topics.map(topic => (
+                <HelpTopicRow
+                  key={topic.id}
+                  topic={topic}
+                  onPress={openTopic}
+                />
+              ))}
+            </View>
 
-      <BottomSheet
-        visible={isComposeOpen}
-        onClose={() => setComposeOpen(false)}
-        title="Open a ticket"
-        dismissible={!isSending}
-      >
-        <VStack gap="md" pb="base">
-          <FormInput
-            control={form.control}
-            name="subject"
-            label="Subject"
-            placeholder="Coins missing after a walk"
-          />
-          <FormSelect
-            control={form.control}
-            name="category"
-            label="What is it about?"
-            sheetTitle="Category"
-            options={CATEGORIES}
-          />
-          <FormTextArea
-            control={form.control}
-            name="message"
-            label="What happened?"
-            placeholder="Tell us what you did, what you expected and what you saw instead."
-            rows={5}
-            showCount
-            maxLength={2000}
-          />
-          <Button
-            label="Send to support"
-            variant="brand"
-            fullWidth
-            loading={isSending}
-            disabled={isSending}
-            onPress={() => onSubmit()}
-          />
-        </VStack>
-      </BottomSheet>
+            <SupportChatCard chat={home.chat} onPress={onChat} />
+
+            <View style={styles.signOff}>
+              <BrandSignOff />
+            </View>
+          </>
+        )}
+      </ScrollView>
     </Screen>
   );
 };

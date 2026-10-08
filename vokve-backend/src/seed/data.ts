@@ -379,6 +379,70 @@ export const SUPPORT_FAQS = [
   { _id: 'faq-other-support', category: 'other', question: 'How do I reach a human?', sort: 1,
     answer: 'Open a ticket from Help & Support and we will reply inside the app. Tickets carry your app version and device automatically, so you do not have to describe your phone to us.',
     tags: ['contact', 'human', 'ticket', 'email us'] },
+  { _id: 'faq-privacy-data', category: 'privacy', question: 'What data does VOKVE collect, and why?', sort: 1,
+    answer: 'Your steps and workouts, so we can pay coins for them; your profile and address, so an order reaches you; and what you do in the app, so it keeps working. Health data never leaves your account and is never sold. Account \u2192 Privacy lists every switch and what turning it off stops.',
+    tags: ['data', 'privacy', 'health', 'collect', 'sell', 'gdpr'] },
+  { _id: 'faq-privacy-health', category: 'privacy', question: 'Who can see my health data?', sort: 2,
+    answer: 'Only you. Steps and workouts are read from your phone\u2019s health service with your permission and are shown to nobody else; the leaderboard shows a rank and a first name, never the readings behind it. You can revoke the permission in your phone\u2019s settings at any time \u2014 the app keeps working, it just stops paying step coins.',
+    tags: ['health connect', 'healthkit', 'who can see', 'leaderboard', 'share'] },
+  { _id: 'faq-privacy-password', category: 'privacy', question: 'How do I keep my account safe?', sort: 3,
+    answer: 'Use a password you do not use anywhere else, keep the email and phone on the account current \u2014 they are how we reach you if something looks wrong \u2014 and sign out of devices you no longer use from Account \u2192 Security. We ask for a code before anything sensitive.',
+    tags: ['password', 'safety', 'security', 'hacked', 'sessions', 'login'] },
+] as const;
+
+/**
+ * The app guide behind the "App Guide" row of the help centre: what a new
+ * member should do, in the order they should do it. Written as steps rather
+ * than prose because that is how it is read \u2014 phone in one hand, app
+ * open in the other.
+ */
+export const SUPPORT_GUIDE_SECTIONS = [
+  {
+    _id: 'guide-start', title: 'Getting started', icon: 'guide', tint: 'primary', sort: 1,
+    summary: 'Set the app up once and it keeps count for you.',
+    steps: [
+      { title: 'Create your account', body: 'Sign up with your phone and email. Both are verified with a code, because they are how we reach you about an order or a problem.' },
+      { title: 'Allow step tracking', body: 'VOKVE reads steps from your phone\u2019s health service. Without that permission the app still works, but it cannot pay you for walking.' },
+      { title: 'Set your daily goal', body: 'Home \u2192 your step card \u2192 the goal. Pick something you will actually hit; you can change it any day.' },
+    ],
+  },
+  {
+    _id: 'guide-earn', title: 'Earning coins', icon: 'coins', tint: 'gold', sort: 2,
+    summary: 'Every coin comes from something you did.',
+    steps: [
+      { title: 'Walk', body: 'Steps pay a little for every 100 you walk, up to a daily ceiling. They are held briefly while we check the day looks real, then land in your wallet.' },
+      { title: 'Keep a streak', body: 'Hitting your goal on consecutive days pays a bonus at each milestone. Miss a day and a freeze can save the run.' },
+      { title: 'Finish a challenge', body: 'Challenges pay a fixed reward and some pay a badge. The board shows what is open and how far along you are.' },
+      { title: 'Invite a friend', body: 'You both get coins once they join and walk their first day. Your code is on the Refer & Earn screen.' },
+    ],
+  },
+  {
+    _id: 'guide-spend', title: 'Spending coins', icon: 'package', tint: 'brandAccent', sort: 3,
+    summary: 'Coins come off the bill at the till.',
+    steps: [
+      { title: 'Find something in the shop', body: 'Every product shows what it costs and how much of that coins can cover.' },
+      { title: 'Choose how to pay', body: 'Some rewards are coins only; others take coins for part of the bill and card or UPI for the rest. The payment page shows the split before anything is taken.' },
+      { title: 'Confirm', body: 'A coins-only order asks you to confirm the deduction, then it is placed. An order with money in it opens the payment sheet for exactly what is left.' },
+    ],
+  },
+  {
+    _id: 'guide-orders', title: 'Your orders', icon: 'package', tint: 'success', sort: 4,
+    summary: 'Where it is, and what to do if something is wrong.',
+    steps: [
+      { title: 'Track it', body: 'My Orders shows every order and the stop it has reached. Once it ships you get a tracking link and a notification.' },
+      { title: 'Change where it goes', body: 'Until it is packed you can send an order to another saved address from the order page.' },
+      { title: 'Cancel or return', body: 'Cancel from the order page any time before it ships \u2014 coins go straight back. After it arrives, the returns window on the order page says how long you have.' },
+    ],
+  },
+  {
+    _id: 'guide-safe', title: 'Staying in control', icon: 'shield', tint: 'purple', sort: 5,
+    summary: 'Your data, your notifications, your account.',
+    steps: [
+      { title: 'Choose what you hear about', body: 'Account \u2192 Notifications turns each kind of message on or off, and sets quiet hours.' },
+      { title: 'See what we hold', body: 'Account \u2192 Privacy lists every switch, and will send you a copy of your data.' },
+      { title: 'Keep the account yours', body: 'Account \u2192 Security shows every signed-in device and can sign the others out.' },
+    ],
+  },
 ] as const;
 
 /**

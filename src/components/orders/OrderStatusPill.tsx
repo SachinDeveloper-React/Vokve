@@ -22,12 +22,15 @@ export const ORDER_STATUS_STYLE: Record<
   { label: string; tint: Tint }
 > = {
   pending_payment: { label: 'Awaiting payment', tint: 'warning' },
-  placed: { label: 'Placed', tint: 'primary' },
-  confirmed: { label: 'Confirmed', tint: 'brandAccent' },
-  shipped: { label: 'Shipped', tint: 'warning' },
+  // "Processing" and "Packed" are both the warehouse working on it, so
+  // they share the blue; a member reading the list sees one state until
+  // the parcel actually moves.
+  placed: { label: 'Processing', tint: 'primary' },
+  confirmed: { label: 'Packed', tint: 'primary' },
+  shipped: { label: 'Shipped', tint: 'success' },
   delivered: { label: 'Delivered', tint: 'success' },
-  cancelled: { label: 'Cancelled', tint: 'textSecondary' },
-  refunded: { label: 'Refunded', tint: 'destructive' },
+  cancelled: { label: 'Cancelled', tint: 'destructive' },
+  refunded: { label: 'Refunded', tint: 'textSecondary' },
 };
 
 interface Props {

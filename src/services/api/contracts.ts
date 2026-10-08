@@ -50,10 +50,12 @@ import type {
   NutritionPreferences,
   NutritionProfile,
   Order,
+  OrderFilter,
   PrivacySettings,
   ProfileSummary,
   Referral,
   ReferralProgram,
+  ReorderResult,
   ShopCategory,
   ShopCategorySummary,
   ShopItem,
@@ -63,7 +65,9 @@ import type {
   StepSourcesReport,
   StreakRestoreResult,
   StreakSummary,
+  AppGuide,
   SupportCategory,
+  SupportHome,
   SupportFaq,
   SupportTicket,
   User,
@@ -490,7 +494,13 @@ export interface CheckoutApi {
 }
 
 export interface OrderApi {
-  list(cursor?: string): Promise<Page<Order>>;
+  /**
+   * One page of orders, newest first, through one tab of the list. The tab
+   * is the server's filter rather than a sieve over a page already in hand:
+   * a member on "Cancelled" would otherwise scroll past months of
+   * delivered orders to reach two.
+   */
+  list(cursor?: string, filter?: OrderFilter): Promise<Page<Order>>;
   get(id: string): Promise<Order>;
   /** How many orders the shop's header counts (RULES R7). */
   count(): Promise<number>;
@@ -499,6 +509,13 @@ export interface OrderApi {
     id: string,
     options: IdempotentOptions,
   ): Promise<{ order: Order; balance: number }>;
+  /**
+   * Sends an order to another saved address, while the warehouse can still
+   * honour it (`409 ORDER_ADDRESS_LOCKED` once it is packed).
+   */
+  changeAddress(id: string, addressId: string): Promise<Order>;
+  /** Puts the order's lines back in the basket — the list's "Buy Again". */
+  reorder(id: string, options: IdempotentOptions): Promise<ReorderResult>;
 }
 
 /** Everything but the id — what the form collects. */
@@ -592,6 +609,15 @@ export interface AccountApi {
 }
 
 export interface SupportApi {
+  /**
+   * The help centre's front page: its rows with their counts, the ways to
+   * reach a human, and the promise about answering. All of it the
+   * server's, so support can reword a row or a commitment without an app
+   * release (RULES P12).
+   */
+  home(): Promise<SupportHome>;
+  /** The step-by-step guide behind the "App Guide" row. */
+  guide(): Promise<AppGuide>;
   /** The help centre, searched by word and narrowed by category. */
   faqs(query?: {
     q?: string;

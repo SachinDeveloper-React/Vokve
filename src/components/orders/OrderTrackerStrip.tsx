@@ -8,30 +8,39 @@ import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 
-const DOT = moderateScale(28);
+export type TrackerSize = 'sm' | 'md';
+
+const DOT: Record<TrackerSize, number> = {
+  sm: moderateScale(20),
+  md: moderateScale(28),
+};
 
 /**
  * The four stops a member is shown, and the state each one stands for
  * (RULES R5). "Packed" is what `confirmed` means to someone waiting for a
- * parcel — the warehouse word, not ours.
+ * parcel — the warehouse word, not ours. The short label is for the strip
+ * on a list card, where four cells share the width of a phone.
  */
-const STOPS: readonly { status: OrderStatus; label: string }[] = [
-  { status: 'placed', label: 'Order\nPlaced' },
-  { status: 'confirmed', label: 'Packed' },
-  { status: 'shipped', label: 'Shipped' },
-  { status: 'delivered', label: 'Delivered' },
+const STOPS: readonly {
+  status: OrderStatus;
+  label: string;
+  short: string;
+}[] = [
+  { status: 'placed', label: 'Order\nPlaced', short: 'Placed' },
+  { status: 'confirmed', label: 'Packed', short: 'Packed' },
+  { status: 'shipped', label: 'Shipped', short: 'Shipped' },
+  { status: 'delivered', label: 'Delivered', short: 'Delivered' },
 ];
 
 interface Props {
   status: OrderStatus;
+  /** `sm` is the strip under a list row; `md` the one on the order page. */
+  size?: TrackerSize;
 }
 
 const makeStyles = ({ colors, radius }: ThemeShape) =>
   StyleSheet.create({
     dot: {
-      width: DOT,
-      height: DOT,
-      borderRadius: DOT / 2,
       borderWidth: 2,
       borderColor: colors.border,
       alignItems: 'center',
@@ -56,13 +65,14 @@ const makeStyles = ({ colors, radius }: ThemeShape) =>
  * that was cancelled or refunded has stepped off the path — neither draws
  * this, because a half-lit track would suggest it is still coming.
  */
-export const OrderTrackerStrip = memo(({ status }: Props) => {
+export const OrderTrackerStrip = memo(({ status, size = 'md' }: Props) => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const reached = STOPS.findIndex(stop => stop.status === status);
+  const diameter = DOT[size];
 
   return (
-    <VStack gap="sm">
+    <VStack gap={size === 'sm' ? 'xs' : 'sm'}>
       <HStack align="center">
         {STOPS.map((stop, index) => {
           const done = index <= reached;
@@ -81,6 +91,11 @@ export const OrderTrackerStrip = memo(({ status }: Props) => {
               <View
                 style={[
                   styles.dot,
+                  {
+                    width: diameter,
+                    height: diameter,
+                    borderRadius: diameter / 2,
+                  },
                   done && {
                     backgroundColor: colors.brandAccent,
                     borderColor: colors.brandAccent,
@@ -90,7 +105,7 @@ export const OrderTrackerStrip = memo(({ status }: Props) => {
                 {done ? (
                   <Icon
                     as={Check}
-                    size={moderateScale(14)}
+                    size={moderateScale(size === 'sm' ? 11 : 14)}
                     tint={colors.primaryForeground}
                   />
                 ) : null}
@@ -104,7 +119,7 @@ export const OrderTrackerStrip = memo(({ status }: Props) => {
         {STOPS.map((stop, index) => (
           <AppText
             key={stop.status}
-            variant="micro"
+            variant={size === 'sm' ? 'miniMicro' : 'micro'}
             color={index <= reached ? undefined : 'textTertiary'}
             style={[
               styles.cell,
@@ -117,7 +132,7 @@ export const OrderTrackerStrip = memo(({ status }: Props) => {
                 : styles.middle,
             ]}
           >
-            {stop.label}
+            {size === 'sm' ? stop.short : stop.label}
           </AppText>
         ))}
       </HStack>

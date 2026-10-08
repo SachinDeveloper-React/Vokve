@@ -818,6 +818,19 @@ export const quoteSchema = z.object({
       /** One unit, and the line, in coins alone — what a coins-only shop shows. */
       coinPrice: z.number().int().nonnegative().default(0),
       lineCoins: z.number().int().nonnegative().default(0),
+      /**
+       * How this line is actually being paid for, at `coinsApplied`
+       * (RULES R11): the coins that go to it, what they are worth in
+       * paise, and the money left on its goods. The server splits it —
+       * the app never divides a total by hand — so a member, and support,
+       * can see what each product cost in each currency.
+       *
+       * Delivery belongs to the order, not to a line, so these cover the
+       * goods alone; `payable` remains the order's money figure.
+       */
+      coinsUsed: z.number().int().nonnegative().default(0),
+      coinsValue: z.number().int().nonnegative().default(0),
+      moneyPaid: z.number().int().nonnegative().default(0),
       /** How this line may be bought — its item's own mode (RULES R11). */
       paymentMode: paymentModeSchema.default('mixed'),
       inStock: z.boolean(),
@@ -859,8 +872,6 @@ export const quoteSchema = z.object({
    * order of coins-only goods offers nothing but `coins`.
    */
   paymentMethods: z.array(paymentMethodSchema).default([]),
-  /** True when `coinsApplied` is at or above the step-up threshold (RULES O8). */
-  needsStepUp: z.boolean(),
   /** The order in coins alone, row by row, in a coins-only shop; null otherwise. */
   inCoins: coinTotalsSchema.nullable().default(null),
 });
@@ -995,6 +1006,20 @@ export const orderItemSchema = z.object({
   /** Per unit, in paise, at the time of the order — a later price change does not rewrite history. */
   price: z.number().int().positive(),
   mrp: z.number().int().positive().nullable().default(null),
+  /**
+   * What this line was actually paid with (RULES R11), snapshotted when
+   * the order was placed: the coins that went to it, what they were worth
+   * in paise, and the money on its goods. The three are the answer to
+   * "what did this product cost me", which an order-level total cannot
+   * give for a basket of several things.
+   *
+   * Delivery is the order's, not a line's: in a coins-only order the
+   * delivery coins are `inCoins.shipping`, and in any other the delivery
+   * money is `shipping`.
+   */
+  coinsUsed: z.number().int().nonnegative().default(0),
+  coinsValue: z.number().int().nonnegative().default(0),
+  moneyPaid: z.number().int().nonnegative().default(0),
 });
 export type OrderItem = z.infer<typeof orderItemSchema>;
 
@@ -1039,6 +1064,59 @@ export type DeliveryWindow = z.infer<typeof deliveryWindowSchema>;
 export const trackingChannelSchema = z.enum(['email', 'sms', 'whatsapp']);
 export type TrackingChannel = z.infer<typeof trackingChannelSchema>;
 
+/**
+ * One stop on an order's journey, as the order page's timeline draws it
+ * (RULES R5): the state it stands for, what the member reads, and when it
+ * happened — null for a stop still ahead.
+ *
+ * The server keeps every transition as an event on the order, so this is
+ * the only place the app can learn *when* a parcel was packed. A stop with
+ * no time yet is still listed, because a timeline that showed only what
+ * has happened would never say what is left.
+ */
+export const orderTimelineEntrySchema = z.object({
+  status: orderStatusSchema,
+  /** "Packed", not "confirmed": the warehouse word, not ours. */
+  title: z.string(),
+  /** ISO-8601 of the moment it happened; null for a stop still ahead. */
+  at: z.string().nullable(),
+  /** Whether the order has made this stop. */
+  done: z.boolean(),
+});
+export type OrderTimelineEntry = z.infer<typeof orderTimelineEntrySchema>;
+
+/**
+ * What may still be sent back, and by when (⚙ `commerce.returnWindowDays`).
+ * It is a promise, so it is the server's to make and the app only reads it;
+ * null where the shop takes no returns.
+ */
+export const orderReturnsSchema = z.object({
+  /** Whether this order is still inside its window. */
+  eligible: z.boolean(),
+  windowDays: z.number().int().nonnegative(),
+  /** ISO-8601 of the last day it may be sent back; null until it is delivered. */
+  until: z.string().nullable().default(null),
+  /** The promise in one line — "Easy returns within 7 days (as per policy)." */
+  note: z.string(),
+});
+export type OrderReturns = z.infer<typeof orderReturnsSchema>;
+
+/**
+ * The tabs the orders list is read through. A grouping, not a state:
+ * `processing` is everything between placed and packed, and `cancelled`
+ * holds refunds too, because a member looking for an order that never
+ * arrived looks in one place for it. Closed, like every enum: a new tab
+ * ships behind a client release.
+ */
+export const orderFilterSchema = z.enum([
+  'all',
+  'processing',
+  'shipped',
+  'delivered',
+  'cancelled',
+]);
+export type OrderFilter = z.infer<typeof orderFilterSchema>;
+
 export const orderSchema = z.object({
   id: z.string(),
   /**
@@ -1080,10 +1158,40 @@ export const orderSchema = z.object({
   trackingChannels: z.array(trackingChannelSchema).default([]),
   /** Courier reference once shipped; null before. */
   trackingRef: z.string().nullable().default(null),
+  /** Where the courier shows the parcel live; null until there is something to show. */
+  trackingUrl: z.string().url().nullable().default(null),
+  /** Every stop this order has made, and the ones still ahead (RULES R5). */
+  timeline: z.array(orderTimelineEntrySchema).default([]),
+  /** The line the tracker leads with — "Your order is on the way!". */
+  headline: z.string(),
+  /** What the returns row promises for this order; null where returns are off. */
+  returns: orderReturnsSchema.nullable().default(null),
+  /**
+   * Whether the delivery address may still be changed (RULES R5). True
+   * until the parcel is packed — after that the label is printed and the
+   * change would be a promise the warehouse cannot keep.
+   */
+  addressChangeable: z.boolean().default(false),
   /** Whether the user may still cancel — `pending_payment`, `placed` or `confirmed` (R5). */
   cancellable: z.boolean(),
 });
 export type Order = z.infer<typeof orderSchema>;
+
+/**
+ * What came of buying an order again: the basket as it now stands, how
+ * many of the order's lines went back in, and the ones that could not,
+ * each with the reason the member is told.
+ *
+ * A line is skipped rather than the whole thing refused — an order of
+ * three things where one has been delisted still puts two in the basket,
+ * which is what a member asking for "buy again" wants.
+ */
+export const reorderResultSchema = z.object({
+  cart: cartSchema,
+  added: z.number().int().nonnegative(),
+  skipped: z.array(z.object({ title: z.string(), reason: z.string() })).default([]),
+});
+export type ReorderResult = z.infer<typeof reorderResultSchema>;
 
 /**
  * What the app needs to collect the money for an order it just placed: the
@@ -1937,9 +2045,139 @@ export const supportCategorySchema = z.enum([
   'orders',
   'tracking',
   'payments',
+  /** Data, consent and account safety — the help centre's own shelf for it. */
+  'privacy',
   'other',
 ]);
 export type SupportCategory = z.infer<typeof supportCategorySchema>;
+
+/**
+ * The glyphs a help topic may wear, and the washes behind them. Closed on
+ * purpose: the row is drawn by the app, so a name it cannot draw would be a
+ * blank tile. A new glyph ships with a release; the titles, the order and
+ * which shelf a row opens do not (⚙ `support.topics`).
+ */
+export const supportIconSchema = z.enum([
+  'question',
+  'mail',
+  'alert',
+  'package',
+  'coins',
+  'user',
+  'shield',
+  'guide',
+]);
+export type SupportIcon = z.infer<typeof supportIconSchema>;
+
+export const supportTintSchema = z.enum([
+  'primary',
+  'brandAccent',
+  'success',
+  'warning',
+  'destructive',
+  'gold',
+  'purple',
+]);
+export type SupportTint = z.infer<typeof supportTintSchema>;
+
+/** What a help row opens when it is tapped. */
+export const supportTopicKindSchema = z.enum([
+  /** A shelf of articles — all of them, or one category's. */
+  'faq',
+  /** The ways support can be reached. */
+  'contact',
+  /** The form that opens a ticket. */
+  'report',
+  /** The step-by-step guide to the app. */
+  'guide',
+]);
+export type SupportTopicKind = z.infer<typeof supportTopicKindSchema>;
+
+/** One row on the help centre's front page. */
+export const supportTopicSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  subtitle: z.string(),
+  kind: supportTopicKindSchema,
+  /** Which shelf a `faq` row opens; null for all of them, and for the rest. */
+  category: supportCategorySchema.nullable().default(null),
+  icon: supportIconSchema,
+  tint: supportTintSchema,
+  /**
+   * How many articles sit behind it, counted as the row is served; null
+   * where the row is not a shelf. A row whose shelf is empty is not sent
+   * at all, so the page never offers a door onto nothing.
+   */
+  count: z.number().int().nonnegative().nullable().default(null),
+});
+export type SupportTopic = z.infer<typeof supportTopicSchema>;
+
+/**
+ * A way of reaching support, ready to open: the app hands `url` straight to
+ * the OS rather than assembling `mailto:` or `tel:` itself, so a change of
+ * number or address never needs a release.
+ */
+export const supportChannelSchema = z.object({
+  kind: z.enum(['email', 'phone', 'whatsapp']),
+  label: z.string(),
+  /** What the member reads — the address, the number as it is dialled. */
+  value: z.string(),
+  url: z.string(),
+  note: z.string().nullable().default(null),
+});
+export type SupportChannel = z.infer<typeof supportChannelSchema>;
+
+/**
+ * The help centre's front page in one answer (RULES P12): the rows, how to
+ * reach a human, and what we promise about answering.
+ *
+ * The promise is the server's to make — "we usually reply within 24 hours"
+ * is a commitment support has to be able to change without an app release,
+ * and a screen that invented it could promise what nobody can keep.
+ */
+export const supportHomeSchema = z.object({
+  topics: z.array(supportTopicSchema),
+  /** The card at the foot of the page, and what its button does. */
+  chat: z.object({
+    title: z.string(),
+    subtitle: z.string(),
+    /** "We usually reply within 24 hours." */
+    responseTime: z.string(),
+    /**
+     * A conversation already going, which "Chat Now" carries on; null when
+     * there is none and the button opens a new one.
+     */
+    openTicketId: z.string().nullable().default(null),
+  }),
+  channels: z.array(supportChannelSchema),
+  /** When support is at their desks; null when the line is always open. */
+  hours: z.string().nullable().default(null),
+});
+export type SupportHome = z.infer<typeof supportHomeSchema>;
+
+/** One step of the app guide: what to do, and what it gets you. */
+export const appGuideStepSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+});
+
+/** One chapter of the guide — "Earning coins", in the order it is read. */
+export const appGuideSectionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  icon: supportIconSchema,
+  tint: supportTintSchema,
+  steps: z.array(appGuideStepSchema),
+});
+export type AppGuideSection = z.infer<typeof appGuideSectionSchema>;
+
+export const appGuideSchema = z.object({
+  title: z.string(),
+  subtitle: z.string(),
+  sections: z.array(appGuideSectionSchema),
+});
+export type AppGuide = z.infer<typeof appGuideSchema>;
 
 export const supportFaqSchema = z.object({
   id: z.string(),

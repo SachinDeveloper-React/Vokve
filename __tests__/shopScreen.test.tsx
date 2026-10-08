@@ -123,6 +123,12 @@ const cartWith = (
         lineTotal: item.price * quantity,
         coinPrice: item.coinPrice,
         lineCoins: item.coinPrice * quantity,
+        coinsUsed: item.coinsMax * quantity,
+        coinsValue: item.coinsMax * quantity * 25,
+        moneyPaid: Math.max(
+          0,
+          item.price * quantity - item.coinsMax * quantity * 25,
+        ),
         paymentMode: item.paymentMode,
         inStock: true,
       },
@@ -142,7 +148,6 @@ const cartWith = (
     paymentMethods: ['coins_upi', 'upi', 'card', 'netbanking'] as const,
     coinsValue: item.coinsMax * quantity * 25,
     payable: item.price * quantity + 4900 - item.coinsMax * quantity * 25,
-    needsStepUp: false,
     inCoins: null,
   },
 });

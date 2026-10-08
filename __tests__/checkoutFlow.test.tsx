@@ -32,6 +32,7 @@ import { useCartStore } from '../src/stores/cartStore';
 import { useCheckoutStore } from '../src/stores/checkoutStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
 import { useOrdersStore } from '../src/stores/ordersStore';
+import { cacheOrders, cachedOrders, journeyOf } from './helpers/orders';
 import { useShopStore } from '../src/stores/shopStore';
 import { SHOP_CONFIG, stockShop } from './helpers/shop';
 import { useWishlistStore } from '../src/stores/wishlistStore';
@@ -222,6 +223,11 @@ const quoteFor = (
         lineTotal: item.price,
         coinPrice: item.coinPrice,
         lineCoins: item.coinPrice,
+        // One line, so the whole split is its own: the coins applied, and
+        // what is left of the goods in money (delivery is the order's).
+        coinsUsed: coinsApplied,
+        coinsValue: coinsApplied * 25,
+        moneyPaid: Math.max(0, item.price - coinsApplied * 25),
         paymentMode: item.paymentMode,
         inStock: true,
       },
@@ -245,7 +251,6 @@ const quoteFor = (
       total: subtotal + shipping,
     }),
     payable: subtotal + shipping - coinsApplied * 25,
-    needsStepUp: coinsApplied >= 1000,
     inCoins: null,
   };
 };
@@ -268,6 +273,9 @@ const orderFor = (
     color: l.color,
     price: l.price,
     mrp: l.mrp,
+    coinsUsed: l.coinsUsed,
+    coinsValue: l.coinsValue,
+    moneyPaid: l.moneyPaid,
   })),
   currency: 'INR',
   subtotal: q.subtotal,
@@ -318,6 +326,7 @@ const orderFor = (
   placedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   trackingRef: null,
+  ...journeyOf(status),
   cancellable: true,
 });
 
@@ -377,6 +386,11 @@ const coinsCart = (balance = 5000): Cart => {
         ...l,
         coinPrice: 1796,
         lineCoins: 1796,
+        // Bought with coins alone: the goods' coins are the line's, the
+        // 196 delivery coins are the order's (RULES R11).
+        coinsUsed: 1796,
+        coinsValue: 1796 * 25,
+        moneyPaid: 0,
         paymentMode: 'coins' as const,
       })),
       coinsMin: total,
@@ -386,7 +400,6 @@ const coinsCart = (balance = 5000): Cart => {
       coinsValue: total * 25,
       paymentMethods: total <= balance ? (['coins'] as const) : [],
       payable: 0,
-      needsStepUp: true,
       inCoins: { goods: 1796, discount: 0, shipping: 196, total },
     },
   };
@@ -551,6 +564,18 @@ const pressButton = async (
     node.props.onPress();
   });
   await settle();
+};
+
+/**
+ * A coins-only order is confirmed in the app rather than by a code
+ * (D-66): the button opens a sheet, and the sheet's action is the consent.
+ */
+const redeemWithCoins = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  coins: string,
+) => {
+  await pressButton(tree, 'Redeem with Coins');
+  await press(tree, `Use ${coins} coins`);
 };
 
 /**
@@ -993,7 +1018,7 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
       { providerPaymentId: expect.stringMatching(/^mockpay_/) },
       { idempotencyKey: 'ord-1:pay' },
     );
-    expect(useOrdersStore.getState().orders[0]).toMatchObject({
+    expect(cachedOrders()[0]).toMatchObject({
       id: 'ord-1',
       status: 'placed',
     });
@@ -1095,7 +1120,14 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
     expect(text2).not.toContain('Pay with UPI');
     expect(text2).toContain('Available: 5,000 coins');
 
-    await pressButton(payment, 'Pay Now');
+    // Nothing is sent until the member agrees to the deduction.
+    await pressButton(payment, 'Redeem with Coins');
+    expect(checkoutApi.place).not.toHaveBeenCalled();
+    expect(allText(payment)).toContain(
+      '1,912 coins will be taken from your wallet',
+    );
+
+    await press(payment, 'Use 1,912 coins');
     expect(checkoutApi.place.mock.calls[0][0]).toMatchObject({
       fromCart: true,
       coins: 1912,
@@ -1142,12 +1174,44 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
     expect(allText(payment)).toContain('₹363.50');
   });
 
-  test('a thousand coins asks for a code: the attempt parks, and the token that comes back finishes it', async () => {
+  test('spending coins asks for no code: the order is placed and the gateway opens (D-66)', async () => {
     mockRouteParams = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }] };
     useAddressesStore.setState({ addresses: [HOME] });
     const q = quoteFor(hoodie, 'L');
+    // Well past the old 1,000-coin threshold, and still no OTP.
     expect(q.coinsApplied).toBeGreaterThanOrEqual(1000);
     checkoutApi.quote.mockResolvedValue(q);
+    checkoutApi.place.mockResolvedValue(checkoutResult(q));
+    checkoutApi.pay.mockResolvedValue({
+      order: orderFor(q, 'placed'),
+      balance: 5000 - q.coinsApplied,
+    });
+
+    const tree = await render(<CheckoutScreen />);
+    // Nothing on the till warns of a code any more.
+    expect(allText(tree)).not.toContain("we'll ask for a code first");
+
+    const payment = await handOff(tree);
+    // Money is owed, so there is no sheet either — the gateway is the
+    // confirmation for an order with money in it.
+    await pressButton(payment, 'Pay Now');
+    expect(authApi.stepUp).not.toHaveBeenCalled();
+    expect(checkoutApi.place).toHaveBeenCalledTimes(1);
+    expect(checkoutApi.place.mock.calls[0][0]).toMatchObject({
+      coins: q.coinsApplied,
+      stepUpToken: undefined,
+    });
+    expect(mockReplace).toHaveBeenCalledWith('OrderConfirmation', {
+      id: 'ord-1',
+    });
+  });
+
+  test('a step-up the server asks for parks the attempt, and the token that comes back finishes it under the same key', async () => {
+    mockRouteParams = { lines: [{ itemId: 'hoodie', quantity: 1, size: 'L' }] };
+    useAddressesStore.setState({ addresses: [HOME] });
+    const q = quoteFor(hoodie, 'L');
+    checkoutApi.quote.mockResolvedValue(q);
+    // Only the server decides this now — a watched account, say (RULES T5).
     checkoutApi.place
       .mockRejectedValueOnce(
         new ApiError(
@@ -1176,9 +1240,6 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
     });
 
     const tree = await render(<CheckoutScreen />);
-    // The till warns about the code before it hands on.
-    expect(allText(tree)).toContain("we'll ask for a code first");
-
     // ₹1,499 (free delivery) less 1,798 coins × ₹0.25.
     expect(q.payable).toBe(104950);
     expect(allText(tree)).toContain('₹1,049.50');
@@ -1331,7 +1392,7 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
     await pressButton(payment, 'Pay Now');
     expect(allText(payment)).toContain('Sold out');
     expect(checkoutApi.quote).toHaveBeenCalledTimes(4);
-    expect(useOrdersStore.getState().orders).toHaveLength(0);
+    expect(cachedOrders()).toHaveLength(0);
   });
 
   test('an order the coins cover has no payment step', async () => {
@@ -1345,7 +1406,6 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
       payable: 0,
       // 1,992 coins clear the ₹498 bill, so coins is the one way to pay.
       paymentMethods: ['coins'],
-      needsStepUp: true,
     };
     checkoutApi.quote.mockResolvedValue(q);
     checkoutApi.place.mockResolvedValue(checkoutResult(q));
@@ -1353,7 +1413,7 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
     const payment = await handOff(await render(<CheckoutScreen />));
     // The coins clear the bill, so paying with them is what the page offers.
     expect(allText(payment)).toContain('Pay with Coins');
-    await pressButton(payment, 'Pay Now');
+    await redeemWithCoins(payment, '1,992');
     expect(checkoutApi.place.mock.calls[0][0]).toMatchObject({
       coins: 1992,
       paymentMethod: 'coins',
@@ -1503,8 +1563,10 @@ describe('PaymentScreen (RULES R12)', () => {
     expect(text).toContain('Total Price 1,592 coins');
     expect(text).toContain('You Pay 1,592 coins');
     expect(text).not.toContain('\u20b9');
+    // Coins alone: the button asks to redeem, not to pay.
+    expect(text).toContain('Redeem with Coins');
 
-    await pressButton(tree, 'Pay Now');
+    await redeemWithCoins(tree, '1,592');
     expect(checkoutApi.place.mock.calls[0][0]).toMatchObject({
       coins: total,
       paymentMethod: 'coins',
@@ -1560,7 +1622,7 @@ describe('PaymentScreen (RULES R12)', () => {
     expect(allText(tree)).toContain("That way of paying won't work");
     expect(allText(tree)).toContain('Pick coins with UPI or a card.');
     expect(checkoutApi.quote).toHaveBeenCalledTimes(2);
-    expect(useOrdersStore.getState().orders).toHaveLength(0);
+    expect(cachedOrders()).toHaveLength(0);
   });
 });
 
@@ -1568,7 +1630,7 @@ describe('OrderConfirmationScreen (RULES R5, R12)', () => {
   /** The page as the payment lands on it: this order, in the cache. */
   const openConfirmation = async (order: Order) => {
     mockRouteParams = { id: order.id };
-    useOrdersStore.setState({ orders: [order], count: 1 });
+    cacheOrders([order]);
     return render(<OrderConfirmationScreen />);
   };
 
@@ -1656,10 +1718,17 @@ describe('OrderConfirmationScreen (RULES R5, R12)', () => {
     expect(text).not.toContain('Order Placed');
   });
 
-  test('a coins order reads its line in coins', async () => {
+  test('a coins order reads its line in the coins it was bought with', async () => {
     const q = quoteFor(cap);
+    const placed = orderFor(q, 'placed');
     const order: Order = {
-      ...orderFor(q, 'placed'),
+      ...placed,
+      items: placed.items.map(item => ({
+        ...item,
+        coinsUsed: 1796,
+        coinsValue: 1796 * 25,
+        moneyPaid: 0,
+      })),
       inCoins: { goods: 1796, discount: 0, shipping: 196, total: 1992 },
       coinsUsed: 1992,
       payable: 0,

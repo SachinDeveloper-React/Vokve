@@ -7,6 +7,7 @@ import { formatMoney } from '../../utils/format';
 import { HStack, VStack } from '../layout/Stack';
 import { AppImage } from '../media/AppImage';
 import { Emoji } from '../media/Emoji';
+import { PayAmount } from '../shop/PayAmount';
 import { AppText } from '../ui/AppText';
 import { CoinAmount } from '../wallet/CoinAmount';
 
@@ -20,7 +21,16 @@ const ART = moderateScale(72);
  */
 export type CheckoutLine = Pick<
   Quote['lines'][number],
-  'title' | 'emoji' | 'image' | 'quantity' | 'size' | 'color' | 'lineTotal' | 'lineCoins'
+  | 'title'
+  | 'emoji'
+  | 'image'
+  | 'quantity'
+  | 'size'
+  | 'color'
+  | 'lineTotal'
+  | 'lineCoins'
+  | 'coinsUsed'
+  | 'moneyPaid'
 > & {
   /** Only a basket can be out of stock; a placed order has its units. */
   inStock?: boolean;
@@ -31,6 +41,13 @@ interface Props {
   currency: string;
   /** An order read in coins shows the line in coins rather than rupees. */
   inCoins: boolean;
+  /**
+   * Shows what this line was actually paid with — the coins, the money, or
+   * both — instead of its price. Only an order knows that: a till's quote
+   * is taken at the most coins allowed, which is not yet what the member
+   * has chosen to spend.
+   */
+  showSplit?: boolean;
 }
 
 const makeStyles = ({ colors, radius }: ThemeShape) =>
@@ -53,12 +70,14 @@ const makeStyles = ({ colors, radius }: ThemeShape) =>
 /**
  * One line of the order as the till lists it: the art, the name, the size
  * and colour chosen, how many, and what the line comes to — in coins where
- * the shop is coins-only, in rupees otherwise.
+ * the shop is coins-only, in rupees otherwise, and on an order in exactly
+ * the coins and money it was bought with (RULES R11).
  *
- * Every figure is the quote's own, so this row and the summary beneath it
- * cannot disagree about one order.
+ * Every figure is the server's own, so this row and the summary beneath it
+ * cannot disagree about one order, and nobody has to divide a basket's
+ * total between three products by hand.
  */
-export const CheckoutLineRow = memo(({ line, currency, inCoins }: Props) => {
+export const CheckoutLineRow = memo(({ line, currency, inCoins, showSplit = false }: Props) => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const brand = { color: colors.brandAccent };
@@ -98,7 +117,16 @@ export const CheckoutLineRow = memo(({ line, currency, inCoins }: Props) => {
           <AppText variant="caption" color="textSecondary">
             {`Qty: ${line.quantity}`}
           </AppText>
-          {inCoins ? (
+          {showSplit ? (
+            <PayAmount
+              quote={{
+                coinsApplied: line.coinsUsed,
+                payable: line.moneyPaid,
+                currency,
+              }}
+              size="md"
+            />
+          ) : inCoins ? (
             <HStack align="baseline" gap="xxs">
               <CoinAmount
                 amount={line.lineCoins}

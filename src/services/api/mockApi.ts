@@ -67,7 +67,10 @@ import {
   type NutritionProfile,
   type VitalReading,
   type NotificationPreferences,
+  type AppGuide,
   type Order,
+  type OrderFilter,
+  type OrderStatus,
   type PaymentMethod,
   type PaymentMode,
   type PrivacySettings,
@@ -80,6 +83,7 @@ import {
   type ShopConfig,
   type ShopItem,
   type SupportFaq,
+  type SupportTopic,
   type SupportTicket,
   type CoinTransaction,
   type DailyActivity,
@@ -2329,6 +2333,129 @@ let mockStock = new Map(
   shopItems.map(item => [item.id, item.inStock ? 25 : 0]),
 );
 let mockOrders: Order[] = [];
+
+/**
+ * When each mock order reached each state — the server's events in
+ * miniature, and the only way the timeline can say *when* a parcel was
+ * packed rather than only that it was.
+ */
+const mockOrderEvents = new Map<string, Partial<Record<OrderStatus, string>>>();
+
+/** The stops an order makes on its way to the door, in order (RULES R5). */
+const MOCK_JOURNEY: readonly OrderStatus[] = [
+  'placed',
+  'confirmed',
+  'shipped',
+  'delivered',
+];
+
+const MOCK_STOP_TITLE: Record<OrderStatus, string> = {
+  pending_payment: 'Awaiting Payment',
+  placed: 'Order Placed',
+  confirmed: 'Packed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  refunded: 'Refunded',
+};
+
+const MOCK_HEADLINE: Record<OrderStatus, string> = {
+  pending_payment: 'Your order is held, waiting for payment.',
+  placed: 'Your order is being prepared.',
+  confirmed: 'Your order is packed and ready to ship.',
+  shipped: 'Your order is on the way!',
+  delivered: 'Your order has been delivered.',
+  cancelled: 'Your order was cancelled.',
+  refunded: 'Your order was refunded.',
+};
+
+/** Which states each tab of the orders list holds — the server's grouping. */
+const MOCK_FILTER_STATUSES: Record<OrderFilter, readonly OrderStatus[] | null> =
+  {
+    all: null,
+    processing: ['pending_payment', 'placed', 'confirmed'],
+    shipped: ['shipped'],
+    delivered: ['delivered'],
+    cancelled: ['cancelled', 'refunded'],
+  };
+
+/** The window the mock's returns promise runs for, as the server's ⚙ has it. */
+const MOCK_RETURN_WINDOW_DAYS = 7;
+
+/**
+ * Recomputes everything the order page reads off a state change: the
+ * timeline, the line it leads with, the courier's link and the returns
+ * promise. The server does this on every read, so the mock does too rather
+ * than letting a paid or cancelled order keep the journey it was born with.
+ */
+function withJourney(order: Order): Order {
+  const at = mockOrderEvents.get(order.id) ?? {};
+  const reached = MOCK_JOURNEY.indexOf(order.status);
+  const stops = MOCK_JOURNEY.map((status, index) => ({
+    status,
+    title: MOCK_STOP_TITLE[status],
+    at: at[status] ?? null,
+    done: index <= reached,
+  }));
+  const timeline =
+    order.status === 'cancelled' || order.status === 'refunded'
+      ? [
+          ...stops
+            .filter(stop => stop.at !== null)
+            .map(stop => ({ ...stop, done: true })),
+          {
+            status: order.status,
+            title: MOCK_STOP_TITLE[order.status],
+            at: at[order.status] ?? order.updatedAt,
+            done: true,
+          },
+        ]
+      : order.status === 'pending_payment'
+      ? [
+          {
+            status: order.status,
+            title: MOCK_STOP_TITLE[order.status],
+            at: order.placedAt,
+            done: true,
+          },
+          ...stops,
+        ]
+      : stops;
+  const deliveredAt = at.delivered ?? null;
+  const until = deliveredAt
+    ? new Date(
+        new Date(deliveredAt).getTime() + MOCK_RETURN_WINDOW_DAYS * 86_400_000,
+      )
+    : null;
+  return {
+    ...order,
+    timeline,
+    headline: MOCK_HEADLINE[order.status],
+    trackingUrl: order.trackingRef
+      ? `https://track.vokve.app/${encodeURIComponent(order.trackingRef)}`
+      : null,
+    returns: {
+      eligible:
+        order.status === 'delivered' &&
+        until !== null &&
+        until.getTime() > Date.now(),
+      windowDays: MOCK_RETURN_WINDOW_DAYS,
+      until: until?.toISOString() ?? null,
+      note: `Easy returns within ${MOCK_RETURN_WINDOW_DAYS} days (as per policy).`,
+    },
+    addressChangeable:
+      order.status === 'pending_payment' || order.status === 'placed',
+  };
+}
+
+/** Records the moment an order reached a state, then redraws its journey. */
+function markReached(order: Order, at: string): Order {
+  mockOrderEvents.set(order.id, {
+    ...mockOrderEvents.get(order.id),
+    [order.status]: at,
+  });
+  return withJourney(order);
+}
 let mockAddresses: Address[] = [];
 let mockCart: {
   itemId: string;
@@ -2451,6 +2578,52 @@ function mockCoinsFloor(paise: number, mode: PaymentMode): number {
 }
 
 /** The server's pro-rata split, with the last part carrying the rounding. */
+/**
+ * How the coins a member spends fall across the lines, and what money is
+ * left on each — the server's `spreadCoins` / `settleMoney` in miniature,
+ * so a mocked order carries the same per-product split as a real one.
+ */
+function mockSpreadCoins(
+  amount: number,
+  floors: number[],
+  caps: number[],
+): number[] {
+  const sum = (parts: number[]) => parts.reduce((total, part) => total + part, 0);
+  const given = floors.map((floor, index) => Math.min(floor, caps[index]));
+  const left = amount - sum(given);
+  if (left > 0) {
+    const headroom = caps.map((cap, index) => Math.max(0, cap - given[index]));
+    const extra = mockApportion(Math.min(left, sum(headroom)), headroom);
+    extra.forEach((part, index) => {
+      given[index] = Math.min(caps[index], given[index] + part);
+    });
+  }
+  let residue = amount - sum(given);
+  for (let index = 0; index < given.length && residue !== 0; index += 1) {
+    const room = residue > 0 ? caps[index] - given[index] : given[index];
+    const step = Math.min(Math.abs(residue), Math.max(0, room));
+    given[index] += residue > 0 ? step : -step;
+    residue += residue > 0 ? -step : step;
+  }
+  return given;
+}
+
+function mockSettleMoney(goods: number[], coinsValue: number[]): number[] {
+  const settled = goods.map((amount, index) =>
+    Math.max(0, amount - coinsValue[index]),
+  );
+  let over = goods.reduce(
+    (sum, amount, index) => sum + Math.max(0, coinsValue[index] - amount),
+    0,
+  );
+  for (let index = 0; index < settled.length && over > 0; index += 1) {
+    const take = Math.min(settled[index], over);
+    settled[index] -= take;
+    over -= take;
+  }
+  return settled;
+}
+
 function mockApportion(amount: number, weights: number[]): number[] {
   const total = weights.reduce((sum, w) => sum + w, 0);
   if (total <= 0 || amount <= 0) return weights.map(() => 0);
@@ -2944,6 +3117,29 @@ function quoteFor(
       ? coinsMax
       : Math.max(floor, Math.min(Math.floor(coins), coinsMax));
   const coinsValue = coinsApplied * cfg.coinValuePaise;
+
+  // What each line is actually paid with, at these coins (RULES R11).
+  const lineCoinsUsed = allCoins
+    ? (() => {
+        const goodsCoins = priced.map(
+          l => mockCoinsFor(l.item.price) * l.quantity,
+        );
+        const off = mockApportion(inCoins!.discount, goodsCoins);
+        return goodsCoins.map((amount, index) => amount - off[index]);
+      })()
+    : mockSpreadCoins(
+        coinsApplied,
+        perLine.map(l => mockCoinsFloor(l.goods, l.mode)),
+        perLine.map(l => mockCoinsCap(l.goods, l.mode)),
+      );
+  const lineCoinsValue = lineCoinsUsed.map(used => used * cfg.coinValuePaise);
+  const lineMoney = allCoins
+    ? priced.map(() => 0)
+    : mockSettleMoney(
+        perLine.map(l => l.goods),
+        lineCoinsValue,
+      );
+
   return {
     currency: cfg.currency,
     paymentMode:
@@ -2954,7 +3150,7 @@ function quoteFor(
         : perLine.every(l => l.mode === 'money')
         ? 'money'
         : 'mixed',
-    lines: priced.map(l => ({
+    lines: priced.map((l, index) => ({
       itemId: l.item.id,
       title: l.item.title,
       emoji: l.item.emoji,
@@ -2967,6 +3163,9 @@ function quoteFor(
       lineTotal: l.item.price * l.quantity,
       coinPrice: mockCoinsFor(l.item.price),
       lineCoins: mockCoinsFor(l.item.price) * l.quantity,
+      coinsUsed: lineCoinsUsed[index],
+      coinsValue: lineCoinsValue[index],
+      moneyPaid: lineMoney[index],
       paymentMode: mockModeOf(l.item),
       inStock: (mockStock.get(l.item.id) ?? 0) >= l.quantity,
     })),
@@ -2984,7 +3183,6 @@ function quoteFor(
     coinsValue,
     paymentMethods: mockMethodsForOrder({ coinsMin: floor, coinsMax, total }),
     payable: Math.max(0, total - coinsValue),
-    needsStepUp: coinsApplied > 0 && coinsApplied >= cfg.stepUpThreshold,
     inCoins,
   };
 }
@@ -3211,26 +3409,10 @@ export const mockCheckoutApi: CheckoutApi = {
         'OUT_OF_STOCK',
       );
     const paymentMethod = mockResolveMethod(payload.paymentMethod, q);
-    if (q.needsStepUp) {
-      if (!payload.stepUpToken) {
-        throw new ApiError(
-          'forbidden',
-          'Confirm it is you to use this many coins.',
-          403,
-          null,
-          'STEP_UP_REQUIRED',
-        );
-      }
-      if (!mockStepUps.delete(payload.stepUpToken)) {
-        throw new ApiError(
-          'forbidden',
-          'That confirmation has expired. Please confirm again.',
-          403,
-          null,
-          'STEP_UP_INVALID',
-        );
-      }
-    }
+    // Spending coins asks for no code (D-66): the app confirms the
+    // deduction with the member before it sends anything. A token sent
+    // anyway is spent, so the mock's single-use rule still holds.
+    if (payload.stepUpToken) mockStepUps.delete(payload.stepUpToken);
 
     for (const line of q.lines)
       mockStock.set(
@@ -3271,6 +3453,9 @@ export const mockCheckoutApi: CheckoutApi = {
         color: l.color,
         price: l.price,
         mrp: l.mrp,
+        coinsUsed: l.coinsUsed,
+        coinsValue: l.coinsValue,
+        moneyPaid: l.moneyPaid,
       })),
       currency: q.currency,
       subtotal: q.subtotal,
@@ -3314,11 +3499,16 @@ export const mockCheckoutApi: CheckoutApi = {
       placedAt: now.toISOString(),
       updatedAt: now.toISOString(),
       trackingRef: null,
+      trackingUrl: null,
+      timeline: [],
+      headline: '',
+      returns: null,
+      addressChangeable: true,
       cancellable: true,
     };
-    mockOrders = [order, ...mockOrders];
+    mockOrders = [markReached(order, now.toISOString()), ...mockOrders];
     const result: CheckoutResult = {
-      order,
+      order: mockOrders[0],
       balance: mockBalance,
       payment: pending
         ? {
@@ -3362,25 +3552,32 @@ export const mockCheckoutApi: CheckoutApi = {
         'PAYMENT_INVALID',
       );
     const now = new Date().toISOString();
-    const paid: Order = {
-      ...order,
-      status: 'placed',
-      updatedAt: now,
-      payment: { ...order.payment, status: 'paid', paidAt: now },
-    };
+    const paid = markReached(
+      {
+        ...order,
+        status: 'placed',
+        updatedAt: now,
+        payment: { ...order.payment, status: 'paid', paidAt: now },
+      },
+      now,
+    );
     mockOrders = mockOrders.map(entry => (entry.id === orderId ? paid : entry));
     return { order: paid, balance: currentBalance() };
   },
 };
 
 export const mockOrderApi: OrderApi = {
-  async list(cursor) {
+  async list(cursor, filter = 'all') {
     await delay();
-    const after = cursor ? mockOrders.findIndex(o => o.id === cursor) : -1;
-    const data = mockOrders.slice(after + 1, after + 1 + 20);
+    const statuses = MOCK_FILTER_STATUSES[filter];
+    const tab = statuses
+      ? mockOrders.filter(order => statuses.includes(order.status))
+      : mockOrders;
+    const after = cursor ? tab.findIndex(o => o.id === cursor) : -1;
+    const data = tab.slice(after + 1, after + 1 + 20);
     const last = data[data.length - 1];
     const hasMore =
-      last !== undefined && mockOrders.indexOf(last) < mockOrders.length - 1;
+      last !== undefined && tab.indexOf(last) < tab.length - 1;
     return { data, nextCursor: hasMore ? last.id : null };
   },
   async get(id) {
@@ -3421,18 +3618,79 @@ export const mockOrderApi: OrderApi = {
         Math.max(0, (mockCouponUses.get(order.coupon.code) ?? 0) - 1),
       );
     }
-    const cancelled: Order = {
-      ...order,
-      status: 'cancelled',
-      cancellable: false,
-      updatedAt: new Date().toISOString(),
-      payment:
-        order.payment.status === 'paid'
-          ? { ...order.payment, status: 'refunded' }
-          : order.payment,
-    };
+    const now = new Date().toISOString();
+    const cancelled = markReached(
+      {
+        ...order,
+        status: 'cancelled',
+        cancellable: false,
+        addressChangeable: false,
+        updatedAt: now,
+        payment:
+          order.payment.status === 'paid'
+            ? { ...order.payment, status: 'refunded' }
+            : order.payment,
+      },
+      now,
+    );
     mockOrders = mockOrders.map(entry => (entry.id === id ? cancelled : entry));
     return { order: cancelled, balance: mockBalance };
+  },
+  async changeAddress(id, addressId) {
+    await delay();
+    const order = mockOrders.find(entry => entry.id === id);
+    if (!order) throw notFound('That order');
+    if (!order.addressChangeable) {
+      throw new ApiError(
+        'unknown',
+        `An order that is ${order.status.replace(
+          '_',
+          ' ',
+        )} is already on its way — contact support to change where it goes.`,
+        409,
+        { status: order.status },
+        'ORDER_ADDRESS_LOCKED',
+      );
+    }
+    const address = mockAddresses.find(entry => entry.id === addressId);
+    if (!address) throw notFound('That address');
+    const moved = withJourney({ ...order, address: snapshotOf(address) });
+    mockOrders = mockOrders.map(entry => (entry.id === id ? moved : entry));
+    return moved;
+  },
+  async reorder(id) {
+    await delay();
+    const order = mockOrders.find(entry => entry.id === id);
+    if (!order) throw notFound('That order');
+    const skipped: { title: string; reason: string }[] = [];
+    let added = 0;
+    for (const line of order.items) {
+      const item = shopItems.find(entry => entry.id === line.itemId);
+      if (!item) {
+        skipped.push({
+          title: line.title,
+          reason: 'One of the items is no longer available.',
+        });
+        continue;
+      }
+      const index = mockCart.findIndex(
+        entry =>
+          entry.itemId === line.itemId &&
+          entry.size === line.size &&
+          (entry.color ?? null) === line.color,
+      );
+      if (index >= 0) mockCart[index].quantity = line.quantity;
+      else
+        mockCart.push({
+          itemId: line.itemId,
+          quantity: line.quantity,
+          size: line.size,
+          color: line.color,
+          addedAt: new Date().toISOString(),
+        });
+      added += 1;
+    }
+    return { cart: await mockCartApi.get(), added, skipped };
   },
 };
 
@@ -3839,7 +4097,70 @@ const MOCK_FAQS: SupportFaq[] = [
     answer:
       'Account → Privacy → Delete account. Deletion is scheduled 14 days ahead so you can change your mind.',
   },
+  {
+    id: 'faq-privacy-health',
+    category: 'privacy',
+    question: 'Who can see my health data?',
+    answer:
+      'Only you. The leaderboard shows a rank and a first name, never the readings behind it, and health data is never sold.',
+  },
 ];
+
+/** The help centre's rows, as the server's ⚙ orders them (RULES P12). */
+const MOCK_TOPICS: readonly Omit<SupportTopic, 'count'>[] = [
+  { id: 'faq', title: 'Frequently Asked Questions', subtitle: 'Find quick answers to common questions', kind: 'faq', category: null, icon: 'question', tint: 'destructive' },
+  { id: 'contact', title: 'Contact Us', subtitle: 'Get in touch with our support team', kind: 'contact', category: null, icon: 'mail', tint: 'primary' },
+  { id: 'report', title: 'Report an Issue', subtitle: 'Facing a problem? Let us know', kind: 'report', category: null, icon: 'alert', tint: 'success' },
+  { id: 'orders', title: 'Orders & Shipping', subtitle: 'Track orders, returns and replacements', kind: 'faq', category: 'orders', icon: 'package', tint: 'brandAccent' },
+  { id: 'coins', title: 'Coins & Rewards', subtitle: 'Learn about earning, redemption and expiry', kind: 'faq', category: 'coins', icon: 'coins', tint: 'gold' },
+  { id: 'account', title: 'Account & Login', subtitle: 'Manage your account, login issues', kind: 'faq', category: 'account', icon: 'user', tint: 'destructive' },
+  { id: 'privacy', title: 'Privacy & Security', subtitle: 'Your data and account safety', kind: 'faq', category: 'privacy', icon: 'shield', tint: 'purple' },
+  { id: 'guide', title: 'App Guide', subtitle: 'How to use VOKVE (step by step)', kind: 'guide', category: null, icon: 'guide', tint: 'success' },
+];
+
+/** The guide the mock serves — the same chapters the seed writes. */
+const MOCK_GUIDE: AppGuide = {
+  title: 'App Guide',
+  subtitle: 'How to use VOKVE, step by step',
+  sections: [
+    {
+      id: 'guide-start',
+      title: 'Getting started',
+      summary: 'Set the app up once and it keeps count for you.',
+      icon: 'guide',
+      tint: 'primary',
+      steps: [
+        { title: 'Create your account', body: 'Sign up with your phone and email; both are verified with a code.' },
+        { title: 'Allow step tracking', body: 'VOKVE reads steps from your phone’s health service. Without it the app works, but cannot pay you for walking.' },
+        { title: 'Set your daily goal', body: 'Pick something you will actually hit — you can change it any day.' },
+      ],
+    },
+    {
+      id: 'guide-earn',
+      title: 'Earning coins',
+      summary: 'Every coin comes from something you did.',
+      icon: 'coins',
+      tint: 'gold',
+      steps: [
+        { title: 'Walk', body: 'Steps pay a little for every 100 you walk, up to a daily ceiling.' },
+        { title: 'Keep a streak', body: 'Consecutive days at your goal pay a bonus at each milestone.' },
+        { title: 'Finish a challenge', body: 'Challenges pay a fixed reward, and some pay a badge.' },
+      ],
+    },
+    {
+      id: 'guide-spend',
+      title: 'Spending coins',
+      summary: 'Coins come off the bill at the till.',
+      icon: 'package',
+      tint: 'brandAccent',
+      steps: [
+        { title: 'Find something in the shop', body: 'Every product shows what it costs and how much of that coins can cover.' },
+        { title: 'Choose how to pay', body: 'Coins only, or coins for part of the bill and card or UPI for the rest.' },
+        { title: 'Confirm', body: 'A coins-only order asks you to confirm the deduction; one with money opens the payment sheet.' },
+      ],
+    },
+  ],
+};
 
 export const mockAccountApi: AccountApi = {
   async profile() {
@@ -3974,6 +4295,53 @@ export const mockAccountApi: AccountApi = {
 };
 
 export const mockSupportApi: SupportApi = {
+  async home() {
+    await delay();
+    // A row whose shelf is empty is not offered — the same rule the server
+    // reads by, so the mock cannot show a door onto nothing.
+    const topics = MOCK_TOPICS.flatMap(topic => {
+      const count =
+        topic.kind === 'faq'
+          ? topic.category
+            ? MOCK_FAQS.filter(faq => faq.category === topic.category).length
+            : MOCK_FAQS.length
+          : null;
+      return count === 0 ? [] : [{ ...topic, count }];
+    });
+    const open = mockTickets.find(
+      ticket => ticket.status === 'open' || ticket.status === 'in_progress',
+    );
+    return {
+      topics,
+      chat: {
+        title: 'Chat with our Support Team',
+        subtitle: 'Still need help?',
+        responseTime: 'We usually reply within 24 hours.',
+        openTicketId: open?.id ?? null,
+      },
+      channels: [
+        {
+          kind: 'email',
+          label: 'Email us',
+          value: 'support@vokve.app',
+          url: 'mailto:support@vokve.app',
+          note: 'We usually reply within 24 hours.',
+        },
+        {
+          kind: 'phone',
+          label: 'Call us',
+          value: '+918000000000',
+          url: 'tel:+918000000000',
+          note: 'Mon–Sat, 9 am – 7 pm IST',
+        },
+      ],
+      hours: 'Mon–Sat, 9 am – 7 pm IST',
+    };
+  },
+  async guide() {
+    await delay();
+    return MOCK_GUIDE;
+  },
   async faqs(query = {}) {
     await delay();
     const words = (query.q ?? '')
