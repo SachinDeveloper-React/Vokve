@@ -20,6 +20,14 @@ export const CONFIG_DEFAULTS = {
      * then records the day and holds nothing.
      */
     steps: { enabled: false, unitSteps: 100, coinsPerUnit: 0.095 },
+    /**
+     * Whether unlocking a badge pays its `rewardCoins` (RULES C7). Off like
+     * step coins are, and for the same reason: the amounts in
+     * `achievement_definitions` are the owner's to settle before anything is
+     * minted (D-32). While it is off the badge is still unlocked and the app
+     * still shows what it will be worth.
+     */
+    achievements: { enabled: false },
     /** Inherited from the client's rate card — see D-32 for rebalancing. */
     workout: 100,
     workoutDailyCount: 2,
@@ -156,6 +164,12 @@ export const CONFIG_DEFAULTS = {
   challenges: {
     /** How far ahead the board lists challenges that have not opened yet. */
     upcomingDays: 30,
+    /**
+     * How many places `GET /challenges/:id` serves. A challenge's standings
+     * are worked out from activity rather than read from stored scores, so
+     * this is also what bounds the work that read does.
+     */
+    boardSize: 20,
   },
   /**
    * The shop's money side (RULES R1, R11–R13). Prices are paise and a coin

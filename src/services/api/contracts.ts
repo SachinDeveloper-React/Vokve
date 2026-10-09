@@ -1,11 +1,13 @@
 import type {
   Achievement,
+  AchievementDetail,
   AccountDeletion,
   AccountSession,
   Address,
   AppAbout,
   Cart,
   Challenge,
+  ChallengeDetail,
   CheckoutResult,
   DeliveryPreferences,
   PaymentMethod,
@@ -64,6 +66,7 @@ import type {
   StepIngestResult,
   StepSourcesReport,
   StreakRestoreResult,
+  StreakHistoryPage,
   StreakSummary,
   AppGuide,
   SupportCategory,
@@ -653,6 +656,12 @@ export interface StreakApi {
    * (422), with nothing charged.
    */
   restore(options: IdempotentOptions): Promise<StreakRestoreResult>;
+  /**
+   * The streak's record, newest first, back to the first day that ever
+   * counted. Missed days are in it — the server fills the gaps rather than
+   * leaving the app to infer them from the days it was not sent.
+   */
+  history(cursor?: string, limit?: number): Promise<StreakHistoryPage>;
 }
 
 export interface ChallengeApi {
@@ -663,8 +672,20 @@ export interface ChallengeApi {
    * C3, C4) — there is nothing to report and nothing to claim.
    */
   board(date: string): Promise<Challenge[]>;
+  /**
+   * One challenge in full for a day — the board's row, the day's share of the
+   * goal, the rule sheet the server enforces, the standings and the reward.
+   * 404 for a challenge that has been retired from the catalogue.
+   */
+  detail(id: string, date: string): Promise<ChallengeDetail>;
   /** The achievement shelf, in the server's order, with what is unlocked. */
   achievements(): Promise<Achievement[]>;
+  /**
+   * One badge in full — what it takes, the member's own best against it,
+   * what it pays and the rest of its family. 404 for a badge that is not in
+   * the catalogue.
+   */
+  achievement(id: string): Promise<AchievementDetail>;
 }
 
 export interface LeaderboardApi {

@@ -19,7 +19,15 @@ const MAX_ROWS = 3;
 
 interface Props {
   challenges: Challenge[];
-  onPressViewAll: () => void;
+  /**
+   * How many rows to draw. The full list screen passes the lot; the board
+   * takes the default, which is what "View All" exists to get past.
+   */
+  max?: number;
+  /** Left off, the link is too — the full list has nowhere further to go. */
+  onPressViewAll?: () => void;
+  /** Opens one challenge in full. Left off, the rows are read-only. */
+  onPressChallenge?: (id: string) => void;
 }
 
 /**
@@ -31,10 +39,10 @@ interface Props {
  * still move today.
  */
 export const ActiveChallengesCard = memo(
-  ({ challenges, onPressViewAll }: Props) => {
+  ({ challenges, max = MAX_ROWS, onPressViewAll, onPressChallenge }: Props) => {
     const { colors } = useTheme();
     const foreground = darkColors.tierForeground;
-    const visible = challenges.slice(0, MAX_ROWS);
+    const visible = challenges.slice(0, max);
 
     return (
       <View
@@ -49,26 +57,28 @@ export const ActiveChallengesCard = memo(
               Active Challenges
             </AppText>
 
-            <Pressable
-              onPress={onPressViewAll}
-              feedback="opacity"
-              accessibilityRole="link"
-              accessibilityLabel="View all active challenges"
-            >
-              <HStack align="center" gap="xxs">
-                <AppText
-                  variant="micro"
-                  style={{ color: withAlpha(foreground, 0.72) }}
-                >
-                  View All
-                </AppText>
-                <Icon
-                  as={ChevronRight}
-                  size="xs"
-                  tint={withAlpha(foreground, 0.72)}
-                />
-              </HStack>
-            </Pressable>
+            {onPressViewAll ? (
+              <Pressable
+                onPress={onPressViewAll}
+                feedback="opacity"
+                accessibilityRole="link"
+                accessibilityLabel="View all active challenges"
+              >
+                <HStack align="center" gap="xxs">
+                  <AppText
+                    variant="micro"
+                    style={{ color: withAlpha(foreground, 0.72) }}
+                  >
+                    View All
+                  </AppText>
+                  <Icon
+                    as={ChevronRight}
+                    size="xs"
+                    tint={withAlpha(foreground, 0.72)}
+                  />
+                </HStack>
+              </Pressable>
+            ) : null}
           </HStack>
 
           {visible.length === 0 ? (
@@ -83,7 +93,11 @@ export const ActiveChallengesCard = memo(
             </AppText>
           ) : (
             visible.map(challenge => (
-              <ActiveChallengeRow key={challenge.id} challenge={challenge} />
+              <ActiveChallengeRow
+                key={challenge.id}
+                challenge={challenge}
+                onPress={onPressChallenge}
+              />
             ))
           )}
         </VStack>

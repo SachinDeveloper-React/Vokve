@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   accountDeletionSchema,
+  achievementDetailSchema,
   achievementSchema,
   accountSessionSchema,
   activityConfigSchema,
@@ -12,6 +13,7 @@ import {
   attestationChallengeSchema,
   authResponseSchema,
   cartSchema,
+  challengeDetailSchema,
   challengeSchema,
   checkoutResultSchema,
   coinTransactionSchema,
@@ -56,6 +58,7 @@ import {
   stepGoalSchema,
   stepIngestResultSchema,
   stepSourcesReportSchema,
+  streakHistoryPageSchema,
   streakRestoreResultSchema,
   streakSummarySchema,
   verificationChallengeSchema,
@@ -602,6 +605,10 @@ const realStreakApi: StreakApi = {
         headers: { 'Idempotency-Key': idempotencyKey },
       }),
     ),
+  history: (cursor, limit) =>
+    request(streakHistoryPageSchema, client =>
+      client.get('/streak/history', { params: { cursor, limit } }),
+    ),
 };
 
 const realChallengeApi: ChallengeApi = {
@@ -609,8 +616,18 @@ const realChallengeApi: ChallengeApi = {
     request(z.array(challengeSchema), client =>
       client.get('/challenges', { params: { date } }),
     ),
+  detail: (id, date) =>
+    request(challengeDetailSchema, client =>
+      client.get(`/challenges/${encodeURIComponent(id)}`, {
+        params: { date },
+      }),
+    ),
   achievements: () =>
     request(z.array(achievementSchema), client => client.get('/achievements')),
+  achievement: id =>
+    request(achievementDetailSchema, client =>
+      client.get(`/achievements/${encodeURIComponent(id)}`),
+    ),
 };
 
 const realLeaderboardApi: LeaderboardApi = {
@@ -965,11 +982,15 @@ export const streakApi: StreakApi = {
   get: () => pick(mockStreakApi, realStreakApi).get(),
   freeze: options => pick(mockStreakApi, realStreakApi).freeze(options),
   restore: options => pick(mockStreakApi, realStreakApi).restore(options),
+  history: (cursor, limit) =>
+    pick(mockStreakApi, realStreakApi).history(cursor, limit),
 };
 
 export const challengeApi: ChallengeApi = {
   board: date => pick(mockChallengeApi, realChallengeApi).board(date),
+  detail: (id, date) => pick(mockChallengeApi, realChallengeApi).detail(id, date),
   achievements: () => pick(mockChallengeApi, realChallengeApi).achievements(),
+  achievement: id => pick(mockChallengeApi, realChallengeApi).achievement(id),
 };
 
 export const leaderboardApi: LeaderboardApi = {

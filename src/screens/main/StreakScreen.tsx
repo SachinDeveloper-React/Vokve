@@ -1,28 +1,43 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { DateChip } from '../../components/streak/DateChip';
 import { StreakBenefitsCard } from '../../components/streak/StreakBenefitsCard';
 import { StreakCalendarCard } from '../../components/streak/StreakCalendarCard';
-import { StreakCheerCard } from '../../components/streak/StreakCheerCard';
-import { StreakHeader } from '../../components/streak/StreakHeader';
-import { StreakSummaryCard } from '../../components/streak/StreakSummaryCard';
-import { StreakToolsCard } from '../../components/streak/StreakToolsCard';
+import { StreakDetailHeader } from '../../components/streak/StreakDetailHeader';
+import { StreakFiguresCard } from '../../components/streak/StreakFiguresCard';
+import { StreakGapAlert } from '../../components/streak/StreakGapAlert';
+import { StreakHistoryCard } from '../../components/streak/StreakHistoryCard';
+import {
+  StreakFreezeCard,
+  StreakRestoreCard,
+} from '../../components/streak/StreakToolCard';
+import { AppText } from '../../components/ui/AppText';
+import { Button } from '../../components/ui/Button';
+import { Icon } from '../../components/media/Icon';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useToast } from '../../components/feedback/Toast';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
-import { useCurrentUser } from '../../stores/authStore';
+import { useStreakHistory } from '../../hooks/useStreakHistory';
+import { ArrowRight } from 'lucide-react-native';
 import { useCoinBalance, useWalletSyncedAt } from '../../stores/coinsStore';
-import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import { useStreakStore } from '../../stores/streakStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { addDays, fromIsoDate, todayIso } from '../../utils/date';
 import { formatCoins } from '../../utils/format';
 
-const makeStyles = ({ spacing }: ThemeShape) =>
+const makeStyles = ({ spacing, colors }: ThemeShape) =>
   StyleSheet.create({
-    content: { paddingBottom: spacing.xxxl, gap: spacing.md },
+    content: { paddingBottom: spacing.xl, gap: spacing.md },
+    /** Bleeds through the screen's gutter so the rule runs edge to edge. */
+    bar: {
+      marginHorizontal: -spacing.base,
+      paddingHorizontal: spacing.base,
+      paddingTop: spacing.md,
+      backgroundColor: colors.background,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
   });
 
 /**
@@ -41,7 +56,6 @@ export const StreakScreen = () => {
   const { colors } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
-  const user = useCurrentUser();
 
   const summary = useStreakStore(s => s.summary);
   const isSyncing = useStreakStore(s => s.isSyncing);
@@ -51,11 +65,15 @@ export const StreakScreen = () => {
   const refreshIfStale = useStreakStore(s => s.refreshIfStale);
   const freezeToday = useStreakStore(s => s.freezeToday);
   const restore = useStreakStore(s => s.restore);
-  const hasUnreadNotifications = useHasUnreadNotifications();
   const balance = useCoinBalance();
   const walletSynced = useWalletSyncedAt() !== null;
 
   useRefreshOnFocus(refreshIfStale);
+
+  // The record behind the figures (`GET /streak/history`). Its own read
+  // rather than part of the summary: the summary is one small answer the
+  // whole screen waits on, and a month of days does not belong inside it.
+  const history = useStreakHistory();
 
   // The server's today, so the calendar and the figures agree on it; the
   // phone's own before the first answer.
@@ -232,28 +250,41 @@ export const StreakScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // Names the Account stack's first screen explicitly: the avatar means "my
-  // account", not "wherever I last was inside that tab".
-  const onOpenAccount = useCallback(
-    () =>
-      navigation.navigate('Main', {
-        screen: 'Account',
-        params: { screen: 'AccountHome' },
-      }),
+  // The "?" and the calendar's "How it Works?" both ask the same question —
+  // what makes a day count — which the app guide answers in full.
+  const onPressHelp = useCallback(
+    () => navigation.navigate('AppGuide'),
     [navigation],
   );
 
-  const onOpenNotifications = useCallback(
-    () => navigation.navigate('Notifications'),
+  const onViewAllHistory = useCallback(
+    () => navigation.navigate('StreakHistory'),
     [navigation],
   );
 
-  // Explainers the app has not written yet. Wired as no-ops rather than left
-  // off, so the ⓘ and the link keep their place and only the handler changes.
-  const notImplemented = useCallback(() => {}, []);
+  // The gap banner is a shortcut to the two tools, which are the next thing
+  // down the screen: a restore is what it is really offering, so it goes
+  // straight there rather than scrolling and leaving the user to find it.
+  const onPressGap = useCallback(() => {
+    handleRestore();
+  }, [handleRestore]);
+
+  // Where the streak is actually kept: the step tracker. The label changes
+  // with the day — there is nothing to save on a day already covered — but
+  // the destination does not, because watching the figure move is the point
+  // either way.
+  const onPressKeepAlive = useCallback(
+    () => navigation.navigate('StepTracking'),
+    [navigation],
+  );
 
   return (
-    <Screen edges={['top']}>
+    <Screen edges={['top', 'bottom']}>
+      <StreakDetailHeader
+        onPressBack={onPressBack}
+        onPressHelp={onPressHelp}
+      />
+
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -266,17 +297,6 @@ export const StreakScreen = () => {
           />
         }
       >
-        <StreakHeader
-          name={user?.name}
-          avatarUri={user?.avatarUrl}
-          hasUnreadNotifications={hasUnreadNotifications}
-          onPressBack={onPressBack}
-          onPressNotifications={onOpenNotifications}
-          onPressAvatar={onOpenAccount}
-        />
-
-        <DateChip date={today} onPress={showToday} />
-
         {summary === null ? (
           <LoadState
             loading={isSyncing || syncError === null}
@@ -286,12 +306,10 @@ export const StreakScreen = () => {
           />
         ) : (
           <>
-            <StreakSummaryCard
+            <StreakFiguresCard
               currentStreak={summary.currentStreak}
               longestStreak={summary.longestStreak}
-              nextMilestone={summary.nextMilestone}
               howToEarn={summary.howToEarn}
-              onPressInfo={notImplemented}
             />
 
             <StreakCalendarCard
@@ -306,31 +324,72 @@ export const StreakScreen = () => {
               onPreviousMonth={previousMonth}
               onNextMonth={nextMonth}
               canGoNext={!isCurrentMonth}
-              onPressInfo={notImplemented}
-              onPressHowItWorks={notImplemented}
+              onPressToday={showToday}
+              onPressHowItWorks={onPressHelp}
             />
 
-            <StreakBenefitsCard
-              milestones={summary.milestones}
-              onPressInfo={notImplemented}
+            {summary.canRestore ? (
+              <StreakGapAlert
+                missedDays={summary.restoreGap.length}
+                onPress={onPressGap}
+              />
+            ) : null}
+
+            <StreakFreezeCard
+              available={summary.freezesAvailable}
+              maxFreezes={summary.maxFreezes}
+              pending={pendingAction === 'freeze'}
+              disabled={pendingAction === 'restore'}
+              onPress={handleFreeze}
             />
 
-            <StreakToolsCard
-              freezesAvailable={summary.freezesAvailable}
-              restoreCostCoins={summary.restoreCostCoins}
-              pendingAction={pendingAction}
-              onPressFreeze={handleFreeze}
-              onPressRestore={handleRestore}
+            <StreakRestoreCard
+              costCoins={summary.restoreCostCoins}
+              gapDays={summary.restoreGap.length}
+              pending={pendingAction === 'restore'}
+              disabled={pendingAction === 'freeze'}
+              onPress={handleRestore}
             />
 
-            <StreakCheerCard
-              name={user?.name}
-              currentStreak={summary.currentStreak}
-              howToEarn={summary.howToEarn}
+            <StreakHistoryCard
+              days={history.days}
+              loading={history.isLoading}
+              total={history.total}
+              onPressViewAll={onViewAllHistory}
             />
+
+            {/* Not on the design, kept because it is the only place the
+                milestone rewards are stated. */}
+            <StreakBenefitsCard milestones={summary.milestones} />
           </>
         )}
       </ScrollView>
+
+      {summary === null ? null : (
+        <View style={styles.bar}>
+          {summary.todayCovered ? (
+            <AppText variant="caption" color="textSecondary" center>
+              Today already counts — your streak is safe.
+            </AppText>
+          ) : (
+            <Button
+              label="Keep Your Streak Alive"
+              variant="brand"
+              size="lg"
+              fullWidth
+              onPress={onPressKeepAlive}
+              icon={
+                <Icon
+                  as={ArrowRight}
+                  size="sm"
+                  tint={colors.primaryForeground}
+                />
+              }
+              iconPosition="trailing"
+            />
+          )}
+        </View>
+      )}
     </Screen>
   );
 };

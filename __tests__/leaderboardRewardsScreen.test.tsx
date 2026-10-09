@@ -188,7 +188,7 @@ describe('LeaderboardRewardsScreen', () => {
 
   test('the user is told their own place when it is below the top five', async () => {
     expect(allText(await render())).toContain(
-      'You are #12 this week with 1,240 points.',
+      'You are #14 this week with 1,240 points.',
     );
   });
 
@@ -226,6 +226,13 @@ describe('LeaderboardRewardsScreen', () => {
     press(tree, 'Rewards & Prizes');
 
     expect(allText(tree)).toContain('Leaderboard Reward Tiers');
+  });
+
+  test('"View Full Leaderboard" opens the board in full', async () => {
+    const tree = await render();
+    press(tree, 'View full leaderboard');
+
+    expect(mockNavigate).toHaveBeenCalledWith('LeaderboardBoard');
   });
 
   test('the chevron returns to whatever opened the board', async () => {

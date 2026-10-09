@@ -1295,6 +1295,241 @@ export const achievementSchema = z.object({
 });
 export type Achievement = z.infer<typeof achievementSchema>;
 
+// ─── One challenge in full (`GET /challenges/:id`) ─────────────────────────
+
+/**
+ * Which glyph a rule is drawn with.
+ *
+ * An enum rather than an icon name or an emoji in the string: the rule sheet
+ * is the server's wording (RULES C3, C4, C6 — the rules it actually enforces),
+ * and a free icon name would let a release of the server reach an app that has
+ * never heard of it and draw the line with no glyph at all.
+ */
+export const challengeRuleIconSchema = z.enum([
+  'goal',
+  'duration',
+  'verified',
+  'reward',
+  'repeat',
+  'warning',
+]);
+export type ChallengeRuleIcon = z.infer<typeof challengeRuleIconSchema>;
+
+/** One line of a challenge's rule sheet. */
+export const challengeRuleSchema = z.object({
+  id: z.string(),
+  icon: challengeRuleIconSchema,
+  text: z.string(),
+  /**
+   * `caution` is the line about what loses the challenge rather than what
+   * wins it, and is drawn quieter — a term, not an instruction.
+   */
+  tone: z.enum(['default', 'caution']).default('default'),
+});
+export type ChallengeRule = z.infer<typeof challengeRuleSchema>;
+
+/**
+ * One member's place in a challenge, this period.
+ *
+ * Named like the leaderboard's entry but deliberately not that type: a place
+ * here is won in the challenge's own metric — steps, workouts, days — where a
+ * leaderboard entry carries a weekly score and the prize its rank pays.
+ */
+export const challengeParticipantSchema = z.object({
+  id: z.string(),
+  /** "Aman S." — a first name and an initial is all a public list shows. */
+  name: z.string(),
+  avatarUrl: z.string().nullable().default(null),
+  rank: z.number().int().positive(),
+  /** How far they have got, in the challenge's metric. */
+  progress: z.number().nonnegative(),
+  /** Whether they have already reached the goal this period. */
+  completed: z.boolean().default(false),
+  isCurrentUser: z.boolean().default(false),
+});
+export type ChallengeParticipant = z.infer<typeof challengeParticipantSchema>;
+
+/**
+ * What the detail screen's ring counts, and the clock under it.
+ *
+ * The server picks the window rather than the app deriving one: "10,000 steps
+ * today" out of a 70,000-step week is a pace the server computed, and an app
+ * dividing the goal by the days itself would disagree with the server the
+ * first time a challenge opened mid-week.
+ */
+export const challengeFocusSchema = z.object({
+  /** `today` is a day's share of the goal; `period` is the whole thing. */
+  scope: z.enum(['today', 'period']),
+  /** "Daily Goal", "Challenge Goal". */
+  label: z.string(),
+  value: z.number().nonnegative(),
+  target: z.number().positive(),
+  /** `target - value`, never below zero. */
+  remaining: z.number().nonnegative(),
+  /** ISO-8601: the instant this window closes, in the caller's zone. */
+  endsAt: z.string(),
+  /** The words before the countdown — "Today's Challenge Ends In". */
+  caption: z.string(),
+});
+export type ChallengeFocus = z.infer<typeof challengeFocusSchema>;
+
+/** What the button at the foot of the detail screen says, and where it goes. */
+export const challengeCtaSchema = z.object({
+  label: z.string(),
+  /**
+   * A destination the app has, not a URL: `track_steps` is the step tracking
+   * screen, `go_home` the dashboard a workout is started from, `view_board`
+   * the challenge board, and `none` a button with nowhere to go — an upcoming
+   * challenge, or one already finished for this period.
+   */
+  action: z.enum(['track_steps', 'go_home', 'view_board', 'none']),
+});
+export type ChallengeCta = z.infer<typeof challengeCtaSchema>;
+
+/**
+ * `GET /challenges/:id?date=`: one challenge in full, for the period the day
+ * falls in — the board's row plus everything that would not fit on it.
+ *
+ * Every figure is the server's (RULES C3, C5): progress from verified
+ * activity, the standings worked out the same way for everyone enrolled, and
+ * the rule sheet worded from the definition in force rather than from a copy
+ * of it in the app.
+ */
+export const challengeDetailSchema = z.object({
+  /** The same row the board sends, so the two can never disagree. */
+  challenge: challengeSchema,
+  /** The period the rest of this answer is about, clipped to the challenge's own dates. */
+  period: z.object({
+    start: z.string(),
+    end: z.string(),
+    /** 1-based, for "Day 3 of 7". */
+    day: z.number().int().positive(),
+    days: z.number().int().positive(),
+    /** ISO-8601: the instant the period closes in the caller's zone. */
+    endsAt: z.string(),
+  }),
+  focus: challengeFocusSchema,
+  reward: z.object({
+    coins: z.number().int().nonnegative(),
+    /** "Complete all 7 days to earn". */
+    caption: z.string(),
+    /** The badge a completion unlocks, with the caller's own state of it. */
+    badge: achievementSchema.nullable().default(null),
+  }),
+  rules: z.array(challengeRuleSchema),
+  /** How many members the challenge is open to — everyone is enrolled (C5). */
+  joined: z.number().int().nonnegative(),
+  /** How many have already reached the goal this period. */
+  finished: z.number().int().nonnegative(),
+  /** How many have any progress at all this period — the ranked field. */
+  ranked: z.number().int().nonnegative(),
+  /** Best first, capped at ⚙ `challenges.boardSize`. */
+  standings: z.array(challengeParticipantSchema),
+  /** The caller's own place, or null until they have made any progress. */
+  me: challengeParticipantSchema.nullable().default(null),
+  cta: challengeCtaSchema,
+  /** What the share sheet sends, worded by the server. */
+  shareText: z.string(),
+});
+export type ChallengeDetail = z.infer<typeof challengeDetailSchema>;
+
+// ─── One achievement in full (`GET /achievements/:id`) ─────────────────────
+
+/**
+ * What a badge's progress figure is measured from.
+ *
+ * The shelf holds two kinds of badge (RULES C7): one with a rule of its own —
+ * a best day, a longest streak, a running total — and one a challenge gives,
+ * which has no figure until you look at the challenge. The basis says which
+ * is on screen, so the app never has to guess what "10,428 of 10,000" counted.
+ */
+export const achievementBasisSchema = z.enum([
+  'best_day',
+  'longest_streak',
+  'total_workouts',
+  'challenges_completed',
+  'challenge',
+]);
+export type AchievementBasis = z.infer<typeof achievementBasisSchema>;
+
+/** Where a badge's coins come from, if any. */
+export const achievementRewardSourceSchema = z.enum([
+  'achievement',
+  'challenge',
+  'none',
+]);
+export type AchievementRewardSource = z.infer<
+  typeof achievementRewardSourceSchema
+>;
+
+/** What the button at the foot of the achievement screen says, and where it goes. */
+export const achievementCtaSchema = z.object({
+  label: z.string(),
+  /**
+   * Its own enum rather than the challenge screen's: a badge can send the
+   * reader back to the shelf, which is not a destination a challenge ever
+   * has, and one shared enum would leave each screen handling cases the
+   * server never sends it.
+   */
+  action: z.enum(['track_steps', 'go_home', 'view_shelf', 'none']),
+});
+export type AchievementCta = z.infer<typeof achievementCtaSchema>;
+
+/**
+ * `GET /achievements/:id`: one badge in full — what it takes, how close the
+ * member is, what it pays, and the others like it.
+ *
+ * Every figure and every line of copy is the server's, worked out from the
+ * definition in force: the member's own best on record against the badge's
+ * threshold (C7 — the best, not today's, so a day synced late still counts),
+ * and the wording derived from the rule rather than kept in a copy of the
+ * catalogue inside the app.
+ */
+export const achievementDetailSchema = z.object({
+  /** The same row the shelf sends, so the two can never disagree. */
+  achievement: achievementSchema,
+  /** The display name — "10K Steps Champion". Falls back to the label. */
+  title: z.string(),
+  /** One line of what it takes — "Walk 10,000 steps in a single day." */
+  description: z.string(),
+  /** The paragraph under "About This Achievement". */
+  about: z.string(),
+  /** The line under the status chip: congratulation, or how far there is to go. */
+  note: z.string(),
+  unlocked: z.boolean(),
+  /** ISO-8601 when it was unlocked, or null while it is locked. */
+  unlockedAt: z.string().nullable().default(null),
+  progress: z.object({
+    basis: achievementBasisSchema,
+    /** What the figure is — "Your best day", "Your longest streak". */
+    label: z.string(),
+    value: z.number().nonnegative(),
+    target: z.number().positive(),
+    /** 0–100, capped: a 10,428-step day against a 10,000 goal is 100, not 104. */
+    percent: z.number().min(0).max(100),
+    /** "Goal completed on 18 Sep 2026", or what is left to do. */
+    caption: z.string(),
+    /** The local day the goal was met, `YYYY-MM-DD`, or null. */
+    completedOn: z.string().nullable().default(null),
+  }),
+  reward: z.object({
+    coins: z.number().nonnegative(),
+    via: achievementRewardSourceSchema,
+    /** "Paid when you unlock it", "Paid by the 10K Steps Challenge". */
+    caption: z.string(),
+    /** Whether this member has actually been paid for it. */
+    paid: z.boolean().default(false),
+  }),
+  /** The panel that says well done, or keep going. */
+  cheer: z.object({ title: z.string(), message: z.string() }),
+  /** The badges of the same metric, by what each asks for — the "Related" row. */
+  related: z.array(achievementSchema),
+  cta: achievementCtaSchema,
+  /** What the share sheet sends, worded by the server. */
+  shareText: z.string(),
+});
+export type AchievementDetail = z.infer<typeof achievementDetailSchema>;
+
 /** Which meal of the day a food entry belongs to. */
 export const mealSlotSchema = z.enum([
   'breakfast',
@@ -1937,7 +2172,14 @@ export const profileBadgeSchema = z.object({
   /** What it took, in the member's words — "30-day streak". */
   description: z.string(),
   icon: profileBadgeIconSchema,
-  /** ISO-8601 when it was earned, or null while it is still locked. */
+  /** Whether the figure has reached the goal. */
+  unlocked: z.boolean().default(false),
+  /**
+   * ISO-8601 when it was earned, when that is on record — null when it is
+   * not. A milestone is worked out from the member's running totals, which
+   * carry no history, so the server cannot say which day it was crossed;
+   * `unlocked` is what the app reads, and a date is never invented for it.
+   */
   unlockedAt: z.string().nullable().default(null),
   /** How far along a locked one is, 0–1. Always 1 once unlocked. */
   progress: z.number().min(0).max(1),
@@ -2312,6 +2554,61 @@ export const streakRestoreResultSchema = z.object({
   balance: z.number().nonnegative(),
 });
 export type StreakRestoreResult = z.infer<typeof streakRestoreResultSchema>;
+
+/**
+ * How one day of the streak history went.
+ *
+ * `frozen` and `restored` are kept apart from `completed` rather than folded
+ * into it: all three keep the run alive, but only one of them was walked, and
+ * a history that drew them the same way would let a member believe they had
+ * earned a run they had paid for.
+ */
+export const streakHistoryStatusSchema = z.enum([
+  'completed',
+  'frozen',
+  'restored',
+  'missed',
+]);
+export type StreakHistoryStatus = z.infer<typeof streakHistoryStatusSchema>;
+
+/** One day on the streak's record. */
+export const streakHistoryDaySchema = z.object({
+  /** `YYYY-MM-DD`. */
+  date: z.string(),
+  /**
+   * Which day of its own run this was — the "Day 18" on the row. Null for a
+   * day no run covers, which is every missed one.
+   */
+  day: z.number().int().positive().nullable().default(null),
+  status: streakHistoryStatusSchema,
+  /**
+   * What carried the day, in the server's words — "10,428 steps", "Workout
+   * completed", "Freeze used", "Restored (50 coins)". Worded here because
+   * what a restore cost is the ledger's to say, not the app's.
+   */
+  detail: z.string(),
+  /** Verified steps that day, for a row that wants the figure itself. */
+  steps: z.number().nonnegative().default(0),
+});
+export type StreakHistoryDay = z.infer<typeof streakHistoryDaySchema>;
+
+/**
+ * `GET /streak/history`: the streak's record, newest first, paged back from
+ * today to the first day that ever counted.
+ *
+ * Missed days are in it. They are not rows in the database — a day that did
+ * not count is simply absent — but they are the whole reason a member opens
+ * the history, so the server fills the gaps rather than leaving the app to
+ * infer them from what is missing.
+ */
+export const streakHistoryPageSchema = z.object({
+  data: z.array(streakHistoryDaySchema),
+  /** The day to continue before, or null once the first day is on screen. */
+  nextCursor: z.string().nullable().default(null),
+  /** Days from the first that ever counted to today, missed ones included. */
+  total: z.number().int().nonnegative(),
+});
+export type StreakHistoryPage = z.infer<typeof streakHistoryPageSchema>;
 
 // ─── Leaderboard ───────────────────────────────────────────────────────────
 

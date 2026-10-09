@@ -9,6 +9,7 @@ import {
   UserAchievementModel,
 } from '../src/modules/challenges/models.js';
 import { evaluateChallenges, periodOf } from '../src/modules/challenges/service.js';
+import { daysBetween } from '../src/modules/streak/rules.js';
 import { CoinLedgerModel } from '../src/modules/economy/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
 import { AppConfigModel } from '../src/modules/platform/models.js';
@@ -182,5 +183,271 @@ describe('achievements (GET /achievements, RULES C7)', () => {
     expect(got).not.toContain('a-20k-steps');
     // A challenge-only badge waits for its challenge.
     expect(got).not.toContain('a-step-master');
+  });
+});
+
+describe('challenges: one in full (GET /challenges/:id)', () => {
+  async function detail(session: Session, id: string, date?: string) {
+    const res = await request(app).get(`/v1/challenges/${id}${date ? `?date=${date}` : ''}`).set(authed(session));
+    expect(res.status).toBe(200);
+    return res.body;
+  }
+
+  it('serves the board row, the day inside the period, and the rule sheet', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 7_842, steps: 7_842, verified: true });
+
+    const body = await detail(session, 'ch-week-step-master');
+    const week = periodOf('weekly', today());
+
+    expect(body.challenge).toMatchObject({ id: 'ch-week-step-master', goal: 70_000, progress: 7_842, cadence: 'weekly' });
+    expect(body.period).toMatchObject({ start: week.start, end: week.end, days: 7 });
+    expect(body.period.day).toBe(daysBetween(week.start, today()) + 1);
+
+    // A week of 70,000 steps is a 10,000-step day, and today's figure is what the ring counts.
+    expect(body.focus).toMatchObject({ scope: 'today', label: 'Daily Goal', value: 7_842, target: 10_000, remaining: 2_158 });
+    expect(Date.parse(body.focus.endsAt)).toBeGreaterThan(Date.now());
+
+    expect(body.reward).toMatchObject({ coins: 800, caption: 'Finish the week to earn' });
+    expect(body.reward.badge).toMatchObject({ id: 'a-step-master', label: 'Step Master', achievedAt: null });
+
+    expect(body.rules.map((r: { id: string }) => r.id)).toEqual(['goal', 'duration', 'verified', 'reward', 'repeat', 'integrity']);
+    expect(body.rules[0].text).toBe('Reach 70,000 steps over the week');
+    expect(body.rules[1].text).toContain(`${7} days`);
+    expect(body.rules.at(-1)).toMatchObject({ tone: 'caution', icon: 'warning' });
+
+    expect(body.cta).toEqual({ label: 'Continue Challenge', action: 'track_steps' });
+    expect(body.shareText).toContain('Weekly Step Master');
+  });
+
+  it('counts a daily challenge against its own goal and closes tonight', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 6_000, steps: 6_000, verified: true });
+
+    const body = await detail(session, 'ch-10k-steps');
+    expect(body.period).toMatchObject({ start: today(), end: today(), day: 1, days: 1 });
+    expect(body.focus).toMatchObject({ scope: 'today', target: 10_000, value: 6_000, remaining: 4_000 });
+    expect(body.reward.caption).toBe("Finish today's goal to earn");
+    expect(body.rules[1].text).toContain('one day');
+  });
+
+  it('measures a consistency challenge against the member’s own step goal', async () => {
+    const session = await signUpAndRegister();
+    await ChallengeDefinitionModel.updateOne({ _id: 'ch-7-day-consistency' }, { $set: { startsOn: null } });
+    await day(session, today(), { verifiedSteps: 4_000, steps: 4_000, verified: true });
+
+    const body = await detail(session, 'ch-7-day-consistency');
+    expect(body.focus).toMatchObject({ label: 'Daily Goal', target: 10_000, value: 4_000, remaining: 6_000 });
+    expect(body.rules[0].text).toBe('Walk at least 10,000 steps on each of the 7 days');
+    expect(body.reward.caption).toBe('Complete all 7 days to earn');
+  });
+
+  it('ranks everyone with progress, names them in public, and places the caller', async () => {
+    const mine = await signUpAndRegister();
+    const ahead = await signUpAndRegister();
+    const behind = await signUpAndRegister();
+    await Promise.all([
+      day(mine, today(), { verifiedSteps: 7_000, steps: 7_000, verified: true }),
+      day(ahead, today(), { verifiedSteps: 12_000, steps: 12_000, verified: true }),
+      day(behind, today(), { verifiedSteps: 1_000, steps: 1_000, verified: true }),
+    ]);
+
+    const body = await detail(mine, 'ch-10k-steps');
+    expect(body.standings.map((p: { rank: number; progress: number }) => [p.rank, p.progress])).toEqual([
+      [1, 12_000], [2, 7_000], [3, 1_000],
+    ]);
+    // A first name and an initial, never the whole name.
+    expect(body.standings[0].name).not.toContain('@');
+    expect(body.standings[1].isCurrentUser).toBe(true);
+    expect(body.standings[0].completed).toBe(true);
+    expect(body.me).toMatchObject({ rank: 2, progress: 7_000, completed: false, isCurrentUser: true });
+    expect(body.ranked).toBe(3);
+    expect(body.joined).toBeGreaterThanOrEqual(3);
+    expect(body.finished).toBe(0);
+  });
+
+  it('counts the finishers and turns the button into a way back once the caller is one', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 10_400, steps: 10_400, verified: true });
+    await evaluateChallenges(session.userId, today(), ZONE);
+
+    const body = await detail(session, 'ch-10k-steps');
+    expect(body.finished).toBe(1);
+    expect(body.challenge.completedAt).toEqual(expect.any(String));
+    expect(body.cta).toEqual({ label: 'Challenge Complete', action: 'view_board' });
+    expect(body.reward.badge).toMatchObject({ id: 'a-10k-steps', achievedAt: expect.any(String) });
+  });
+
+  it('shows an upcoming challenge for the period it opens in, with nothing counted yet', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 9_000, steps: 9_000, verified: true });
+
+    const body = await detail(session, 'ch-15k-steps');
+    const opensOn = addDays(today(), 1);
+    expect(body.challenge).toMatchObject({ startsAt: opensOn, progress: 0, endsOn: null });
+    expect(body.period).toMatchObject({ start: opensOn, end: opensOn, day: 1, days: 1 });
+    expect(body.focus).toMatchObject({ scope: 'period', value: 0, target: 15_000, caption: 'Challenge Starts In' });
+    expect(body.standings).toEqual([]);
+    expect(body.me).toBeNull();
+    expect(body.cta.action).toBe('none');
+  });
+
+  it('sends a workout challenge to the dashboard and shows the period, not a daily share', async () => {
+    const session = await signUpAndRegister();
+    await ChallengeDefinitionModel.updateOne({ _id: 'ch-weekend-warrior' }, { $set: { startsOn: null } });
+
+    const body = await detail(session, 'ch-weekend-warrior');
+    expect(body.focus).toMatchObject({ scope: 'period', label: 'Challenge Goal', target: 2, value: 0 });
+    expect(body.cta).toEqual({ label: 'Start a Workout', action: 'go_home' });
+  });
+
+  it('shows a past day as closed rather than counting down to a deadline behind it', async () => {
+    const session = await signUpAndRegister();
+    const yesterday = addDays(today(), -1);
+    await day(session, yesterday, { verifiedSteps: 8_000, steps: 8_000, verified: true });
+
+    const body = await detail(session, 'ch-10k-steps', yesterday);
+    expect(body.period).toMatchObject({ start: yesterday, end: yesterday });
+    expect(body.focus).toMatchObject({ value: 8_000, caption: 'That Day Has Closed' });
+    expect(Date.parse(body.focus.endsAt)).toBeLessThan(Date.now());
+  });
+
+  it('404s an unknown challenge and 422s a date it cannot read', async () => {
+    const session = await signUpAndRegister();
+    expect((await request(app).get('/v1/challenges/ch-nope').set(authed(session))).status).toBe(404);
+    expect((await request(app).get('/v1/challenges/ch-10k-steps?date=soon').set(authed(session))).status).toBe(422);
+  });
+});
+
+describe('achievements: one in full (GET /achievements/:id)', () => {
+  async function badge(session: Session, id: string) {
+    const res = await request(app).get(`/v1/achievements/${id}`).set(authed(session));
+    expect(res.status).toBe(200);
+    return res.body;
+  }
+
+  async function badgeCoinsOn() {
+    await AppConfigModel.updateOne({ _id: 'coins' }, { $set: { 'value.achievements.enabled': true } }, { upsert: true });
+    invalidateConfig();
+  }
+
+  it('words the badge from its own rule and measures the member’s best against it', async () => {
+    const session = await signUpAndRegister();
+    await day(session, addDays(today(), -3), { verifiedSteps: 8_428, steps: 8_428, verified: true });
+    // Today is smaller: a badge is judged on the best on record, not on today.
+    await day(session, today(), { verifiedSteps: 1_000, steps: 1_000, verified: true });
+
+    const body = await badge(session, 'a-10k-steps');
+    expect(body.title).toBe('10K Steps Champion');
+    expect(body.description).toBe('Walk 10,000 steps in a single day.');
+    expect(body.about).toBe(
+      'This achievement is awarded when you walk 10,000 steps in a single day. It shows your dedication towards an active lifestyle.',
+    );
+    expect(body.unlocked).toBe(false);
+    expect(body.progress).toMatchObject({
+      basis: 'best_day',
+      label: 'Your best day',
+      value: 8_428,
+      target: 10_000,
+      percent: 84,
+      completedOn: null,
+    });
+    expect(body.progress.caption).toBe('1,572 steps to go');
+    expect(body.cta).toEqual({ label: 'Keep Going', action: 'track_steps' });
+  });
+
+  it('caps the bar at done and dates the day it was won', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 10_428, steps: 10_428, verified: true });
+    await evaluateChallenges(session.userId, today(), ZONE);
+
+    const body = await badge(session, 'a-10k-steps');
+    expect(body.unlocked).toBe(true);
+    // 10,428 of 10,000 is done, not 104% done.
+    expect(body.progress).toMatchObject({ value: 10_428, target: 10_000, percent: 100, completedOn: today() });
+    expect(body.progress.caption).toMatch(/^Goal completed on /);
+    expect(body.unlockedAt).toEqual(expect.any(String));
+    expect(body.note).toBe('You did it! Consistency leads to a healthier you.');
+    expect(body.cheer).toEqual({ title: 'Great job!', message: "You're one step closer to a fitter, healthier you." });
+  });
+
+  it('shows what a badge pays, and says plainly that badge coins have not started', async () => {
+    const session = await signUpAndRegister();
+
+    expect((await badge(session, 'a-10k-steps')).reward).toEqual({
+      coins: 50,
+      via: 'achievement',
+      caption: 'Coins for badges start soon',
+      paid: false,
+    });
+  });
+
+  it('pays the badge once badge coins are on, once, under the ceiling', async () => {
+    const session = await signUpAndRegister();
+    await badgeCoinsOn();
+    await day(session, today(), { verifiedSteps: 10_400, steps: 10_400, verified: true });
+
+    await evaluateChallenges(session.userId, today(), ZONE);
+    await evaluateChallenges(session.userId, today(), ZONE);
+
+    const rows = await CoinLedgerModel.find({ userId: session.userId, referenceType: 'achievement' }).lean();
+    const tenK = rows.filter(r => r.referenceId === 'a-10k-steps');
+    expect(tenK).toHaveLength(1);
+    expect(tenK[0]).toMatchObject({ amountMc: 50_000, source: 'challenge', title: '10K Steps badge unlocked' });
+
+    expect((await badge(session, 'a-10k-steps')).reward).toMatchObject({
+      coins: 50,
+      via: 'achievement',
+      caption: 'Paid when you unlocked it',
+      paid: true,
+    });
+  });
+
+  it('borrows the challenge’s period for a badge that has no rule of its own', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 14_000, steps: 14_000, verified: true });
+
+    // 'a-step-master' has no rule: only the Weekly Step Master challenge gives it.
+    const body = await badge(session, 'a-step-master');
+    expect(body.progress).toMatchObject({ basis: 'challenge', label: 'Weekly Step Master', target: 70_000, value: 14_000, percent: 20 });
+    expect(body.description).toBe('Finish the Weekly Step Master challenge.');
+    expect(body.reward).toMatchObject({ coins: 150, via: 'achievement' });
+  });
+
+  it('lists the rest of the ladder with what the member holds of it', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { verifiedSteps: 16_000, steps: 16_000, verified: true });
+    await evaluateChallenges(session.userId, today(), ZONE);
+
+    const body = await badge(session, 'a-10k-steps');
+    const ids = body.related.map((a: { id: string }) => a.id);
+    // Every steps badge, smallest first, this one among them.
+    expect(ids).toContain('a-10k-steps');
+    expect(ids).toContain('a-20k-steps');
+    const values = body.related.map((a: { value: number }) => a.value);
+    expect(values).toEqual([...values].sort((a: number, b: number) => a - b));
+
+    const byId = Object.fromEntries(body.related.map((a: { id: string }) => [a.id, a]));
+    expect(byId['a-10k-steps'].achievedAt).toEqual(expect.any(String));
+    expect(byId['a-20k-steps'].achievedAt).toBeNull();
+  });
+
+  it('sends the member back to the shelf once there is no rung left above', async () => {
+    const session = await signUpAndRegister();
+    // 'a-marathon' has no rule of its own: the Monthly Marathon challenge is
+    // the only thing that gives it, so the challenge has to be open.
+    await ChallengeDefinitionModel.updateOne({ _id: 'ch-monthly-marathon' }, { $set: { startsOn: null } });
+    await day(session, today(), { verifiedSteps: 320_000, steps: 320_000, verified: true });
+    await evaluateChallenges(session.userId, today(), ZONE);
+
+    // The largest steps badge: there is no rung above it to send anyone to.
+    const body = await badge(session, 'a-marathon');
+    expect(body.unlocked).toBe(true);
+    expect(body.cta).toEqual({ label: 'View All Achievements', action: 'view_shelf' });
+  });
+
+  it('404s a badge that is not in the catalogue', async () => {
+    const session = await signUpAndRegister();
+    expect((await request(app).get('/v1/achievements/a-nope').set(authed(session))).status).toBe(404);
   });
 });

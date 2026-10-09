@@ -1,8 +1,10 @@
 import { getConfig } from '../../config/remote.js';
 import type { AppConfig } from '../../config/defaults.js';
 import {
+  streakHistoryPageSchema,
   streakRestoreResultSchema,
   streakSummarySchema,
+  type StreakHistoryPage,
   type StreakMilestone,
   type StreakRestoreResult,
   type StreakRun,
@@ -13,13 +15,14 @@ import { addDays, localDayOf, localHourOf, type IsoDate } from '../../lib/dates.
 import { ApiError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { toCoins } from '../../lib/coins.js';
+import { ActivityDailyModel } from '../activity/models.js';
 import { evaluateAchievements } from '../challenges/service.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../economy/models.js';
 import { credit, debitInSession } from '../economy/service.js';
 import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { notify } from '../notifications/service.js';
 import { StreakDayModel, StreakStateModel, type StreakDaySource } from './models.js';
-import { currentRunOf, currentStreakOf, longestStreakOf, restoreGapOf } from './rules.js';
+import { currentRunOf, currentStreakOf, daysBetween, longestStreakOf, restoreGapOf } from './rules.js';
 
 /**
  * The streak (RULES §S), on the server: which days count, the figures drawn
@@ -131,6 +134,145 @@ export async function streakFigures(userId: string, timeZone: string, now = new 
     current: currentStreakOf(days.all, localDayOf(now, timeZone)),
     longest: longestStreakOf(days.all)?.length ?? 0,
   };
+}
+
+// ─── The record (RULES S1) ─────────────────────────────────────────────────
+
+/** How many days a page of the history carries by default. */
+const HISTORY_PAGE = 30;
+const HISTORY_MAX_PAGE = 100;
+
+const fmtSteps = (steps: number) => Math.round(steps).toLocaleString('en-IN');
+
+/**
+ * `GET /streak/history?cursor=&limit=`: the streak's record, newest first,
+ * back to the first day that ever counted.
+ *
+ * Missed days are filled in rather than left out. A day that did not count
+ * has no row — that is what "did not count" means — but it is the day the
+ * member came to look at, so the walk is over the calendar rather than over
+ * the table, and a day with no row becomes a missed one.
+ *
+ * "Day 18" is the day's place in its own run, not its place in the list: a
+ * history scrolled past a break has to start counting again at 1, which it
+ * can only do by walking the whole record forward from the beginning. That
+ * is one read of ids per request, bounded by the age of the account.
+ */
+export async function getStreakHistory(
+  userId: string,
+  timeZone: string,
+  options: { cursor?: IsoDate; limit?: number } = {},
+  now = new Date(),
+): Promise<StreakHistoryPage> {
+  const limit = Math.min(HISTORY_MAX_PAGE, Math.max(1, options.limit ?? HISTORY_PAGE));
+  const today = localDayOf(now, timeZone);
+
+  const rows = await StreakDayModel.find({ userId }).sort({ localDay: 1 }).lean();
+  if (rows.length === 0) {
+    return streakHistoryPageSchema.parse({ data: [], nextCursor: null, total: 0 });
+  }
+
+  const first = rows[0].localDay;
+  const byDay = new Map(rows.map(row => [row.localDay, row]));
+
+  // Each day's place in its own run, counted forward from the first day that
+  // ever counted. A day with no row breaks the run and resets the count.
+  const runIndex = new Map<IsoDate, number>();
+  let run = 0;
+  for (let day = first; day <= today; day = addDays(day, 1)) {
+    run = byDay.has(day) ? run + 1 : 0;
+    if (run > 0) runIndex.set(day, run);
+  }
+
+  // The page: `limit` days ending at the cursor, or at today on the first one.
+  const end = options.cursor ? addDays(options.cursor, -1) : today;
+  const dates: IsoDate[] = [];
+  for (let day = end; day >= first && dates.length < limit; day = addDays(day, -1)) {
+    dates.push(day);
+  }
+  if (dates.length === 0) {
+    return streakHistoryPageSchema.parse({
+      data: [],
+      nextCursor: null,
+      total: daysBetween(first, today) + 1,
+    });
+  }
+
+  // What each day is worth saying: the steps walked, and what a restore cost.
+  const restoreIds = [
+    ...new Set(
+      dates
+        .map(date => byDay.get(date))
+        .filter(row => row?.kind === 'restored' && row.referenceId)
+        .map(row => row!.referenceId as string),
+    ),
+  ];
+  const [activity, ledger] = await Promise.all([
+    ActivityDailyModel.find({ userId, localDay: { $in: dates } }, { localDay: 1, verifiedSteps: 1 }).lean(),
+    restoreIds.length > 0
+      ? CoinLedgerModel.find({ _id: { $in: restoreIds } }, { amountMc: 1 }).lean()
+      : Promise.resolve([] as { _id: string; amountMc: number }[]),
+  ]);
+  const stepsOn = new Map(activity.map(row => [row.localDay, Math.round(row.verifiedSteps ?? 0)]));
+  const restoreCost = new Map(ledger.map(row => [row._id, Math.abs(toCoins(row.amountMc))]));
+  // One restore can bridge several days off one debit, so the figure on a row
+  // has to say which it is or every day would look like it cost the lot.
+  const restoreSpan = new Map<string, number>();
+  for (const row of rows) {
+    if (row.kind === 'restored' && row.referenceId) {
+      restoreSpan.set(row.referenceId, (restoreSpan.get(row.referenceId) ?? 0) + 1);
+    }
+  }
+
+  const data = dates.map(date => {
+    const row = byDay.get(date);
+    const steps = stepsOn.get(date) ?? 0;
+
+    if (!row) {
+      return {
+        date,
+        day: null,
+        status: 'missed' as const,
+        detail: steps > 0 ? `${fmtSteps(steps)} steps — short of your goal` : 'No activity',
+        steps,
+      };
+    }
+
+    const day = runIndex.get(date) ?? null;
+    if (row.kind === 'frozen') {
+      return { date, day, status: 'frozen' as const, detail: 'Freeze used', steps };
+    }
+    if (row.kind === 'restored') {
+      const cost = restoreCost.get(row.referenceId ?? '') ?? 0;
+      const span = restoreSpan.get(row.referenceId ?? '') ?? 1;
+      return {
+        date,
+        day,
+        status: 'restored' as const,
+        detail:
+          cost === 0
+            ? 'Restored'
+            : span > 1
+              ? `Restored (${fmtSteps(cost)} coins for ${span} days)`
+              : `Restored (${fmtSteps(cost)} coins)`,
+        steps,
+      };
+    }
+    return {
+      date,
+      day,
+      status: 'completed' as const,
+      detail: steps > 0 ? `${fmtSteps(steps)} steps` : 'Workout completed',
+      steps,
+    };
+  });
+
+  const oldest = dates[dates.length - 1];
+  return streakHistoryPageSchema.parse({
+    data,
+    nextCursor: oldest > first ? oldest : null,
+    total: daysBetween(first, today) + 1,
+  });
 }
 
 // ─── Writes ────────────────────────────────────────────────────────────────

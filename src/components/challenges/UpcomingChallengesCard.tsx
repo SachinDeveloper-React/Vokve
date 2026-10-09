@@ -17,7 +17,15 @@ interface Props {
   challenges: Challenge[];
   /** The day the board is showing, which "Starts Tomorrow" is counted from. */
   relativeTo?: IsoDate;
-  onPressViewAll: () => void;
+  /**
+   * How many rows to draw. The full list screen passes the lot; the board
+   * takes the default, which is what "View All" exists to get past.
+   */
+  max?: number;
+  /** Left off, the link is too — the full list has nowhere further to go. */
+  onPressViewAll?: () => void;
+  /** Opens one challenge in full. Left off, the rows are read-only. */
+  onPressChallenge?: (id: string) => void;
 }
 
 /**
@@ -28,8 +36,14 @@ interface Props {
  * yet would bury the three bars that are actually moving.
  */
 export const UpcomingChallengesCard = memo(
-  ({ challenges, relativeTo, onPressViewAll }: Props) => {
-    const visible = challenges.slice(0, MAX_ROWS);
+  ({
+    challenges,
+    relativeTo,
+    max = MAX_ROWS,
+    onPressViewAll,
+    onPressChallenge,
+  }: Props) => {
+    const visible = challenges.slice(0, max);
 
     return (
       <Card radius="xl" padding="base">
@@ -39,19 +53,21 @@ export const UpcomingChallengesCard = memo(
               Upcoming Challenges
             </AppText>
 
-            <Pressable
-              onPress={onPressViewAll}
-              feedback="opacity"
-              accessibilityRole="link"
-              accessibilityLabel="View all upcoming challenges"
-            >
-              <HStack align="center" gap="xxs">
-                <AppText variant="micro" color="textSecondary">
-                  View All
-                </AppText>
-                <Icon as={ChevronRight} size="xs" color="textSecondary" />
-              </HStack>
-            </Pressable>
+            {onPressViewAll ? (
+              <Pressable
+                onPress={onPressViewAll}
+                feedback="opacity"
+                accessibilityRole="link"
+                accessibilityLabel="View all upcoming challenges"
+              >
+                <HStack align="center" gap="xxs">
+                  <AppText variant="micro" color="textSecondary">
+                    View All
+                  </AppText>
+                  <Icon as={ChevronRight} size="xs" color="textSecondary" />
+                </HStack>
+              </Pressable>
+            ) : null}
           </HStack>
 
           {visible.length === 0 ? (
@@ -64,6 +80,7 @@ export const UpcomingChallengesCard = memo(
                 key={challenge.id}
                 challenge={challenge}
                 relativeTo={relativeTo}
+                onPress={onPressChallenge}
               />
             ))
           )}

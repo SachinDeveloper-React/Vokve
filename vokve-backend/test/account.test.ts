@@ -108,7 +108,10 @@ describe('account: profile summary (RULES P4, P6)', () => {
     const leader = await request(app).get('/v1/me/profile').set(authed(busy));
     expect(leader.body.rank).toBe(1);
     expect(leader.body.totalMembers).toBeGreaterThanOrEqual(2);
-    expect(leader.body.badges.find((b: { id: string }) => b.id === 'coins-5000')).toMatchObject({ value: 5_000, unlockedAt: expect.any(String) });
+    // Reached, with no date: a milestone is judged against a running total,
+    // which carries no history, so the day it was crossed is not on record.
+    expect(leader.body.badges.find((b: { id: string }) => b.id === 'coins-5000'))
+      .toMatchObject({ value: 5_000, unlocked: true, unlockedAt: null });
 
     const follower = await request(app).get('/v1/me/profile').set(authed(quiet));
     expect(follower.body.rank).toBe(2);

@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { CalendarDays } from 'lucide-react-native';
 import { useTheme } from '../../theme';
@@ -14,6 +14,7 @@ import {
 import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
 import { Icon } from '../media/Icon';
+import { Pressable } from '../form/Pressable';
 import { AppText } from '../ui/AppText';
 import { CoinAmount } from '../wallet/CoinAmount';
 import { METRIC_STYLE } from './metrics';
@@ -46,6 +47,8 @@ interface Props {
   challenge: Challenge;
   /** The day the board is showing. Defaults to today. */
   relativeTo?: IsoDate;
+  /** Opens the challenge in full. Left off, the row is a readout. */
+  onPress?: (id: string) => void;
 }
 
 /**
@@ -55,21 +58,30 @@ interface Props {
  * No progress bar, deliberately. A challenge with nothing done yet would draw
  * an empty track down every row, which reads as "you are failing at four
  * things" rather than "these are next".
+ *
+ * The press target carries the description itself, for the same reason the
+ * running row's does: a nested accessible view hides the button.
  */
-export const UpcomingChallengeRow = memo(({ challenge, relativeTo }: Props) => {
+export const UpcomingChallengeRow = memo(({
+  challenge,
+  relativeTo,
+  onPress,
+}: Props) => {
   const { colors, isDark } = useTheme();
   const tint = colors[METRIC_STYLE[challenge.metric].tint];
   const starts = challenge.startsAt
     ? formatStartLabel(challenge.startsAt, relativeTo)
     : '';
 
-  return (
-    <HStack
-      align="center"
-      gap="md"
-      accessible
-      accessibilityLabel={`${challenge.title}. ${challenge.description}. ${starts}. Pays ${challenge.rewardCoins} coins`}
-    >
+  const label = `${challenge.title}. ${challenge.description}. ${starts}. Pays ${challenge.rewardCoins} coins`;
+
+  const press = useCallback(
+    () => onPress?.(challenge.id),
+    [challenge.id, onPress],
+  );
+
+  const body = (
+    <HStack align="center" gap="md">
       <View
         style={[
           styles.disc,
@@ -103,6 +115,22 @@ export const UpcomingChallengeRow = memo(({ challenge, relativeTo }: Props) => {
         <CoinAmount amount={challenge.rewardCoins} size="sm" withUnit />
       </VStack>
     </HStack>
+  );
+
+  return onPress ? (
+    <Pressable
+      onPress={press}
+      feedback="opacity"
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Opens this challenge"
+    >
+      {body}
+    </Pressable>
+  ) : (
+    <View accessible accessibilityLabel={label}>
+      {body}
+    </View>
   );
 });
 

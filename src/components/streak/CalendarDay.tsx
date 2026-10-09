@@ -52,8 +52,13 @@ export const CalendarDay = memo(
         ? colors.textTertiary
         : colors.text;
 
+    // A day that has been and gone with nothing on it is washed in the
+    // destructive tint rather than left blank: an empty disc reads as "not
+    // yet", and the break is the thing the calendar is opened to find.
     const disc = inStreak
       ? withAlpha(colors.brandAccent, isDark ? 0.32 : 0.18)
+      : status === 'incomplete'
+      ? withAlpha(colors.destructive, isDark ? 0.24 : 0.12)
       : isToday
       ? colors.muted
       : 'transparent';
@@ -74,7 +79,13 @@ export const CalendarDay = memo(
         accessible
         accessibilityLabel={inStreak ? `${label}, current streak` : label}
       >
-        <View style={[styles.disc, { backgroundColor: disc }]}>
+        <View
+          style={[
+            styles.disc,
+            { backgroundColor: disc },
+            isToday && [styles.todayRing, { borderColor: colors.text }],
+          ]}
+        >
           <AppText
             variant="micro"
             style={[styles.number, { color: numberColor }]}
@@ -109,6 +120,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  todayRing: { borderWidth: 1 },
   number: { fontWeight: '600' },
   mark: { height: moderateScale(12), justifyContent: 'center' },
 });

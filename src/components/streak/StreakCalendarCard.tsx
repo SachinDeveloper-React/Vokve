@@ -29,6 +29,8 @@ interface Props {
   onNextMonth: () => void;
   canGoNext: boolean;
   onPressInfo?: () => void;
+  /** Jumps back to the month the user is actually in. */
+  onPressToday?: () => void;
   onPressHowItWorks: () => void;
 }
 
@@ -60,6 +62,7 @@ export const StreakCalendarCard = memo(
     onNextMonth,
     canGoNext,
     onPressInfo,
+    onPressToday,
     onPressHowItWorks,
   }: Props) => (
     <Card radius="xl" padding="base">
@@ -93,12 +96,27 @@ export const StreakCalendarCard = memo(
         <Divider />
 
         <HStack align="center" justify="between" gap="sm">
-          <HStack align="center" gap="xs">
-            <Icon as={Snowflake} size="xs" color="primary" />
-            <AppText variant="micro">
-              {freezeStatus(isTodayFrozen, freezesAvailable)}
-            </AppText>
-          </HStack>
+          {/* Paged away from this month, the freeze status is about a month
+              the user is not looking at — the way back is more use. */}
+          {canGoNext && onPressToday ? (
+            <Pressable
+              onPress={onPressToday}
+              feedback="opacity"
+              accessibilityRole="button"
+              accessibilityLabel="Back to this month"
+            >
+              <AppText variant="micro" style={styles.link}>
+                Back to today
+              </AppText>
+            </Pressable>
+          ) : (
+            <HStack align="center" gap="xs">
+              <Icon as={Snowflake} size="xs" color="primary" />
+              <AppText variant="micro">
+                {freezeStatus(isTodayFrozen, freezesAvailable)}
+              </AppText>
+            </HStack>
+          )}
 
           <Pressable
             onPress={onPressHowItWorks}

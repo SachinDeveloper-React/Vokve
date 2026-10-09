@@ -468,26 +468,31 @@ export const CHALLENGES = [
  * The achievement shelf (RULES C7). `rule`/`threshold` unlock a badge on its
  * own — the member's best day, longest streak or running total reaching it;
  * a badge with no rule is a challenge's to give.
+ *
+ * `title` is what the badge is called on its own screen, where there is room
+ * for more than the label a 48pt ring sits under. `rewardCoins` is what it
+ * pays once ⚙ `coins.achievements.enabled` is on — inherited figures the
+ * owner rebalances here (D-32), and nothing is minted while the flag is off.
  */
 export const ACHIEVEMENTS = [
-  { _id: 'a-10k-steps', label: '10K Steps', value: 10_000, metric: 'steps', rule: 'best_day_steps', threshold: 10_000, sort: 1 },
-  { _id: 'a-cal-burner', label: 'Cal Burner', value: 500, metric: 'calories', rule: 'best_day_calories', threshold: 500, sort: 2 },
-  { _id: 'a-active-30', label: 'Active 30', value: 30, metric: 'minutes', rule: 'best_day_minutes', threshold: 30, sort: 3 },
-  { _id: 'a-7-day-streak', label: '7 Days Streak', value: 7, metric: 'days', rule: 'longest_streak', threshold: 7, sort: 4 },
-  { _id: 'a-first-challenge', label: 'First Challenge', value: 1, metric: 'workouts', rule: 'challenges_completed', threshold: 1, sort: 5 },
-  { _id: 'a-15k-steps', label: '15K Steps', value: 15_000, metric: 'steps', rule: 'best_day_steps', threshold: 15_000, sort: 6 },
-  { _id: 'a-cal-crusher', label: 'Cal Crusher', value: 1_000, metric: 'calories', rule: 'best_day_calories', threshold: 1_000, sort: 7 },
-  { _id: 'a-active-60', label: 'Active 60', value: 60, metric: 'minutes', rule: 'best_day_minutes', threshold: 60, sort: 8 },
-  { _id: 'a-30-day-streak', label: '30 Days Streak', value: 30, metric: 'days', rule: 'longest_streak', threshold: 30, sort: 9 },
-  { _id: 'a-ten-workouts', label: 'Ten Workouts', value: 10, metric: 'workouts', rule: 'total_workouts', threshold: 10, sort: 10 },
-  { _id: 'a-20k-steps', label: '20K Steps', value: 20_000, metric: 'steps', rule: 'best_day_steps', threshold: 20_000, sort: 11 },
-  { _id: 'a-cal-machine', label: 'Cal Machine', value: 2_000, metric: 'calories', rule: 'best_day_calories', threshold: 2_000, sort: 12 },
-  { _id: 'a-active-120', label: 'Active 120', value: 120, metric: 'minutes', rule: 'best_day_minutes', threshold: 120, sort: 13 },
-  { _id: 'a-90-day-streak', label: '90 Days Streak', value: 90, metric: 'days', rule: 'longest_streak', threshold: 90, sort: 14 },
-  { _id: 'a-fifty-workouts', label: 'Fifty Workouts', value: 50, metric: 'workouts', rule: 'total_workouts', threshold: 50, sort: 15 },
-  { _id: 'a-step-master', label: 'Step Master', value: 70_000, metric: 'steps', rule: null, threshold: null, sort: 16 },
-  { _id: 'a-month-mover', label: 'Month Mover', value: 900, metric: 'minutes', rule: null, threshold: null, sort: 17 },
-  { _id: 'a-marathon', label: 'Marathoner', value: 300_000, metric: 'steps', rule: null, threshold: null, sort: 18 },
+  { _id: 'a-10k-steps', label: '10K Steps', title: '10K Steps Champion', value: 10_000, metric: 'steps', rule: 'best_day_steps', threshold: 10_000, rewardCoins: 50, sort: 1 },
+  { _id: 'a-cal-burner', label: 'Cal Burner', title: 'Calorie Burner', value: 500, metric: 'calories', rule: 'best_day_calories', threshold: 500, rewardCoins: 50, sort: 2 },
+  { _id: 'a-active-30', label: 'Active 30', title: 'Active 30 Achiever', value: 30, metric: 'minutes', rule: 'best_day_minutes', threshold: 30, rewardCoins: 50, sort: 3 },
+  { _id: 'a-7-day-streak', label: '7 Days Streak', title: '7 Day Streaker', value: 7, metric: 'days', rule: 'longest_streak', threshold: 7, rewardCoins: 75, sort: 4 },
+  { _id: 'a-first-challenge', label: 'First Challenge', title: 'First Challenge Finisher', value: 1, metric: 'workouts', rule: 'challenges_completed', threshold: 1, rewardCoins: 25, sort: 5 },
+  { _id: 'a-15k-steps', label: '15K Steps', title: '15K Steps Champion', value: 15_000, metric: 'steps', rule: 'best_day_steps', threshold: 15_000, rewardCoins: 100, sort: 6 },
+  { _id: 'a-cal-crusher', label: 'Cal Crusher', title: 'Calorie Crusher', value: 1_000, metric: 'calories', rule: 'best_day_calories', threshold: 1_000, rewardCoins: 100, sort: 7 },
+  { _id: 'a-active-60', label: 'Active 60', title: 'Active 60 Achiever', value: 60, metric: 'minutes', rule: 'best_day_minutes', threshold: 60, rewardCoins: 100, sort: 8 },
+  { _id: 'a-30-day-streak', label: '30 Days Streak', title: '30 Day Streaker', value: 30, metric: 'days', rule: 'longest_streak', threshold: 30, rewardCoins: 250, sort: 9 },
+  { _id: 'a-ten-workouts', label: 'Ten Workouts', title: 'Ten Workouts Strong', value: 10, metric: 'workouts', rule: 'total_workouts', threshold: 10, rewardCoins: 150, sort: 10 },
+  { _id: 'a-20k-steps', label: '20K Steps', title: '20K Steps Champion', value: 20_000, metric: 'steps', rule: 'best_day_steps', threshold: 20_000, rewardCoins: 200, sort: 11 },
+  { _id: 'a-cal-machine', label: 'Cal Machine', title: 'Calorie Machine', value: 2_000, metric: 'calories', rule: 'best_day_calories', threshold: 2_000, rewardCoins: 200, sort: 12 },
+  { _id: 'a-active-120', label: 'Active 120', title: 'Active 120 Achiever', value: 120, metric: 'minutes', rule: 'best_day_minutes', threshold: 120, rewardCoins: 200, sort: 13 },
+  { _id: 'a-90-day-streak', label: '90 Days Streak', title: '90 Day Streaker', value: 90, metric: 'days', rule: 'longest_streak', threshold: 90, rewardCoins: 750, sort: 14 },
+  { _id: 'a-fifty-workouts', label: 'Fifty Workouts', title: 'Fifty Workouts Strong', value: 50, metric: 'workouts', rule: 'total_workouts', threshold: 50, rewardCoins: 500, sort: 15 },
+  { _id: 'a-step-master', label: 'Step Master', title: 'Weekly Step Master', value: 70_000, metric: 'steps', rule: null, threshold: null, rewardCoins: 150, sort: 16 },
+  { _id: 'a-month-mover', label: 'Month Mover', title: 'Monthly Mover', value: 900, metric: 'minutes', rule: null, threshold: null, rewardCoins: 300, sort: 17 },
+  { _id: 'a-marathon', label: 'Marathoner', title: 'Monthly Marathoner', value: 300_000, metric: 'steps', rule: null, threshold: null, rewardCoins: 500, sort: 18 },
 ] as const;
 
 /**

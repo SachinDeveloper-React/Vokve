@@ -2,6 +2,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { invalidateConfig } from '../src/config/remote.js';
 import { addDays, localDayOf } from '../src/lib/dates.js';
+import { ActivityDailyModel } from '../src/modules/activity/models.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../src/modules/economy/models.js';
 import { credit } from '../src/modules/economy/service.js';
 import { UserModel } from '../src/modules/identity/models.js';
@@ -327,5 +328,139 @@ describe('streak: the evening nudge (RULES S10)', () => {
 
     // Any other hour, nobody.
     expect(await warnStreaksAtRisk(new Date('2026-10-02T10:00:00Z'))).toEqual({ warned: 0 });
+  });
+});
+
+describe('streak: the record (GET /streak/history)', () => {
+  async function history(session: Session, query = '') {
+    const res = await request(app).get(`/v1/streak/history${query}`).set(authed(session));
+    expect(res.status).toBe(200);
+    return res.body as {
+      data: { date: string; day: number | null; status: string; detail: string; steps: number }[];
+      nextCursor: string | null;
+      total: number;
+    };
+  }
+
+  async function walked(session: Session, day: string, steps: number) {
+    await ActivityDailyModel.updateOne(
+      { _id: `${session.userId}:${day}` },
+      { $set: { userId: session.userId, localDay: day, verifiedSteps: steps, steps, verified: true } },
+      { upsert: true },
+    );
+  }
+
+  it('is empty for an account with no day on record', async () => {
+    const session = await signUpAndRegister();
+    expect(await history(session)).toEqual({ data: [], nextCursor: null, total: 0 });
+  });
+
+  it('numbers each day inside its own run, newest first, with the steps that carried it', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, run(2, 0));
+    await walked(session, today(), 10_428);
+    await walked(session, ago(1), 8_932);
+
+    const { data } = await history(session);
+    expect(data.map(d => [d.date, d.day, d.status])).toEqual([
+      [today(), 3, 'completed'],
+      [ago(1), 2, 'completed'],
+      [ago(2), 1, 'completed'],
+    ]);
+    expect(data[0].detail).toBe('10,428 steps');
+    expect(data[1].detail).toBe('8,932 steps');
+    // A day earned with no verified steps was earned some other way.
+    expect(data[2].detail).toBe('Workout completed');
+  });
+
+  it('fills in the days that never counted, and starts the run again after one', async () => {
+    const session = await signUpAndRegister();
+    // Two days, a gap, then two more.
+    await earned(session, [ago(4), ago(3), ago(1), today()]);
+    await walked(session, ago(2), 3_100);
+
+    const { data } = await history(session);
+    expect(data.map(d => [d.date, d.day, d.status])).toEqual([
+      [today(), 2, 'completed'],
+      [ago(1), 1, 'completed'],
+      [ago(2), null, 'missed'],
+      [ago(3), 2, 'completed'],
+      [ago(4), 1, 'completed'],
+    ]);
+    // A missed day still says what was walked on it.
+    expect(data[2].detail).toBe('3,100 steps — short of your goal');
+  });
+
+  it('says a day with nothing on it had nothing on it', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, [ago(2), today()]);
+
+    const { data } = await history(session);
+    expect(data[1]).toMatchObject({ date: ago(1), status: 'missed', detail: 'No activity', steps: 0 });
+  });
+
+  it('names a restored day with what the restore cost, and over how many days', async () => {
+    const session = await signUpAndRegister();
+    await fund(session, 500);
+    // A run that ended three days ago: the gap a restore bridges is the two
+    // days since (a restore revives a broken streak, not a live one — S6).
+    await earned(session, run(5, 3));
+    const res = await request(app).post('/v1/streak/restore').set({ ...authed(session), 'idempotency-key': 'r1' }).send();
+    expect(res.status).toBe(200);
+
+    const { data } = await history(session);
+    const byDate = Object.fromEntries(data.map(d => [d.date, d]));
+    expect(byDate[ago(2)]).toMatchObject({ status: 'restored', detail: 'Restored (50 coins for 2 days)' });
+    expect(byDate[ago(1)]).toMatchObject({ status: 'restored', detail: 'Restored (50 coins for 2 days)' });
+    // The restore joined the days into one run, so the numbering carries on.
+    expect(byDate[ago(1)].day).toBe(5);
+  });
+
+  it('names one day and its cost when a restore bridged only one', async () => {
+    const session = await signUpAndRegister();
+    await fund(session, 500);
+    await earned(session, run(4, 2));
+    const res = await request(app).post('/v1/streak/restore').set({ ...authed(session), 'idempotency-key': 'r2' }).send();
+    expect(res.status).toBe(200);
+
+    const { data } = await history(session);
+    expect(data.find(d => d.date === ago(1))).toMatchObject({
+      status: 'restored',
+      detail: 'Restored (50 coins)',
+    });
+  });
+
+  it('marks a frozen day as frozen', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, run(3, 1));
+    await StreakStateModel.updateOne({ _id: session.userId }, { $set: { freezesAvailable: 2 } }, { upsert: true });
+    const res = await request(app).post('/v1/streak/freeze').set({ ...authed(session), 'idempotency-key': 'f1' }).send();
+    expect(res.status).toBe(200);
+
+    const { data } = await history(session);
+    expect(data[0]).toMatchObject({ date: today(), status: 'frozen', detail: 'Freeze used' });
+  });
+
+  it('pages back from today and stops at the first day that ever counted', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, run(9, 0));
+
+    const first = await history(session, '?limit=4');
+    expect(first.data.map(d => d.date)).toEqual([today(), ago(1), ago(2), ago(3)]);
+    expect(first.nextCursor).toBe(ago(3));
+    expect(first.total).toBe(10);
+
+    const second = await history(session, `?limit=4&cursor=${first.nextCursor}`);
+    expect(second.data.map(d => d.date)).toEqual([ago(4), ago(5), ago(6), ago(7)]);
+
+    const last = await history(session, `?limit=4&cursor=${second.nextCursor}`);
+    expect(last.data.map(d => d.date)).toEqual([ago(8), ago(9)]);
+    expect(last.nextCursor).toBeNull();
+  });
+
+  it('refuses a cursor or a page size it cannot read', async () => {
+    const session = await signUpAndRegister();
+    expect((await request(app).get('/v1/streak/history?cursor=yesterday').set(authed(session))).status).toBe(422);
+    expect((await request(app).get('/v1/streak/history?limit=500').set(authed(session))).status).toBe(422);
   });
 });

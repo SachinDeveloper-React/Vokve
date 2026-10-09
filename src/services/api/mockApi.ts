@@ -36,6 +36,8 @@ import {
   activityConfigSchema,
   activityRangeSchema,
   authResponseSchema,
+  achievementDetailSchema,
+  challengeDetailSchema,
   challengeSchema,
   dailyActivitySchema,
   deviceAttestationResultSchema,
@@ -45,6 +47,7 @@ import {
   stepGoalSchema,
   stepIngestResultSchema,
   stepSourcesReportSchema,
+  streakHistoryPageSchema,
   streakRestoreResultSchema,
   streakSummarySchema,
   userSchema,
@@ -89,6 +92,7 @@ import {
   type DailyActivity,
   type StepIngestResult,
   type StreakRun,
+  type StreakHistoryPage,
   type StreakSummary,
   type AppliedCoupon,
   type DeliveryPreferences,
@@ -909,6 +913,99 @@ function mockPeriodEnd(cadence: Challenge['cadence'], date: string): string {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
+/** The first day of the period `date` falls in — the mirror of `mockPeriodEnd`. */
+function mockPeriodStart(cadence: Challenge['cadence'], date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  if (cadence === 'daily') return date;
+  if (cadence === 'weekly') {
+    const weekday = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+    return new Date(Date.UTC(y, m - 1, d - weekday)).toISOString().slice(0, 10);
+  }
+  return `${date.slice(0, 7)}-01`;
+}
+
+const MOCK_METRIC_WORDS: Record<Challenge['metric'], string> = {
+  steps: 'steps',
+  calories: 'calories',
+  minutes: 'active minutes',
+  days: 'days',
+  workouts: 'workouts',
+};
+
+const MOCK_CADENCE_WORD: Record<Challenge['cadence'], string> = {
+  daily: 'day',
+  weekly: 'week',
+  monthly: 'month',
+};
+
+/** Local midnight at the start of `date`, as the instant a countdown runs to. */
+function mockMidnight(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(y, m - 1, d).toISOString();
+}
+
+/** `days` on from an ISO day, crossing month and year ends. */
+function addMockDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+const mockDays = (from: string, to: string) =>
+  Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+  );
+
+/** The mock step goal — the server's default, and what the mock profile shows. */
+const MOCK_STEP_GOAL = 10_000;
+
+/**
+ * The display name and the reward each badge carries on the server
+ * (`achievement_definitions.title` / `.rewardCoins`). Kept beside the mock
+ * rather than in `seedData`, which mirrors the shelf the server serves and
+ * has no column for either.
+ */
+const MOCK_ACHIEVEMENT_TITLES: Record<string, string> = {
+  'a-10k-steps': '10K Steps Champion',
+  'a-cal-burner': 'Calorie Burner',
+  'a-active-30': 'Active 30 Achiever',
+  'a-7-day-streak': '7 Day Streaker',
+  'a-first-challenge': 'First Challenge Finisher',
+  'a-15k-steps': '15K Steps Champion',
+  'a-cal-crusher': 'Calorie Crusher',
+  'a-active-60': 'Active 60 Achiever',
+  'a-30-day-streak': '30 Day Streaker',
+  'a-ten-workouts': 'Ten Workouts Strong',
+  'a-20k-steps': '20K Steps Champion',
+  'a-cal-machine': 'Calorie Machine',
+  'a-active-120': 'Active 120 Achiever',
+  'a-90-day-streak': '90 Day Streaker',
+  'a-fifty-workouts': 'Fifty Workouts Strong',
+  'a-step-master': 'Weekly Step Master',
+  'a-month-mover': 'Monthly Mover',
+  'a-marathon': 'Monthly Marathoner',
+};
+
+const MOCK_ACHIEVEMENT_COINS: Record<string, number> = {
+  'a-10k-steps': 50,
+  'a-cal-burner': 50,
+  'a-active-30': 50,
+  'a-7-day-streak': 75,
+  'a-first-challenge': 25,
+  'a-15k-steps': 100,
+  'a-cal-crusher': 100,
+  'a-active-60': 100,
+  'a-30-day-streak': 250,
+  'a-ten-workouts': 150,
+  'a-20k-steps': 200,
+  'a-cal-machine': 200,
+  'a-active-120': 200,
+  'a-90-day-streak': 750,
+  'a-fifty-workouts': 500,
+  'a-step-master': 150,
+  'a-month-mover': 300,
+  'a-marathon': 500,
+};
+
 export const mockChallengeApi: ChallengeApi = {
   async board(date) {
     await delay();
@@ -932,9 +1029,276 @@ export const mockChallengeApi: ChallengeApi = {
       ),
     ];
   },
+  async detail(id, date) {
+    await delay();
+    const seed = seedChallenges.find(c => c.id === id);
+    if (!seed) {
+      throw new ApiError('not_found', 'That challenge could not be found.', 404);
+    }
+
+    const upcoming = seed.startsAt !== null && seed.startsAt > date;
+    const anchor = upcoming ? seed.startsAt! : date;
+    const start = mockPeriodStart(seed.cadence, anchor);
+    const end = mockPeriodEnd(seed.cadence, anchor);
+    const days = mockDays(start, end) + 1;
+    const day = upcoming ? 1 : Math.min(days, mockDays(start, anchor) + 1);
+    const progress = upcoming ? 0 : seed.progress;
+    const completed = !upcoming && progress >= seed.goal;
+
+    // The same share of the goal the server works out: a day of a weekly
+    // challenge, the member's step goal for a consistency one, the whole
+    // period where a daily share would be a fraction of a workout.
+    const perDay =
+      seed.metric === 'days'
+        ? MOCK_STEP_GOAL
+        : days === 1
+          ? seed.goal
+          : Math.ceil(seed.goal / days);
+    const scope: 'today' | 'period' =
+      upcoming || (seed.metric === 'workouts' && days > 1) ? 'period' : 'today';
+    const target = scope === 'period' ? seed.goal : perDay;
+    const value =
+      scope === 'period'
+        ? progress
+        : // A day's share of a period's progress, so the ring and the bar agree.
+          Math.min(target, Math.round(progress / (days === 1 ? 1 : day)));
+
+    const unit = MOCK_METRIC_WORDS[seed.metric];
+    const cadence = MOCK_CADENCE_WORD[seed.cadence];
+    const caption =
+      seed.metric === 'days'
+        ? `Complete all ${seed.goal} days to earn`
+        : days === 1
+          ? "Finish today's goal to earn"
+          : `Finish the ${cadence} to earn`;
+
+    // The seeded board, as other people walking the same challenge.
+    const standings = seedLeaderboard.slice(0, 6).map((entry, index) => ({
+      id: entry.id,
+      name: entry.name,
+      avatarUrl: entry.avatarUrl,
+      rank: index + 1,
+      progress: Math.max(1, Math.round(seed.goal * (1.12 - index * 0.14))),
+      completed: 1.12 - index * 0.14 >= 1,
+      isCurrentUser: false,
+    }));
+    const mine = standings.filter(p => p.progress > progress).length + 1;
+
+    return challengeDetailSchema.parse({
+      challenge: challengeSchema.parse({
+        ...seed,
+        progress,
+        startsAt: upcoming ? seed.startsAt : null,
+        endsOn: upcoming ? null : end,
+        completedAt: completed ? new Date().toISOString() : null,
+      }),
+      period: { start, end, day, days, endsAt: mockMidnight(addMockDays(end, 1)) },
+      focus: {
+        scope,
+        label: scope === 'period' ? 'Challenge Goal' : 'Daily Goal',
+        value,
+        target,
+        remaining: Math.max(0, target - value),
+        endsAt: upcoming
+          ? mockMidnight(seed.startsAt!)
+          : mockMidnight(addMockDays(scope === 'today' ? anchor : end, 1)),
+        caption: upcoming
+          ? 'Challenge Starts In'
+          : scope === 'today'
+            ? "Today's Challenge Ends In"
+            : 'Challenge Ends In',
+      },
+      reward: {
+        coins: seed.rewardCoins,
+        caption,
+        badge: seed.rewardsBadge
+          ? achievementSchema.parse(
+              seedAchievements.find(a => a.metric === seed.metric) ??
+                seedAchievements[0],
+            )
+          : null,
+      },
+      rules: [
+        {
+          id: 'goal',
+          icon: 'goal',
+          text:
+            seed.metric === 'days'
+              ? `Walk at least ${MOCK_STEP_GOAL.toLocaleString('en-IN')} steps on each of the ${seed.goal} days`
+              : days > 1
+                ? `Reach ${seed.goal.toLocaleString('en-IN')} ${unit} over the ${cadence}`
+                : `Reach ${seed.goal.toLocaleString('en-IN')} ${unit} in the day`,
+          tone: 'default',
+        },
+        {
+          id: 'duration',
+          icon: 'duration',
+          text:
+            days === 1
+              ? `Challenge duration: one day (${start})`
+              : `Challenge duration: ${days} days (${start} – ${end})`,
+          tone: 'default',
+        },
+        {
+          id: 'verified',
+          icon: 'verified',
+          text: `Only verified ${unit} count — the ones we can confirm came from you`,
+          tone: 'default',
+        },
+        {
+          id: 'reward',
+          icon: 'reward',
+          text: `${caption} ${seed.rewardCoins.toLocaleString('en-IN')} coins${
+            seed.rewardsBadge ? ' and a badge for your shelf' : ''
+          }`,
+          tone: 'default',
+        },
+        {
+          id: 'repeat',
+          icon: 'repeat',
+          text: `It resets every ${cadence}, so a ${cadence} you miss is a ${cadence} you can win back`,
+          tone: 'default',
+        },
+        {
+          id: 'integrity',
+          icon: 'warning',
+          text: 'Faked or tampered activity is not counted and can cost you the reward',
+          tone: 'caution',
+        },
+      ],
+      joined: 12_431,
+      finished: standings.filter(p => p.completed).length,
+      ranked: upcoming ? 0 : standings.length + 1,
+      standings: upcoming ? [] : standings,
+      me:
+        upcoming || progress === 0
+          ? null
+          : {
+              id: 'me',
+              name: 'You',
+              avatarUrl: null,
+              rank: mine,
+              progress,
+              completed,
+              isCurrentUser: true,
+            },
+      cta: upcoming
+        ? { label: `Opens ${seed.startsAt}`, action: 'none' }
+        : completed
+          ? { label: 'Challenge Complete', action: 'view_board' }
+          : seed.metric === 'workouts'
+            ? { label: 'Start a Workout', action: 'go_home' }
+            : { label: 'Continue Challenge', action: 'track_steps' },
+      shareText: upcoming
+        ? `${seed.title} opens on ${seed.startsAt} on VOKVE. ${seed.description}`
+        : `I'm on day ${day} of ${days} of the ${seed.title} challenge on VOKVE — ${progress.toLocaleString(
+            'en-IN',
+          )} of ${seed.goal.toLocaleString('en-IN')} so far. Join me!`,
+    });
+  },
   async achievements() {
     await delay();
     return seedAchievements.map(a => achievementSchema.parse(a));
+  },
+  async achievement(id) {
+    await delay();
+    const seed = seedAchievements.find(a => a.id === id);
+    if (!seed) {
+      throw new ApiError('not_found', 'That achievement could not be found.', 404);
+    }
+
+    const unlocked = seed.achievedAt !== null;
+    const target = seed.value;
+    // The member's best on record. The mock has no history, so an unlocked
+    // badge is shown just past its target and a locked one just short of it.
+    const value = unlocked ? Math.round(target * 1.043) : Math.round(target * 0.84);
+    const percent = Math.min(100, Math.round((value / target) * 100));
+
+    const requirement =
+      seed.metric === 'calories'
+        ? `Burn ${target.toLocaleString('en-IN')} calories in a single day.`
+        : seed.metric === 'minutes'
+          ? `Stay active for ${target.toLocaleString('en-IN')} minutes in a single day.`
+          : seed.metric === 'days'
+            ? `Keep your streak going for ${target.toLocaleString('en-IN')} days in a row.`
+            : seed.metric === 'workouts'
+              ? `Finish ${target.toLocaleString('en-IN')} workouts.`
+              : `Walk ${target.toLocaleString('en-IN')} steps in a single day.`;
+
+    const left = Math.max(0, target - value);
+    const remaining = `${left.toLocaleString('en-IN')} ${
+      MOCK_METRIC_WORDS[seed.metric]
+    } to go`;
+
+    // Everything of the same metric, smallest first — the "Related" row.
+    const family = seedAchievements
+      .filter(a => a.metric === seed.metric)
+      .sort((a, b) => a.value - b.value);
+    const hasNext = family.some(a => a.value > seed.value && a.achievedAt === null);
+
+    return achievementDetailSchema.parse({
+      achievement: achievementSchema.parse(seed),
+      title: MOCK_ACHIEVEMENT_TITLES[seed.id] ?? seed.label,
+      description: requirement,
+      about: `This achievement is awarded when you ${requirement
+        .charAt(0)
+        .toLowerCase()}${requirement.slice(
+        1,
+        -1,
+      )}. It shows your dedication towards an active lifestyle.`,
+      note: unlocked
+        ? 'You did it! Consistency leads to a healthier you.'
+        : `${remaining} — keep moving and it is yours.`,
+      unlocked,
+      unlockedAt: seed.achievedAt,
+      progress: {
+        basis: seed.metric === 'days' ? 'longest_streak' : seed.metric === 'workouts' ? 'total_workouts' : 'best_day',
+        label:
+          seed.metric === 'days'
+            ? 'Your longest streak'
+            : seed.metric === 'workouts'
+              ? 'Workouts finished'
+              : 'Your best day',
+        value,
+        target,
+        percent,
+        caption: unlocked
+          ? `Goal completed on ${seed.achievedAt!.slice(0, 10)}`
+          : remaining,
+        completedOn: unlocked ? seed.achievedAt!.slice(0, 10) : null,
+      },
+      reward: {
+        coins: MOCK_ACHIEVEMENT_COINS[seed.id] ?? 50,
+        via: 'achievement',
+        // The mock mirrors the server's default: the flag is off, so the
+        // figure is shown and nothing is claimed to have been paid.
+        caption: 'Coins for badges start soon',
+        paid: false,
+      },
+      cheer: unlocked
+        ? {
+            title: 'Great job!',
+            message: "You're one step closer to a fitter, healthier you.",
+          }
+        : {
+            title: 'Keep going',
+            message: 'Every day you move brings this one closer.',
+          },
+      related: family.map(a => achievementSchema.parse(a)),
+      cta:
+        unlocked && !hasNext
+          ? { label: 'View All Achievements', action: 'view_shelf' }
+          : seed.metric === 'workouts'
+            ? { label: 'Start a Workout', action: 'go_home' }
+            : { label: 'Keep Going', action: 'track_steps' },
+      shareText: unlocked
+        ? `I just unlocked the ${
+            MOCK_ACHIEVEMENT_TITLES[seed.id] ?? seed.label
+          } badge on VOKVE. ${requirement} Your turn!`
+        : `I'm ${percent}% of the way to the ${
+            MOCK_ACHIEVEMENT_TITLES[seed.id] ?? seed.label
+          } badge on VOKVE. ${requirement}`,
+    });
   },
 };
 
@@ -1050,6 +1414,82 @@ function mockStreakSummary(): StreakSummary {
   });
 }
 
+/**
+ * The streak's record, the way the server builds it: a walk over the
+ * calendar rather than over the days that counted, so a day with no row
+ * comes back as a missed one instead of simply not being there.
+ */
+function mockStreakHistory(cursor?: string, limit = 30): StreakHistoryPage {
+  const today = mockToday();
+  const all = new Set([...mockStreak.completed, ...mockStreak.protectedDays]);
+  const days = [...all].sort();
+  if (days.length === 0) {
+    return streakHistoryPageSchema.parse({ data: [], nextCursor: null, total: 0 });
+  }
+
+  const first = days[0];
+  // Each day's place in its own run, counted forward from the first.
+  const runIndex = new Map<string, number>();
+  let run = 0;
+  for (let day = first; day <= today; day = addMockDays(day, 1)) {
+    run = all.has(day) ? run + 1 : 0;
+    if (run > 0) {
+      runIndex.set(day, run);
+    }
+  }
+
+  const end = cursor ? addMockDays(cursor, -1) : today;
+  const dates: string[] = [];
+  for (
+    let day = end;
+    day >= first && dates.length < limit;
+    day = addMockDays(day, -1)
+  ) {
+    dates.push(day);
+  }
+
+  // The mock has no activity table, so a day's steps are derived from its
+  // date — made up, but the same on every read, which is what a list needs.
+  const stepsOn = (date: string) =>
+    7_800 + ((Number(date.slice(-2)) * 173) % 4_200);
+
+  const data = dates.map(date => {
+    if (mockStreak.protectedDays.has(date)) {
+      return {
+        date,
+        day: runIndex.get(date) ?? null,
+        status: 'frozen' as const,
+        detail: 'Freeze used',
+        steps: 0,
+      };
+    }
+    if (all.has(date)) {
+      const steps = stepsOn(date);
+      return {
+        date,
+        day: runIndex.get(date) ?? null,
+        status: 'completed' as const,
+        detail: `${steps.toLocaleString('en-IN')} steps`,
+        steps,
+      };
+    }
+    return {
+      date,
+      day: null,
+      status: 'missed' as const,
+      detail: 'No activity',
+      steps: 0,
+    };
+  });
+
+  const oldest = dates[dates.length - 1];
+  return streakHistoryPageSchema.parse({
+    data,
+    nextCursor: oldest !== undefined && oldest > first ? oldest : null,
+    total: mockDays(first, today) + 1,
+  });
+}
+
 export const mockStreakApi: StreakApi = {
   async get() {
     await delay();
@@ -1082,6 +1522,10 @@ export const mockStreakApi: StreakApi = {
     mockStreak.freezes -= 1;
     mockStreak.protectedDays.add(today);
     return mockStreakSummary();
+  },
+  async history(cursor, limit) {
+    await delay();
+    return mockStreakHistory(cursor, limit);
   },
   async restore() {
     await delay();
@@ -1157,7 +1601,10 @@ export const mockLeaderboardApi: LeaderboardApi = {
         status: 'live',
       },
       entries: seedLeaderboard,
-      me: { rank: 12, score: 1_240, coins: 0, percentile: 88 },
+      // Outside the places the board lists, which is the case the full board
+      // screen has to handle: the reader's own place is stated above the list
+      // rather than found by scrolling it.
+      me: { rank: 14, score: 1_240, coins: 0, percentile: 86 },
       ranked: 96,
     });
   },
@@ -3934,7 +4381,10 @@ function mockProfile(): ProfileSummary {
     label,
     description,
     icon,
-    unlockedAt: value >= goal ? daysAgoIso(20) : null,
+    unlocked: value >= goal,
+    // The server cannot date a milestone either: it is judged against a
+    // running total, which carries no history.
+    unlockedAt: null,
     progress: Math.min(1, value / goal),
     value: Math.min(value, goal),
     goal,

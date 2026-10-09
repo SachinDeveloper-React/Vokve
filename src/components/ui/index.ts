@@ -3,6 +3,8 @@ export { Button } from './Button';
 export { Card } from './Card';
 export { Chip } from './Chip';
 export { EmptyState } from './EmptyState';
+export { FilterChips } from './FilterChips';
+export type { FilterOption } from './FilterChips';
 export { GradientBadge } from './GradientBadge';
 export { IconBadge } from './IconBadge';
 export type { IconBadgeSize, IconBadgeVariant } from './IconBadge';

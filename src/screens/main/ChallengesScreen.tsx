@@ -47,6 +47,9 @@ const matchesPeriod = (challenge: Challenge, period: ChallengePeriod) =>
  * challenge cannot appear as both running and upcoming however the data is
  * ordered.
  *
+ * Each row opens that challenge in full (`ChallengeDetail`), carrying the day
+ * the board is showing, so the detail is about the same period the row was.
+ *
  * It is a root route rather than a page of a tab. It is opened from Home's
  * shortcut row today and from the account's rewards later, and filing it under
  * one tab would leave that tab showing a challenge board the next time its own
@@ -147,11 +150,35 @@ export const ChallengesScreen = () => {
     [navigation],
   );
 
-  // The full challenge list, the achievement shelf and the rules explainer have
-  // no screens yet. Wired as no-ops rather than left off, so each control keeps
-  // the shape it will ship with and only the handler changes when its screen
-  // lands.
-  const notImplemented = useCallback(() => {}, []);
+  // Tapping a row opens that challenge in full, for the day the board is
+  // showing — so a member looking back at Tuesday opens Tuesday's challenge
+  // rather than today's.
+  const onOpenChallenge = useCallback(
+    (id: string) => navigation.navigate('ChallengeDetail', { id, date }),
+    [date, navigation],
+  );
+
+  // "View All" on either list opens that list in full, carrying the day the
+  // board is showing so the screen behind the link covers the same period.
+  const onViewAllActive = useCallback(
+    () => navigation.navigate('ChallengeList', { kind: 'active', date }),
+    [date, navigation],
+  );
+
+  const onViewAllUpcoming = useCallback(
+    () => navigation.navigate('ChallengeList', { kind: 'upcoming', date }),
+    [date, navigation],
+  );
+
+  const onViewAllAchievements = useCallback(
+    () => navigation.navigate('Achievements'),
+    [navigation],
+  );
+
+  const onOpenAchievement = useCallback(
+    (id: string) => navigation.navigate('AchievementDetail', { id }),
+    [navigation],
+  );
 
   return (
     <Screen edges={['top']}>
@@ -193,7 +220,8 @@ export const ChallengesScreen = () => {
         ) : (
           <ActiveChallengesCard
             challenges={active}
-            onPressViewAll={notImplemented}
+            onPressViewAll={onViewAllActive}
+            onPressChallenge={onOpenChallenge}
           />
         )}
 
@@ -209,7 +237,8 @@ export const ChallengesScreen = () => {
         ) : (
           <AchievementsCard
             achievements={achievements}
-            onPressViewAll={notImplemented}
+            onPressViewAll={onViewAllAchievements}
+            onPressAchievement={onOpenAchievement}
           />
         )}
 
@@ -217,7 +246,8 @@ export const ChallengesScreen = () => {
           <UpcomingChallengesCard
             challenges={upcoming}
             relativeTo={date}
-            onPressViewAll={notImplemented}
+            onPressViewAll={onViewAllUpcoming}
+            onPressChallenge={onOpenChallenge}
           />
         ) : null}
 

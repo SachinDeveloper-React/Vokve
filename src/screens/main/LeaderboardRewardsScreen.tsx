@@ -89,9 +89,10 @@ export const LeaderboardRewardsScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The full board has no screen yet. Wired as a no-op rather than left off, so
-  // the link keeps the shape it will ship with and only the handler changes.
-  const notImplemented = useCallback(() => {}, []);
+  const onViewFullBoard = useCallback(
+    () => navigation.navigate('LeaderboardBoard'),
+    [navigation],
+  );
 
   return (
     <Screen edges={['top']}>
@@ -130,7 +131,7 @@ export const LeaderboardRewardsScreen = () => {
               <CurrentLeaderboardCard
                 entries={top}
                 me={board.data.me}
-                onPressViewFull={notImplemented}
+                onPressViewFull={onViewFullBoard}
               />
             ) : (
               <LoadState

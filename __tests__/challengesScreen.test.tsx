@@ -19,6 +19,7 @@ import { ChallengesScreen } from '../src/screens/main/ChallengesScreen';
 import { ThemeProvider } from '../src/theme';
 import { seedChallenges } from '../src/constants/seedData';
 import { clearServerReads } from '../src/hooks/useServerRead';
+import { todayIso } from '../src/utils/date';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -348,6 +349,55 @@ describe('ChallengesScreen', () => {
     press(await render(), 'Back');
 
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+
+  test('a running challenge opens in full, for the day the board is showing', async () => {
+    const tree = await render();
+    press(tree, '10K Steps Challenge.');
+
+    expect(mockNavigate).toHaveBeenCalledWith('ChallengeDetail', {
+      id: 'ch-10k-steps',
+      date: todayIso(),
+    });
+  });
+
+  test('an upcoming challenge opens in full too', async () => {
+    const tree = await render();
+    const upcoming = seedChallenges.find(c => c.startsAt !== null);
+    press(tree, `${upcoming!.title}.`);
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      'ChallengeDetail',
+      expect.objectContaining({ id: upcoming!.id }),
+    );
+  });
+
+  test('every "View All" on the board leads somewhere', async () => {
+    const tree = await render();
+
+    press(tree, 'View all active challenges');
+    expect(mockNavigate).toHaveBeenCalledWith('ChallengeList', {
+      kind: 'active',
+      date: todayIso(),
+    });
+
+    press(tree, 'View all achievements');
+    expect(mockNavigate).toHaveBeenCalledWith('Achievements');
+
+    press(tree, 'View all upcoming challenges');
+    expect(mockNavigate).toHaveBeenCalledWith('ChallengeList', {
+      kind: 'upcoming',
+      date: todayIso(),
+    });
+  });
+
+  test('a badge on the shelf opens in full', async () => {
+    const tree = await render();
+    press(tree, '10K Steps, achieved');
+
+    expect(mockNavigate).toHaveBeenCalledWith('AchievementDetail', {
+      id: 'a-10k-steps',
+    });
   });
 
   test('the bell opens the notification centre', async () => {

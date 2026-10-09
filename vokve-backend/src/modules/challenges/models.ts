@@ -81,10 +81,18 @@ const achievementDefinitionSchema = new Schema(
   {
     _id: { type: String, required: true },
     label: { type: String, required: true },
+    /** The display name on the badge's own screen; the label when empty. */
+    title: { type: String, default: '' },
     value: { type: Number, required: true },
     metric: { type: String, enum: CHALLENGE_METRICS, required: true },
     rule: { type: String, enum: [...ACHIEVEMENT_RULES, null], default: null },
     threshold: { type: Number, default: null },
+    /**
+     * What unlocking it pays (D-32 — the owner's to rebalance here). Held
+     * until ⚙ `coins.achievements.enabled`, exactly as step-derived rewards
+     * wait on `coins.steps.enabled` (D-46).
+     */
+    rewardCoins: { type: Number, default: 0, min: 0 },
     sort: { type: Number, default: 0 },
   },
   { timestamps: true, collection: 'achievement_definitions', versionKey: false },

@@ -22,7 +22,7 @@ import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { ProgressBar } from '../ui/ProgressBar';
 
-/** The glyph each badge kind is drawn with — the server names the kind, not the icon. */
+/** The glyph each milestone kind is drawn with — the server names the kind, not the icon. */
 const BADGE_ICON: Record<ProfileBadgeIcon, LucideIcon> = {
   flame: Flame,
   footprints: Footprints,
@@ -38,20 +38,27 @@ interface Props {
 }
 
 /**
- * What the member has earned, and what is nearly earned.
+ * How far the member has come as a member: lifetime steps, workouts, coins,
+ * their first order, the friends they brought.
  *
- * Unlocked badges come first and locked ones keep their place in the row
- * with a progress bar under them: a badge at 6/7 days is the single best
- * reason to come back tomorrow, and hiding it until it is won would throw
- * that away. A locked one is drawn in grey rather than removed, so the
- * shelf's length never changes under the user.
+ * Deliberately not the achievement shelf, which is a catalogue of fitness
+ * badges with a screen of its own. These are account milestones, worked out
+ * from running totals the catalogue has no metric for (RULES C1 fixes it to
+ * steps, calories, minutes, days and workouts), which is why they live here
+ * under their own name rather than being mixed in with badges the member can
+ * open, compare and chase.
+ *
+ * Unlocked milestones come first and locked ones keep their place in the row
+ * with a progress bar under them: one at 6/7 days is the single best reason
+ * to come back tomorrow, and hiding it until it is won would throw that away.
+ * A locked one is drawn in grey rather than removed, so the shelf's length
+ * never changes under the user.
  */
-export const BadgeShelf = memo(({ badges }: Props) => {
+export const MilestoneShelf = memo(({ badges }: Props) => {
   const { colors } = useTheme();
-  const unlocked = badges.filter(b => b.unlockedAt !== null).length;
+  const unlocked = badges.filter(b => b.unlocked).length;
   const ordered = [...badges].sort((a, b) => {
-    const byState =
-      Number(b.unlockedAt !== null) - Number(a.unlockedAt !== null);
+    const byState = Number(b.unlocked) - Number(a.unlocked);
     return byState !== 0 ? byState : b.progress - a.progress;
   });
 
@@ -59,9 +66,9 @@ export const BadgeShelf = memo(({ badges }: Props) => {
     <Card radius="xl" padding="base">
       <VStack gap="md">
         <HStack align="center" justify="between">
-          <AppText variant="bodyStrong">Achievements</AppText>
+          <AppText variant="bodyStrong">Milestones</AppText>
           <AppText variant="micro" color="textSecondary">
-            {`${unlocked} of ${badges.length} earned`}
+            {`${unlocked} of ${badges.length} reached`}
           </AppText>
         </HStack>
 
@@ -71,7 +78,7 @@ export const BadgeShelf = memo(({ badges }: Props) => {
           contentContainerStyle={styles.row}
         >
           {ordered.map(badge => {
-            const earned = badge.unlockedAt !== null;
+            const earned = badge.unlocked;
             const tint = earned ? colors.gold : colors.textQuaternary;
             return (
               <VStack
@@ -82,7 +89,7 @@ export const BadgeShelf = memo(({ badges }: Props) => {
                 accessibilityRole="image"
                 accessibilityLabel={
                   earned
-                    ? `${badge.label}, earned — ${badge.description}`
+                    ? `${badge.label}, reached — ${badge.description}`
                     : `${badge.label}, locked — ${formatCompactNumber(
                         badge.value,
                       )} of ${formatCompactNumber(badge.goal)}`
@@ -128,7 +135,7 @@ export const BadgeShelf = memo(({ badges }: Props) => {
   );
 });
 
-BadgeShelf.displayName = 'BadgeShelf';
+MilestoneShelf.displayName = 'MilestoneShelf';
 
 const BADGE_WIDTH = moderateScale(76);
 

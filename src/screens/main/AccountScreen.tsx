@@ -1,18 +1,20 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { AccountHeader } from '../../components/account/AccountHeader';
 import { AccountMenuList } from '../../components/account/AccountMenuList';
 import { AccountShortcutsRow } from '../../components/account/AccountShortcutsRow';
 import { AppearanceSheet } from '../../components/account/AppearanceSheet';
-import { BadgeShelf } from '../../components/account/BadgeShelf';
+import { MilestoneShelf } from '../../components/account/MilestoneShelf';
 import { DataSafetyNote } from '../../components/account/DataSafetyNote';
 import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
 import { PremiumUpsellCard } from '../../components/account/PremiumUpsellCard';
 import { ProfileCompletenessCard } from '../../components/account/ProfileCompletenessCard';
 import { ProfileSummaryCard } from '../../components/account/ProfileSummaryCard';
+import { AchievementsCard } from '../../components/challenges/AchievementsCard';
 import { Screen } from '../../components/ui/Screen';
 import { config } from '../../constants/config';
+import { useAchievements } from '../../hooks/useChallenges';
 import { useAccountStore, useProfileSummary } from '../../stores/accountStore';
 import {
   useAuthStatus,
@@ -42,6 +44,14 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * the wallet store instead — that one changes on every spend and the wallet
  * is the thing that knows first.
  *
+ * Two shelves sit on the tab and they are different things. The achievements
+ * card is the shelf itself (`GET /achievements`) — the same badges, in the
+ * same order, as the challenge board and the shelf screen, each one opening
+ * its own page. The milestones under it are the account's own: lifetime
+ * steps, workouts, coins, a first order, friends brought along, none of which
+ * the achievement catalogue has a metric for. Keeping them apart is what
+ * stops the tab and the board disagreeing about how many badges a member has.
+ *
  * A `ScrollView` of sections rather than a list. Nothing here grows without
  * bound — the menu is a fixed list and the shortcut row a fixed five — so a
  * virtualised list would cost a recycler and buy nothing.
@@ -58,6 +68,26 @@ export const AccountScreen = () => {
 
   const summary = useProfileSummary();
   const isSyncing = useAccountStore(s => s.isSyncing);
+
+  // The same shelf the challenge board and the achievements screen show
+  // (`GET /achievements`), not a second set of badges worked out here: a
+  // member who has eleven of them should be told eleven wherever they look.
+  const shelf = useAchievements();
+
+  // Earned first, as everywhere else the shelf appears. It is a record of
+  // what the member has done, and a first page of padlocks reads as a list
+  // of failures.
+  const achievements = useMemo(
+    () =>
+      [...(shelf.data ?? [])].sort(
+        (a, b) => Number(b.achievedAt !== null) - Number(a.achievedAt !== null),
+      ),
+    [shelf.data],
+  );
+  const achievementsEarned = useMemo(
+    () => achievements.filter(a => a.achievedAt !== null).length,
+    [achievements],
+  );
   const syncedAt = useAccountStore(s => s.syncedAt);
   const hydrateProfile = useAccountStore(s => s.hydrateFromServer);
   const refreshProfileIfStale = useAccountStore(s => s.refreshIfStale);
@@ -99,10 +129,16 @@ export const AccountScreen = () => {
           | 'About'
           | 'HealthCheckup'
           | 'StepTracking'
+          | 'Achievements'
           | 'Wishlist',
       ) =>
       () =>
         navigation.navigate(route),
+    [navigation],
+  );
+
+  const onOpenAchievement = useCallback(
+    (id: string) => navigation.navigate('AchievementDetail', { id }),
     [navigation],
   );
 
@@ -151,6 +187,7 @@ export const AccountScreen = () => {
           avatarUri={user?.avatarUrl}
           summary={summary}
           coins={balance}
+          achievementsEarned={achievementsEarned}
           onPress={go('EditProfile')}
         />
 
@@ -170,7 +207,15 @@ export const AccountScreen = () => {
           onPressSecurity={go('Security')}
         />
 
-        {summary ? <BadgeShelf badges={summary.badges} /> : null}
+        {shelf.data !== null ? (
+          <AchievementsCard
+            achievements={achievements}
+            onPressViewAll={go('Achievements')}
+            onPressAchievement={onOpenAchievement}
+          />
+        ) : null}
+
+        {summary ? <MilestoneShelf badges={summary.badges} /> : null}
 
         <PremiumUpsellCard onPressUpgrade={go('LeaderboardRewards')} />
 

@@ -25,6 +25,8 @@ const DOT = moderateScale(6);
 interface Props {
   achievements: Achievement[];
   onPressViewAll: () => void;
+  /** Opens one badge in full. Left off, the rings are read-only. */
+  onPressAchievement?: (id: string) => void;
 }
 
 function paginate(achievements: Achievement[]): Achievement[][] {
@@ -48,7 +50,7 @@ function paginate(achievements: Achievement[]): Achievement[][] {
  * would be wrong by however much of that chain changes.
  */
 export const AchievementsCard = memo(
-  ({ achievements, onPressViewAll }: Props) => {
+  ({ achievements, onPressViewAll, onPressAchievement }: Props) => {
     const { colors } = useTheme();
     const [pageWidth, setPageWidth] = useState(0);
     const [page, setPage] = useState(0);
@@ -113,6 +115,7 @@ export const AchievementsCard = memo(
                   <AchievementBadge
                     key={achievement.id}
                     achievement={achievement}
+                    onPress={onPressAchievement}
                   />
                 ))}
 

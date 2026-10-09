@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { darkColors } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
@@ -6,6 +6,7 @@ import type { Challenge } from '../../types/models';
 import { withAlpha } from '../../utils/color';
 import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
+import { Pressable } from '../form/Pressable';
 import { AppText } from '../ui/AppText';
 import { ProgressBar } from '../ui/ProgressBar';
 import { CoinAmount } from '../wallet/CoinAmount';
@@ -15,6 +16,8 @@ const DISC_SIZE = moderateScale(40);
 
 interface Props {
   challenge: Challenge;
+  /** Opens the challenge in full. Left off, the row is a readout. */
+  onPress?: (id: string) => void;
 }
 
 /**
@@ -28,8 +31,13 @@ interface Props {
  * The progress bar never stands alone: the figure under it says the same thing
  * in words, so a user who cannot judge a bar's fill by eye still knows they
  * are 7,543 steps into 10,000.
+ *
+ * When the row leads somewhere, the press target carries the description
+ * itself rather than wrapping a row that already has one: a nested accessible
+ * view hides the button from a screen reader, which leaves a row that reads
+ * perfectly and cannot be opened.
  */
-export const ActiveChallengeRow = memo(({ challenge }: Props) => {
+export const ActiveChallengeRow = memo(({ challenge, onPress }: Props) => {
   const { tint } = METRIC_STYLE[challenge.metric];
   const color = darkColors[tint];
   const foreground = darkColors.tierForeground;
@@ -43,17 +51,19 @@ export const ActiveChallengeRow = memo(({ challenge }: Props) => {
   const completed = challenge.completedAt !== null;
   const status = completed ? `Completed ✓ · ${progress}` : progress;
 
-  return (
-    <HStack
-      align="center"
-      gap="md"
-      accessible
-      accessibilityLabel={`${challenge.title}. ${status}. ${
-        completed ? 'Paid' : 'Pays'
-      } ${challenge.rewardCoins} coins${
-        challenge.rewardsBadge ? ' and a special badge' : ''
-      }`}
-    >
+  const label = `${challenge.title}. ${status}. ${
+    completed ? 'Paid' : 'Pays'
+  } ${challenge.rewardCoins} coins${
+    challenge.rewardsBadge ? ' and a special badge' : ''
+  }`;
+
+  const press = useCallback(
+    () => onPress?.(challenge.id),
+    [challenge.id, onPress],
+  );
+
+  const body = (
+    <HStack align="center" gap="md">
       <View
         style={[
           styles.disc,
@@ -115,6 +125,22 @@ export const ActiveChallengeRow = memo(({ challenge }: Props) => {
         ) : null}
       </VStack>
     </HStack>
+  );
+
+  return onPress ? (
+    <Pressable
+      onPress={press}
+      feedback="opacity"
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Opens this challenge"
+    >
+      {body}
+    </Pressable>
+  ) : (
+    <View accessible accessibilityLabel={label}>
+      {body}
+    </View>
   );
 });
 

@@ -54,6 +54,22 @@ export function formatProgress(
 }
 
 /**
+ * "70,421 steps" — a figure on its own, without the goal beside it.
+ *
+ * For the places a progress figure is read against the other figures around
+ * it rather than against the goal: a column of three leaders is compared
+ * name to name, and "70,421 / 70,000 steps" three times over says the same
+ * thing three times and makes the names that differ harder to find.
+ */
+export function formatMetricValue(
+  value: number,
+  metric: ChallengeMetric,
+): string {
+  const write = value >= 100_000 ? formatCompactNumber : formatGrouped;
+  return `${write(value)} ${METRIC_STYLE[metric].unit}`;
+}
+
+/**
  * The figure inside an achievement's ring — "10K", "1.5K", "500". The server
  * sends the number (RULES C7); the ring has room for four characters.
  */

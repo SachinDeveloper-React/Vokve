@@ -13,7 +13,7 @@ export { AccountMenuRow } from './AccountMenuRow';
 export { AccountMenuList } from './AccountMenuList';
 export { DataSafetyNote } from './DataSafetyNote';
 export { AppearanceSheet } from './AppearanceSheet';
-export { BadgeShelf } from './BadgeShelf';
+export { MilestoneShelf } from './MilestoneShelf';
 export { FaqRow } from './FaqRow';
 export { ProfileCompletenessCard } from './ProfileCompletenessCard';
 export { AvatarPicker } from './AvatarPicker';

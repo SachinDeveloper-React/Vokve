@@ -34,6 +34,14 @@ interface Props {
   summary: ProfileSummary | null;
   /** Spendable coins from the wallet, which is fresher than the summary. */
   coins: number;
+  /**
+   * Badges earned off the achievement shelf (`GET /achievements`) — the same
+   * figure the challenge board and the shelf screen show. Counted there
+   * rather than off `summary.badges`, which are the account's own milestones
+   * and a different, shorter list: the two under one word would have the tab
+   * and the board disagree about how many badges the member has.
+   */
+  achievementsEarned?: number;
   onPress: () => void;
 }
 
@@ -55,7 +63,14 @@ interface Props {
  * than the card appearing from nothing.
  */
 export const ProfileSummaryCard = memo(
-  ({ name, avatarUri, summary, coins, onPress }: Props) => {
+  ({
+    name,
+    avatarUri,
+    summary,
+    coins,
+    achievementsEarned = 0,
+    onPress,
+  }: Props) => {
     const { colors } = useTheme();
 
     const foreground = colors.tierForeground;
@@ -160,10 +175,7 @@ export const ProfileSummaryCard = memo(
             <ProfileStatStrip
               coins={coins}
               streakDays={summary?.stats.currentStreak ?? 0}
-              achievements={
-                summary?.badges.filter(badge => badge.unlockedAt !== null)
-                  .length ?? 0
-              }
+              achievements={achievementsEarned}
               totalSteps={summary?.stats.totalSteps ?? 0}
             />
           </VStack>

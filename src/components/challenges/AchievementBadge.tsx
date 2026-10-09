@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Lock } from 'lucide-react-native';
 import { useTheme } from '../../theme';
@@ -7,6 +7,7 @@ import type { Achievement } from '../../types/models';
 import { withAlpha } from '../../utils/color';
 import { VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
+import { Pressable } from '../form/Pressable';
 import { AppText } from '../ui/AppText';
 import { METRIC_STYLE, formatBadgeValue } from './metrics';
 
@@ -15,6 +16,8 @@ const RING = moderateScale(48);
 
 interface Props {
   achievement: Achievement;
+  /** Opens the badge in full. Left off, the ring is a readout. */
+  onPress?: (id: string) => void;
 }
 
 /**
@@ -28,22 +31,25 @@ interface Props {
  * The status word under the label repeats what the colour says, for the same
  * reason: "Achieved" and "Locked" survive a reader who cannot tell a green
  * ring from a grey one.
+ *
+ * When the ring leads somewhere, the press target carries the description
+ * itself rather than wrapping an element that already has one: a nested
+ * accessible view hides the button from a screen reader, which leaves a badge
+ * that reads perfectly and cannot be opened.
  */
-export const AchievementBadge = memo(({ achievement }: Props) => {
+export const AchievementBadge = memo(({ achievement, onPress }: Props) => {
   const { colors, isDark } = useTheme();
   const achieved = achievement.achievedAt !== null;
   const tint = colors[METRIC_STYLE[achievement.metric].tint];
 
-  return (
-    <VStack
-      align="center"
-      gap="xs"
-      flex={1}
-      accessible
-      accessibilityLabel={`${achievement.label}, ${
-        achieved ? 'achieved' : 'locked'
-      }`}
-    >
+  const label = `${achievement.label}, ${achieved ? 'achieved' : 'locked'}`;
+  const press = useCallback(
+    () => onPress?.(achievement.id),
+    [achievement.id, onPress],
+  );
+
+  const body = (
+    <VStack align="center" gap="xs" flex={1}>
       <View
         style={[
           styles.ring,
@@ -79,11 +85,31 @@ export const AchievementBadge = memo(({ achievement }: Props) => {
       </VStack>
     </VStack>
   );
+
+  return onPress ? (
+    <Pressable
+      onPress={press}
+      feedback="scale"
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Opens this achievement"
+      style={styles.target}
+    >
+      {body}
+    </Pressable>
+  ) : (
+    <View accessible accessibilityLabel={label} style={styles.target}>
+      {body}
+    </View>
+  );
 });
 
 AchievementBadge.displayName = 'AchievementBadge';
 
 const styles = StyleSheet.create({
+  // The wrapper takes the column the badge used to take itself, so a row of
+  // five still divides evenly whether or not the rings lead anywhere.
+  target: { flex: 1 },
   ring: {
     width: RING,
     height: RING,

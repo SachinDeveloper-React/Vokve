@@ -12,6 +12,10 @@ import { AddressFormScreen } from '../screens/main/AddressFormScreen';
 import { AddressesScreen } from '../screens/main/AddressesScreen';
 import { AnalyticsScreen } from '../screens/main/AnalyticsScreen';
 import { BloodPressureScreen } from '../screens/main/BloodPressureScreen';
+import { AchievementDetailScreen } from '../screens/main/AchievementDetailScreen';
+import { AchievementsScreen } from '../screens/main/AchievementsScreen';
+import { ChallengeDetailScreen } from '../screens/main/ChallengeDetailScreen';
+import { ChallengeListScreen } from '../screens/main/ChallengeListScreen';
 import { ChallengesScreen } from '../screens/main/ChallengesScreen';
 import { CoinHistoryScreen } from '../screens/main/CoinHistoryScreen';
 import { DietPlanScreen } from '../screens/main/DietPlanScreen';
@@ -19,6 +23,7 @@ import { HealthCheckupScreen } from '../screens/main/HealthCheckupScreen';
 import { HeartRateScreen } from '../screens/main/HeartRateScreen';
 import { HydrationReminderScreen } from '../screens/main/HydrationReminderScreen';
 import { HydrationScreen } from '../screens/main/HydrationScreen';
+import { LeaderboardBoardScreen } from '../screens/main/LeaderboardBoardScreen';
 import { LeaderboardRewardsScreen } from '../screens/main/LeaderboardRewardsScreen';
 import { NotificationSettingsScreen } from '../screens/main/NotificationSettingsScreen';
 import { NotificationsScreen } from '../screens/main/NotificationsScreen';
@@ -48,6 +53,7 @@ import { ShopBrowseScreen } from '../screens/main/ShopBrowseScreen';
 import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
 import { WishlistScreen } from '../screens/main/WishlistScreen';
 import { WriteReviewScreen } from '../screens/main/WriteReviewScreen';
+import { StreakHistoryScreen } from '../screens/main/StreakHistoryScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { StepGoalScreen } from '../screens/main/StepGoalScreen';
 import { StepSourcesScreen } from '../screens/main/StepSourcesScreen';
@@ -386,6 +392,11 @@ export const RootNavigator = () => {
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen
+              name="StreakHistory"
+              component={StreakHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="StepTracking"
               component={StepTrackingScreen}
               options={{ animation: 'slide_from_right' }}
@@ -403,6 +414,31 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="Challenges"
               component={ChallengesScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ChallengeDetail"
+              component={ChallengeDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ChallengeList"
+              component={ChallengeListScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Achievements"
+              component={AchievementsScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="AchievementDetail"
+              component={AchievementDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="LeaderboardBoard"
+              component={LeaderboardBoardScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

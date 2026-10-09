@@ -44,14 +44,24 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 jest.mock('../src/services/api/endpoints', () => ({
-  streakApi: { get: jest.fn(), freeze: jest.fn(), restore: jest.fn() },
+  streakApi: {
+    get: jest.fn(),
+    freeze: jest.fn(),
+    restore: jest.fn(),
+    history: jest.fn(),
+  },
   walletApi: { get: jest.fn(), transactions: jest.fn(), earnRules: jest.fn() },
 }));
 
 const { streakApi, walletApi } = jest.requireMock(
   '../src/services/api/endpoints',
 ) as {
-  streakApi: { get: jest.Mock; freeze: jest.Mock; restore: jest.Mock };
+  streakApi: {
+    get: jest.Mock;
+    freeze: jest.Mock;
+    restore: jest.Mock;
+    history: jest.Mock;
+  };
   walletApi: { get: jest.Mock; transactions: jest.Mock; earnRules: jest.Mock };
 };
 
@@ -149,10 +159,19 @@ const seedWallet = (balance: number, synced = true) =>
     syncedAt: synced ? new Date().toISOString() : null,
   });
 
-const RESTORE_LABEL =
-  'Streak Restore, 50 Coins. Missed a day? Restore your streak.';
-const FREEZE_LABEL =
-  'Streak Freeze, 1 Available. Protect your streak for 24 hours.';
+const RESTORE_LABEL = 'Restore Day';
+const FREEZE_LABEL = 'Use Freeze';
+
+/** A record with one completed day, one missed and one restored. */
+const HISTORY = {
+  data: [
+    { date: TODAY, day: 3, status: 'completed' as const, detail: '10,428 steps', steps: 10_428 },
+    { date: d(1), day: 2, status: 'completed' as const, detail: '8,932 steps', steps: 8_932 },
+    { date: d(2), day: null, status: 'missed' as const, detail: 'No activity', steps: 0 },
+  ],
+  nextCursor: d(2),
+  total: 24,
+};
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
@@ -162,6 +181,7 @@ beforeEach(() => {
   streakApi.get.mockReset();
   streakApi.freeze.mockReset();
   streakApi.restore.mockReset();
+  streakApi.history.mockReset().mockResolvedValue(HISTORY);
   walletApi.get.mockReset().mockRejectedValue(new Error('offline'));
   walletApi.transactions.mockReset().mockRejectedValue(new Error('offline'));
   walletApi.earnRules.mockReset().mockRejectedValue(new Error('offline'));
@@ -226,7 +246,7 @@ describe('StreakScreen', () => {
     const tree = await render();
 
     expect(labelsOf(tree)).toContain('Loading');
-    expect(allText(tree)).not.toContain('Longest Streak');
+    expect(allText(tree)).not.toContain('Best Streak');
     expect(streakApi.get).toHaveBeenCalledTimes(1);
   });
 
@@ -249,27 +269,27 @@ describe('StreakScreen', () => {
       await retry.props.onPress();
     });
 
-    expect(allText(tree)).toContain('Longest Streak');
+    expect(allText(tree)).toContain('Best Streak');
   });
 
-  test('leads with the current run and the record, dated', async () => {
+  test('leads with the current run and the record beside it', async () => {
     showStreak(summaryOf([...run(25, 11), ...run(6, 0)]));
     const text = allText(await render());
 
+    expect(text).toContain('Current Streak');
     expect(text).toContain('7');
+    expect(text).toContain('Best Streak');
     expect(text).toContain('15');
-    expect(text).toContain("You're on fire!");
-    // The record's dates, not the current run's.
-    expect(text).toContain('Achieved on');
-    // Towards the next rung, in the server's ladder.
-    expect(text).toContain('8 more days to the 15-day milestone.');
+    expect(text).toContain('Keep it going!');
+    // The milestone ladder is still on the screen, under the record.
+    expect(text).toContain('Streak Benefits');
   });
 
   test("with no streak it says how to start, in the server's words", async () => {
     showStreak(summaryOf([]));
     const text = allText(await render());
 
-    expect(text).toContain('Start today');
+    expect(text).toContain('Current Streak');
     expect(text).toContain('Finish a workout or walk 10,000 steps in a day.');
   });
 
@@ -428,6 +448,62 @@ describe('StreakScreen', () => {
     expect(text).toContain('Not enough coins');
     expect(text).toContain('You need 30 more coins for this.');
     expect(useStreakStore.getState().summary?.protectedDays).toEqual([]);
+  });
+
+  test('the record under the tools is the server’s, newest first', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    const text = allText(await render());
+
+    expect(text).toContain('Streak History');
+    expect(text).toContain('Day 3');
+    expect(text).toContain('10,428 steps');
+    // A missed day is on the record too, not edited out of it.
+    expect(text).toContain('Missed');
+    expect(text).toContain('No activity');
+  });
+
+  test('"View All" opens the whole record', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    const tree = await render();
+
+    await press(tree, 'View all streak history');
+    expect(mockNavigate).toHaveBeenCalledWith('StreakHistory');
+  });
+
+  test('a gap the server would bridge is called out above the tools', async () => {
+    // A run that ended two days ago: the server offers a restore for the gap.
+    showStreak({ ...summaryOf(run(5, 2)), canRestore: true, restoreGap: [d(1)] });
+    const text = allText(await render());
+
+    expect(text).toContain('1 day missed');
+    expect(text).toContain('Use Freeze or Restore to keep your streak alive.');
+  });
+
+  test('no gap, no warning', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    expect(allText(await render())).not.toContain('day missed');
+  });
+
+  test('the call to action follows whether today already counts', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    expect(allText(await render())).toContain('Today already counts');
+  });
+
+  test('a day not yet covered offers the way to keep it alive', async () => {
+    showStreak(summaryOf(run(3, 1)));
+    const tree = await render();
+
+    expect(allText(tree)).toContain('Keep Your Streak Alive');
+    await press(tree, 'Keep Your Streak Alive');
+    expect(mockNavigate).toHaveBeenCalledWith('StepTracking');
+  });
+
+  test('the "?" opens the guide rather than doing nothing', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    const tree = await render();
+
+    await press(tree, 'How streaks work');
+    expect(mockNavigate).toHaveBeenCalledWith('AppGuide');
   });
 
   test('the chevron returns to whatever opened the streak', async () => {

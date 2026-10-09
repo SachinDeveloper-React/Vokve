@@ -1612,10 +1612,11 @@ export const seedAchievements: Achievement[] = [
 /**
  * This week's top of the leaderboard, in rank order.
  *
- * Five rows: the reward tiers pay down to tenth place, but the card is a
- * glance at who is winning rather than the board itself — the rest is behind
- * "View Full Leaderboard". The coins each row states match the tiers exactly,
- * so the table above the list and the people below it cannot disagree.
+ * Twelve rows: the reward tiers pay down to tenth place, so the list runs two
+ * past it — the card shows the top five and the full board shows the lot,
+ * which is what makes the paid places and the unpaid ones visibly different.
+ * The coins each row states match the tiers exactly, so the table above the
+ * list and the people below it cannot disagree.
  */
 export const seedLeaderboard: LeaderboardEntry[] = [
   {
@@ -1672,6 +1673,84 @@ export const seedLeaderboard: LeaderboardEntry[] = [
     avatarUrl: null,
     isCurrentUser: false,
     score: 1_875,
+  },
+
+  {
+    id: 'lb-6',
+    name: 'Ananya Iyer',
+    location: 'Hyderabad, India',
+    rank: 6,
+    coins: 1_000,
+    perk: 'Fitness Mat',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_790,
+  },
+  {
+    id: 'lb-7',
+    name: 'Rohit Nair',
+    location: 'Kochi, India',
+    rank: 7,
+    coins: 1_000,
+    perk: 'Fitness Mat',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_704,
+  },
+  {
+    id: 'lb-8',
+    name: 'Sneha Joshi',
+    location: 'Jaipur, India',
+    rank: 8,
+    coins: 1_000,
+    perk: 'Fitness Mat',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_612,
+  },
+  {
+    id: 'lb-9',
+    name: 'Imran Qureshi',
+    location: 'Lucknow, India',
+    rank: 9,
+    coins: 1_000,
+    perk: 'Fitness Mat',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_544,
+  },
+  {
+    id: 'lb-10',
+    name: 'Meera Pillai',
+    location: 'Ahmedabad, India',
+    rank: 10,
+    coins: 1_000,
+    perk: 'Fitness Mat',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_470,
+  },
+  {
+    id: 'lb-11',
+    name: 'Kabir Chawla',
+    location: 'Chandigarh, India',
+    rank: 11,
+    coins: 0,
+    perk: '',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_388,
+  },
+  {
+    id: 'lb-12',
+    name: 'Divya Rao',
+    location: 'Indore, India',
+    rank: 12,
+    coins: 0,
+    perk: '',
+    avatarUrl: null,
+    isCurrentUser: false,
+    score: 1_302,
   },
 ];
 

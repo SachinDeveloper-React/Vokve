@@ -101,8 +101,32 @@ export type RootStackParamList = {
   Notifications: undefined;
   /** Opened from Home's shortcut row, and later from the account's rewards. */
   Challenges: undefined;
+  /**
+   * Every challenge of one kind, from the board's "View All".
+   *
+   * `kind` picks which half opens — what is running, or what is still to
+   * come — and `date` is the day the board was showing. Both optional, so a
+   * plain `navigate('ChallengeList')` lands on today's running challenges.
+   */
+  ChallengeList: { kind?: 'active' | 'upcoming'; date?: string } | undefined;
+  /** The whole achievement shelf, from the board's "View All". */
+  Achievements: undefined;
+  /** One badge in full, from a ring on the shelf or on the board's card. */
+  AchievementDetail: { id: string };
+  /** This week's board in full, from the rewards screen's "View Full". */
+  LeaderboardBoard: undefined;
+  /**
+   * One challenge in full, from a row on the board.
+   *
+   * `date` is the day the board was showing, carried over so a member looking
+   * back at Tuesday opens Tuesday's challenge rather than today's. Optional,
+   * so a notification that only knows the challenge still lands on today.
+   */
+  ChallengeDetail: { id: string; date?: string };
   /** Opened from Home's shortcut row and from the account's menu. */
   Streak: undefined;
+  /** The streak's whole record, from the streak screen's "View All". */
+  StreakHistory: undefined;
   /**
    * `tab` picks which half opens — the prizes, or the rules that award them.
    * Optional, so the plain `navigate('LeaderboardRewards')` still lands on the

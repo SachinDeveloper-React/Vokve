@@ -66,3 +66,24 @@ export function localHourOf(at: Date, timeZone: string): number {
   const hour = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(at);
   return Number(hour) % 24;
 }
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "21 Sep 2026" — a day, written out, for wording the server owns. */
+export function formatDay(day: IsoDate): string {
+  const [y, m, d] = day.split('-').map(Number);
+  return `${d} ${MONTHS_SHORT[m - 1]} ${y}`;
+}
+
+/**
+ * "15 – 21 Sep 2026", collapsing whatever the two ends share — "28 Sep – 4
+ * Oct 2026" across a month, both years in full across a year.
+ */
+export function formatDayRange(from: IsoDate, to: IsoDate): string {
+  if (from === to) return formatDay(from);
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (fy !== ty) return `${formatDay(from)} – ${formatDay(to)}`;
+  if (fm !== tm) return `${fd} ${MONTHS_SHORT[fm - 1]} – ${td} ${MONTHS_SHORT[tm - 1]} ${ty}`;
+  return `${fd} – ${td} ${MONTHS_SHORT[tm - 1]} ${ty}`;
+}

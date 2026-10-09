@@ -26,6 +26,7 @@ import {
   mockAddressApi,
   mockAuthApi,
   mockCartApi,
+  mockChallengeApi,
   mockCheckoutApi,
   mockDeviceApi,
   mockNotificationApi,
@@ -1155,5 +1156,116 @@ describe('the streak', () => {
     ).rejects.toMatchObject({
       code: 'NOTHING_TO_RESTORE',
     });
+  });
+});
+
+describe('mock challenges', () => {
+  const today = todayIso();
+
+  test('one challenge in full carries everything the detail screen reads', async () => {
+    const [running] = await mockChallengeApi.board(today);
+    const detail = await mockChallengeApi.detail(running.id, today);
+
+    expect(detail.challenge.id).toBe(running.id);
+    expect(detail.period.day).toBeGreaterThan(0);
+    expect(detail.period.day).toBeLessThanOrEqual(detail.period.days);
+    expect(detail.focus.remaining).toBe(
+      Math.max(0, detail.focus.target - detail.focus.value),
+    );
+    expect(Date.parse(detail.focus.endsAt)).not.toBeNaN();
+    expect(detail.rules.length).toBeGreaterThan(0);
+    expect(detail.rules.at(-1)?.tone).toBe('caution');
+    expect(detail.cta.label).toBeTruthy();
+    expect(detail.shareText).toContain(detail.challenge.title);
+  });
+
+  test('the standings are ranked and the caller is placed among them', async () => {
+    const detail = await mockChallengeApi.detail('ch-10k-steps', today);
+    const ranks = detail.standings.map(p => p.rank);
+
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(detail.me?.rank).toBeGreaterThan(0);
+    expect(detail.joined).toBeGreaterThanOrEqual(detail.ranked);
+  });
+
+  test('a challenge that is not in the catalogue is a 404, not an empty screen', async () => {
+    await expect(mockChallengeApi.detail('ch-nope', today)).rejects.toThrow(
+      ApiError,
+    );
+  });
+});
+
+describe('mock achievements', () => {
+  test('one badge in full carries everything the detail screen reads', async () => {
+    const detail = await mockChallengeApi.achievement('a-10k-steps');
+
+    expect(detail.title).toBe('10K Steps Champion');
+    expect(detail.description).toBe('Walk 10,000 steps in a single day.');
+    expect(detail.about).toContain('This achievement is awarded when you walk');
+    expect(detail.progress.percent).toBeLessThanOrEqual(100);
+    expect(detail.reward.coins).toBeGreaterThan(0);
+    expect(detail.related.map(a => a.value)).toEqual(
+      [...detail.related.map(a => a.value)].sort((a, b) => a - b),
+    );
+    expect(detail.related.some(a => a.id === 'a-10k-steps')).toBe(true);
+    expect(detail.shareText).toContain('10K Steps Champion');
+  });
+
+  test('a locked badge claims no date and says what is left', async () => {
+    const shelf = await mockChallengeApi.achievements();
+    const locked = shelf.find(a => a.achievedAt === null)!;
+    const detail = await mockChallengeApi.achievement(locked.id);
+
+    expect(detail.unlocked).toBe(false);
+    expect(detail.unlockedAt).toBeNull();
+    expect(detail.progress.completedOn).toBeNull();
+    expect(detail.progress.caption).toContain('to go');
+    expect(detail.cheer.title).toBe('Keep going');
+  });
+
+  test('a badge that is not in the catalogue is a 404, not an empty screen', async () => {
+    await expect(mockChallengeApi.achievement('a-nope')).rejects.toThrow(
+      ApiError,
+    );
+  });
+});
+
+describe('mock streak history', () => {
+  test('walks the calendar, so a day that never counted comes back missed', async () => {
+    const page = await mockStreakApi.history(undefined, 40);
+
+    expect(page.data.length).toBeGreaterThan(0);
+    // Newest first.
+    const dates = page.data.map(d => d.date);
+    expect(dates).toEqual([...dates].sort().reverse());
+    // The seeded streak has a gap in it, so the record has to show one.
+    expect(page.data.some(d => d.status === 'missed')).toBe(true);
+    expect(page.data.some(d => d.status === 'completed')).toBe(true);
+    expect(page.total).toBeGreaterThanOrEqual(page.data.length);
+  });
+
+  test('numbers each day inside its own run, restarting after a gap', async () => {
+    const { data } = await mockStreakApi.history(undefined, 40);
+    const oldestFirst = [...data].reverse();
+
+    let expected = 0;
+    for (const entry of oldestFirst) {
+      if (entry.status === 'missed') {
+        expect(entry.day).toBeNull();
+        expected = 0;
+        continue;
+      }
+      expected += 1;
+      expect(entry.day).toBe(expected);
+    }
+  });
+
+  test('pages back with a cursor and stops at the first day on record', async () => {
+    const first = await mockStreakApi.history(undefined, 5);
+    expect(first.data).toHaveLength(5);
+    expect(first.nextCursor).toBe(first.data[4].date);
+
+    const second = await mockStreakApi.history(first.nextCursor!, 5);
+    expect(second.data[0].date < first.data[4].date).toBe(true);
   });
 });

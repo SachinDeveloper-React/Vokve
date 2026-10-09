@@ -129,15 +129,24 @@ interface BadgeSpec {
   value: number;
 }
 
-/** A spec becomes a badge: unlocked when the figure has reached the goal. */
-function toBadge(spec: BadgeSpec, unlockedAt: string | null): ProfileBadge {
+/**
+ * A spec becomes a milestone: unlocked when the figure has reached the goal.
+ *
+ * No date comes out of this. A milestone is judged against a running total —
+ * lifetime steps, workouts, coins — and a total carries no history, so the
+ * day it was crossed is not something the server knows. It used to report the
+ * member's join date here, which said every milestone was won the day the
+ * account was opened.
+ */
+function toBadge(spec: BadgeSpec): ProfileBadge {
   const reached = spec.value >= spec.goal;
   return {
     id: spec.id,
     label: spec.label,
     description: spec.description,
     icon: spec.icon,
-    unlockedAt: reached ? unlockedAt : null,
+    unlocked: reached,
+    unlockedAt: null,
     progress: Math.max(0, Math.min(1, spec.goal === 0 ? 1 : spec.value / spec.goal)),
     value: Math.min(spec.value, spec.goal),
     goal: spec.goal,
@@ -208,13 +217,13 @@ export async function getProfileSummary(userId: string, timeZone: string): Promi
 
   const memberSince = (user.createdAt ?? new Date()).toISOString();
   const badges = [
-    toBadge({ id: 'streak-7', label: 'Week One', description: 'A seven-day streak', icon: 'flame', goal: 7, value: longest }, memberSince),
-    toBadge({ id: 'streak-30', label: 'Month Strong', description: 'A thirty-day streak', icon: 'flame', goal: 30, value: longest }, memberSince),
-    toBadge({ id: 'steps-100k', label: 'Hundred K', description: '100,000 steps walked', icon: 'footprints', goal: 100_000, value: stats.totalSteps }, memberSince),
-    toBadge({ id: 'workouts-25', label: 'Regular', description: '25 workouts finished', icon: 'dumbbell', goal: 25, value: workoutCount }, memberSince),
-    toBadge({ id: 'coins-5000', label: 'Earner', description: '5,000 coins earned', icon: 'coins', goal: 5_000, value: lifetimeCoins }, memberSince),
-    toBadge({ id: 'orders-1', label: 'First Order', description: 'Something bought with coins', icon: 'package', goal: 1, value: orders }, memberSince),
-    toBadge({ id: 'referrals-3', label: 'Recruiter', description: 'Three friends brought along', icon: 'users', goal: 3, value: referrals }, memberSince),
+    toBadge({ id: 'streak-7', label: 'Week One', description: 'A seven-day streak', icon: 'flame', goal: 7, value: longest }),
+    toBadge({ id: 'streak-30', label: 'Month Strong', description: 'A thirty-day streak', icon: 'flame', goal: 30, value: longest }),
+    toBadge({ id: 'steps-100k', label: 'Hundred K', description: '100,000 steps walked', icon: 'footprints', goal: 100_000, value: stats.totalSteps }),
+    toBadge({ id: 'workouts-25', label: 'Regular', description: '25 workouts finished', icon: 'dumbbell', goal: 25, value: workoutCount }),
+    toBadge({ id: 'coins-5000', label: 'Earner', description: '5,000 coins earned', icon: 'coins', goal: 5_000, value: lifetimeCoins }),
+    toBadge({ id: 'orders-1', label: 'First Order', description: 'Something bought with coins', icon: 'package', goal: 1, value: orders }),
+    toBadge({ id: 'referrals-3', label: 'Recruiter', description: 'Three friends brought along', icon: 'users', goal: 3, value: referrals }),
   ];
 
   const context: GapContext = {

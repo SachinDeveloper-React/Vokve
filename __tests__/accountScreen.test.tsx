@@ -2,8 +2,9 @@
  * The account screen is the member's own summary plus a lot of navigation,
  * so the checks here are about the seams: that every figure on the panel is
  * the server's and not a seeded one, that the completeness card names what
- * is missing and leads to the right screen for it, that the badge shelf
- * shows locked badges with their progress, that sign-out still signs out,
+ * is missing and leads to the right screen for it, that the tab's two
+ * shelves stay distinct — the achievement shelf the rest of the app shows,
+ * and the account's own milestones — that sign-out still signs out,
  * and that the appearance sheet — the one live control left on the screen —
  * still opens.
  *
@@ -17,6 +18,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
 import { AccountScreen } from '../src/screens/main/AccountScreen';
 import { ThemeProvider } from '../src/theme';
+import { clearServerReads } from '../src/hooks/useServerRead';
 import { useAccountStore } from '../src/stores/accountStore';
 import { useAuthStore } from '../src/stores/authStore';
 import { useCoinsStore } from '../src/stores/coinsStore';
@@ -38,6 +40,7 @@ jest.mock('@react-navigation/native', () => ({
 
 jest.mock('../src/services/api/endpoints', () => ({
   accountApi: { profile: jest.fn(), privacy: jest.fn(), deletion: jest.fn() },
+  challengeApi: { achievements: jest.fn() },
   walletApi: { get: jest.fn(), transactions: jest.fn(), earnRules: jest.fn() },
   notificationApi: {
     list: jest.fn(),
@@ -48,9 +51,20 @@ jest.mock('../src/services/api/endpoints', () => ({
   authApi: { signOut: jest.fn() },
 }));
 
-const { accountApi } = jest.requireMock('../src/services/api/endpoints') as {
+const { accountApi, challengeApi } = jest.requireMock(
+  '../src/services/api/endpoints',
+) as {
   accountApi: { profile: jest.Mock };
+  challengeApi: { achievements: jest.Mock };
 };
+
+/** The shelf the tab shows, the same one the board and the shelf screen do. */
+const shelf = [
+  { id: 'a-10k-steps', value: 10_000, label: '10K Steps', metric: 'steps' as const, achievedAt: '2026-09-18T19:32:00.000Z' },
+  { id: 'a-cal-burner', value: 500, label: 'Cal Burner', metric: 'calories' as const, achievedAt: '2026-09-11T08:10:00.000Z' },
+  { id: 'a-active-30', value: 30, label: 'Active 30', metric: 'minutes' as const, achievedAt: '2026-09-02T18:00:00.000Z' },
+  { id: 'a-20k-steps', value: 20_000, label: '20K Steps', metric: 'steps' as const, achievedAt: null },
+];
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -95,7 +109,8 @@ const summary: ProfileSummary = {
       label: 'Week One',
       description: 'A seven-day streak',
       icon: 'flame',
-      unlockedAt: '2025-06-01T00:00:00.000Z',
+      unlocked: true,
+      unlockedAt: null,
       progress: 1,
       value: 7,
       goal: 7,
@@ -105,7 +120,8 @@ const summary: ProfileSummary = {
       label: 'Month Strong',
       description: 'A thirty-day streak',
       icon: 'flame',
-      unlockedAt: '2025-07-01T00:00:00.000Z',
+      unlocked: true,
+      unlockedAt: null,
       progress: 1,
       value: 30,
       goal: 30,
@@ -115,6 +131,7 @@ const summary: ProfileSummary = {
       label: 'Regular',
       description: '25 workouts finished',
       icon: 'dumbbell',
+      unlocked: false,
       unlockedAt: null,
       progress: 0.4,
       value: 10,
@@ -141,6 +158,8 @@ beforeEach(() => {
   mockNavigate.mockClear();
   signOut.mockClear();
   accountApi.profile.mockReset().mockResolvedValue(summary);
+  challengeApi.achievements.mockReset().mockResolvedValue(shelf);
+  clearServerReads();
   useAuthStore.setState({ user, signOut, status: 'authenticated' });
   useCoinsStore.setState({ balance: 2450 });
   // One unread row, so the bell carries its dot.
@@ -225,7 +244,7 @@ describe('AccountScreen', () => {
     expect(text).toContain('#412 of 18.9k');
     expect(text).toContain('2,450'); // the wallet's balance, grouped
     expect(text).toContain('32'); // the server's current streak
-    expect(text).toContain('2'); // badges earned
+    expect(text).toContain('3'); // badges earned, off the achievement shelf
   });
 
   test('lifetime steps are compacted, with the suffix in caps', async () => {
@@ -271,11 +290,34 @@ describe('AccountScreen', () => {
     expect(allText(await render())).not.toContain('Finish your profile');
   });
 
-  test('the badge shelf counts what is earned and shows a locked one with its progress', async () => {
+  test('the achievements card is the shelf the rest of the app shows', async () => {
     const text = allText(await render());
 
     expect(text).toContain('Achievements');
-    expect(text).toContain('2 of 3 earned');
+    expect(text).toContain('10K Steps');
+    expect(text).toContain('Cal Burner');
+    // Locked ones keep their place, as on the board.
+    expect(text).toContain('20K Steps');
+  });
+
+  test('a badge opens its own screen, and View All opens the shelf', async () => {
+    const tree = await render();
+
+    await press(tree, '10K Steps, achieved');
+    expect(mockNavigate).toHaveBeenLastCalledWith('AchievementDetail', {
+      id: 'a-10k-steps',
+    });
+
+    await press(tree, 'View all achievements');
+    expect(mockNavigate).toHaveBeenLastCalledWith('Achievements');
+  });
+
+  test('the account milestones are their own shelf, under their own name', async () => {
+    const text = allText(await render());
+
+    // Not "Achievements": these are account milestones, a different list.
+    expect(text).toContain('Milestones');
+    expect(text).toContain('2 of 3 reached');
     expect(text).toContain('Regular'); // locked, still on the shelf
     expect(text).toContain('10/25');
   });

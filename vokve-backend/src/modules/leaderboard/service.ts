@@ -10,6 +10,7 @@ import {
 } from '../../contracts/index.js';
 import { addDays, localDayOf, localHourOf, localMidnightUtc, type IsoDate } from '../../lib/dates.js';
 import { logger } from '../../lib/logger.js';
+import { DELETED_MEMBER, publicName } from '../../lib/names.js';
 import { ActivityDailyModel } from '../activity/models.js';
 import { ChallengeCompletionModel } from '../challenges/models.js';
 import { periodOf } from '../challenges/service.js';
@@ -48,13 +49,6 @@ function tierFor(config: AppConfig, rank: number): Tier | null {
 
 function tierLabel(tier: Tier): string {
   return tier.fromRank === tier.toRank ? `Rank ${tier.fromRank}` : `Rank ${tier.fromRank} – ${tier.toRank}`;
-}
-
-/** "Rahul V." — a first name and an initial is all a public board shows of anyone. */
-function boardName(name: string | null | undefined): string {
-  const words = (name ?? '').trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 'VOKVE member';
-  return words.length === 1 ? words[0] : `${words[0]} ${words[words.length - 1][0].toUpperCase()}.`;
 }
 
 const fmt = (n: number) => n.toLocaleString('en-IN');
@@ -139,7 +133,7 @@ export async function getBoard(userId: string, now = new Date()): Promise<Leader
     const person = people.get(row.userId);
     return {
       id: row.userId,
-      name: person && !person.deletedAt ? boardName(person.name) : 'Deleted member',
+      name: person && !person.deletedAt ? publicName(person.name) : DELETED_MEMBER,
       location,
       rank,
       coins: tier?.coins ?? 0,
