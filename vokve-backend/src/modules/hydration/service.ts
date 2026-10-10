@@ -2,13 +2,18 @@ import { getConfig } from '../../config/remote.js';
 import type { AppConfig } from '../../config/defaults.js';
 import {
   hydrationDaySchema,
+  hydrationHistorySchema,
   hydrationReminderPlanSchema,
   hydrationStatsSchema,
+  reminderSoundSchema,
+  type HydrationCaution,
   type HydrationDay,
+  type HydrationHistory,
   type HydrationReminderPlan,
   type HydrationStats,
+  type ReminderSound,
 } from '../../contracts/index.js';
-import { addDays, localDayOf, type IsoDate } from '../../lib/dates.js';
+import { addDays, localDayOf, weekdayOf, type IsoDate } from '../../lib/dates.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { UserSettingsModel } from '../identity/models.js';
 import { daysBetween } from '../streak/rules.js';
@@ -28,17 +33,74 @@ async function goalOf(userId: string): Promise<number> {
   return settings?.dailyWaterGoalMl ?? 2_500;
 }
 
+/** The limits every day payload carries (RULES Y1b). */
+function limitsOf(config: AppConfig) {
+  const { minMl, maxMl, maxDailyMl, confirmAboveMl, hourlyMl, hourlyMinutes } = config.hydration;
+  return { minMl, maxMl, maxDailyMl, confirmAboveMl, hourlyMl, hourlyMinutes };
+}
+
+/**
+ * The health note a day has earned, or null (RULES Y1b).
+ *
+ * The rate is asked first and the total second, because it is the one with
+ * medicine behind it: four litres over a day is unusual, four litres in an
+ * hour is dangerous, and a member doing the second should not be told about
+ * the first. Only one note is ever returned — two at once would read as an
+ * app panicking rather than a fact worth knowing.
+ */
+function cautionFor(
+  config: AppConfig,
+  drinks: { ml: number; at: Date }[],
+  now: Date,
+): HydrationCaution | null {
+  const { cautionAboveMl, hourlyMl, hourlyMinutes } = config.hydration;
+  const since = now.getTime() - hourlyMinutes * 60_000;
+  const recent = drinks
+    .filter(drink => drink.at.getTime() >= since)
+    .reduce((sum, drink) => sum + drink.ml, 0);
+
+  if (recent > hourlyMl) {
+    return {
+      kind: 'rate',
+      title: config.hydration.cautionRateTitle,
+      message: config.hydration.cautionRateBody.replaceAll('{amount}', litres(recent)),
+    };
+  }
+
+  const total = drinks.reduce((sum, drink) => sum + drink.ml, 0);
+  if (total > cautionAboveMl) {
+    return {
+      kind: 'high',
+      title: config.hydration.cautionHighTitle,
+      message: config.hydration.cautionHighBody.replaceAll('{amount}', litres(total)),
+    };
+  }
+  return null;
+}
+
+/** "6.4 L", or "800 ml" below a litre — the way a person says it. */
+function litres(ml: number): string {
+  return ml >= 1_000 ? `${(ml / 1_000).toFixed(1)} L` : `${ml} ml`;
+}
+
 /** One day's water: the drinks not deleted, newest first, and their total (RULES Y2). */
-export async function getHydrationDay(userId: string, localDay: IsoDate): Promise<HydrationDay> {
-  const [rows, goalMl] = await Promise.all([
+export async function getHydrationDay(
+  userId: string,
+  localDay: IsoDate,
+  now = new Date(),
+): Promise<HydrationDay> {
+  const [rows, goalMl, config] = await Promise.all([
     HydrationEntryModel.find({ userId, localDay, deletedAt: null }).sort({ at: -1, _id: -1 }).lean(),
     goalOf(userId),
+    getConfig(),
   ]);
   return hydrationDaySchema.parse({
     date: localDay,
     consumedMl: rows.reduce((sum, row) => sum + row.ml, 0),
     goalMl,
     entries: rows.map(row => ({ id: row.clientId, ml: row.ml, at: row.at.toISOString() })),
+    limits: limitsOf(config),
+    caution: cautionFor(config, rows.map(row => ({ ml: row.ml, at: row.at })), now),
   });
 }
 
@@ -68,9 +130,37 @@ export async function logDrink(userId: string, input: DrinkInput, timeZone: stri
     throw Errors.validation({ at: `Only the last ${config.hydration.maxAgeDays} days can be logged.` });
   }
   const localDay = localDayOf(at, timeZone);
+  const ml = Math.round(input.ml);
+
+  /**
+   * The day's ceiling (RULES Y1b).
+   *
+   * Checked here rather than left to the client, because the client is not
+   * the only way in and because this is what protects every figure built on
+   * top of the log — the average, the goal-hit rate, the streak. A refusal
+   * names the ceiling and what is left, so the app can say something true
+   * rather than "invalid".
+   *
+   * Idempotent on purpose: the same drink sent twice is one glass, so the
+   * sum below excludes this id. A retry of a drink that already landed must
+   * not be refused for pushing the day over a line it is already inside.
+   */
+  const already = await HydrationEntryModel.aggregate<{ total: number }>([
+    { $match: { userId, localDay, deletedAt: null, _id: { $ne: `${userId}:${input.id}` } } },
+    { $group: { _id: null, total: { $sum: '$ml' } } },
+  ]);
+  const dayTotal = (already[0]?.total ?? 0) + ml;
+  if (dayTotal > config.hydration.maxDailyMl) {
+    const remaining = Math.max(0, config.hydration.maxDailyMl - (already[0]?.total ?? 0));
+    throw new ApiError(422, 'HYDRATION_DAILY_LIMIT', remaining > 0
+      ? `That would put you over ${litres(config.hydration.maxDailyMl)} today. You can still log ${litres(remaining)}.`
+      : `You have already logged ${litres(config.hydration.maxDailyMl)} today, which is as much as Vokve will record.`,
+      { maxDailyMl: config.hydration.maxDailyMl, remainingMl: remaining });
+  }
+
   try {
     await HydrationEntryModel.create({
-      _id: `${userId}:${input.id}`, userId, clientId: input.id, ml: Math.round(input.ml), at, localDay,
+      _id: `${userId}:${input.id}`, userId, clientId: input.id, ml, at, localDay,
     });
   } catch (err) {
     if ((err as { code?: number }).code !== 11000) throw err;
@@ -90,6 +180,73 @@ export async function deleteDrink(userId: string, id: string): Promise<Hydration
   ).lean();
   if (!row) throw Errors.notFound('That drink');
   return getHydrationDay(userId, row.localDay);
+}
+
+/**
+ * A span of days and what it came to (RULES Y4) — the history screen's
+ * whole answer in one call.
+ *
+ * The summary is worked out here, not in the app, so the figures cannot
+ * disagree with the stats card: both divide by days that had any water, and
+ * both read every day against the goal in force now. A day nobody logged is
+ * present with a zero and counted out of the average — those are different
+ * facts and the rows say which.
+ */
+export async function getHydrationHistory(userId: string, from: IsoDate, to: IsoDate): Promise<HydrationHistory> {
+  if (daysBetween(from, to) < 0) throw Errors.validation({ to: 'Must not be before from.' });
+  if (daysBetween(from, to) > 366) throw new ApiError(422, 'RANGE_TOO_LONG', 'Ask for a year at most.');
+
+  const [rows, goalMl] = await Promise.all([
+    HydrationEntryModel.aggregate<{ _id: string; total: number; entries: number }>([
+      { $match: { userId, deletedAt: null, localDay: { $gte: from, $lte: to } } },
+      { $group: { _id: '$localDay', total: { $sum: '$ml' }, entries: { $sum: 1 } } },
+    ]),
+    goalOf(userId),
+  ]);
+  const logged = new Map(rows.map(row => [row._id, row]));
+
+  const days: HydrationHistory['days'] = [];
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    const row = logged.get(day);
+    const consumedMl = row?.total ?? 0;
+    days.push({ date: day, consumedMl, goalMl, goalMet: consumedMl >= goalMl, entries: row?.entries ?? 0 });
+  }
+
+  const withWater = days.filter(day => day.entries > 0);
+  const totalMl = withWater.reduce((sum, day) => sum + day.consumedMl, 0);
+  const hit = withWater.filter(day => day.goalMet).length;
+
+  // The longest run inside the span, counted over consecutive calendar days;
+  // a day with no water breaks it, because it is not a day at the goal.
+  let bestStreakDays = 0;
+  let run = 0;
+  for (const day of days) {
+    run = day.goalMet ? run + 1 : 0;
+    bestStreakDays = Math.max(bestStreakDays, run);
+  }
+
+  const bestDay = withWater.reduce<HydrationHistory['summary']['bestDay']>(
+    (best, day) => (best === null || day.consumedMl > best.consumedMl
+      ? { date: day.date, consumedMl: day.consumedMl }
+      : best),
+    null,
+  );
+
+  return hydrationHistorySchema.parse({
+    from,
+    to,
+    // Newest first, the way every other history in the app reads.
+    days: [...days].reverse(),
+    summary: {
+      dailyAverageMl: withWater.length > 0 ? Math.round(totalMl / withWater.length) : 0,
+      totalMl,
+      daysLogged: withWater.length,
+      daysInRange: days.length,
+      goalHitRatePercent: withWater.length > 0 ? Math.round((hit / withWater.length) * 100) : 0,
+      bestStreakDays,
+      bestDay,
+    },
+  });
 }
 
 /** Per-day totals from `from` to `to` inclusive, with every day present — a day with no water is 0. */
@@ -175,6 +332,29 @@ const minutesOf = (time: string) => {
   return h * 60 + m;
 };
 
+/** The sounds a reminder may arrive with (RULES Y5). */
+export async function getReminderSounds(): Promise<ReminderSound[]> {
+  const config = await getConfig();
+  return config.hydration.sounds.map(sound => reminderSoundSchema.parse(sound));
+}
+
+/**
+ * The stored sound as one of the catalogue's ids.
+ *
+ * Plans written before the catalogue existed hold the label — `Default` —
+ * so a label is matched too, case-insensitively; anything else at all gets
+ * the first sound on the list. A plan is never answered with a sound the
+ * picker could not show, and never refused for one either: a sound dropped
+ * from the catalogue would otherwise lock a member out of their own plan.
+ */
+function normalizeSound(stored: string, sounds: { id: string; label: string }[]): string {
+  const wanted = stored.trim().toLowerCase();
+  const match = sounds.find(
+    sound => sound.id.toLowerCase() === wanted || sound.label.toLowerCase() === wanted,
+  );
+  return (match ?? sounds[0]).id;
+}
+
 /** The member's plan, or the default one until they have changed anything. */
 export async function getReminderPlan(userId: string): Promise<HydrationReminderPlan> {
   const config = await getConfig();
@@ -183,7 +363,7 @@ export async function getReminderPlan(userId: string): Promise<HydrationReminder
   return hydrationReminderPlanSchema.parse({
     enabled: row.enabled,
     reminders: row.reminders.map(r => ({ id: r.id, time: r.time, slot: r.slot, enabled: r.enabled })),
-    sound: row.sound,
+    sound: normalizeSound(row.sound, config.hydration.sounds),
     vibration: row.vibration,
     repeatDays: row.repeatDays,
   });
@@ -194,7 +374,11 @@ export async function getReminderPlan(userId: string): Promise<HydrationReminder
  * (time, block) pair dropped, repeat days unique and in order. Bounded
  * (X9) — a plan of a thousand alarms is not one anybody means.
  */
-export async function putReminderPlan(userId: string, plan: HydrationReminderPlan): Promise<HydrationReminderPlan> {
+export async function putReminderPlan(
+  userId: string,
+  plan: HydrationReminderPlan,
+  timeZone?: string,
+): Promise<HydrationReminderPlan> {
   const config = await getConfig();
   const seen = new Set<string>();
   const reminders = plan.reminders
@@ -210,18 +394,19 @@ export async function putReminderPlan(userId: string, plan: HydrationReminderPla
   }
   const repeatDays = [...new Set(plan.repeatDays)].sort((a, b) => a - b);
 
-  await HydrationPlanModel.updateOne(
-    { _id: userId },
-    { $set: { enabled: plan.enabled, reminders, sound: plan.sound, vibration: plan.vibration, repeatDays } },
-    { upsert: true },
-  );
+  const set: Record<string, unknown> = {
+    enabled: plan.enabled,
+    reminders,
+    sound: normalizeSound(plan.sound, config.hydration.sounds),
+    vibration: plan.vibration,
+    repeatDays,
+  };
+  // The zone the times were set on, for the minute sweep to find them by (Y6).
+  if (timeZone) set.timezone = timeZone;
+  await HydrationPlanModel.updateOne({ _id: userId }, { $set: set }, { upsert: true });
   return getReminderPlan(userId);
 }
 
-/** 0 = Monday … 6 = Sunday (RULES Y5). */
-function weekdayOf(day: IsoDate): number {
-  return (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7;
-}
 
 /** How many reminders will actually arrive today (RULES Y6, short of quiet hours). */
 function remindersToday(plan: HydrationReminderPlan, today: IsoDate): number {

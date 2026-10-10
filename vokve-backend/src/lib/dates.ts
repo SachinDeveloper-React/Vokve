@@ -67,6 +67,33 @@ export function localHourOf(at: Date, timeZone: string): number {
   return Number(hour) % 24;
 }
 
+/**
+ * The wall clock at `at` in `timeZone`, as `HH:mm`.
+ *
+ * The form a reminder is stored in (RULES Y5), so the sweep can compare a
+ * plan's times against the clock the member reads without any date
+ * arithmetic — the only thing that matters to "is 07:00 now?" is the two
+ * numbers on the face.
+ */
+export function localTimeOf(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(at);
+}
+
+/** The weekday on `timeZone`'s wall clock at `at`, 0 = Monday (RULES Y5). */
+export function localWeekdayOf(at: Date, timeZone: string): number {
+  return weekdayOf(localDayOf(at, timeZone));
+}
+
+/** 0 = Monday … 6 = Sunday (RULES Y5), for a day already in local form. */
+export function weekdayOf(day: IsoDate): number {
+  return (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7;
+}
+
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** "21 Sep 2026" — a day, written out, for wording the server owns. */

@@ -22,6 +22,13 @@ devicesRouter.post('/devices/register', requireAuth, validate('body', registerDe
 const heartbeatBody = z.object({
   appVersion: z.string().optional(), build: z.string().optional(), osVersion: z.string().optional(),
   pushToken: z.string().nullable().optional(), timezone: z.string().optional(), locale: z.string().optional(),
+  /**
+   * True once this install has the hydration reminder plan scheduled with
+   * the OS (RULES Y6); false when it has given that up — permission
+   * refused, or the plan switched off. The server stamps the time itself
+   * rather than taking one from the client.
+   */
+  localReminders: z.boolean().optional(),
 });
 
 devicesRouter.patch('/devices/:deviceId', requireAuth, validate('body', heartbeatBody), async (req, res) => {
@@ -33,6 +40,7 @@ devicesRouter.patch('/devices/:deviceId', requireAuth, validate('body', heartbea
   if (req.body.locale) set['info.locale'] = req.body.locale;
   if (req.body.pushToken !== undefined) set['push'] = req.body.pushToken
     ? { token: req.body.pushToken, provider: 'fcm', updatedAt: new Date() } : { token: null, invalidAt: new Date() };
+  if (req.body.localReminders !== undefined) set.remindersScheduledAt = req.body.localReminders ? new Date() : null;
   const updated = await DeviceModel.updateOne({ _id: String(req.params.deviceId), userId: req.ctx.userId, revokedAt: null }, { $set: set });
   res.json({ ok: updated.matchedCount === 1 });
 });

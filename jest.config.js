@@ -15,6 +15,6 @@ module.exports = {
       '<rootDir>/node_modules/lucide-react-native/dist/cjs/lucide-react-native.js',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-navigation|@shopify|react-native-.*|lucide-react-native|immer|zustand)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-navigation|@notifee|@shopify|react-native-.*|lucide-react-native|immer|zustand)/)',
   ],
 };

@@ -5,11 +5,13 @@ import { HomeHeader } from '../../components/home/HomeHeader';
 import { QuickActionsRow } from '../../components/home/QuickActionsRow';
 import { ActivityMetricsRow } from '../../components/fitness/ActivityMetricsRow';
 import { HydrationCard } from '../../components/fitness/HydrationCard';
+import { WaterGuardSheet } from '../../components/hydration/WaterGuardSheet';
 import { StepGoalCard } from '../../components/fitness/StepGoalCard';
 import { WeeklyStepsChart } from '../../components/fitness/WeeklyStepsChart';
 import { StepTrackingPromptCard } from '../../components/steps/StepTrackingPromptCard';
 import { Screen } from '../../components/ui/Screen';
 import { useTip } from '../../hooks/useContent';
+import { useLogWater } from '../../hooks/useLogWater';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { syncStepsNow } from '../../services/steps';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
@@ -47,7 +49,10 @@ export const HomeScreen = () => {
   const stepGoal = useDailyStepGoal();
   const waterGoalMl = useDailyWaterGoalMl();
   const consumedMl = useTodayHydration();
-  const addWater = useHydrationStore(s => s.add);
+  // The same guard the water screen uses (RULES Y1b). Not the store's raw
+  // `add`: the dashboard is the other place a drink is logged from, and a
+  // check that lived on the water screen would be one this card walked past.
+  const water = useLogWater();
   const today = useTodayActivity();
   const serverWeek = useServerWeek();
   const stepPrompt = useStepPrompt();
@@ -194,12 +199,14 @@ export const HomeScreen = () => {
         <HydrationCard
           consumedMl={consumedMl}
           goalMl={waterGoalMl}
-          onAdd={addWater}
+          onAdd={water.logWater}
           onPressDetails={onOpenHydration}
         />
 
         {motivation ? <MotivationCard quote={motivation.text} /> : null}
       </ScrollView>
+
+      <WaterGuardSheet guard={water} />
     </Screen>
   );
 };

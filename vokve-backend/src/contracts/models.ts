@@ -2702,6 +2702,46 @@ export type LeaderboardHistory = z.infer<typeof leaderboardHistorySchema>;
 
 // ─── Hydration ─────────────────────────────────────────────────────────────
 
+/**
+ * How much water the server will take, and where it starts objecting
+ * (RULES Y1b).
+ *
+ * Carried on every day payload rather than fetched once, so the app can ask
+ * "would this tap be too much?" before it sends anything, and can never be
+ * working from a stale copy of a limit the server has since moved. Four
+ * numbers is a cheap price for a client that is always right about them.
+ */
+export const hydrationLimitsSchema = z.object({
+  /** The smallest and largest single drink. */
+  minMl: z.number().int().positive(),
+  maxMl: z.number().int().positive(),
+  /** A day beyond this is refused outright: no real day looks like it. */
+  maxDailyMl: z.number().int().positive(),
+  /** Past this in a day, the app asks before logging rather than refusing. */
+  confirmAboveMl: z.number().int().positive(),
+  /** Past this in `hourlyMinutes`, the app asks: this is the rate that harms. */
+  hourlyMl: z.number().int().positive(),
+  hourlyMinutes: z.number().int().positive(),
+});
+export type HydrationLimits = z.infer<typeof hydrationLimitsSchema>;
+
+/**
+ * The server's health note about a day's intake, or null when there is
+ * nothing to say.
+ *
+ * Worded by the server (⚙ `hydration.caution*`) rather than the app: this is
+ * the one place hydration touches on health rather than habit, and the
+ * sentence a user reads about diluting their blood salts should be
+ * changeable without shipping a release.
+ */
+export const hydrationCautionSchema = z.object({
+  /** `high` is the day's total; `rate` is how fast it went in. */
+  kind: z.enum(['high', 'rate']),
+  title: z.string(),
+  message: z.string(),
+});
+export type HydrationCaution = z.infer<typeof hydrationCautionSchema>;
+
 /** `GET /hydration/today`, and the answer to every log and delete: one day's water. */
 export const hydrationDaySchema = z.object({
   /** The user's day, `YYYY-MM-DD`, as the server counts it. */
@@ -2711,8 +2751,57 @@ export const hydrationDaySchema = z.object({
   goalMl: z.number().int().positive(),
   /** Newest first. */
   entries: z.array(hydrationEntrySchema),
+  limits: hydrationLimitsSchema,
+  /** Null on an ordinary day, which is almost every day. */
+  caution: hydrationCautionSchema.nullable(),
 });
 export type HydrationDay = z.infer<typeof hydrationDaySchema>;
+
+/** One day in the history, as `GET /hydration/history` lists it. */
+export const hydrationHistoryDaySchema = z.object({
+  date: z.string(),
+  consumedMl: z.number().int().nonnegative(),
+  /** The goal in force now, so every row is read against the same target. */
+  goalMl: z.number().int().positive(),
+  /** Whether the day reached the goal — the server's answer, not a division. */
+  goalMet: z.boolean(),
+  /** How many drinks were logged. Zero means nobody logged, not nobody drank. */
+  entries: z.number().int().nonnegative(),
+});
+export type HydrationHistoryDay = z.infer<typeof hydrationHistoryDaySchema>;
+
+/**
+ * `GET /hydration/history?from=&to=`: a span of days and what it came to.
+ *
+ * The summary is the server's arithmetic, not the app's. Every figure here
+ * is one the stats card already states for a different window, and two
+ * screens dividing by a different denominator — days in the range, or days
+ * that had any water — is how a history ends up disagreeing with the card
+ * above it.
+ */
+export const hydrationHistorySchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** Newest first. */
+  days: z.array(hydrationHistoryDaySchema),
+  summary: z.object({
+    /** Over the days that had any water; 0 when none did. */
+    dailyAverageMl: z.number().int().nonnegative(),
+    totalMl: z.number().int().nonnegative(),
+    /** Days with at least one drink, and days in the span at all. */
+    daysLogged: z.number().int().nonnegative(),
+    daysInRange: z.number().int().positive(),
+    /** Days at or above the goal ÷ days logged. */
+    goalHitRatePercent: z.number().int().min(0).max(100),
+    /** The longest run of days at or above the goal inside the span. */
+    bestStreakDays: z.number().int().nonnegative(),
+    /** The heaviest day, or null when nothing was logged at all. */
+    bestDay: z
+      .object({ date: z.string(), consumedMl: z.number().int().nonnegative() })
+      .nullable(),
+  }),
+});
+export type HydrationHistory = z.infer<typeof hydrationHistorySchema>;
 
 /** `GET /hydration/stats`: the habit rather than the day (RULES Y4). */
 export const hydrationStatsSchema = z.object({
@@ -2739,6 +2828,22 @@ export const hydrationReminderPlanSchema = z.object({
   repeatDays: z.array(z.number().int().min(0).max(6)),
 });
 export type HydrationReminderPlan = z.infer<typeof hydrationReminderPlanSchema>;
+
+/**
+ * `GET /hydration/reminders/sounds`: the sounds a reminder may arrive with.
+ *
+ * Server-driven so the picker is never out of step with what the plan will
+ * accept. The `id` is what `HydrationReminderPlan.sound` holds and what the
+ * app names its own audio file after; an id the app has no file for falls
+ * back to the device's default sound rather than arriving silent.
+ */
+export const reminderSoundSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  /** One line under the label, saying what it sounds like. */
+  description: z.string(),
+});
+export type ReminderSound = z.infer<typeof reminderSoundSchema>;
 
 // ─── Content ───────────────────────────────────────────────────────────────
 

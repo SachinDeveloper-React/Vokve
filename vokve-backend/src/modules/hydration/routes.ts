@@ -9,10 +9,13 @@ import { validate } from '../../middleware/validate.js';
 import { Errors } from '../../lib/errors.js';
 import {
   deleteDrink,
+  getHydrationDay,
   getHydrationDays,
+  getHydrationHistory,
   getHydrationStats,
   getHydrationToday,
   getReminderPlan,
+  getReminderSounds,
   logDrink,
   putReminderPlan,
 } from './service.js';
@@ -59,8 +62,34 @@ hydrationRouter.get('/hydration/days', validate('query', daysQuery), async (req,
   res.json(await getHydrationDays(req.ctx.userId!, from, to));
 });
 
+/**
+ * The history screen's whole answer: the days, and what the span came to
+ * (RULES Y4). One call rather than the app adding up `/hydration/days`
+ * itself, so its figures cannot disagree with the stats card's.
+ */
+hydrationRouter.get('/hydration/history', validate('query', daysQuery), async (req, res) => {
+  const { from, to } = req.query as z.infer<typeof daysQuery>;
+  res.json(await getHydrationHistory(req.ctx.userId!, from, to));
+});
+
+const dayQuery = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
+
+/** One past day's drinks — what a row of the history opens on. */
+hydrationRouter.get('/hydration/day', validate('query', dayQuery), async (req, res) => {
+  const { date } = req.query as z.infer<typeof dayQuery>;
+  res.json(await getHydrationDay(req.ctx.userId!, date));
+});
+
 hydrationRouter.get('/hydration/reminders', async (req, res) => {
   res.json(await getReminderPlan(req.ctx.userId!));
+});
+
+/**
+ * The sounds a reminder may arrive with (RULES Y5). Listed by the server so
+ * the picker and what a plan will accept cannot drift apart.
+ */
+hydrationRouter.get('/hydration/reminders/sounds', async (_req, res) => {
+  res.json({ data: await getReminderSounds(), nextCursor: null });
 });
 
 const planBody = hydrationReminderPlanSchema.extend({
@@ -77,5 +106,7 @@ const planBody = hydrationReminderPlanSchema.extend({
 
 /** Replaces the whole plan (RULES Y5). */
 hydrationRouter.put('/hydration/reminders', idempotent, validate('body', planBody), async (req, res) => {
-  res.json(await putReminderPlan(req.ctx.userId!, req.body));
+  // The caller's zone with it: the times are on that clock, and the sweep
+  // has to know which one to read them against (RULES Y6).
+  res.json(await putReminderPlan(req.ctx.userId!, req.body, req.ctx.timezone));
 });

@@ -31,8 +31,10 @@ import {
   nutritionProfileSchema,
   contentTipSchema,
   hydrationDaySchema,
+  hydrationHistorySchema,
   hydrationReminderPlanSchema,
   hydrationStatsSchema,
+  reminderSoundSchema,
   activityConfigSchema,
   activityRangeSchema,
   authResponseSchema,
@@ -67,6 +69,7 @@ import {
   type ContentTopic,
   type FoodEntry,
   type HydrationReminderPlan,
+  type ReminderSound,
   type NutritionProfile,
   type VitalReading,
   type NotificationPreferences,
@@ -756,6 +759,10 @@ export const mockDeviceApi: DeviceApi = {
     };
   },
   async setPushToken() {
+    await delay();
+    return { ok: true };
+  },
+  async setLocalReminders() {
     await delay();
     return { ok: true };
   },
@@ -1679,7 +1686,7 @@ function mockDefaultPlan(): HydrationReminderPlan {
   ];
   return {
     enabled: true,
-    sound: 'Default',
+    sound: 'default',
     vibration: true,
     repeatDays: [0, 1, 2, 3, 4, 5, 6],
     reminders: times.flatMap(([slot, list]) =>
@@ -1687,6 +1694,19 @@ function mockDefaultPlan(): HydrationReminderPlan {
     ),
   };
 }
+
+/**
+ * The real list is the server's (`/hydration/reminders/sounds`); this is the
+ * same shape so the picker and the scheduler can be worked on against the
+ * mock. The ids match the audio the app bundles.
+ */
+const MOCK_REMINDER_SOUNDS: ReminderSound[] = [
+  { id: 'default', label: 'Default', description: 'Your phone\u2019s notification sound' },
+  { id: 'water_drop', label: 'Water Drop', description: 'A single drop' },
+  { id: 'chime', label: 'Chime', description: 'Two soft notes' },
+  { id: 'bell', label: 'Bell', description: 'A short bell' },
+  { id: 'silent', label: 'Silent', description: 'No sound \u2014 vibration only' },
+];
 
 let mockWater = new Map<string, { ml: number; at: string; day: string }>();
 let mockPlan: HydrationReminderPlan = mockDefaultPlan();
@@ -1700,16 +1720,68 @@ function mockLocalDay(at: string): string {
   )}`;
 }
 
-function mockWaterDay(day: string) {
-  const entries = [...mockWater.entries()]
+/**
+ * The real server's ⚙ `hydration` limits (RULES Y1b), repeated here.
+ *
+ * Repeated rather than imported: the app must never read a limit from its
+ * own constants, or it would go on enforcing a number the server has moved.
+ * The mock is standing in for the server, so it is the one place a copy
+ * belongs — and keeping it equal to the real default is what makes the
+ * confirm sheet and the ceiling testable against the mock.
+ */
+const MOCK_WATER_LIMITS = {
+  minMl: 10,
+  maxMl: 3000,
+  maxDailyMl: 10000,
+  confirmAboveMl: 5000,
+  hourlyMl: 1500,
+  hourlyMinutes: 60,
+};
+const MOCK_WATER_CAUTION_ABOVE_ML = 6000;
+
+/** The drinks of one day, newest first. */
+function mockWaterEntries(day: string) {
+  return [...mockWater.entries()]
     .filter(([, drink]) => drink.day === day)
     .map(([id, drink]) => ({ id, ml: drink.ml, at: drink.at }))
     .sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** The same two notes the server words, under the same precedence. */
+function mockWaterCaution(entries: { ml: number; at: string }[]) {
+  const litres = (ml: number) =>
+    ml >= 1000 ? `${(ml / 1000).toFixed(1)} L` : `${ml} ml`;
+  const since = Date.now() - MOCK_WATER_LIMITS.hourlyMinutes * 60_000;
+  const recent = entries
+    .filter(entry => new Date(entry.at).getTime() >= since)
+    .reduce((sum, entry) => sum + entry.ml, 0);
+  if (recent > MOCK_WATER_LIMITS.hourlyMl) {
+    return {
+      kind: 'rate' as const,
+      title: 'That is a lot of water very quickly',
+      message: `You have logged ${litres(recent)} in the last hour. Healthy kidneys clear about a litre an hour, so drinking faster than that for long can be harmful.`,
+    };
+  }
+  const total = entries.reduce((sum, entry) => sum + entry.ml, 0);
+  if (total > MOCK_WATER_CAUTION_ABOVE_ML) {
+    return {
+      kind: 'high' as const,
+      title: 'That is a lot of water today',
+      message: `You have logged ${litres(total)} today. Most adults need 2–3 litres; well past that, water can dilute the salts your body runs on.`,
+    };
+  }
+  return null;
+}
+
+function mockWaterDay(day: string) {
+  const entries = mockWaterEntries(day);
   return hydrationDaySchema.parse({
     date: day,
     consumedMl: entries.reduce((sum, entry) => sum + entry.ml, 0),
     goalMl: mockSettings.dailyWaterGoalMl,
     entries,
+    limits: MOCK_WATER_LIMITS,
+    caution: mockWaterCaution(entries),
   });
 }
 
@@ -1730,6 +1802,24 @@ export const mockHydrationApi: HydrationApi = {
       );
     }
     const day = mockLocalDay(entry.at);
+    // The day's ceiling (RULES Y1b), refused the way the server refuses it —
+    // excluding this id, so a retry of a drink that already landed is not
+    // refused for its own litres.
+    if (!mockWater.has(entry.id)) {
+      const already = mockWaterEntries(day).reduce((sum, e) => sum + e.ml, 0);
+      if (already + entry.ml > MOCK_WATER_LIMITS.maxDailyMl) {
+        const remaining = Math.max(0, MOCK_WATER_LIMITS.maxDailyMl - already);
+        throw new ApiError(
+          'validation',
+          remaining > 0
+            ? `That would put you over 10 L today. You can still log ${remaining} ml.`
+            : 'You have already logged 10 L today, which is as much as Vokve will record.',
+          422,
+          { maxDailyMl: MOCK_WATER_LIMITS.maxDailyMl, remainingMl: remaining },
+          'HYDRATION_DAILY_LIMIT',
+        );
+      }
+    }
     if (!mockWater.has(entry.id)) {
       mockWater.set(entry.id, { ml: entry.ml, at: entry.at, day });
     }
@@ -1764,9 +1854,64 @@ export const mockHydrationApi: HydrationApi = {
     }
     return days;
   },
+  async history(from, to) {
+    await delay();
+    const goalMl = mockSettings.dailyWaterGoalMl;
+    const days = [];
+    for (let day = from; day <= to; day = mockStreakDayShift(day, 1)) {
+      const entries = mockWaterEntries(day);
+      const consumedMl = entries.reduce((sum, entry) => sum + entry.ml, 0);
+      days.push({
+        date: day,
+        consumedMl,
+        goalMl,
+        goalMet: consumedMl >= goalMl,
+        entries: entries.length,
+      });
+    }
+    const withWater = days.filter(day => day.entries > 0);
+    const totalMl = withWater.reduce((sum, day) => sum + day.consumedMl, 0);
+    const hit = withWater.filter(day => day.goalMet).length;
+    let bestStreakDays = 0;
+    let run = 0;
+    for (const day of days) {
+      run = day.goalMet ? run + 1 : 0;
+      bestStreakDays = Math.max(bestStreakDays, run);
+    }
+    return hydrationHistorySchema.parse({
+      from,
+      to,
+      days: [...days].reverse(),
+      summary: {
+        dailyAverageMl:
+          withWater.length > 0 ? Math.round(totalMl / withWater.length) : 0,
+        totalMl,
+        daysLogged: withWater.length,
+        daysInRange: Math.max(1, days.length),
+        goalHitRatePercent:
+          withWater.length > 0 ? Math.round((hit / withWater.length) * 100) : 0,
+        bestStreakDays,
+        bestDay: withWater.reduce<{ date: string; consumedMl: number } | null>(
+          (best, day) =>
+            best === null || day.consumedMl > best.consumedMl
+              ? { date: day.date, consumedMl: day.consumedMl }
+              : best,
+          null,
+        ),
+      },
+    });
+  },
+  async day(date) {
+    await delay();
+    return mockWaterDay(date);
+  },
   async reminders() {
     await delay();
     return hydrationReminderPlanSchema.parse(mockPlan);
+  },
+  async reminderSounds() {
+    await delay();
+    return MOCK_REMINDER_SOUNDS.map(sound => reminderSoundSchema.parse(sound));
   },
   async saveReminders(plan) {
     await delay();

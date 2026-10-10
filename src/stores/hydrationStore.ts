@@ -26,6 +26,16 @@ interface HydrationState {
   isSyncing: boolean;
   /** Why the last exchange failed; cleared by the next that succeeds. */
   syncError: string | null;
+  /**
+   * A change the server refused for good (RULES Y1b) — a day past its
+   * ceiling, most often — worded for the user, until they have been told.
+   *
+   * Kept apart from `syncError`, which is about the network and resolves
+   * itself. This will not: the drink is gone and the user has to know why,
+   * or the figure they watched appear and vanish is unexplained. Cleared by
+   * `clearRefusal` once a screen has said it.
+   */
+  refusal: string | null;
 
   /** Sends what is waiting, then asks for today. Resolves either way. */
   hydrateFromServer: () => Promise<void>;
@@ -36,6 +46,8 @@ interface HydrationState {
   remove: (id: string) => void;
   /** Sends the waiting changes in order; stops at the first that cannot go yet. */
   flush: () => Promise<void>;
+  /** Marks the last refusal as told. */
+  clearRefusal: () => void;
   reset: () => void;
 }
 
@@ -63,6 +75,7 @@ export const useHydrationStore = create<HydrationState>()(
       syncedAt: null,
       isSyncing: false,
       syncError: null,
+      refusal: null,
 
       hydrateFromServer: async () => {
         if (get().isSyncing) {
@@ -176,6 +189,12 @@ export const useHydrationStore = create<HydrationState>()(
                 );
                 set(state => ({
                   outbox: state.outbox.filter(entry => entry !== change),
+                  // Told rather than swallowed: the user watched this drink
+                  // appear, and it is about to vanish. Only for a drink
+                  // being added — a delete the server has already forgotten
+                  // is nothing the user needs to hear about.
+                  refusal:
+                    change.kind === 'add' ? apiError.message : state.refusal,
                 }));
               }
             }
@@ -186,6 +205,12 @@ export const useHydrationStore = create<HydrationState>()(
         return flushing;
       },
 
+      clearRefusal: () => {
+        if (get().refusal !== null) {
+          set({ refusal: null });
+        }
+      },
+
       reset: () =>
         set({
           day: null,
@@ -193,6 +218,7 @@ export const useHydrationStore = create<HydrationState>()(
           syncedAt: null,
           isSyncing: false,
           syncError: null,
+          refusal: null,
         }),
     }),
     {
@@ -271,6 +297,22 @@ export const useTodayHydrationView = (): HydrationToday => {
     };
   }, [day, outbox]);
 };
+
+/**
+ * The limits the server sent with the day (RULES Y1b), or null before the
+ * first answer.
+ *
+ * Null rather than a built-in default on purpose: an app that guessed a
+ * ceiling would go on enforcing a number the server has moved, and a guess
+ * that is too low would refuse a drink the server would have taken. With no
+ * answer yet there is nothing to check against, and the server still is.
+ */
+export const useWaterLimits = () =>
+  useHydrationStore(s => s.day?.limits ?? null);
+
+/** The server's health note about today, or null — which is most days. */
+export const useWaterCaution = () =>
+  useHydrationStore(s => s.day?.caution ?? null);
 
 /** Millilitres today — the server's, with this phone's unsent drinks added. */
 export const useTodayHydration = (): number =>

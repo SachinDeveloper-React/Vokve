@@ -135,6 +135,8 @@ export type RootStackParamList = {
   LeaderboardRewards: { tab?: 'rewards' | 'how' } | undefined;
   /** Opened from the dashboard's hydration card. */
   Hydration: undefined;
+  /** The water record, from the hydration screen's "View History". */
+  HydrationHistory: undefined;
   /**
    * The code for the second contact detail — phone after an email sign-up,
    * email after a phone one. A root route rather than an auth one: the user
@@ -144,6 +146,8 @@ export type RootStackParamList = {
   VerifyContact: undefined;
   /** Opened from the hydration screen's own header. */
   HydrationReminder: undefined;
+  /** The reminder sound, from the reminder plan's own settings card. */
+  ReminderSound: undefined;
   /** Opened from the dashboard's "Analysis" metric tile. */
   Analytics: undefined;
   /**

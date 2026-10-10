@@ -4,6 +4,7 @@ import { setOnSessionExpired } from '../services/api/client';
 import { ApiError, toApiError } from '../services/api/errors';
 import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
+import { cancelHydrationReminders } from '../services/notifications';
 import { registerForPush, unregisterFromPush } from '../services/push';
 import { stopStepsForSignOut } from '../services/steps';
 import { clearServerReads } from '../hooks/useServerRead';
@@ -484,6 +485,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // push token goes first, while the session can still say whose it was.
     try {
       await unregisterFromPush();
+      // The alarms this phone is holding are this account's reminders. The
+      // scheduler would clear them anyway when the plan goes, but not before
+      // the next tick — and an app killed in between would go on waking the
+      // next person on this phone at seven.
+      await cancelHydrationReminders();
       await authApi.signOut();
     } catch (error) {
       logger.warn(

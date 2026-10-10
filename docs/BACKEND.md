@@ -519,12 +519,20 @@ Every screen in the app, what it renders, where that data comes from today, what
 #### Hydration
 - **Renders:** header (back, reminders → HydrationReminder), `HydrationProgressCard` (glass, ml vs goal), `QuickAddRow` (presets + custom sheet), `HydrationLogCard` (today's entries, delete), `HydrationStatsCard` (best streak, daily average, goal hit %, reminder count; History **[no-op]**), `HydrationTipCard`.
 - **Source today:** `hydrationStore` — a cache of `GET /hydration/today` plus a persisted **outbox**: a quick-add goes into the outbox and shows at once, the outbox is sent in order (each drink under its own id, `Idempotency-Key: drink:<id>`), every answer replaces the cached day, and the screen shows the server's day with the outbox laid over it. A 404/422 drops a change; anything else waits for the next flush (focus, pull, next log). Stats from `GET /hydration/stats`, re-read when a drink is confirmed; the tip from `GET /content/tips/hydration`. Before the first answer the progress and log are a loading state (D-45).
-- **Backend (built — `modules/hydration`, D-48):** `GET /hydration/today`, `POST /hydration/entries` (idempotent on the app's id; 10–3000 ml ⚙, within the last 7 days), `DELETE /hydration/entries/:id` (soft delete, 404 if not the caller's), `GET /hydration/stats` (Y4, reminder count by Y6), `GET /hydration/days?from=&to=`.
+- **Backend (built — `modules/hydration`, D-48):** `GET /hydration/today`, `POST /hydration/entries` (idempotent on the app's id; 10–3000 ml ⚙, within the last 7 days, and refused past the day's ceiling — RULES Y1b), `DELETE /hydration/entries/:id` (soft delete, 404 if not the caller's), `GET /hydration/stats` (Y4, reminder count by Y6), `GET /hydration/days?from=&to=`, `GET /hydration/history?from=&to=`, `GET /hydration/day?date=`.
+- **The ceiling (built, RULES Y1b):** every day payload carries `limits` and a nullable server-worded `caution`. `useLogWater` is the one path a drink is logged through — from the dashboard card as well as this screen — and it refuses, asks, or logs from those limits before sending; the server refuses again regardless, and a refusal it does make is surfaced as a toast rather than dropped. `HydrationCautionCard` draws the server's health note with the vitals disclaimer.
+- **History (built):** "View History" opens `HydrationHistoryScreen` — range tabs (week / four weeks / three months / custom), the server's summary drawn and never recomputed, a bar per day clipped at the goal so rows compare by eye, and any row opening on that day's own drinks read-only.
 
 #### Hydration Reminder
-- **Renders:** `ReminderHeroCard` (enabled toggle, active count, next time), `ReminderPlanCard` (morning/afternoon/evening presets with add per slot), `CustomTimesCard` (custom times + remove menu), `ReminderSettingsCard` (sound **[no-op]**, vibration, repeat days M–S), `ReminderTipCard`.
+- **Renders:** `ReminderHeroCard` (enabled toggle, active count, next time), `ReminderDeliveryCard` (whether the reminders will actually arrive, with the one tap that fixes it), `ReminderPlanCard` (morning/afternoon/evening presets with add per slot), `CustomTimesCard` (custom times + remove menu), `ReminderSettingsCard` (sound → ReminderSound, vibration, repeat days M–S), `ReminderTipCard`.
 - **Source today:** `remindersStore` — a cache of `GET /hydration/reminders`; every edit shows at once and `PUT`s the whole plan; a refusal puts the server's plan back. The default plan (presets 07:00/08:30/10:00, 13:00/15:30, 18:00/20:00, every day) is ⚙ `hydration.defaultPlan`. The tip is `GET /content/tips/reminders`.
-- **Backend (built):** `GET/PUT /hydration/reminders` — whole plan, (time, block) de-duplicated, clock order, ⚙ `hydration.maxReminders`. Delivery is still not built: **local notifications** scheduled on-device are the plan; server-sent reminders when the app is dead would respect quiet hours and the `health` category (default **off**).
+- **Delivery (built, RULES Y6–Y7):** the phone rings the plan itself. `services/reminderScheduler` watches the plan, quiet hours, the water goal and the `health` category, and hands the result to `services/notifications`, which schedules it with notifee — one alarm per time where the plan runs every day (repeating daily), one per day-and-time where it does not (repeating weekly), nearest first up to a per-platform budget (iOS holds 64 pending requests). Alarms use AlarmManager, exact where Android allows it and inexact where it does not. A time inside quiet hours is not scheduled at all. Ids are stable (`vokve.hydration.<time>`), so re-scheduling replaces rather than duplicates, and cancelling cannot touch another feature's notification. A tapped reminder opens the Hydration screen. The screen says when nothing will arrive: health notifications off, the OS permission refused, or exact alarms not granted.
+- **Backend (built):** `GET/PUT /hydration/reminders` — whole plan, (time, block) de-duplicated, clock order, ⚙ `hydration.maxReminders`; a save also records the caller's zone. `GET /hydration/reminders/sounds` lists the sounds a plan may name (⚙ `hydration.sounds`), which the picker shows filtered to the ones the build carries audio for. The minute sweep (`modules/hydration/reminders.job.ts`, RULES Y6) writes the feed row for every due reminder and pushes **only** where no install of the account has claimed local scheduling inside ⚙ `hydration.localScheduleTrustDays`.
+
+#### Reminder Sound
+- **Renders:** `ReminderSoundRow` per sound — name, what it sounds like, a tick on the one in force, and a play button that rings it as a real notification so the volume, channel and do-not-disturb rules are the ones that will apply for real.
+- **Source:** `GET /hydration/reminders/sounds`, filtered to the ids this build has audio for (`constants/reminderSounds`); the bundled list when the server's has not arrived. A tap saves the plan at once — there is nothing here to change and abandon.
+- **Audio:** `android/app/src/main/res/raw/<id>.wav` and the iOS bundle (`ios/vokve/Sounds`, added to the Xcode target). `default` is the phone's own sound and `silent` is none; an id with no audio in this build falls back to the phone's own rather than arriving silent.
 
 ### 5.8 Nutrition
 
@@ -716,11 +724,14 @@ Every screen in the app, what it renders, where that data comes from today, what
 | | Method + path | Notes |
 |---|---|---|
 | ✓ | `GET /hydration/today` | `{ date, consumedMl, goalMl, entries[] }` |
-| ✓ | `POST /hydration/entries` | `{ id, ml, at? }` — idempotent on the app's `id`; answers the day |
+| ✓ | `POST /hydration/entries` | `{ id, ml, at? }` — idempotent on the app's `id`; answers the day. Refuses `422 HYDRATION_DAILY_LIMIT` past ⚙ `hydration.maxDailyMl` (RULES Y1b) |
 | ✓ | `DELETE /hydration/entries/:id` | Soft delete; answers the day; 404 if not the caller's |
 | ✓ | `GET /hydration/stats` | `{ bestStreakDays, dailyAverageMl, goalHitRatePercent, reminderCount }` |
 | ✓ | `GET /hydration/days?from=&to=` | Per-day totals, every day present (≤ 366 days) |
-| ✓ | `GET/PUT /hydration/reminders` | Whole plan object `{ enabled, reminders[], sound, vibration, repeatDays }` |
+| ✓ | `GET /hydration/history?from=&to=` | The history screen's whole answer: `{ from, to, days[], summary }` — summary computed server-side over the days that had water (RULES Y4) |
+| ✓ | `GET /hydration/day?date=` | One past day's drinks, same shape as `/today` |
+| ✓ | `GET/PUT /hydration/reminders` | Whole plan object `{ enabled, reminders[], sound, vibration, repeatDays }`; a `PUT` also stores the caller's zone, for the minute sweep |
+| ✓ | `GET /hydration/reminders/sounds` | `{ data: [{ id, label, description }] }` — ⚙ `hydration.sounds`; the ids a plan's `sound` may hold |
 
 ### 6.11 Nutrition
 | | Method + path | Notes |
@@ -962,7 +973,7 @@ Owner set steps to **0.095 per 100 = 0.95 / 1,000**, matching Sweatcoin. A 10k/d
 
 - `GET /wallet` returns `expiresAt` (null when there is nothing to expire — never earned, or already swept: RULES E11), `expiryDaysLeft` (= window − whole days idle, so a credit a minute ago reads as the full window), `expiryWindowDays` and `expiryWarnDays` (⚙ `coins.expiryWarnDays`, default `[14, 3]`) — the client hardcodes none of them.
 - `expireIdleWallets(now)` in `economy/wallet.service.ts`: every wallet with `balanceMc > 0` and `lastCreditAt ≤ now − window` is zeroed inside a transaction with one compensating `refund` row (`referenceType: 'expiry'`, `referenceId: lastCreditAt`, title "Coins expired after 90 days of inactivity", actor `system:expiry`). Idempotent: the ledger's unique index refuses a second row for the same credit, and the balance is only zeroed when still equal to what was read, so a credit landing mid-sweep keeps its coins. `lastCreditAt` is left as evidence; `pending` is untouched.
-- `src/jobs/scheduler.ts`: an hourly tick inside the API process runs the daily jobs once per UTC day, claiming `jobs:<name>:<day>` in the KV first so two instances cannot both sweep. Started from `index.ts` and `dev:memory`.
+- `src/jobs/scheduler.ts`: an hourly tick inside the API process runs the daily jobs once per UTC day, claiming `jobs:<name>:<day>` in the KV first so two instances cannot both sweep. Started from `index.ts` and `dev:memory`. A second, minute-level tick runs the hydration reminder sweep — a reminder set for 07:15 cannot be sent by an hourly job — and claims each minute on the plan document (`lastSentMinute`) rather than in the KV, so a race between instances means one of them sends.
 - Dev only: `POST /dev/jobs/coin-expiry { now?: ISO }` runs the sweep as of a chosen date.
 - **Warnings (E10):** `warnExpiringWallets(now)` runs daily before the sweep and calls `notify()` for every wallet with coins sitting exactly on a warn day (`expiryWarnDays`, default 14 and 3) — "Your coins expire in 14 days". Keyed `coin-expiry-warn:<lastCreditAt>:<daysLeft>`, so each warning lands once per idle stretch and never after the user earns (the key then names a credit with no window). The sweep itself writes "Your coins have expired" (`coin-expired:<lastCreditAt>`). In the app the panel turns amber at the outer threshold and red at the inner one. Dev: `POST /dev/jobs/coin-expiry-warn { now? }`.
 
@@ -1008,7 +1019,8 @@ The conditional `$gte` filter is the overspend guard; the transaction makes the 
 | Flush deferred pushes | Hourly | Sends pushes quiet hours held back — **built** (`flushDeferredPushes`) |
 | Reconciliation | Nightly | Ledger vs balances |
 | Fraud sweep | Nightly | Re-score, flag, queue clawbacks |
-| Hydration / workout / streak-at-risk push | Per user schedule | Respect quiet hours + categories |
+| Hydration reminders | Every minute | Per member, on their own clock — **built** (`hydration/reminders.job.ts`); feed row always, push only where no install rings it locally (RULES Y6–Y7) |
+| Workout / streak-at-risk push | Per user schedule | Respect quiet hours + categories (streak-at-risk **built**) |
 | Inventory alerts | Daily | Low stock |
 
 All idempotent and safe to re-run.

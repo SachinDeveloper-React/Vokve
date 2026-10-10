@@ -12,7 +12,12 @@ import { WaterDroplet } from '../fitness/WaterDroplet';
 
 interface Props {
   entry: HydrationEntry;
-  onRemove: (id: string) => void;
+  /**
+   * Left off for a day that has gone: the delete exists to take back a
+   * mis-tap, which happens on today's log, and a control that is drawn but
+   * does nothing is worse than one that is not there.
+   */
+  onRemove?: (id: string) => void;
 }
 
 /** "250 ml Water", or "1 L Water" once the amount reaches a litre. */
@@ -32,10 +37,10 @@ export const HydrationLogRow = memo(({ entry, onRemove }: Props) => {
   const label = amountLabel(entry.ml);
   const time = formatClockTime(entry.at);
 
-  const handleRemove = useCallback(() => onRemove(entry.id), [
-    entry.id,
-    onRemove,
-  ]);
+  const handleRemove = useCallback(
+    () => onRemove?.(entry.id),
+    [entry.id, onRemove],
+  );
 
   return (
     <HStack align="center" gap="md" py="sm">
@@ -49,15 +54,17 @@ export const HydrationLogRow = memo(({ entry, onRemove }: Props) => {
         {time}
       </AppText>
 
-      <Pressable
-        onPress={handleRemove}
-        feedback="opacity"
-        visualSize={20}
-        accessibilityRole="button"
-        accessibilityLabel={`Remove ${label} logged at ${time}`}
-      >
-        <Icon as={Delete} size="sm" tint={colors.textTertiary} />
-      </Pressable>
+      {onRemove ? (
+        <Pressable
+          onPress={handleRemove}
+          feedback="opacity"
+          visualSize={20}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${label} logged at ${time}`}
+        >
+          <Icon as={Delete} size="sm" tint={colors.textTertiary} />
+        </Pressable>
+      ) : null}
     </HStack>
   );
 });

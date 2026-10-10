@@ -7,6 +7,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import { Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf as collectText } from './helpers/text';
+import { waterDay } from './helpers/hydration';
 import { HydrationCard } from '../src/components/fitness/HydrationCard';
 import { MotivationCard } from '../src/components/home/MotivationCard';
 import { MOTIVATION_EMOJIS } from '../src/components/home/MotivationArt';
@@ -53,15 +54,8 @@ describe('hydration store', () => {
     hydrationApi: { today: jest.Mock; log: jest.Mock; remove: jest.Mock };
   };
 
-  const day = (
-    entries: { id: string; ml: number; at: string }[],
-    date = todayIso(),
-  ) => ({
-    date,
-    consumedMl: entries.reduce((sum, e) => sum + e.ml, 0),
-    goalMl: 2500,
-    entries,
-  });
+  // The server's day, limits and all (RULES Y1b).
+  const day = waterDay;
 
   /** Lets the background flush run. */
   const settle = () => new Promise(resolve => setTimeout(resolve, 0));

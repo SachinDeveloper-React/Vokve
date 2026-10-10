@@ -96,6 +96,21 @@ export interface NotifyInput {
   /** OTP-grade messages that quiet hours must not hold back (BACKEND §5). */
   exemptFromQuietHours?: boolean;
   /**
+   * A message that is only worth anything at its own minute: quiet hours
+   * drop it rather than holding it. A hydration reminder for 02:00 pushed
+   * at 07:00 is not a late reminder, it is a reminder for a time that has
+   * gone — and it would arrive next to the 07:00 one.
+   */
+  dropInQuietHours?: boolean;
+  /**
+   * Write the feed row but send no push: something else is already alerting
+   * the member. The hydration reminder the phone rings for itself (RULES
+   * Y6) still belongs in the notification centre — that is the record of
+   * what the app told them — but a push as well would be the same reminder
+   * twice.
+   */
+  suppressPush?: boolean;
+  /**
    * A message aimed at this member rather than sent to everyone — a deal
    * picked from what they browse. Honours the privacy switch as well as the
    * notification one (RULES P7): opted out, nothing is written at all,
@@ -110,7 +125,7 @@ export interface NotifyResult {
   /** `suppressed` is a targeted message the member has opted out of (RULES P7). */
   status: 'created' | 'duplicate' | 'suppressed';
   /** Where the push went: sent now, held for quiet hours, or not wanted. */
-  push: 'sent' | 'deferred' | 'no_provider' | 'category_off' | 'no_device' | 'skipped';
+  push: 'sent' | 'deferred' | 'no_provider' | 'category_off' | 'no_device' | 'skipped' | 'local';
 }
 
 /**
@@ -122,6 +137,12 @@ export interface NotifyResult {
 export async function notify(input: NotifyInput): Promise<NotifyResult> {
   const now = input.now ?? new Date();
   if (input.personalised && !(await privacyAllows(input.userId, 'personalisedOffers'))) {
+    return { id: null, status: 'suppressed', push: 'skipped' };
+  }
+  // Asked before the row is written, because a message that quiet hours drop
+  // should leave no trace at all: a feed row is a thing the member has to
+  // read past, and they asked not to be told at this hour.
+  if (input.dropInQuietHours && (await inQuietHours(input.userId, now))) {
     return { id: null, status: 'suppressed', push: 'skipped' };
   }
   const id = newId('ntf');
@@ -144,6 +165,8 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   const wanted = categories[preference] ?? preference !== 'health';
   if (!wanted) return { id, status: 'created', push: 'category_off' };
 
+  if (input.suppressPush) return { id, status: 'created', push: 'local' };
+
   const quiet = prefs?.quietHours ?? { enabled: true, start: '22:00', end: '07:00' };
   const delay = input.exemptFromQuietHours ? 0 : quietHoursDelayMs(now, user?.timezone ?? 'UTC', quiet);
   if (delay > 0) {
@@ -153,6 +176,16 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
 
   const push = await pushRow(id, input.userId, input.title, input.message, input.topic);
   return { id, status: 'created', push };
+}
+
+/** Whether the member's quiet window is open now — their zone, their window. */
+async function inQuietHours(userId: string, now: Date): Promise<boolean> {
+  const [prefs, user] = await Promise.all([
+    NotificationPreferencesModel.findById(userId, { quietHours: 1 }).lean(),
+    UserModel.findById(userId, { timezone: 1 }).lean(),
+  ]);
+  const quiet = prefs?.quietHours ?? { enabled: true, start: '22:00', end: '07:00' };
+  return quietHoursDelayMs(now, user?.timezone ?? 'UTC', quiet) > 0;
 }
 
 async function pushRow(id: string, userId: string, title: string, message: string, topic: NotificationTopic): Promise<NotifyResult['push']> {

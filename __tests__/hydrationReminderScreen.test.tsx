@@ -16,11 +16,13 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
 import { HydrationReminderScreen } from '../src/screens/main/HydrationReminderScreen';
 import { ThemeProvider } from '../src/theme';
+import { ToastProvider } from '../src/components/feedback';
 import {
   nextReminderTime,
   useRemindersStore,
 } from '../src/stores/remindersStore';
 import { useSettingsStore } from '../src/stores/settingsStore';
+import { useNotificationSettingsStore } from '../src/stores/notificationSettingsStore';
 import { clearServerReads } from '../src/hooks/useServerRead';
 import type { HydrationReminderPlan } from '../src/types/models';
 
@@ -52,6 +54,7 @@ jest.mock('../src/services/api/endpoints', () => {
   return {
     hydrationApi: {
       reminders: jest.fn(() => api.mockHydrationApi.reminders()),
+      reminderSounds: jest.fn(() => api.mockHydrationApi.reminderSounds()),
       saveReminders: jest.fn((plan: unknown, options: unknown) =>
         api.mockHydrationApi.saveReminders(plan, options),
       ),
@@ -63,13 +66,17 @@ jest.mock('../src/services/api/endpoints', () => {
 });
 
 const { hydrationApi } = jest.requireMock('../src/services/api/endpoints') as {
-  hydrationApi: { reminders: jest.Mock; saveReminders: jest.Mock };
+  hydrationApi: {
+    reminders: jest.Mock;
+    reminderSounds: jest.Mock;
+    saveReminders: jest.Mock;
+  };
 };
 
 /** Seven presets and two custom times, all on, every day. */
 const PLAN: HydrationReminderPlan = {
   enabled: true,
-  sound: 'Default',
+  sound: 'water_drop',
   vibration: true,
   repeatDays: [0, 1, 2, 3, 4, 5, 6],
   reminders: [
@@ -102,6 +109,7 @@ beforeEach(() => {
   mockGoBack.mockClear();
   clearServerReads();
   hydrationApi.reminders.mockClear();
+  hydrationApi.reminderSounds.mockClear();
   hydrationApi.saveReminders.mockClear();
   useRemindersStore.getState().reset();
   useRemindersStore.setState({
@@ -109,6 +117,14 @@ beforeEach(() => {
     syncedAt: new Date().toISOString(),
   });
   useSettingsStore.setState({ dailyWaterGoalMl: 2500 });
+  // Health notifications are off by default, which the screen says out loud
+  // (RULES Y6). On, except where a test is about that.
+  useNotificationSettingsStore.setState(state => ({
+    categories: { ...state.categories, health: true },
+    // Off, so the seeded evening times are not silenced in checks that are
+    // about something else. The two checks that are about the window set it.
+    quietHours: { ...state.quietHours, enabled: false },
+  }));
 });
 
 const reminders = () => useRemindersStore.getState().plan?.reminders ?? [];
@@ -129,7 +145,9 @@ const render = async () => {
     tree = ReactTestRenderer.create(
       <SafeAreaProvider initialMetrics={metrics}>
         <ThemeProvider>
-          <HydrationReminderScreen />
+          <ToastProvider>
+            <HydrationReminderScreen />
+          </ToastProvider>
         </ThemeProvider>
       </SafeAreaProvider>,
     );
@@ -271,6 +289,87 @@ describe('HydrationReminderScreen', () => {
 
     expect(allText(tree)).toContain('Add a reminder');
     expect(reminders()).toHaveLength(9);
+  });
+
+  test('the sound row names the sound rather than its id, and opens the picker', async () => {
+    const tree = await render();
+
+    // The plan stores `water_drop`; a settings row reading that would be the
+    // server's word, not the user's.
+    expect(allText(tree)).toContain('Water Drop');
+
+    press(tree, 'Reminder sound');
+
+    expect(mockNavigate).toHaveBeenCalledWith('ReminderSound');
+  });
+
+  test('once the plan is on the phone it says how many it will ring', async () => {
+    const tree = await render();
+
+    await ReactTestRenderer.act(async () => {
+      await Promise.resolve();
+    });
+
+    // The one place a user can find out that the plan actually works, rather
+    // than waiting for a time to pass and seeing whether anything happens.
+    expect(allText(tree)).toContain('9 reminders, even offline');
+  });
+
+  test('with health notifications off it says so, and one tap turns them on', async () => {
+    useNotificationSettingsStore.setState(state => ({
+      categories: { ...state.categories, health: false },
+    }));
+
+    const tree = await render();
+
+    // Otherwise the plan reads "9 reminders active" over a phone that will
+    // show none of them.
+    expect(allText(tree)).toContain('Health reminders are switched off');
+
+    press(tree, 'Turn on');
+
+    expect(
+      useNotificationSettingsStore.getState().categories.health,
+    ).toBe(true);
+  });
+
+  test('a time added inside quiet hours says so at once, not silently', async () => {
+    useNotificationSettingsStore.setState({
+      quietHours: { enabled: true, start: '22:00', end: '07:00' },
+    });
+    const tree = await render();
+
+    press(tree, 'Add a custom time');
+    // The picker opens on 08:00; submit a time inside the window instead.
+    const picker = tree.root
+      .findAll(n => typeof n.props?.onSubmit === 'function')
+      .find(n => n.props.visible === true);
+    if (!picker) throw new Error('No open time picker');
+    await ReactTestRenderer.act(async () => {
+      picker.props.onSubmit('22:45');
+    });
+
+    // Quiet hours are on by default from 22:00, which is exactly when
+    // somebody first tries this out. A chip that looks live and never rings
+    // is the worst thing this screen can do.
+    expect(allText(tree)).toContain('That time is inside your quiet hours');
+  });
+
+  test('it counts the times quiet hours will silence, and offers the window', async () => {
+    useNotificationSettingsStore.setState({
+      // A window that swallows most of the seeded plan.
+      quietHours: { enabled: true, start: '12:00', end: '23:00' },
+    });
+
+    const tree = await render();
+    await ReactTestRenderer.act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(allText(tree)).toContain('times are inside your quiet hours');
+
+    press(tree, 'Quiet hours');
+    expect(mockNavigate).toHaveBeenCalledWith('NotificationSettings');
   });
 
   test('the chevron returns to whatever opened the plan', async () => {

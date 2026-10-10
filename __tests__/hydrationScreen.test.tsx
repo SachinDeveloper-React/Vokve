@@ -10,6 +10,8 @@
  */
 
 import React from 'react';
+import { ToastProvider } from '../src/components/feedback';
+import { waterDay } from './helpers/hydration';
 import { Text as RNText } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -89,7 +91,7 @@ beforeEach(async () => {
   useHydrationStore.getState().reset();
   // Today, as a finished sync leaves it: nothing drunk yet.
   useHydrationStore.setState({
-    day: { date: todayIso(), consumedMl: 0, goalMl: 3000, entries: [] },
+    day: waterDay([], todayIso(), { goalMl: 3000 }),
     syncedAt: new Date().toISOString(),
   });
   useSettingsStore.setState({ dailyWaterGoalMl: 3000 });
@@ -118,7 +120,9 @@ const render = async () => {
     tree = ReactTestRenderer.create(
       <SafeAreaProvider initialMetrics={metrics}>
         <ThemeProvider>
-          <HydrationScreen />
+          <ToastProvider>
+            <HydrationScreen />
+          </ToastProvider>
         </ThemeProvider>
       </SafeAreaProvider>,
     );
@@ -214,11 +218,115 @@ describe('HydrationScreen', () => {
     const tree = await render();
     expect(allText(tree)).toContain('Time for your first glass');
 
-    press(tree, 'Add 750 ml');
-    press(tree, 'Add 750 ml');
+    // Earlier in the day, not in the last ten minutes: 2.25 L drunk over an
+    // afternoon is an ordinary day, where the same water poured in at once
+    // is the rate the guard asks about (RULES Y1b).
+    const hoursAgo = (n: number) =>
+      new Date(Date.now() - n * 3_600_000).toISOString();
+    await ReactTestRenderer.act(async () => {
+      useHydrationStore.setState({
+        day: waterDay(
+          [
+            { id: 'earlier-1', ml: 750, at: hoursAgo(4) },
+            { id: 'earlier-2', ml: 750, at: hoursAgo(2) },
+          ],
+          todayIso(),
+          { goalMl: 3000 },
+        ),
+      });
+    });
+
     press(tree, 'Add 750 ml');
 
     expect(allText(tree)).toContain("You're doing great");
+  });
+
+  test('a day poured in all at once is asked about before it is logged', async () => {
+    const tree = await render();
+
+    // The failure this guards: tapping a litre over and over until the day
+    // reads 15 L, which would poison the average and the goal-hit rate for
+    // a month afterwards.
+    press(tree, 'Add 1 L');
+    press(tree, 'Add 1 L');
+
+    const text = allText(tree);
+    expect(text).toContain('That is fast');
+    expect(text).toContain('kidneys');
+    // Not logged yet: the question is asked first, and the figure has not
+    // moved behind it.
+    expect(allText(tree)).toContain('1.0 L of 3.0 L');
+  });
+
+  test('confirming the question logs the drink unchanged', async () => {
+    const tree = await render();
+
+    press(tree, 'Add 1 L');
+    press(tree, 'Add 1 L');
+    press(tree, 'Log water');
+
+    expect(allText(tree)).toContain('2.0 L of 3.0 L');
+  });
+
+  test('cancelling it logs nothing', async () => {
+    const tree = await render();
+
+    press(tree, 'Add 1 L');
+    press(tree, 'Add 1 L');
+    press(tree, 'Cancel');
+
+    expect(allText(tree)).toContain('1.0 L of 3.0 L');
+  });
+
+  test('a day already at the ceiling is refused outright, with what is left', async () => {
+    await ReactTestRenderer.act(async () => {
+      useHydrationStore.setState({
+        day: waterDay(
+          [{ id: 'huge', ml: 9900, at: new Date(Date.now() - 6 * 3_600_000).toISOString() }],
+          todayIso(),
+          { goalMl: 3000 },
+        ),
+      });
+    });
+    const tree = await render();
+
+    press(tree, 'Add 250 ml');
+
+    const text = allText(tree);
+    expect(text).toContain('the most Vokve records in a day');
+    expect(text).toContain('100 ml');
+    // No question offered: this one cannot be logged at all.
+    expect(text).not.toContain('Log water');
+  });
+
+  test('the server’s health note about the day is shown, in the server’s words', async () => {
+    await ReactTestRenderer.act(async () => {
+      useHydrationStore.setState({
+        day: waterDay([], todayIso(), {
+          goalMl: 3000,
+          caution: {
+            kind: 'high',
+            title: 'That is a lot of water today',
+            message: 'You have logged 6.5 L today.',
+          },
+        }),
+      });
+    });
+
+    const text = allText(await render());
+
+    expect(text).toContain('That is a lot of water today');
+    expect(text).toContain('You have logged 6.5 L today.');
+    // The disclaimer travels with it, as it does on every vitals screen.
+    expect(text).toContain('not a medical device');
+  });
+
+  test('the history link opens the record', async () => {
+    const tree = await render();
+
+    press(tree, 'View hydration history');
+
+    expect(mockNavigate).toHaveBeenCalledWith('HydrationHistory');
   });
 
   test('the custom tile opens a sheet instead of logging something', async () => {

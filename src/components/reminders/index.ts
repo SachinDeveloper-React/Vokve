@@ -7,4 +7,5 @@ export { TimeChip } from './TimeChip';
 export { CustomTimesCard } from './CustomTimesCard';
 export { CustomTimeRow } from './CustomTimeRow';
 export { ReminderSettingsCard } from './ReminderSettingsCard';
+export { ReminderSoundRow } from './ReminderSoundRow';
 export { ReminderTipCard } from './ReminderTipCard';

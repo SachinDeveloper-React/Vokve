@@ -8,3 +8,6 @@ export { HydrationStatsCard } from './HydrationStatsCard';
 export { HydrationLogCard } from './HydrationLogCard';
 export { HydrationLogRow } from './HydrationLogRow';
 export { HydrationTipCard } from './HydrationTipCard';
+export { HydrationCautionCard } from './HydrationCautionCard';
+export { HydrationHistorySummary } from './HydrationHistorySummary';
+export { HydrationHistoryDayRow } from './HydrationHistoryDayRow';

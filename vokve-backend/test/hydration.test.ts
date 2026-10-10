@@ -25,7 +25,12 @@ describe('hydration: the day (RULES Y1, Y2)', () => {
     const session = await signUpAndRegister();
     const res = await request(app).get('/v1/hydration/today').set(authed(session));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ date: today(), consumedMl: 0, goalMl: 2_500, entries: [] });
+    expect(res.body).toMatchObject({ date: today(), consumedMl: 0, goalMl: 2_500, entries: [], caution: null });
+    // The limits travel with the day, so the app can ask "would this tap be
+    // too much?" without a second call (RULES Y1b).
+    expect(res.body.limits).toEqual({
+      minMl: 10, maxMl: 3_000, maxDailyMl: 10_000, confirmAboveMl: 5_000, hourlyMl: 1_500, hourlyMinutes: 60,
+    });
 
     await UserSettingsModel.updateOne({ _id: session.userId }, { $set: { dailyWaterGoalMl: 3_000 } }, { upsert: true });
     expect((await request(app).get('/v1/hydration/today').set(authed(session))).body.goalMl).toBe(3_000);
@@ -99,7 +104,7 @@ describe('hydration: reminders (RULES Y5, Y6)', () => {
   it('serves the default plan, then keeps the member’s — de-duplicated and in clock order', async () => {
     const session = await signUpAndRegister();
     const plan = (await request(app).get('/v1/hydration/reminders').set(authed(session))).body;
-    expect(plan).toMatchObject({ enabled: true, sound: 'Default', vibration: true, repeatDays: [0, 1, 2, 3, 4, 5, 6] });
+    expect(plan).toMatchObject({ enabled: true, sound: 'default', vibration: true, repeatDays: [0, 1, 2, 3, 4, 5, 6] });
     expect(plan.reminders.map((r: { time: string }) => r.time)).toEqual(['07:00', '08:30', '10:00', '13:00', '15:30', '18:00', '20:00']);
 
     const next = {
@@ -123,7 +128,7 @@ describe('hydration: reminders (RULES Y5, Y6)', () => {
   it('refuses a time it cannot read', async () => {
     const session = await signUpAndRegister();
     const res = await request(app).put('/v1/hydration/reminders').set(authed(session)).send({
-      enabled: true, sound: 'Default', vibration: true, repeatDays: [0],
+      enabled: true, sound: 'default', vibration: true, repeatDays: [0],
       reminders: [{ id: 'x', time: '25:00', slot: 'custom', enabled: true }],
     });
     expect(res.status).toBe(422);
@@ -133,7 +138,7 @@ describe('hydration: reminders (RULES Y5, Y6)', () => {
     const session = await signUpAndRegister();
     const weekday = (new Date(`${today()}T00:00:00Z`).getUTCDay() + 6) % 7;
     await request(app).put('/v1/hydration/reminders').set(authed(session)).send({
-      enabled: true, sound: 'Default', vibration: true, repeatDays: [(weekday + 1) % 7],
+      enabled: true, sound: 'default', vibration: true, repeatDays: [(weekday + 1) % 7],
       reminders: [{ id: 'a', time: '09:00', slot: 'morning', enabled: true }],
     });
     expect((await getHydrationStats(session.userId, ZONE)).reminderCount).toBe(0);

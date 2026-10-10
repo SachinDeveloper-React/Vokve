@@ -4,6 +4,7 @@ import { purgeScheduledDeletions } from '../modules/account/service.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { releaseDueHolds } from '../modules/economy/holds.service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
+import { sendDueReminders } from '../modules/hydration/reminders.job.js';
 import { flushDeferredPushes } from '../modules/notifications/service.js';
 import { warnStreaksAtRisk } from '../modules/streak/service.js';
 import { closeDueWeeks } from '../modules/leaderboard/service.js';
@@ -24,6 +25,15 @@ import { closeDueWeeks } from '../modules/leaderboard/service.js';
  */
 const TICK_MS = 60 * 60 * 1000;
 const CLAIM_TTL_SECONDS = 26 * 60 * 60;
+
+/**
+ * The hydration reminder sweep runs on its own, much faster tick: a reminder
+ * the member set for 07:15 has to go at 07:15, and an hourly job can only
+ * ever be right on the hour. It claims each minute in Mongo before sending
+ * (RULES Y6), so the faster tick does not need the KV claim the nightly jobs
+ * take — two instances racing the same minute means one of them sends.
+ */
+const MINUTE_MS = 60 * 1000;
 
 interface DailyJob {
   name: string;
@@ -92,15 +102,32 @@ export async function runHourlyJobs(now = new Date()): Promise<void> {
   }
 }
 
+/** The reminders due this minute (RULES Y6). Its own tick, every minute. */
+export async function runMinuteJobs(now = new Date()): Promise<void> {
+  try {
+    await sendDueReminders(now);
+  } catch (err) {
+    logger.error({ err, at: now }, 'job.failed');
+  }
+}
+
 async function tick(): Promise<void> {
   await runHourlyJobs();
   await runDailyJobs();
 }
 
-/** Starts the hourly tick and returns what stops it, for shutdown. */
+/** Starts both ticks and returns what stops them, for shutdown. */
 export function startScheduler(): () => void {
   void tick();
-  const timer = setInterval(() => void tick(), TICK_MS);
-  timer.unref();
-  return () => clearInterval(timer);
+  const hourly = setInterval(() => void tick(), TICK_MS);
+  hourly.unref();
+
+  void runMinuteJobs();
+  const minutely = setInterval(() => void runMinuteJobs(), MINUTE_MS);
+  minutely.unref();
+
+  return () => {
+    clearInterval(hourly);
+    clearInterval(minutely);
+  };
 }

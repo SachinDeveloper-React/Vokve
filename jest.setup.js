@@ -61,6 +61,16 @@ jest.mock('@react-native-firebase/messaging', () => ({
   onTokenRefresh: jest.fn(() => jest.fn()),
 }));
 
+// Notifee is a native module. Its shipped mock answers every call and keeps
+// the jest.fn()s on the default export, which is what the reminder tests
+// assert against; `openAlarmPermissionSettings` is not in it, so it is added
+// here rather than letting a call on it throw.
+jest.mock('@notifee/react-native', () => {
+  const mock = require('@notifee/react-native/jest-mock');
+  mock.default.openAlarmPermissionSettings = jest.fn(async () => {});
+  return mock;
+});
+
 // The slider is a native view; the checkout only needs something that
 // renders and forwards the props a test reads (`value`, `onValueChange`).
 jest.mock('@react-native-community/slider', () => ({

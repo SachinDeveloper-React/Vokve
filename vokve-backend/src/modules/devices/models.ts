@@ -19,6 +19,20 @@ const deviceSchema = new Schema(
     },
     app: { version: String, build: String, bundleId: String, firstVersion: String },
     push: { token: String, provider: { type: String, default: 'fcm' }, updatedAt: Date, invalidAt: Date },
+    /**
+     * When this install last said it had the hydration plan scheduled with
+     * the OS itself (RULES Y6).
+     *
+     * A local alarm fires at the minute, offline, with the member's own
+     * sound; a push cannot promise any of the three. So the phone is the one
+     * that notifies, and the server's push is the fallback for an account
+     * where no install has claimed it lately — a new phone that has not
+     * opened the app, or one whose notification permission was refused.
+     * Stamped by the device heartbeat, never trusted past
+     * `hydration.localScheduleTrustDays`: an install that has gone quiet
+     * cannot be relied on to ring.
+     */
+    remindersScheduledAt: { type: Date, default: null },
     integrity: { provider: String, keyId: String, verdict: String, checkedAt: Date, raw: Schema.Types.Mixed },
     /**
      * The Keystore key this install signs step snapshots with, as accepted

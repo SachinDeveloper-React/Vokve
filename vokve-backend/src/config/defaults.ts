@@ -124,14 +124,106 @@ export const CONFIG_DEFAULTS = {
     /** The smallest and largest single drink the server accepts, ml (Y1, X9). */
     minMl: 10,
     maxMl: 3000,
+    /**
+     * How much water one day may hold, and where the app should start
+     * asking (RULES Y1b).
+     *
+     * There are two different problems here and they need two different
+     * answers. One is bad data: somebody taps +1 L a dozen times and the
+     * day reads 15 L, which poisons the average, the goal-hit rate and the
+     * streak for the next month. The other is real: the kidneys of a healthy
+     * adult clear roughly 0.8–1.0 L an hour, and drinking far past that is
+     * how water intoxication happens. An app that silently accepted 15 L
+     * would be wrong about both.
+     *
+     * So: `maxDailyMl` is refused outright, because no genuine day looks
+     * like that and the figure would be worth nothing anyway.
+     * `confirmAboveMl` is not refused — an endurance athlete in summer
+     * really does drink six litres — but the app asks first, which is
+     * enough to stop a mis-tap becoming a month of bad averages.
+     * `cautionAboveMl` is where the day's answers start carrying a health
+     * note. `hourlyMl` over `hourlyMinutes` is the rate guard, and it is the
+     * one with medicine behind it rather than tidiness.
+     *
+     * The rate sits at 1.5 L rather than at the litre an hour healthy
+     * kidneys clear. That litre is the point where intake *starts* to
+     * outpace excretion, not a cliff — and a guard set there would fire on
+     * an ordinary gym hour, since the quick-add row offers a 1 L tile and
+     * two 750 ml glasses is a normal workout. A warning that goes off on
+     * ordinary behaviour is a warning people learn to dismiss, which would
+     * cost exactly the attention the genuinely excessive case needs. At
+     * 1.5 L a normal hour is quiet and somebody tapping 1 L twice is asked
+     * on the second tap.
+     *
+     * Deliberately not percentages of the member's own goal: a goal is a
+     * target somebody chose, and 300% of a small goal is a perfectly
+     * ordinary day's water. Harm does not scale with intent.
+     */
+    maxDailyMl: 10_000,
+    confirmAboveMl: 5_000,
+    cautionAboveMl: 6_000,
+    hourlyMl: 1_500,
+    hourlyMinutes: 60,
+    /**
+     * The health notes the day's answer carries, worded here so they can be
+     * changed without a release of the app. `{amount}` is the day's total.
+     */
+    cautionHighTitle: 'That is a lot of water today',
+    cautionHighBody:
+      'You have logged {amount} today. Most adults need 2–3 litres; well past that, water can dilute the salts your body runs on. Sip rather than gulp, and check with a doctor if you are often this thirsty.',
+    cautionRateTitle: 'That is a lot of water very quickly',
+    cautionRateBody:
+      'You have logged {amount} in the last hour. Healthy kidneys clear about a litre an hour, so drinking faster than that for long can be harmful. Give it an hour before the next large glass.',
     /** How far back a drink may still be logged. */
     maxAgeDays: 7,
     /** The most times one reminder plan may hold. */
     maxReminders: 24,
+    /**
+     * The sounds a reminder may arrive with (Y5).
+     *
+     * The id is what the plan stores, what the app names its audio file
+     * after, and what its Android notification channel is keyed on — so it
+     * is a slug, not a label, and renaming the label never moves anybody's
+     * plan. The first entry is the fallback: a plan naming a sound that is
+     * not on this list gets it.
+     *
+     * Server-driven so the list can grow with a release of the app that
+     * carries the new file, without a release of the one that picks it: an
+     * app that does not have the audio for an id falls back to its own
+     * default, which is why `default` is the system sound rather than a file.
+     */
+    sounds: [
+      { id: 'default', label: 'Default', description: 'Your phone\u2019s notification sound' },
+      { id: 'water_drop', label: 'Water Drop', description: 'A single drop' },
+      { id: 'chime', label: 'Chime', description: 'Two soft notes' },
+      { id: 'bell', label: 'Bell', description: 'A short bell' },
+      { id: 'silent', label: 'Silent', description: 'No sound \u2014 vibration only' },
+    ] as { id: string; label: string; description: string }[],
+    /** What a reminder says when the server sends it (Y6). */
+    reminderTitle: 'Time for water \ud83d\udca7',
+    /**
+     * The body, with `{remaining}` and `{goal}` filled in from the day so
+     * far. Picked by the reminder's own minute rather than at random, so
+     * two phones on one account word the same reminder the same way.
+     */
+    reminderBodies: [
+      'A glass now and you are {remaining} from your {goal} goal.',
+      '{remaining} left today. A glass now keeps you on track.',
+      'Time for a drink \u2014 {remaining} to go.',
+    ],
+    /**
+     * How long a device's claim that it schedules reminders itself is
+     * trusted for, in days. Past it the server sends the push again: an
+     * install that has not been near the app in a week may have been wiped,
+     * had its notifications turned off, or simply stopped.
+     */
+    localScheduleTrustDays: 7,
+    /** The body once the day's goal is already met. */
+    reminderGoalMetBody: 'You have already hit your {goal} goal today \u2014 keep it up.',
     /** A new member's reminder plan (Y5): presets by block, every day, on. */
     defaultPlan: {
       enabled: true,
-      sound: 'Default',
+      sound: 'default',
       vibration: true,
       repeatDays: [0, 1, 2, 3, 4, 5, 6],
       times: {

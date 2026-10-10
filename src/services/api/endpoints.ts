@@ -48,6 +48,7 @@ import {
   earnRuleSchema,
   healthScoreSchema,
   hydrationDaySchema,
+  hydrationHistorySchema,
   hydrationReminderPlanSchema,
   hydrationStatsSchema,
   ingestNonceSchema,
@@ -57,6 +58,7 @@ import {
   pageSchema,
   stepGoalSchema,
   stepIngestResultSchema,
+  reminderSoundSchema,
   stepSourcesReportSchema,
   streakHistoryPageSchema,
   streakRestoreResultSchema,
@@ -226,6 +228,12 @@ const realDeviceApi: DeviceApi = {
   setPushToken: (deviceId, pushToken) =>
     request(okSchema, client =>
       client.patch(`/devices/${encodeURIComponent(deviceId)}`, { pushToken }),
+    ),
+  setLocalReminders: (deviceId, scheduled) =>
+    request(okSchema, client =>
+      client.patch(`/devices/${encodeURIComponent(deviceId)}`, {
+        localReminders: scheduled,
+      }),
     ),
   attestationChallenge: deviceId =>
     request(attestationChallengeSchema, client =>
@@ -672,10 +680,22 @@ const realHydrationApi: HydrationApi = {
     request(hydrationDayTotalsSchema, client =>
       client.get('/hydration/days', { params: { from, to } }),
     ),
+  history: (from, to) =>
+    request(hydrationHistorySchema, client =>
+      client.get('/hydration/history', { params: { from, to } }),
+    ),
+  day: date =>
+    request(hydrationDaySchema, client =>
+      client.get('/hydration/day', { params: { date } }),
+    ),
   reminders: () =>
     request(hydrationReminderPlanSchema, client =>
       client.get('/hydration/reminders'),
     ),
+  reminderSounds: () =>
+    request(pageSchema(reminderSoundSchema), client =>
+      client.get('/hydration/reminders/sounds'),
+    ).then(page => page.data),
   saveReminders: (plan, { idempotencyKey }) =>
     request(hydrationReminderPlanSchema, client =>
       client.put('/hydration/reminders', plan, {
@@ -877,6 +897,8 @@ export const deviceApi: DeviceApi = {
     pick(mockDeviceApi, realDeviceApi).register(profile, refreshToken),
   setPushToken: (deviceId, pushToken) =>
     pick(mockDeviceApi, realDeviceApi).setPushToken(deviceId, pushToken),
+  setLocalReminders: (deviceId, scheduled) =>
+    pick(mockDeviceApi, realDeviceApi).setLocalReminders(deviceId, scheduled),
   attestationChallenge: deviceId =>
     pick(mockDeviceApi, realDeviceApi).attestationChallenge(deviceId),
   submitAttestation: (deviceId, attestation) =>
@@ -1007,7 +1029,12 @@ export const hydrationApi: HydrationApi = {
     pick(mockHydrationApi, realHydrationApi).remove(id, options),
   stats: () => pick(mockHydrationApi, realHydrationApi).stats(),
   days: (from, to) => pick(mockHydrationApi, realHydrationApi).days(from, to),
+  history: (from, to) =>
+    pick(mockHydrationApi, realHydrationApi).history(from, to),
+  day: date => pick(mockHydrationApi, realHydrationApi).day(date),
   reminders: () => pick(mockHydrationApi, realHydrationApi).reminders(),
+  reminderSounds: () =>
+    pick(mockHydrationApi, realHydrationApi).reminderSounds(),
   saveReminders: (plan, options) =>
     pick(mockHydrationApi, realHydrationApi).saveReminders(plan, options),
 };

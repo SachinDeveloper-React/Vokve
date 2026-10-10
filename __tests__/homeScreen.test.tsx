@@ -7,15 +7,18 @@
  */
 
 import React from 'react';
+import { ToastProvider } from '../src/components/feedback';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Text as RNText } from 'react-native';
 import { mockSnapshot } from 'react-native-step-tracker-pro/jest';
 import { HomeScreen } from '../src/screens/main/HomeScreen';
+import { useHydrationStore } from '../src/stores/hydrationStore';
 import { useStepsStore } from '../src/stores/stepsStore';
 import { useStreakStore } from '../src/stores/streakStore';
 import { ThemeProvider } from '../src/theme';
 import { textOf } from './helpers/text';
+import { waterDay } from './helpers/hydration';
 import { addDays, todayIso } from '../src/utils/date';
 
 const mockNavigate = jest.fn();
@@ -70,7 +73,9 @@ const render = async () => {
     tree = ReactTestRenderer.create(
       <SafeAreaProvider initialMetrics={metrics}>
         <ThemeProvider>
-          <HomeScreen />
+          <ToastProvider>
+            <HomeScreen />
+          </ToastProvider>
         </ThemeProvider>
       </SafeAreaProvider>,
     );
@@ -139,6 +144,53 @@ describe('HomeScreen', () => {
     press(await render(), 'Streaks');
 
     expect(mockNavigate).toHaveBeenCalledWith('Streak');
+  });
+
+  test('the dashboard cannot log past the day’s ceiling either', async () => {
+    // The gap this closes: the water screen checked the limits and this card
+    // called the store directly, so a user could tap a litre over and over
+    // from the dashboard and never be asked (RULES Y1b).
+    await ReactTestRenderer.act(async () => {
+      useHydrationStore.setState({
+        day: waterDay(
+          [
+            {
+              id: 'huge',
+              ml: 9900,
+              at: new Date(Date.now() - 6 * 3_600_000).toISOString(),
+            },
+          ],
+          todayIso(),
+        ),
+        syncedAt: new Date().toISOString(),
+      });
+    });
+    const tree = await render();
+
+    press(tree, 'Add 200 millilitres');
+
+    expect(textOf(tree, RNText)).toContain('the most Vokve records in a day');
+    expect(useHydrationStore.getState().outbox).toHaveLength(0);
+  });
+
+  test('and asks about a fast one, from the dashboard as from the water screen', async () => {
+    await ReactTestRenderer.act(async () => {
+      useHydrationStore.setState({
+        // 1.2 L already, all of it in the last few minutes.
+        day: waterDay(
+          [{ id: 'fast', ml: 1200, at: new Date(Date.now() - 300_000).toISOString() }],
+          todayIso(),
+        ),
+        syncedAt: new Date().toISOString(),
+      });
+    });
+    const tree = await render();
+
+    press(tree, 'Add 500 millilitres');
+
+    expect(textOf(tree, RNText)).toContain('That is fast');
+    // Nothing logged behind the question.
+    expect(useHydrationStore.getState().outbox).toHaveLength(0);
   });
 
   test("the streak shortcut carries the server's run, and a dash before it has said", async () => {

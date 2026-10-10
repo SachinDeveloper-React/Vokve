@@ -2,20 +2,25 @@ import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { CustomAmountSheet } from '../../components/hydration/CustomAmountSheet';
+import { HydrationCautionCard } from '../../components/hydration/HydrationCautionCard';
 import { HydrationHeader } from '../../components/hydration/HydrationHeader';
 import { HydrationLogCard } from '../../components/hydration/HydrationLogCard';
 import { HydrationProgressCard } from '../../components/hydration/HydrationProgressCard';
 import { HydrationStatsCard } from '../../components/hydration/HydrationStatsCard';
 import { HydrationTipCard } from '../../components/hydration/HydrationTipCard';
+import { WaterGuardSheet } from '../../components/hydration/WaterGuardSheet';
 import { QuickAddRow } from '../../components/hydration/QuickAddRow';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useTip } from '../../hooks/useContent';
 import { useHydrationStats } from '../../hooks/useHydration';
+import { useLogWater } from '../../hooks/useLogWater';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import {
   useHydrationStore,
   useTodayHydrationView,
+  useWaterCaution,
+  useWaterLimits,
 } from '../../stores/hydrationStore';
 import { useDailyWaterGoalMl } from '../../stores/settingsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
@@ -47,7 +52,6 @@ export const HydrationScreen = () => {
 
   const today = useTodayHydrationView();
   const goalMl = useDailyWaterGoalMl();
-  const addWater = useHydrationStore(s => s.add);
   const removeEntry = useHydrationStore(s => s.remove);
   const isSyncing = useHydrationStore(s => s.isSyncing);
   const syncError = useHydrationStore(s => s.syncError);
@@ -55,6 +59,9 @@ export const HydrationScreen = () => {
   const refreshIfStale = useHydrationStore(s => s.refreshIfStale);
   const stats = useHydrationStats();
   const tip = useTip('hydration');
+  const limits = useWaterLimits();
+  const caution = useWaterCaution();
+  const guard = useLogWater();
 
   useRefreshOnFocus(refreshIfStale);
 
@@ -87,10 +94,10 @@ export const HydrationScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The history of past days has no screen yet. Wired as a no-op rather than
-  // left off, so the link keeps the shape it will ship with and only the
-  // handler changes when that screen lands.
-  const notImplemented = useCallback(() => {}, []);
+  const onOpenHistory = useCallback(
+    () => navigation.navigate('HydrationHistory'),
+    [navigation],
+  );
 
   return (
     <Screen edges={['top']}>
@@ -111,6 +118,8 @@ export const HydrationScreen = () => {
           onPressReminders={onOpenReminders}
         />
 
+        {caution ? <HydrationCautionCard caution={caution} /> : null}
+
         {today.synced ? (
           <HydrationProgressCard
             consumedMl={today.consumedMl}
@@ -125,7 +134,7 @@ export const HydrationScreen = () => {
           />
         )}
 
-        <QuickAddRow onAdd={addWater} onPressCustom={openCustom} />
+        <QuickAddRow onAdd={guard.logWater} onPressCustom={openCustom} />
 
         {stats.data ? (
           <HydrationStatsCard
@@ -147,7 +156,7 @@ export const HydrationScreen = () => {
           <HydrationLogCard
             entries={today.entries}
             onRemove={removeEntry}
-            onPressHistory={notImplemented}
+            onPressHistory={onOpenHistory}
           />
         ) : null}
 
@@ -156,9 +165,13 @@ export const HydrationScreen = () => {
 
       <CustomAmountSheet
         visible={isCustomOpen}
-        onSubmit={addWater}
+        onSubmit={guard.logWater}
         onClose={closeCustom}
+        minMl={limits?.minMl}
+        maxMl={limits?.maxMl}
       />
+
+      <WaterGuardSheet guard={guard} />
     </Screen>
   );
 };

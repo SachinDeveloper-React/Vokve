@@ -57,6 +57,19 @@ export const config = {
   logStepSources: true,
 
   /**
+   * Writes why a hydration reminder did or did not arrive to the console
+   * whenever the reminder screen opens: the permission, the health switch,
+   * quiet hours, the plan, what the scheduler worked out, what the OS
+   * actually accepted, and whether the channel has a sound
+   * (`services/remindersDebug`). Combined with `__DEV__` there.
+   *
+   * On by default while the feature is new: a reminder can only be tested by
+   * waiting for a minute to pass, and when nothing happens there is nothing
+   * else to look at.
+   */
+  logReminderSchedule: true,
+
+  /**
    * The version shown on the account screen's "About VOKVE" row.
    *
    * Held here rather than read from the native bundle: the two stores each

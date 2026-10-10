@@ -21,6 +21,7 @@ import { CoinHistoryScreen } from '../screens/main/CoinHistoryScreen';
 import { DietPlanScreen } from '../screens/main/DietPlanScreen';
 import { HealthCheckupScreen } from '../screens/main/HealthCheckupScreen';
 import { HeartRateScreen } from '../screens/main/HeartRateScreen';
+import { HydrationHistoryScreen } from '../screens/main/HydrationHistoryScreen';
 import { HydrationReminderScreen } from '../screens/main/HydrationReminderScreen';
 import { HydrationScreen } from '../screens/main/HydrationScreen';
 import { LeaderboardBoardScreen } from '../screens/main/LeaderboardBoardScreen';
@@ -32,6 +33,7 @@ import { NutritionScreen } from '../screens/main/NutritionScreen';
 import { OrderDetailScreen } from '../screens/main/OrderDetailScreen';
 import { OrdersScreen } from '../screens/main/OrdersScreen';
 import { ReferralScreen } from '../screens/main/ReferralScreen';
+import { ReminderSoundScreen } from '../screens/main/ReminderSoundScreen';
 import { AboutScreen } from '../screens/main/AboutScreen';
 import { CartScreen } from '../screens/main/CartScreen';
 import { CheckoutScreen } from '../screens/main/CheckoutScreen';
@@ -63,6 +65,7 @@ import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
 import { UpgradeRequiredScreen } from '../screens/system/UpgradeRequiredScreen';
 import { useUpgradeRequired } from '../stores/appStatusStore';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
+import { useReminderNotifications } from '../hooks/useReminderNotifications';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
@@ -118,6 +121,10 @@ export const RootNavigator = () => {
 
   // Step counting follows the session, not any one screen.
   useStepTrackingSession();
+
+  // The same for hydration reminders: the plan stays scheduled with the OS
+  // whatever is on screen, and a tapped reminder opens the water log.
+  useReminderNotifications(navigationRef, isNavReady);
 
   const isSignedIn = status === 'authenticated' || shouldBypassAuth();
 
@@ -374,6 +381,16 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="Hydration"
               component={HydrationScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="HydrationHistory"
+              component={HydrationHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="ReminderSound"
+              component={ReminderSoundScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

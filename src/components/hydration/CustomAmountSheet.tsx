@@ -5,7 +5,15 @@ import { AppText } from '../ui/AppText';
 import { Button } from '../ui/Button';
 import { Input } from '../form/Input';
 
-/** What a glass and a large bottle bracket; anything outside is a typo. */
+/**
+ * What a glass and a large bottle bracket, until the server has said.
+ *
+ * Defaults rather than constants: the bounds are the server's (⚙
+ * `hydration.minMl`/`maxMl`, carried on every day payload), and the sheet is
+ * reachable before the first answer has landed. These match the server's own
+ * defaults so the helper line is never misleading — and the server is the
+ * one that actually refuses, so being briefly out of step is safe.
+ */
 const MIN_ML = 10;
 const MAX_ML = 3000;
 
@@ -13,6 +21,9 @@ interface Props {
   visible: boolean;
   onSubmit: (ml: number) => void;
   onClose: () => void;
+  /** The server's bounds for a single drink; its defaults when unknown. */
+  minMl?: number;
+  maxMl?: number;
 }
 
 /**
@@ -27,18 +38,21 @@ interface Props {
  * keystroke would log 1, then 12, then 125 on the way to 1250.
  */
 export const CustomAmountSheet = memo(
-  ({ visible, onSubmit, onClose }: Props) => {
+  ({ visible, onSubmit, onClose, minMl = MIN_ML, maxMl = MAX_ML }: Props) => {
     const [draft, setDraft] = useState('');
 
     const amount = Number.parseInt(draft, 10);
     const isValid =
-      Number.isFinite(amount) && amount >= MIN_ML && amount <= MAX_ML;
+      Number.isFinite(amount) && amount >= minMl && amount <= maxMl;
 
     const handleChange = useCallback(
       // Digits only: the keyboard offers a decimal point on some locales, and
       // half a millilitre is not a thing anyone means to log.
-      (value: string) => setDraft(value.replace(/[^0-9]/g, '').slice(0, 4)),
-      [],
+      (value: string) =>
+        setDraft(
+          value.replace(/[^0-9]/g, '').slice(0, String(maxMl).length),
+        ),
+      [maxMl],
     );
 
     const handleClose = useCallback(() => {
@@ -64,7 +78,7 @@ export const CustomAmountSheet = memo(
             onChangeText={handleChange}
             keyboardType="number-pad"
             placeholder="e.g. 330"
-            helper={`Between ${MIN_ML} and ${MAX_ML} ml`}
+            helper={`Between ${minMl} and ${maxMl} ml`}
             trailing={
               <AppText variant="caption" color="textSecondary">
                 ml

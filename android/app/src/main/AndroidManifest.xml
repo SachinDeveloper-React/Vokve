@@ -4,6 +4,23 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+      Hydration reminders (RULES Y6) are local alarms, scheduled by notifee
+      from the plan in services/notifications. Everything they need is
+      declared by notifee's own manifest and merged in here: VIBRATE,
+      SCHEDULE_EXACT_ALARM, WAKE_LOCK, RECEIVE_BOOT_COMPLETED, and the
+      receiver that re-schedules the alarms after a restart - which is why
+      a phone that reboots overnight still rings at seven. Nothing is
+      repeated below: a permission declared twice is not stronger, and the
+      one place to change it should be the library that uses it.
+
+      Not declared, deliberately: USE_EXACT_ALARM. It would grant exact
+      alarms without asking, but Play only allows it for apps whose main
+      purpose is alarms or calendars, and a hydration reminder is not that.
+      So the app asks for SCHEDULE_EXACT_ALARM instead and falls back to
+      inexact alarms if it is refused, saying so on the reminder screen.
+    -->
+
+    <!--
       Health Connect. Step counting itself (ACTIVITY_RECOGNITION, the health
       foreground service, boot restart) is declared by
       react-native-step-tracker-pro's own manifest. The two reads let it use

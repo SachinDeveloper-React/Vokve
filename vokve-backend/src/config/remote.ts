@@ -48,6 +48,9 @@ export function invalidateConfig(): void {
  * methods the mode leaves empty — a shop nobody could pay. And a returns
  * window or a tracking link an order page could not honour.
  */
+/** The most `PATCH /me/settings` lets a member set their water goal to. */
+const MAX_WATER_GOAL_ML = 8_000;
+
 const SUPPORT_TOPIC_KINDS: readonly string[] = supportTopicKindSchema.options;
 const SUPPORT_ICONS: readonly string[] = supportIconSchema.options;
 const SUPPORT_TINTS: readonly string[] = supportTintSchema.options;
@@ -62,6 +65,35 @@ function validate(config: AppConfig): void {
   const { min, max, increment } = config.activity.goal;
   if (!(min > 0 && min < max && increment > 0)) {
     throw new Error(`activity.goal: ${min}–${max} by ${increment} is not a range a goal can be set in`);
+  }
+  // The water ladder has to climb (RULES Y1b): a single drink, then the ask,
+  // then the health note, then the refusal. Out of order, a member could be
+  // refused a day they were never warned about — or, worse, have their own
+  // 8 L goal be unreachable, since that is the most `/me/settings` allows.
+  const water = config.hydration;
+  const ladder: [string, number][] = [
+    ['maxMl', water.maxMl],
+    ['confirmAboveMl', water.confirmAboveMl],
+    ['cautionAboveMl', water.cautionAboveMl],
+    ['maxDailyMl', water.maxDailyMl],
+  ];
+  for (let i = 1; i < ladder.length; i += 1) {
+    const [name, value] = ladder[i];
+    const [below, lower] = ladder[i - 1];
+    if (value < lower) {
+      throw new Error(`hydration.${name} (${value}) is below hydration.${below} (${lower})`);
+    }
+  }
+  if (water.maxDailyMl < MAX_WATER_GOAL_ML) {
+    throw new Error(
+      `hydration.maxDailyMl (${water.maxDailyMl}) is below the largest goal a member may set (${MAX_WATER_GOAL_ML}), so their own goal could not be logged`,
+    );
+  }
+  if (water.minMl <= 0 || water.minMl > water.maxMl) {
+    throw new Error(`hydration: ${water.minMl}–${water.maxMl} ml is not a range a drink can be in`);
+  }
+  if (water.hourlyMl <= 0 || water.hourlyMinutes <= 0) {
+    throw new Error('hydration.hourlyMl and hourlyMinutes must both be above zero');
   }
   const { paymentMode, coinShareMin, coinShareMax } = config.commerce;
   if (!['coins', 'money', 'mixed'].includes(paymentMode)) {

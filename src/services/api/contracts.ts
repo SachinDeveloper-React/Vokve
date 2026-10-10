@@ -37,6 +37,7 @@ import type {
   HealthScore,
   HydrationDay,
   HydrationEntry,
+  HydrationHistory,
   HydrationReminderPlan,
   HydrationStats,
   IngestNonce,
@@ -57,6 +58,7 @@ import type {
   ProfileSummary,
   Referral,
   ReferralProgram,
+  ReminderSound,
   ReorderResult,
   ShopCategory,
   ShopCategorySummary,
@@ -148,6 +150,16 @@ export interface DeviceApi {
   setPushToken(
     deviceId: string,
     pushToken: string | null,
+  ): Promise<{ ok: boolean }>;
+  /**
+   * Whether this install has the hydration reminder plan scheduled with the
+   * OS itself (RULES Y6). True and the server leaves the ringing to the
+   * phone and only writes the feed row; false — permission refused, the
+   * plan switched off — and it pushes, so the member is still reminded.
+   */
+  setLocalReminders(
+    deviceId: string,
+    scheduled: boolean,
   ): Promise<{ ok: boolean }>;
   /** A single-use challenge for the next Keystore key this device makes. */
   attestationChallenge(deviceId: string): Promise<AttestationChallenge>;
@@ -717,8 +729,21 @@ export interface HydrationApi {
   stats(): Promise<HydrationStats>;
   /** Per-day totals, every day present. */
   days(from: string, to: string): Promise<HydrationDayTotal[]>;
+  /**
+   * A span of days and what it came to (RULES Y4) — the history screen's
+   * whole answer. The summary is the server's arithmetic, so the history
+   * cannot disagree with the stats card above it.
+   */
+  history(from: string, to: string): Promise<HydrationHistory>;
+  /** One past day's drinks — what a row of the history opens on. */
+  day(date: string): Promise<HydrationDay>;
   /** The reminder plan; the default one until the user has changed it. */
   reminders(): Promise<HydrationReminderPlan>;
+  /**
+   * The sounds a reminder may arrive with. Listed by the server so the
+   * picker cannot offer a sound a plan would be refused for.
+   */
+  reminderSounds(): Promise<ReminderSound[]>;
   /** Replaces the whole plan; answers it as stored. */
   saveReminders(
     plan: HydrationReminderPlan,
