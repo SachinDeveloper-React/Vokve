@@ -55,6 +55,34 @@ describe('vitals: readings (RULES V1, V2, V4)', () => {
     expect((await UserModel.findById(session.userId).lean())?.weightKg).toBe(72.5);
   });
 
+  it('carries the profile figures back on GET /me, and a weight edited there becomes a reading', async () => {
+    const session = await signUpAndRegister();
+
+    const saved = await request(app).patch('/v1/me').set(authed(session)).send({ heightCm: 175, weightKg: 70.5 });
+    expect(saved.status).toBe(200);
+    // What the edit screen reads back: the figures it just saved, not nulls.
+    expect(saved.body).toMatchObject({ heightCm: 175, weightKg: 70.5 });
+    expect((await request(app).get('/v1/me').set(authed(session))).body).toMatchObject({
+      heightCm: 175,
+      weightKg: 70.5,
+    });
+
+    // One number, one story (RULES V4): the health screen follows the edit.
+    const latest = (await request(app).get('/v1/vitals/latest').set(authed(session))).body;
+    expect(latest.weight).toMatchObject({ value: 70.5 });
+    expect(latest.bmi?.value).toBe(23);
+    expect((await request(app).get('/v1/vitals?kind=weight').set(authed(session))).body).toHaveLength(1);
+
+    // Saving the same weight again records nothing new; a different one does.
+    expect((await request(app).patch('/v1/me').set(authed(session)).send({ weightKg: 70.5 })).status).toBe(200);
+    expect((await request(app).get('/v1/vitals?kind=weight').set(authed(session))).body).toHaveLength(1);
+    expect((await request(app).patch('/v1/me').set(authed(session)).send({ weightKg: 69 })).status).toBe(200);
+    const readings = (await request(app).get('/v1/vitals?kind=weight').set(authed(session))).body;
+    expect(readings).toHaveLength(2);
+    expect(readings[0].value).toBe(69);
+    expect((await UserModel.findById(session.userId).lean())?.weightKg).toBe(69);
+  });
+
   it('lists the newest first, of one kind or all, and takes one back out', async () => {
     const session = await signUpAndRegister();
     const other = await signUpAndRegister();

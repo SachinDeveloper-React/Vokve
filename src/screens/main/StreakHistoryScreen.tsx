@@ -51,14 +51,21 @@ export const StreakHistoryScreen = () => {
     navigation.navigate('Streak');
   }, [navigation]);
 
+  // Each row opens the day it is about: the row says how the day went, the
+  // day says what happened on it.
+  const onPressDay = useCallback(
+    (date: string) => navigation.navigate('StreakDay', { date }),
+    [navigation],
+  );
+
   const renderItem = useCallback(
     ({ item, index }: { item: StreakHistoryDay; index: number }) => (
       <VStack>
         {index > 0 ? <Divider /> : null}
-        <StreakHistoryRow entry={item} />
+        <StreakHistoryRow entry={item} onPress={onPressDay} />
       </VStack>
     ),
-    [],
+    [onPressDay],
   );
 
   const keyExtractor = useCallback((item: StreakHistoryDay) => item.date, []);

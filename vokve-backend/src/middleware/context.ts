@@ -13,6 +13,8 @@ export interface RequestContext {
   timezone: string;
   locale?: string;
   idempotencyKey?: string;
+  /** Who the admin key authenticated as, on `/v1/admin/*` only. */
+  adminActor?: string;
 }
 
 declare module 'express-serve-static-core' {

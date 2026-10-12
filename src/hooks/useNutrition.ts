@@ -10,6 +10,8 @@ import {
 import type {
   DietPlanDay,
   DietPlanDaySummary,
+  DietPlanDetail,
+  DietPlanSummary,
   FoodEntry,
   FoodItem,
   NutritionGoals,
@@ -106,13 +108,33 @@ export function useNutritionDays(
   return { ...read, data: days };
 }
 
-/** The diet plan for a day (`GET /diet-plan`), asked again when the preferences change. */
+/**
+ * What the plan in force follows from: the preferences, and the plan the user
+ * picked by hand (RULES N10). Every plan read is asked again when this moves,
+ * so choosing a plan changes the day on the screen behind the chooser.
+ */
+function usePlanBasis(): string | null {
+  const profile = useNutritionStore(s => s.profile);
+  return profile
+    ? JSON.stringify([profile.preferences, profile.selectedPlanId])
+    : null;
+}
+
+/** The diet plan for a day (`GET /diet-plan`), asked again when the basis changes. */
 export function useDietPlan(date: string): Loaded<DietPlanDay> {
-  const preferences = useNutritionStore(s => s.profile?.preferences);
+  return useServerRead(`diet:${date}`, () => nutritionApi.plan(date), usePlanBasis());
+}
+
+/** The plans on offer (`GET /diet-plans`), the ones that suit the user first. */
+export function useDietPlans(): Loaded<DietPlanSummary[]> {
+  return useServerRead('diet:plans', () => nutritionApi.dietPlans(), usePlanBasis());
+}
+
+/** One plan with every day of it (`GET /diet-plans/:id`). */
+export function useDietPlanDetail(planId: string | null): Loaded<DietPlanDetail> {
   return useServerRead(
-    `diet:${date}`,
-    () => nutritionApi.plan(date),
-    preferences ? JSON.stringify(preferences) : null,
+    planId === null ? null : `diet:plan:${planId}`,
+    () => nutritionApi.dietPlan(planId!),
   );
 }
 
@@ -120,12 +142,12 @@ export function useDietPlan(date: string): Loaded<DietPlanDay> {
 export function useDietPlanDays(
   dates: readonly string[],
 ): Loaded<DietPlanDaySummary[]> {
-  const preferences = useNutritionStore(s => s.profile?.preferences);
+  const basis = usePlanBasis();
   const { from, to } = span(dates);
   const read = useServerRead(
     dates.length > 0 ? `diet:days:${from}:${to}` : null,
     () => nutritionApi.planDays(from, to),
-    preferences ? JSON.stringify(preferences) : null,
+    basis,
   );
   const days = useMemo(() => {
     if (read.data === null) return null;

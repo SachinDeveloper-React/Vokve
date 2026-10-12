@@ -2226,6 +2226,11 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNNotifee (9.1.8):
+    - React-Core
+    - RNNotifee/NotifeeCore (= 9.1.8)
+  - RNNotifee/NotifeeCore (9.1.8):
+    - React-Core
   - RNReanimated (4.6.0):
     - hermes-engine
     - RCTRequired
@@ -2596,6 +2601,7 @@ DEPENDENCIES:
   - "RNFBMessaging (from `../node_modules/@react-native-firebase/messaging`)"
   - "RNFBPerf (from `../node_modules/@react-native-firebase/perf`)"
   - RNKeychain (from `../node_modules/react-native-keychain`)
+  - "RNNotifee (from `../node_modules/@notifee/react-native`)"
   - RNReanimated (from `../node_modules/react-native-reanimated`)
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNSVG (from `../node_modules/react-native-svg`)
@@ -2844,6 +2850,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@react-native-firebase/perf"
   RNKeychain:
     :path: "../node_modules/react-native-keychain"
+  RNNotifee:
+    :path: "../node_modules/@notifee/react-native"
   RNReanimated:
     :path: "../node_modules/react-native-reanimated"
   RNScreens:
@@ -2993,6 +3001,7 @@ SPEC CHECKSUMS:
   RNFBMessaging: 90bab2ad25b0e6fc61b1dda8e9dae53f48993a69
   RNFBPerf: 09ffa15c45bcf39ec7c402aa4a45d064edf41b0f
   RNKeychain: 7aea80e3655a249325775c71dc5d6fd29b1ae0bd
+  RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
   RNReanimated: 48fad1c291af0d0a8653aa1c461683b8cbe28c56
   RNScreens: 604d0b76dc6623a208fa386e4b30337500dff09b
   RNSVG: 4da2e0a724c48a841e0dbfbdc7db39286c050b61

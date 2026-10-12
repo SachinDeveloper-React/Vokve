@@ -140,6 +140,7 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | S8 | Milestones ⚙ 7/15/30/90/180 days pay 50/150/300/1,000/2,000 coins, **once each**, judged against **longest** streak. A user who hit 30 in March keeps the badge in April. | `STREAK_MILESTONES`, `achieved={longestStreak >= days}` |
 | S9 | What earns a day is config ⚙ `streak.earnedBy`: a plausible workout, and/or verified steps at or above the user's own daily goal (`/me/settings`). Default: **both** (MEMORY.md D-44). Unverified steps never earn a day. | `modules/streak`, `activity/rollup.service` |
 | S10 | Streak-at-risk notification fires at 19:00 local ⚙ if today is not covered, subject to quiet hours and the `activity` category. | |
+| S11 | **A day is read, never re-judged.** `GET /streak/day` answers from the `streak_days` row written when the day was decided (D2) — a goal raised since does not unmake a day already earned, and a day that did not count stays missed. Its wording is the record's (`wordDay`), its figures the day's own rollup, its log the five collections keyed by that local day, and which days it offers to page to is the server's answer, bounded by the first day it knows of and today. | `getStreakDay`, `getStreakDayEvents` |
 
 ## §C · Challenges and achievements
 
@@ -213,9 +214,11 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | N4 | Goal defaults: 2,200 kcal / 120 P / 300 C / 70 F. Preferences defaults: vegetarian / balanced / gain_weight. | `DEFAULT_GOALS`, `DEFAULT_PREFERENCES` |
 | N5 | Per-slot summary: item count, kcal, `startedAt` = earliest `loggedAt` in the slot, names. | `summariseMeals` |
 | N6 | Diet plan for a date = generated meals for that date + user-added meals, sorted by time. User-added meals default to 08:00/13:00/17:00/20:00 by slot. | `dietPlanStore` |
-| N7 | Plan generation ⚙ (proposal): pick from curated templates keyed by `(dietType, mealPlan)`, scale portions to the kcal goal, rotate so no day repeats within 7 days. | replaces `dietPlanRotation` |
-| N8 | Custom foods are private to their creator. Global library items have `owner_user_id = null`. | |
+| N7 | A diet plan is a named programme of days, written by an operator and tagged with the diet types and meal plans it suits. Its days run in rotation, chosen by date, so every date has one. Portion scaling to the kcal goal is not built. | `diet_plans` |
+| N8 | Custom foods are private to their creator. Global library items have `owner_user_id = null`. The library is browsed in pages (`GET /foods/library`), the member's own foods first; a retired food (`active: false`) is out of search, the shortcuts and the library but keeps its row. | |
 | N9 | Nutrition logging mints **no coins** in v1. | |
+| N10 | A member either picks a plan from the library (`selectedPlanId` on their nutrition profile) or lets the server pick: the first that suits both their preferences, else their diet type, else any. A choice made by hand outranks the preferences and survives a change to them. Only a plan on offer may be chosen; retiring one frees everyone who had it. The library is written through `/v1/admin/diet-plans`, which answers the operator's key alone. | `modules/nutrition` |
+| N11 | The global food library and the diet plans are seeded once and the operator's thereafter: a re-seed skips any row whose `updatedBy` is no longer `seed`, and one they retired stays retired. Written through `/v1/admin/foods` and `/v1/admin/diet-plans`, or `npm run plans` for the library as a whole (list / create — one or a whole list / read / update / retire), under the admin key alone; a member's own food is never reachable there (N8). A logged food keeps its own copy of the figures (N2), so correcting a row never rewrites what anybody already ate. | `modules/nutrition/admin.service` |
 
 ## §V · Vitals and health
 
@@ -224,7 +227,7 @@ Ported from `src/stores/streakStore.ts`. The golden tests in `__tests__/streakSt
 | V1 | Kinds: `heart_rate` (bpm), `blood_pressure` (systolic = `value`, diastolic = `secondary`, mmHg), `weight` (kg). **`bmi` is never accepted as input** — it is derived. | 🔒 enum keeps `bmi` for output compatibility; fixes C9 |
 | V2 | Bounds: HR 30–220; systolic 60–250; diastolic 30–150; weight 20–350 kg. Out of bounds → 422. | `AddReadingSheet.BOUNDS` |
 | V3 | BMI = `weight_kg / (height_m)²`, from the latest weight reading and `User.heightCm`; null if either is missing. | |
-| V4 | A `weight` reading updates `User.weightKg` and inserts a `body_measurements` row. One write path. | fixes C10 |
+| V4 | **Weight is one number.** A `weight` reading that is the newest on record updates `User.weightKg`; a weight saved on the profile (`PATCH /me`) is recorded as a reading in turn (D-72), so the health tile, the BMI and the score can never disagree with the profile. Clearing the profile's weight writes no reading — a measurement that was taken is history. | `logReading`, `me.routes` |
 | V5 | Heart-rate bands: < 60 low · 60–100 normal · 101–120 elevated · > 120 high. | `HEART_BANDS` |
 | V6 | Blood-pressure bands: **high** if systolic ≥ 130 **or** diastolic ≥ 80; else **low** if systolic < 90 or diastolic < 60; else **elevated** if systolic 120–129; else **normal**. Either half can raise the band. | `pressureBandFor` |
 | V7 | BMI bands: < 18.5 underweight · 18.5–24.9 healthy · 25–29.9 overweight · ≥ 30 obese. | `BmiGuide` |

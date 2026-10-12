@@ -10,21 +10,14 @@ import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { Pressable } from '../form/Pressable';
+import type { DraftFood } from '../../stores/mealDraftStore';
 import { MacroStrip } from './MacroStrip';
 
-/** One food on the draft meal, before it is saved. */
-export interface DraftFood {
-  /** Unique to this draft row, so two bananas can be removed separately. */
-  key: string;
-  name: string;
-  portion: string;
-  emoji: string;
-  calories: number;
-  proteinG: number;
-  carbsG: number;
-  fatsG: number;
-  fiberG: number;
-}
+/**
+ * One food on the draft meal, before it is saved — the store's own row, so
+ * the card and the two screens that fill it cannot drift apart.
+ */
+export type { DraftFood } from '../../stores/mealDraftStore';
 
 interface RowProps {
   food: DraftFood;
@@ -64,7 +57,9 @@ const AddedFoodRow = memo(({ food, onRemove }: RowProps) => {
           feedback="opacity"
           visualSize={20}
           accessibilityRole="button"
-          accessibilityLabel={`Remove ${food.name}`}
+          // Which list this bin acts on, because the screen has two of them:
+          // the meal already logged above, and this draft.
+          accessibilityLabel={`Remove ${food.name} from this meal`}
         >
           <Icon as={Delete} size="sm" tint={colors.destructive} />
         </Pressable>

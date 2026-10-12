@@ -31,6 +31,9 @@ export interface FoodEntryDraft {
   loggedAt?: string;
 }
 
+/** Whether a queued meal is still waiting, has landed, or was refused. */
+export type MealOutcome = 'saved' | 'queued' | 'refused';
+
 /** A meal saved or a food taken back here that the server has not confirmed yet. */
 export type NutritionChange =
   | { kind: 'add'; entries: FoodEntry[] }
@@ -48,17 +51,38 @@ interface NutritionState {
   confirmedAt: string | null;
   syncedAt: string | null;
   isSyncing: boolean;
-  /** Why the last exchange failed; cleared by the next that succeeds. */
+  /**
+   * Why the last exchange failed, worded for the user; cleared by the next
+   * that succeeds. Set both when a change could not go yet and when one was
+   * refused outright, so the nutrition screen can say which meal never
+   * landed rather than quietly losing it.
+   */
   syncError: string | null;
+  /** Forgets the last failure — what dismissing the notice does. */
+  clearSyncError: () => void;
 
   /** Sends what is waiting, then asks for the profile. Resolves either way. */
   hydrateFromServer: () => Promise<void>;
   refreshIfStale: () => Promise<void>;
-  /** Logs a whole meal at once — what the add-meal screen saves (RULES N2). */
-  addEntries: (entries: FoodEntryDraft[]) => void;
+  /**
+   * Logs a whole meal at once — what the add-meal screen saves (RULES N2).
+   *
+   * Answers the id of the first food it queued, so the caller can tell its
+   * own meal apart from anyone else's once the flush has run: still in the
+   * outbox means it is waiting for a network, gone with no `syncError` means
+   * the server took it, and gone *with* one means the server refused it.
+   * Null where there was nothing worth queueing.
+   */
+  addEntries: (entries: FoodEntryDraft[]) => string | null;
   removeEntry: (id: string) => void;
   setGoals: (goals: Partial<NutritionGoals>) => void;
   setPreferences: (preferences: Partial<NutritionPreferences>) => void;
+  /**
+   * Picks a plan from the library, or hands the choice back to the server
+   * with null (RULES N10). The server refuses a plan that is not on offer,
+   * and the refusal puts its own answer back.
+   */
+  setSelectedPlan: (planId: string | null) => void;
   /** Sends the waiting changes in order; stops at the first that cannot go yet. */
   flush: () => Promise<void>;
   reset: () => void;
@@ -70,7 +94,21 @@ let flushing: Promise<void> | null = null;
 /** The newest profile save: an older answer arriving late must not undo a newer edit. */
 let latestProfileSave = 0;
 
-const isPermanent = (status: number | null) => status === 404 || status === 422;
+/**
+ * Whether the server will refuse this change however often it is asked.
+ *
+ * A 422 is the server saying the change itself is wrong — too old, too many,
+ * nameless — and retrying it forever would block everything behind it.
+ *
+ * A 404 is only final for a removal: the food is already gone, which is the
+ * outcome that was wanted. For a *save* a 404 means the route was not found,
+ * which is a server or a base URL that is wrong rather than a meal that is —
+ * and quietly dropping somebody's dinner because a deploy was half done is
+ * not a trade this app gets to make. It stays queued and goes when the route
+ * is there.
+ */
+const isPermanent = (kind: NutritionChange['kind'], status: number | null) =>
+  status === 422 || (kind === 'remove' && status === 404);
 
 /** Fills a draft out into an entry with its own id. Null for one with no name (RULES N3). */
 function toEntry(draft: FoodEntryDraft): FoodEntry | null {
@@ -113,6 +151,10 @@ export const useNutritionStore = create<NutritionState>()(
           profile: {
             goals: { ...current.goals, ...patch.goals },
             preferences: { ...current.preferences, ...patch.preferences },
+            selectedPlanId:
+              patch.selectedPlanId === undefined
+                ? current.selectedPlanId
+                : patch.selectedPlanId,
           },
         });
         const save = (latestProfileSave += 1);
@@ -184,12 +226,16 @@ export const useNutritionStore = create<NutritionState>()(
             .map(toEntry)
             .filter((entry): entry is FoodEntry => entry !== null);
           if (entries.length === 0) {
-            return;
+            return null;
           }
           set(state => ({
             outbox: [...state.outbox, { kind: 'add', entries }],
+            // A new attempt is not the old one's failure: the notice goes
+            // until this meal has its own answer.
+            syncError: null,
           }));
           get().flush();
+          return entries[0].id;
         },
 
         removeEntry: id => {
@@ -221,8 +267,11 @@ export const useNutritionStore = create<NutritionState>()(
           get().flush();
         },
 
+        clearSyncError: () => set({ syncError: null }),
+
         setGoals: goals => saveProfile({ goals }),
         setPreferences: preferences => saveProfile({ preferences }),
+        setSelectedPlan: planId => saveProfile({ selectedPlanId: planId }),
 
         flush: () => {
           if (flushing) {
@@ -252,10 +301,15 @@ export const useNutritionStore = create<NutritionState>()(
                   }));
                 } catch (error) {
                   const apiError = toApiError(error);
-                  if (!isPermanent(apiError.status)) {
+                  if (!isPermanent(change.kind, apiError.status)) {
                     set({ syncError: apiError.message });
                     return;
                   }
+                  // A refusal the server will give again however often it is
+                  // asked: the change is dropped, or it would block the queue
+                  // for good. It is *said*, though — a meal that appeared and
+                  // then vanished with nothing on screen to explain it is the
+                  // worst of both.
                   logger.warn(
                     'nutritionStore',
                     'A food change was refused',
@@ -264,6 +318,7 @@ export const useNutritionStore = create<NutritionState>()(
                   set(state => ({
                     outbox: state.outbox.filter(entry => entry !== change),
                     confirmedAt: new Date().toISOString(),
+                    syncError: apiError.message,
                   }));
                 }
               }
@@ -307,11 +362,35 @@ export const useNutritionStore = create<NutritionState>()(
   ),
 );
 
+/**
+ * What became of the meal `addEntries` queued, once `flush()` has settled.
+ *
+ * Read from the store rather than returned by `flush`, because a flush sends
+ * everything that is waiting and one answer could not speak for all of it.
+ */
+export function outcomeOf(firstEntryId: string | null): MealOutcome {
+  if (firstEntryId === null) {
+    return 'refused';
+  }
+  const { outbox, syncError } = useNutritionStore.getState();
+  const waiting = outbox.some(
+    change =>
+      change.kind === 'add' &&
+      change.entries.some(entry => entry.id === firstEntryId),
+  );
+  if (waiting) {
+    return 'queued';
+  }
+  return syncError === null ? 'saved' : 'refused';
+}
+
 export const useNutritionProfile = () => useNutritionStore(s => s.profile);
 export const useNutritionGoals = () =>
   useNutritionStore(s => s.profile?.goals ?? null);
 export const useNutritionPreferences = () =>
   useNutritionStore(s => s.profile?.preferences ?? null);
+export const useSelectedDietPlanId = () =>
+  useNutritionStore(s => s.profile?.selectedPlanId ?? null);
 
 export interface MacroTotals {
   calories: number;

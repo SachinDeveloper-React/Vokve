@@ -100,11 +100,114 @@ Nothing on a screen comes from the app's own seed data (MEMORY D-45). Beyond ste
 - **Challenges and achievements** (`modules/challenges`) — `GET /challenges?date=`, `GET /achievements`; completion is automatic after each rollup / workout save.
 - **Leaderboard** (`modules/leaderboard`) — `GET /leaderboard`, `/leaderboard/history`, `/leaderboard/reward-tiers`.
 - **Water** (`modules/hydration`) — `/hydration/today`, `/entries`, `/stats`, `/days`, `/reminders`.
-- **Food** (`modules/nutrition`) — `/nutrition/day`, `/days`, `/entries`, `/profile`, `/foods`, `/foods/quick-add`, `/foods/custom`, `/diet-plan`, `/diet-plan/days`.
+- **Food** (`modules/nutrition`) — `/nutrition/day`, `/days`, `/entries`, `/profile`, `/foods`, `/foods/quick-add`, `/foods/custom`, `/diet-plan`, `/diet-plan/days`, `/diet-plans`, `/diet-plans/:id`.
 - **Vitals** (`modules/vitals`) — `/vitals`, `/vitals/latest`, `/health/score`.
 - **Words** (`modules/content`) — `GET /content/tips/:topic`, one tip (or Home's motivation line) per topic per day.
 
 Rewards that steps can earn — step coins, streak milestones, step-derived challenges, leaderboard prizes — all wait for ⚙ `coins.steps.enabled` (D-46); everything is recorded meanwhile.
+
+## The admin API (food library and diet plans)
+
+The diet plan library is content an operator writes, not something the app can
+change: a plan is a named programme of days, tagged with the diet types and
+meal plans it suits, and a member either picks one by name (`PUT
+/nutrition/profile { selectedPlanId }`) or lets the server pick from the ones
+that suit their preferences (RULES N10).
+
+There is no admin account and no admin role on a member. `/v1/admin/*` answers
+the operator's key alone — `ADMIN_API_KEY`, sent as `X-Admin-Key` — so no
+member token can reach it, and with no key configured every admin route
+answers 404 rather than advertising a door. Every write lands in `audit_log`
+with the plan before and after it.
+
+### Working with real plans, not the demo ones
+
+The app ships with three demo plans so the screen has something behind it on a
+fresh database. The first thing you will want is to see what is actually there
+and get them out of the way:
+
+```sh
+npm run plans list          # every plan, and who wrote it (seed / admin / operator)
+npm run plans resolve       # which plan each kind of member is given, and why
+npm run plans show <id>     # one plan's days, printed as a menu
+npm run plans import diet-plans.example.json   # add or replace from a file
+npm run plans retire-seed   # the three shipped plans out of the library
+npm run plans retire <id> | restore <id>
+```
+
+`resolve` is the one that answers "is this working?": it walks all sixteen
+(diet type × meal plan) combinations and prints the plan a member with those
+preferences would be handed, and whether it was chosen because it matched both
+their preferences, only their diet type, or because it was the only plan left.
+A combination with nothing written for it is named, so a gap is something you
+decide about rather than discover from a member.
+
+`retire-seed` refuses to leave the library empty: import your own first, or
+members would land on a Diet Plan screen with nothing to show. Copy
+`diet-plans.example.json`, replace every figure with your dietitian's, and
+`import` it — the ids in the file are yours, so re-running the import replaces
+those plans rather than piling up copies.
+
+**A re-seed will not undo your work.** `npm run seed` restores the shipped
+content, but it skips any plan or food whose `updatedBy` is no longer `seed` —
+anything you have written or corrected through the admin API or this script is
+yours from then on. A plan you only *retired* stays retired too.
+
+The food library is the same story: the rows a member searches, browses and
+quick-adds from are an operator's to write. A logged food keeps its own copy of
+the figures (RULES N2), so fixing a wrong calorie count never rewrites what
+anybody already ate, and retiring a food takes it off the shelf without
+breaking the diary that points at it.
+
+```sh
+A=http://localhost:3000/v1; K='X-Admin-Key: <ADMIN_API_KEY>'
+
+# the food library, a page at a time (retired rows included)
+curl -s "$A/admin/foods?limit=50" -H "$K" | jq '{total, next: .nextCursor, foods: [.data[] | {name, portion, calories, quickAdd, active}]}'
+
+# add a whole list at once — "Chapati 104 kcal | 1 piece (40 g)", and so on
+curl -s -X POST $A/admin/foods -H "$K" -H 'Content-Type: application/json' -d '{
+  "foods": [
+    { "name": "Chapati", "portion": "1 piece (40 g)", "emoji": "🫓", "calories": 104, "proteinG": 3, "carbsG": 20, "fatsG": 1.5, "fiberG": 2, "sort": 20 },
+    { "name": "Banana",  "portion": "1 medium (118 g)", "emoji": "🍌", "calories": 89, "proteinG": 1, "carbsG": 23, "fatsG": 0.3, "fiberG": 2.6, "quickAdd": true, "sort": 21 },
+    { "name": "Orange",  "portion": "1 medium (130 g)", "emoji": "🍊", "calories": 62, "proteinG": 1.2, "carbsG": 15, "fatsG": 0.2, "fiberG": 3, "sort": 22 }
+  ]
+}' | jq '[.[] | {id, name}]'
+
+# fix one (figures already eaten are untouched), or put it on the quick-add row
+curl -s -X PUT $A/admin/foods/<id> -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "calories": 120, "quickAdd": true }' | jq '{name, calories, quickAdd}'
+
+# take it off the shelf; {"active": true} puts it back
+curl -s -X DELETE $A/admin/foods/<id> -H "$K" | jq '{name, active}'
+
+# what is there (retired plans included)
+curl -s $A/admin/diet-plans -H "$K" | jq '.[] | {id, name, active, days: (.days|length)}'
+
+# write one — the whole programme in one call
+curl -s -X POST $A/admin/diet-plans -H "$K" -H 'Content-Type: application/json' -d '{
+  "name": "Lean Veg Reset",
+  "description": "Three lighter vegetarian days, protein kept up.",
+  "emoji": "🥗",
+  "dietTypes": ["vegetarian", "eggetarian"],
+  "mealPlans": ["balanced", "high_protein"],
+  "days": [{ "label": "Day one", "meals": [
+    { "slot": "breakfast", "time": "08:00", "calories": 320, "proteinG": 18, "carbsG": 42, "fatsG": 9,
+      "items": [{ "name": "Oats with banana", "quantity": "1 bowl (200g)" }] },
+    { "slot": "lunch", "time": "13:00", "calories": 450, "proteinG": 26, "carbsG": 58, "fatsG": 14, "items": [] },
+    { "slot": "snack", "time": "17:00", "calories": 180, "proteinG": 6, "carbsG": 18, "fatsG": 11, "items": [] },
+    { "slot": "dinner", "time": "20:00", "calories": 300, "proteinG": 32, "carbsG": 32, "fatsG": 11, "items": [] }
+  ]}]
+}' | jq '{id, name}'
+
+# change it (fields left out keep what they had; `days` replaces the programme)
+curl -s -X PUT $A/admin/diet-plans/<id> -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "name": "Lean Veg Reset v2", "sort": 4 }' | jq '{name, sort}'
+
+# retire it: out of the library, and everyone who chose it falls back to the
+# server's own choice (`released` says how many). `{"active": true}` puts it back.
+curl -s -X DELETE $A/admin/diet-plans/<id> -H "$K" | jq '{released, active: .plan.active}'
+```
 
 ## Notifications and push
 

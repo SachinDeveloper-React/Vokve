@@ -5,6 +5,7 @@ import type { ThemeColors } from '../../constants/colors';
 import { useTheme } from '../../theme';
 import type { StreakHistoryDay, StreakHistoryStatus } from '../../types/models';
 import { formatLongDate } from '../../utils/date';
+import { Pressable } from '../form/Pressable';
 import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
@@ -27,6 +28,8 @@ const STATUS: Record<
 
 interface Props {
   entry: StreakHistoryDay;
+  /** Opens the day in full. Without it the row is a readout, not a button. */
+  onPress?: (date: string) => void;
 }
 
 /**
@@ -40,21 +43,13 @@ interface Props {
  * what a restore cost — because the cost of a restore is the ledger's to
  * report, not something the app should reconstruct from a price list.
  */
-export const StreakHistoryRow = memo(({ entry }: Props) => {
+export const StreakHistoryRow = memo(({ entry, onPress }: Props) => {
   const { colors } = useTheme();
   const { icon, tint, label } = STATUS[entry.status];
   const date = formatLongDate(entry.date);
 
-  return (
-    <HStack
-      align="center"
-      gap="sm"
-      py="sm"
-      accessible
-      accessibilityLabel={`${
-        entry.day === null ? date : `Day ${entry.day}, ${date}`
-      }, ${label}. ${entry.detail}`}
-    >
+  const row = (
+    <HStack align="center" gap="sm" py="sm">
       <Icon as={icon} size="xs" tint={colors[tint]} strokeWidth={3} />
 
       <VStack flex={1} gap="xxs">
@@ -83,6 +78,26 @@ export const StreakHistoryRow = memo(({ entry }: Props) => {
         {entry.detail}
       </AppText>
     </HStack>
+  );
+
+  const spoken = `${
+    entry.day === null ? date : `Day ${entry.day}, ${date}`
+  }, ${label}. ${entry.detail}`;
+
+  return onPress ? (
+    <Pressable
+      onPress={() => onPress(entry.date)}
+      feedback="opacity"
+      accessibilityRole="button"
+      accessibilityLabel={spoken}
+      accessibilityHint="Opens this day"
+    >
+      {row}
+    </Pressable>
+  ) : (
+    <VStack accessible accessibilityLabel={spoken}>
+      {row}
+    </VStack>
   );
 });
 

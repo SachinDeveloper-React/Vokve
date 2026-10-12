@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { ClipboardList, Plus } from 'lucide-react-native';
 import { Icon } from '../../components/media/Icon';
+import { CurrentPlanCard } from '../../components/diet/CurrentPlanCard';
 import { DayPager } from '../../components/diet/DayPager';
 import { DietPlanHeader } from '../../components/diet/DietPlanHeader';
 import {
@@ -43,11 +44,12 @@ const NO_TOTALS = { calories: 0, proteinG: 0, carbsG: 0, fatsG: 0, fiberG: 0 };
 /**
  * The diet plan: what to eat on a given day, and the week either side of it.
  *
- * The plan is the server's (`GET /diet-plan`, `/diet-plan/days`), chosen from
- * the user's preferences: the days that suit them, in rotation, so every day
+ * The plan is the server's (`GET /diet-plan`, `/diet-plan/days`): the plan the
+ * user chose from the library, else one the server picks from their
+ * preferences (RULES N10). Either way its days run in rotation, so every day
  * the user pages to has something behind it — forwards into next week as
  * readily as back into last. Changing a preference on the nutrition screen
- * changes the plan here.
+ * changes the plan here, and so does choosing one in the library.
  *
  * The calorie goal is the nutrition screen's, not a second one of this
  * screen's own: a plan measured against one target while the day's food is
@@ -83,6 +85,10 @@ export const DietPlanScreen = () => {
     () => navigation.navigate('AddMeal', { date }),
     [date, navigation],
   );
+
+  // The library is a screen of its own rather than a sheet: choosing a plan
+  // means reading several of them, days and all, and that is a scroll.
+  const openPlans = useCallback(() => navigation.navigate('DietPlans'), [navigation]);
 
   /** Tapping a day in either list is how those tabs get back to the plan. */
   const handlePickDay = useCallback((picked: IsoDate) => {
@@ -149,6 +155,15 @@ export const DietPlanScreen = () => {
               />
             ) : (
               <>
+                <CurrentPlanCard
+                  planName={plan.data.planName}
+                  dayNumber={plan.data.dayNumber}
+                  cycleLength={plan.data.cycleLength}
+                  chosenByUser={plan.data.chosenByUser}
+                  basis={plan.data.basis}
+                  onPressChange={openPlans}
+                />
+
                 <PlanCaloriesCard
                   calories={totals.calories}
                   goal={goals.calories}
@@ -202,7 +217,7 @@ export const DietPlanScreen = () => {
               title="The week ahead"
               caption={
                 plan.data
-                  ? `${plan.data.basis} — a ${plan.data.cycleLength}-day rotation.`
+                  ? `${plan.data.planName} — a ${plan.data.cycleLength}-day rotation.`
                   : 'Your plan, day by day.'
               }
               onPressDay={handlePickDay}

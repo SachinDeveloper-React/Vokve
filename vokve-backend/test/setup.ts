@@ -5,6 +5,8 @@ import { afterAll, afterEach, beforeAll } from 'vitest';
 process.env.NODE_ENV = 'test';
 process.env.OTP_DEV_ECHO = 'true';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
+// The operator's door is open in tests, so the admin API can be exercised.
+process.env.ADMIN_API_KEY = 'test-admin-key-test-admin-key';
 delete process.env.REDIS_URL;
 // No reaching out to Google from a test: the revocation list is stubbed where it matters.
 process.env.ATTESTATION_STATUS_URL = '';

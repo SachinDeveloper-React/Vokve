@@ -20,6 +20,14 @@ import { useNutritionStore } from '../src/stores/nutritionStore';
 import { seedFoodEntries } from '../src/constants/seedData';
 import { clearServerReads } from '../src/hooks/useServerRead';
 import { mockAuthApi, mockNutritionApi } from '../src/services/api/mockApi';
+import {
+  addDays,
+  formatLongDate,
+  fromIsoDate,
+  todayIso,
+} from '../src/utils/date';
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
@@ -53,6 +61,9 @@ jest.mock('../src/services/api/endpoints', () => {
         api.mockNutritionApi.updateProfile(patch, options),
       ),
       day: jest.fn((date: string) => api.mockNutritionApi.day(date)),
+      days: jest.fn((from: string, to: string) =>
+        api.mockNutritionApi.days(from, to),
+      ),
       log: jest.fn((entries: unknown, options: unknown) =>
         api.mockNutritionApi.log(entries, options),
       ),
@@ -78,7 +89,7 @@ jest.mock('../src/services/api/endpoints', () => {
 });
 
 const { nutritionApi } = jest.requireMock('../src/services/api/endpoints') as {
-  nutritionApi: { log: jest.Mock; updateProfile: jest.Mock };
+  nutritionApi: { log: jest.Mock; updateProfile: jest.Mock; days: jest.Mock };
 };
 
 const metrics = {
@@ -160,6 +171,15 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
   ReactTestRenderer.act(() => node.props.onPress());
 };
 
+/** Presses and then lets whatever the press asked the server for land. */
+const pressAndSettle = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  prefix: string,
+) => {
+  press(tree, prefix);
+  await settle();
+};
+
 describe('NutritionScreen', () => {
   test('before the targets arrive it says so, and invents no goal', async () => {
     useNutritionStore.getState().reset();
@@ -206,7 +226,7 @@ describe('NutritionScreen', () => {
   test('logging food moves the meal, the total and the macros together', async () => {
     const tree = await render();
 
-    ReactTestRenderer.act(() =>
+    ReactTestRenderer.act(() => {
       useNutritionStore.getState().addEntries([
         {
           slot: 'dinner',
@@ -216,8 +236,8 @@ describe('NutritionScreen', () => {
           carbsG: 6,
           fatsG: 12,
         },
-      ]),
-    );
+      ]);
+    });
 
     // At once, before the server has answered.
     const text = allText(tree);
@@ -239,7 +259,7 @@ describe('NutritionScreen', () => {
     const tree = await render();
     expect(allText(tree)).toContain("within your daily calorie goal");
 
-    ReactTestRenderer.act(() =>
+    ReactTestRenderer.act(() => {
       useNutritionStore.getState().addEntries([
         {
           slot: 'dinner',
@@ -249,8 +269,8 @@ describe('NutritionScreen', () => {
           carbsG: 90,
           fatsG: 30,
         },
-      ]),
-    );
+      ]);
+    });
 
     expect(allText(tree)).toContain('350 kcal over');
   });
@@ -299,5 +319,130 @@ describe('NutritionScreen', () => {
     press(await render(), 'Back');
 
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the period chips', () => {
+  test('Week averages the days rather than adding them up', async () => {
+    const tree = await render();
+    expect(allText(tree)).toContain('Calorie Summary'); // the day's own ring
+
+    await pressAndSettle(tree, 'Week');
+
+    const text = allText(tree);
+    expect(text).toContain('The last 7 days');
+    expect(text).toContain('Day by day');
+    // Averaged, not totalled: the daily goal is what the figures are read
+    // against, so a week's sum would be measured against nothing. The total
+    // is still there, a step down, for anyone who wants it.
+    expect(text).toContain('kcal a day');
+    expect(text).toContain('kcal in total');
+    expect(text).toContain('days within goal');
+    expect(text).not.toContain('Calorie Summary');
+    // Seven days, ending on the day the chip sits beside.
+    expect(nutritionApi.days).toHaveBeenCalled();
+    const [from, to] = nutritionApi.days.mock.calls[
+      nutritionApi.days.mock.calls.length - 1
+    ];
+    expect(to).toBe(todayIso());
+    expect(from).toBe(addDays(todayIso(), -6));
+  });
+
+  test('Month asks for thirty days, and Day goes back to the one day', async () => {
+    const tree = await render();
+
+    await pressAndSettle(tree, 'Month');
+    const [from, to] = nutritionApi.days.mock.calls[
+      nutritionApi.days.mock.calls.length - 1
+    ];
+    expect(from).toBe(addDays(todayIso(), -29));
+    expect(to).toBe(todayIso());
+    expect(allText(tree)).toContain('The last 30 days');
+
+    await pressAndSettle(tree, 'Day');
+    const text = allText(tree);
+    expect(text).toContain('Calorie Summary');
+    expect(text).toContain("Today's Meals");
+    expect(text).not.toContain('The last 30 days');
+  });
+
+  test('a day in the list brings the day view back to it', async () => {
+    const tree = await render();
+    await pressAndSettle(tree, 'Week');
+
+    // The rows are labelled "Sat, 10 October 2026" — weekday first.
+    const yesterday = addDays(todayIso(), -1);
+    const weekday = WEEKDAYS[fromIsoDate(yesterday).getDay()];
+    await pressAndSettle(tree, `${weekday}, ${formatLongDate(yesterday)}`);
+
+    const text = allText(tree);
+    expect(text).toContain('Calorie Summary'); // back on a single day
+    expect(text).toContain(formatLongDate(yesterday));
+  });
+});
+
+describe('the daily goal', () => {
+  test('Edit saves a new target to the server and shows it at once', async () => {
+    const tree = await render();
+    expect(allText(tree)).toContain('2,200');
+
+    press(tree, 'Edit');
+
+    const sheet = tree.root
+      .findAll(n => typeof n.props?.onSubmit === 'function')
+      .find(n => n.props?.goals !== undefined);
+    if (!sheet) throw new Error('No goal editor');
+    expect(sheet.props.goals).toMatchObject({ calories: 2200 });
+
+    await ReactTestRenderer.act(async () => {
+      sheet.props.onSubmit({
+        calories: 1900,
+        proteinG: 130,
+        carbsG: 210,
+        fatsG: 60,
+      });
+    });
+    await settle();
+
+    expect(nutritionApi.updateProfile).toHaveBeenCalledWith(
+      { goals: { calories: 1900, proteinG: 130, carbsG: 210, fatsG: 60 } },
+      expect.anything(),
+    );
+    expect(useNutritionStore.getState().profile?.goals).toMatchObject({
+      calories: 1900,
+      proteinG: 130,
+    });
+    expect(allText(tree)).toContain('1,900');
+  });
+});
+
+describe('a meal that did not save', () => {
+  test('says so, with the reason, instead of losing it quietly', async () => {
+    const tree = await render();
+    expect(allText(tree)).not.toContain("A meal didn't save");
+
+    // What the store does when the server refuses a change outright: it drops
+    // it from the outbox, so the only trace left is this.
+    await ReactTestRenderer.act(async () => {
+      useNutritionStore.setState({ syncError: 'Only the last 30 days can be logged.' });
+    });
+
+    const text = allText(tree);
+    expect(text).toContain("A meal didn't save");
+    expect(text).toContain('Only the last 30 days can be logged.');
+    expect(text).toContain('Try again');
+  });
+
+  test('Try again asks the server once more and clears the notice', async () => {
+    const tree = await render();
+    await ReactTestRenderer.act(async () => {
+      useNutritionStore.setState({ syncError: 'Network unavailable.' });
+    });
+
+    press(tree, 'Try again');
+    await settle();
+
+    expect(useNutritionStore.getState().syncError).toBeNull();
+    expect(allText(tree)).not.toContain("A meal didn't save");
   });
 });

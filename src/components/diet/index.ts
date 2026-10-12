@@ -6,3 +6,5 @@ export { PlanCaloriesCard } from './PlanCaloriesCard';
 export { PlannedMealCard } from './PlannedMealCard';
 export { PlanDayList } from './PlanDayList';
 export { PlanNutritionCard } from './PlanNutritionCard';
+export { CurrentPlanCard } from './CurrentPlanCard';
+export { DietPlanOptionCard } from './DietPlanOptionCard';

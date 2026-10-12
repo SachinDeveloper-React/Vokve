@@ -1,6 +1,6 @@
 import React, { memo, useCallback } from 'react';
 import { StyleSheet } from 'react-native';
-import { LayoutGrid } from 'lucide-react-native';
+import { ChevronRight, LayoutGrid } from 'lucide-react-native';
 import { radius, useTheme } from '../../theme';
 import type { FoodItem } from '../../types/models';
 import { HStack, VStack } from '../layout/Stack';
@@ -57,7 +57,10 @@ QuickAddTile.displayName = 'QuickAddTile';
 interface Props {
   items: FoodItem[];
   onAdd: (item: FoodItem) => void;
+  /** The tile at the end of the row — the whole library. */
   onPressMore: () => void;
+  /** The link beside the heading, which goes to the same place. */
+  onPressViewAll: () => void;
 }
 
 /**
@@ -70,43 +73,73 @@ interface Props {
  * one the figures describe, and a sheet asking "how much?" for a banana is the
  * friction that stops people logging breakfast at all. Anything unusual goes
  * through the search above.
+ *
+ * "View all" and the "More" tile both open the library. Two ways to the same
+ * screen because they answer two different impulses: one is reading the
+ * heading and wanting the rest, the other is reaching the end of four tiles
+ * and wanting a fifth.
  */
-export const FoodQuickAddRow = memo(({ items, onAdd, onPressMore }: Props) => {
-  const { colors } = useTheme();
+export const FoodQuickAddRow = memo(
+  ({ items, onAdd, onPressMore, onPressViewAll }: Props) => {
+    const { colors } = useTheme();
 
-  return (
-    <VStack gap="sm">
-      <AppText variant="h3">Quick Add</AppText>
+    return (
+      <VStack gap="sm">
+        <HStack align="center" gap="sm">
+          <AppText variant="h3">Quick Add</AppText>
 
-      <HStack align="stretch" gap="sm">
-        {items.map(item => (
-          <QuickAddTile key={item.id} item={item} onPress={onAdd} />
-        ))}
+          <HStack flex={1} align="center" justify="end">
+            <Pressable
+              onPress={onPressViewAll}
+              feedback="opacity"
+              accessibilityRole="button"
+              accessibilityLabel="View all foods"
+            >
+              <HStack align="center" gap="xxs">
+                <AppText variant="micro" color="primary">
+                  View all
+                </AppText>
+                <Icon as={ChevronRight} size="xs" color="primary" />
+              </HStack>
+            </Pressable>
+          </HStack>
+        </HStack>
 
-        <Pressable
-          onPress={onPressMore}
-          feedback="scale"
-          accessibilityRole="button"
-          accessibilityLabel="More foods"
-          style={styles.press}
-        >
-          <VStack
-            align="center"
-            gap="xs"
-            py="md"
-            px="xs"
-            style={[styles.tile, { borderColor: colors.border }]}
+        <HStack align="stretch" gap="sm">
+          {items.map(item => (
+            <QuickAddTile key={item.id} item={item} onPress={onAdd} />
+          ))}
+
+          <Pressable
+            onPress={onPressMore}
+            feedback="scale"
+            accessibilityRole="button"
+            accessibilityLabel="More foods"
+            style={styles.press}
           >
-            <Icon as={LayoutGrid} size="md" color="text" />
-            <AppText variant="miniMicro" center numberOfLines={1} style={styles.name}>
-              More
-            </AppText>
-          </VStack>
-        </Pressable>
-      </HStack>
-    </VStack>
-  );
-});
+            <VStack
+              align="center"
+              gap="xs"
+              py="md"
+              px="xs"
+              style={[styles.tile, { borderColor: colors.border }]}
+            >
+              <Icon as={LayoutGrid} size="md" color="text" />
+              <AppText
+                variant="miniMicro"
+                center
+                numberOfLines={1}
+                style={styles.name}
+              >
+                More
+              </AppText>
+            </VStack>
+          </Pressable>
+        </HStack>
+      </VStack>
+    );
+  },
+);
 
 FoodQuickAddRow.displayName = 'FoodQuickAddRow';
 

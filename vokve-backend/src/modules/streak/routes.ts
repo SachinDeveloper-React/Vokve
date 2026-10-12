@@ -4,7 +4,14 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { idempotent } from '../../middleware/idempotency.js';
 import { validate } from '../../middleware/validate.js';
-import { freezeToday, getStreak, getStreakHistory, restoreStreak } from './service.js';
+import {
+  freezeToday,
+  getStreak,
+  getStreakDay,
+  getStreakDayEvents,
+  getStreakHistory,
+  restoreStreak,
+} from './service.js';
 
 export const streakRouter = Router();
 streakRouter.use('/streak', requireAuth, requireDevice);
@@ -23,6 +30,27 @@ const historyQuery = z.object({
 streakRouter.get('/streak/history', validate('query', historyQuery), async (req, res) => {
   const { cursor, limit } = req.query as z.infer<typeof historyQuery>;
   res.json(await getStreakHistory(req.ctx.userId!, req.ctx.timezone, { cursor, limit }));
+});
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD.');
+const dayQuery = z.object({ date: isoDate });
+
+/** One day of the streak in full, from a cell of the calendar (BACKEND §6.5). */
+streakRouter.get('/streak/day', validate('query', dayQuery), async (req, res) => {
+  const { date } = req.query as z.infer<typeof dayQuery>;
+  res.json(await getStreakDay(req.ctx.userId!, req.ctx.timezone, date));
+});
+
+const dayEventsQuery = dayQuery.extend({
+  /** An offset into the day's own log, not a date — see `getStreakDayEvents`. */
+  cursor: z.string().regex(/^\d{1,6}$/, 'Use the cursor the last page gave.').optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+/** The day's log — what decided it, the workouts, the coins, the water, the food. */
+streakRouter.get('/streak/day/events', validate('query', dayEventsQuery), async (req, res) => {
+  const { date, cursor, limit } = req.query as unknown as z.infer<typeof dayEventsQuery>;
+  res.json(await getStreakDayEvents(req.ctx.userId!, req.ctx.timezone, date, { cursor, limit }));
 });
 
 /** Spends a freeze on today; refused with nothing spent when it cannot help (RULES S4). */

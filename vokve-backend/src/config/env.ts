@@ -47,6 +47,16 @@ const envSchema = z.object({
     .transform(v => v === 'true' || v === '1'),
   LOG_LEVEL: z.string().default('info'),
 
+  /**
+   * The operator's key for the admin HTTP API (`/v1/admin/*`), which is how
+   * diet plans and other curated content are written. Unset means the admin
+   * surface does not exist on this server: the routes answer 404, so a box
+   * that was never meant to be administered does not advertise a door.
+   */
+  ADMIN_API_KEY: z.string().min(24).optional(),
+  /** Who the audit log records for admin writes. */
+  ADMIN_ACTOR: z.string().default('admin'),
+
   /** Email channel (OTP). Any SMTP — Gmail app password works for dev. Unset = no email channel. */
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),

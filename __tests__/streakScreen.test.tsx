@@ -311,6 +311,33 @@ describe('StreakScreen', () => {
     }
   });
 
+  test('a day on the calendar opens that day, and a day still to come does not', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    const tree = await render();
+
+    await press(tree, `${formatLongDate(d(1))}, completed, current streak`);
+    expect(mockNavigate).toHaveBeenCalledWith('StreakDay', { date: d(1) });
+
+    // A day that has not happened is drawn for the shape of the month, not
+    // as a way into a day with nothing on it.
+    const ahead = addDays(TODAY, 1);
+    const future = tree.root
+      .findAll(n => n.props?.accessibilityLabel === formatLongDate(ahead))
+      .find(n => typeof n.props.onPress === 'function');
+    expect(future).toBeUndefined();
+  });
+
+  test('a row of the record on the streak screen opens its day', async () => {
+    showStreak(summaryOf(run(2, 0)));
+    const tree = await render();
+    await ReactTestRenderer.act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    await press(tree, `Day 2, ${formatLongDate(d(1))}, Completed. 8,932 steps`);
+    expect(mockNavigate).toHaveBeenCalledWith('StreakDay', { date: d(1) });
+  });
+
   test("a milestone the record has passed shows as earned, from the server's ladder", async () => {
     showStreak(summaryOf(run(6, 0))); // exactly seven days
     const labels = labelsOf(await render());

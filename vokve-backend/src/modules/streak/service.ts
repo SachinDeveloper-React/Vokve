@@ -1,28 +1,39 @@
 import { getConfig } from '../../config/remote.js';
 import type { AppConfig } from '../../config/defaults.js';
 import {
+  streakDayDetailSchema,
+  streakDayEventsPageSchema,
   streakHistoryPageSchema,
   streakRestoreResultSchema,
   streakSummarySchema,
+  type StreakDayDetail,
+  type StreakDayEvent,
+  type StreakDayEventsPage,
+  type StreakDayMetric,
+  type StreakDayStatus,
   type StreakHistoryPage,
+  type StreakHistoryStatus,
   type StreakMilestone,
   type StreakRestoreResult,
   type StreakRun,
   type StreakSummary,
 } from '../../contracts/index.js';
 import { withTransaction } from '../../db/mongo.js';
-import { addDays, localDayOf, localHourOf, type IsoDate } from '../../lib/dates.js';
+import { addDays, localDayOf, localHourOf, localMidnightUtc, type IsoDate } from '../../lib/dates.js';
 import { ApiError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { toCoins } from '../../lib/coins.js';
 import { ActivityDailyModel } from '../activity/models.js';
 import { evaluateAchievements } from '../challenges/service.js';
-import { CoinBalanceModel, CoinLedgerModel } from '../economy/models.js';
+import { CoinBalanceModel, CoinLedgerModel, type CoinSource } from '../economy/models.js';
 import { credit, debitInSession } from '../economy/service.js';
+import { HydrationEntryModel } from '../hydration/models.js';
 import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { notify } from '../notifications/service.js';
+import { FoodEntryModel } from '../nutrition/models.js';
+import { WorkoutModel } from '../training/models.js';
 import { StreakDayModel, StreakStateModel, type StreakDaySource } from './models.js';
-import { currentRunOf, currentStreakOf, daysBetween, longestStreakOf, restoreGapOf } from './rules.js';
+import { currentRunOf, currentStreakOf, daysBetween, longestStreakOf, restoreGapOf, runAt } from './rules.js';
 
 /**
  * The streak (RULES §S), on the server: which days count, the figures drawn
@@ -34,7 +45,7 @@ import { currentRunOf, currentStreakOf, daysBetween, longestStreakOf, restoreGap
 const MILESTONE_REFERENCE = 'streak_milestone';
 const RESTORE_REFERENCE = 'streak_restore';
 
-export { currentRunOf, currentStreakOf, daysBetween, longestStreakOf, restoreGapOf } from './rules.js';
+export { currentRunOf, currentStreakOf, daysBetween, longestStreakOf, restoreGapOf, runAt } from './rules.js';
 
 /** What makes a day count, in a sentence, from the rules in force. */
 export function howToEarn(config: AppConfig, dailyStepGoal: number): string {
@@ -145,6 +156,43 @@ const HISTORY_MAX_PAGE = 100;
 const fmtSteps = (steps: number) => Math.round(steps).toLocaleString('en-IN');
 
 /**
+ * How a day went and what is worth saying about it, in the server's words.
+ *
+ * Shared by the record (`GET /streak/history`) and the day's own screen
+ * (`GET /streak/day`): a row and the page it opens must never word the same
+ * day differently, and what a restore cost is the ledger's to say in both.
+ */
+function wordDay(
+  kind: string | null,
+  steps: number,
+  restore: { cost: number; span: number },
+): { status: StreakHistoryStatus; detail: string } {
+  if (kind === null) {
+    return {
+      status: 'missed',
+      detail: steps > 0 ? `${fmtSteps(steps)} steps — short of your goal` : 'No activity',
+    };
+  }
+  if (kind === 'frozen') return { status: 'frozen', detail: 'Freeze used' };
+  if (kind === 'restored') {
+    const { cost, span } = restore;
+    return {
+      status: 'restored',
+      detail:
+        cost === 0
+          ? 'Restored'
+          : span > 1
+            ? `Restored (${fmtSteps(cost)} coins for ${span} days)`
+            : `Restored (${fmtSteps(cost)} coins)`,
+    };
+  }
+  return {
+    status: 'completed',
+    detail: steps > 0 ? `${fmtSteps(steps)} steps` : 'Workout completed',
+  };
+}
+
+/**
  * `GET /streak/history?cursor=&limit=`: the streak's record, newest first,
  * back to the first day that ever counted.
  *
@@ -227,44 +275,11 @@ export async function getStreakHistory(
   const data = dates.map(date => {
     const row = byDay.get(date);
     const steps = stepsOn.get(date) ?? 0;
-
-    if (!row) {
-      return {
-        date,
-        day: null,
-        status: 'missed' as const,
-        detail: steps > 0 ? `${fmtSteps(steps)} steps — short of your goal` : 'No activity',
-        steps,
-      };
-    }
-
-    const day = runIndex.get(date) ?? null;
-    if (row.kind === 'frozen') {
-      return { date, day, status: 'frozen' as const, detail: 'Freeze used', steps };
-    }
-    if (row.kind === 'restored') {
-      const cost = restoreCost.get(row.referenceId ?? '') ?? 0;
-      const span = restoreSpan.get(row.referenceId ?? '') ?? 1;
-      return {
-        date,
-        day,
-        status: 'restored' as const,
-        detail:
-          cost === 0
-            ? 'Restored'
-            : span > 1
-              ? `Restored (${fmtSteps(cost)} coins for ${span} days)`
-              : `Restored (${fmtSteps(cost)} coins)`,
-        steps,
-      };
-    }
-    return {
-      date,
-      day,
-      status: 'completed' as const,
-      detail: steps > 0 ? `${fmtSteps(steps)} steps` : 'Workout completed',
-      steps,
-    };
+    const worded = wordDay(row?.kind ?? null, steps, {
+      cost: restoreCost.get(row?.referenceId ?? '') ?? 0,
+      span: restoreSpan.get(row?.referenceId ?? '') ?? 1,
+    });
+    return { date, day: row ? runIndex.get(date) ?? null : null, ...worded, steps };
   });
 
   const oldest = dates[dates.length - 1];
@@ -272,6 +287,312 @@ export async function getStreakHistory(
     data,
     nextCursor: oldest > first ? oldest : null,
     total: daysBetween(first, today) + 1,
+  });
+}
+
+// ─── One day (RULES S11) ───────────────────────────────────────────────────
+
+/** How many rows a page of the day's log carries by default. */
+const DAY_EVENTS_PAGE = 20;
+const DAY_EVENTS_MAX_PAGE = 100;
+
+const fmtNumber = (value: number) => Math.round(value).toLocaleString('en-IN');
+
+/** Coins, to three decimals — a step credit can be 0.095 (D-27). */
+const roundCoins = (coins: number) => Math.round(coins * 1000) / 1000;
+
+/** What a ledger row is called on a day's log. */
+const COIN_SOURCE_WORDS: Record<CoinSource, string> = {
+  steps: 'Steps',
+  workout: 'Workout',
+  streak: 'Streak',
+  challenge: 'Challenge',
+  referral: 'Referral',
+  purchase: 'Order',
+  refund: 'Refund',
+};
+
+/**
+ * The ledger rows written during one local day.
+ *
+ * By `createdAt` inside the day's own midnights rather than by a stored day:
+ * the ledger has no `localDay` of its own (the daily cap is what keeps that),
+ * and coins are earned when they are written.
+ */
+async function ledgerOnDay(userId: string, date: IsoDate, timeZone: string) {
+  return CoinLedgerModel.find(
+    {
+      userId,
+      createdAt: {
+        $gte: localMidnightUtc(date, timeZone),
+        $lt: localMidnightUtc(addDays(date, 1), timeZone),
+      },
+    },
+    { amountMc: 1, title: 1, source: 1, createdAt: 1 },
+  )
+    .sort({ createdAt: -1 })
+    .lean();
+}
+
+/** What a restored day cost, and over how many days that one debit was spread. */
+async function restoreCostOf(userId: string, referenceId: string | null | undefined) {
+  if (!referenceId) return { cost: 0, span: 1 };
+  const [debit, span] = await Promise.all([
+    CoinLedgerModel.findById(referenceId, { amountMc: 1 }).lean(),
+    StreakDayModel.countDocuments({ userId, kind: 'restored', referenceId }),
+  ]);
+  return { cost: debit ? Math.abs(toCoins(debit.amountMc)) : 0, span: Math.max(1, span) };
+}
+
+/**
+ * `GET /streak/day?date=`: one day of the streak in full — how it went, the
+ * figures behind it, and the days either side.
+ *
+ * The same read as the record's row, with the day's own numbers added, and
+ * worded by the same `wordDay`: tapping a cell of the calendar must not
+ * change the story the list told about it.
+ *
+ * Nothing is recomputed (RULES D2). Whether the day counted is the
+ * `streak_days` row written when the day was decided, not a fresh judgement
+ * under today's goal — a member who raised their goal last week still sees
+ * the days they earned under the old one.
+ */
+export async function getStreakDay(
+  userId: string,
+  timeZone: string,
+  date: IsoDate,
+  now = new Date(),
+): Promise<StreakDayDetail> {
+  const config = await getConfig();
+  const today = localDayOf(now, timeZone);
+
+  const [row, activity, settings, days, oldestActivity, water, food, ledger] = await Promise.all([
+    StreakDayModel.findById(`${userId}:${date}`).lean(),
+    ActivityDailyModel.findById(`${userId}:${date}`).lean(),
+    UserSettingsModel.findById(userId, { dailyStepGoal: 1, dailyWaterGoalMl: 1 }).lean(),
+    daysOf(userId),
+    ActivityDailyModel.findOne({ userId }, { localDay: 1 }).sort({ localDay: 1 }).lean(),
+    HydrationEntryModel.find({ userId, localDay: date, deletedAt: null }, { ml: 1 }).lean(),
+    FoodEntryModel.find({ userId, localDay: date, deletedAt: null }, { calories: 1 }).lean(),
+    ledgerOnDay(userId, date, timeZone),
+  ]);
+
+  const stepGoal = settings?.dailyStepGoal ?? 10_000;
+  const steps = Math.round(activity?.verifiedSteps ?? 0);
+  const upcoming = date > today;
+
+  const run = runAt(days.all, date);
+  const current = currentRunOf(days.all, today);
+  const day = run ? daysBetween(run.start, date) + 1 : null;
+  const worded = wordDay(row?.kind ?? null, steps, await restoreCostOf(userId, row?.referenceId));
+  const status: StreakDayStatus = upcoming ? 'upcoming' : worded.status;
+
+  const title = upcoming
+    ? 'Still to come'
+    : run && day !== null
+      ? current !== null && current.start === run.start
+        ? `Day ${day} of your current streak`
+        : `Day ${day} of a ${run.length}-day run`
+      : date === today
+        ? 'Not counted yet'
+        : 'Day missed';
+
+  // The way back stops at the first day anything is known about — a counting
+  // day, or a day the phone sent steps for. Paging further would be paging
+  // through days that could only ever read "No activity".
+  const recorded = [...days.all].sort();
+  const earliest = [recorded[0], oldestActivity?.localDay, today]
+    .filter((value): value is IsoDate => typeof value === 'string')
+    .sort()[0];
+
+  const metrics: StreakDayMetric[] = [];
+  if (!upcoming) {
+    const consumedMl = water.reduce((sum, entry) => sum + entry.ml, 0);
+    const eaten = food.reduce((sum, entry) => sum + entry.calories, 0);
+    metrics.push(
+      { id: 'distance', label: 'Distance', value: `${(activity?.distanceKm ?? 0).toFixed(1)} km`, caption: null },
+      { id: 'activeMinutes', label: 'Active', value: `${fmtNumber(activity?.activeMinutes ?? 0)} min`, caption: null },
+      {
+        id: 'calories',
+        label: 'Calories',
+        value: `${fmtNumber((activity?.caloriesBurned ?? 0) + (activity?.stepCalories ?? 0))} kcal`,
+        caption: 'Walking and workouts',
+      },
+      { id: 'workouts', label: 'Workouts', value: fmtNumber(activity?.workoutsCompleted ?? 0), caption: null },
+    );
+    // Water and food only when there is something to report: a row reading
+    // "0 ml" says nothing about a day the member never opened the screen on.
+    if (consumedMl > 0) {
+      metrics.push({
+        id: 'water',
+        label: 'Water',
+        value: `${fmtNumber(consumedMl)} ml`,
+        caption: `Goal ${fmtNumber(settings?.dailyWaterGoalMl ?? 2_500)} ml`,
+      });
+    }
+    if (eaten > 0) {
+      metrics.push({
+        id: 'food',
+        label: 'Food',
+        value: `${fmtNumber(eaten)} kcal`,
+        caption: `${food.length} ${food.length === 1 ? 'item' : 'items'} logged`,
+      });
+    }
+  }
+
+  // What is still open about the day: a restore while it is inside the window
+  // (RULES S6), otherwise what it would have taken to count.
+  const gap = restoreGapOf(days.all, today, config.streak.restoreWindowDays);
+  const note = upcoming
+    ? null
+    : gap.includes(date)
+      ? `A restore would bring this day back for ${fmtNumber(config.streak.restoreCost)} coins.`
+      : row
+        ? null
+        : howToEarn(config, stepGoal);
+
+  return streakDayDetailSchema.parse({
+    date,
+    today,
+    status,
+    title,
+    detail: upcoming ? 'This day has not happened yet.' : worded.detail,
+    day,
+    run,
+    counted: row !== null && row !== undefined,
+    steps,
+    stepGoal,
+    goalMet: steps >= stepGoal,
+    verified: activity?.verified ?? false,
+    metrics,
+    coinsEarned: roundCoins(toCoins(ledger.reduce((sum, entry) => sum + entry.amountMc, 0))),
+    note,
+    previousDate: date > earliest ? addDays(date, -1) : null,
+    nextDate: date < today ? addDays(date, 1) : null,
+  });
+}
+
+/**
+ * `GET /streak/day/events?date=&cursor=&limit=`: everything the day holds, in
+ * one list, newest first — what decided the day, the workouts done, the coins
+ * it moved, the water drunk and the food logged.
+ *
+ * Built whole and then sliced, rather than paged in the database: the rows
+ * come from five collections with five different clocks, and a cursor into
+ * any one of them could not order the others. One local day is bounded — a
+ * few dozen rows — so the whole of it is the cheapest correct page, and the
+ * `total` is exact rather than an estimate. The cursor is an offset, which
+ * for a day that is over can never shift under the reader.
+ */
+export async function getStreakDayEvents(
+  userId: string,
+  timeZone: string,
+  date: IsoDate,
+  options: { cursor?: string; limit?: number } = {},
+): Promise<StreakDayEventsPage> {
+  const limit = Math.min(DAY_EVENTS_MAX_PAGE, Math.max(1, options.limit ?? DAY_EVENTS_PAGE));
+  const offset = Math.max(0, Number(options.cursor ?? 0));
+
+  const [row, activity, workouts, ledger, water, food] = await Promise.all([
+    StreakDayModel.findById(`${userId}:${date}`).lean(),
+    ActivityDailyModel.findById(`${userId}:${date}`, { verifiedSteps: 1 }).lean(),
+    WorkoutModel.find(
+      { userId, localDay: date, deletedAt: null },
+      { title: 1, startedAt: 1, completedAt: 1, caloriesBurned: 1, totalVolumeKg: 1 },
+    ).lean(),
+    ledgerOnDay(userId, date, timeZone),
+    HydrationEntryModel.find({ userId, localDay: date, deletedAt: null }, { ml: 1, at: 1 }).lean(),
+    FoodEntryModel.find({ userId, localDay: date, deletedAt: null }, { name: 1, slot: 1, calories: 1, loggedAt: 1 }).lean(),
+  ]);
+
+  const events: StreakDayEvent[] = [];
+
+  if (row) {
+    const worded = wordDay(row.kind, Math.round(activity?.verifiedSteps ?? 0), await restoreCostOf(userId, row.referenceId));
+    events.push({
+      id: `streak:${date}`,
+      kind: 'streak',
+      title:
+        row.kind === 'frozen'
+          ? 'Streak Freeze used'
+          : row.kind === 'restored'
+            ? 'Day restored'
+            : row.source === 'workout'
+              ? 'Workout counted the day'
+              : 'Step goal reached',
+      detail: worded.detail,
+      at: (row as { createdAt?: Date }).createdAt?.toISOString() ?? null,
+      coins: null,
+    });
+  }
+
+  for (const entry of workouts) {
+    const minutes = entry.completedAt
+      ? Math.max(0, Math.round((entry.completedAt.getTime() - entry.startedAt.getTime()) / 60_000))
+      : null;
+    events.push({
+      id: `workout:${entry._id}`,
+      kind: 'workout',
+      title: entry.title,
+      detail: [
+        minutes === null ? null : `${minutes} min`,
+        entry.caloriesBurned ? `${fmtNumber(entry.caloriesBurned)} kcal` : null,
+        entry.totalVolumeKg ? `${fmtNumber(entry.totalVolumeKg)} kg lifted` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ') || null,
+      at: (entry.completedAt ?? entry.startedAt).toISOString(),
+      coins: null,
+    });
+  }
+
+  for (const entry of ledger) {
+    events.push({
+      id: `coins:${entry._id}`,
+      kind: 'coins',
+      title: entry.title,
+      detail: COIN_SOURCE_WORDS[entry.source as CoinSource] ?? null,
+      at: entry.createdAt.toISOString(),
+      coins: roundCoins(toCoins(entry.amountMc)),
+    });
+  }
+
+  for (const entry of water) {
+    events.push({
+      id: `water:${entry._id}`,
+      kind: 'water',
+      title: `${fmtNumber(entry.ml)} ml of water`,
+      detail: null,
+      at: entry.at.toISOString(),
+      coins: null,
+    });
+  }
+
+  for (const entry of food) {
+    events.push({
+      id: `meal:${entry._id}`,
+      kind: 'meal',
+      title: entry.name,
+      detail: `${entry.slot[0].toUpperCase()}${entry.slot.slice(1)} · ${fmtNumber(entry.calories)} kcal`,
+      at: entry.loggedAt.toISOString(),
+      coins: null,
+    });
+  }
+
+  // Newest first, with anything undated last — and the id as the tie-break,
+  // so two rows written in the same millisecond keep one order between pages.
+  events.sort((a, b) => {
+    if (a.at === b.at) return a.id < b.id ? 1 : -1;
+    if (a.at === null) return 1;
+    if (b.at === null) return -1;
+    return a.at < b.at ? 1 : -1;
+  });
+
+  const page = events.slice(offset, offset + limit);
+  return streakDayEventsPageSchema.parse({
+    data: page,
+    nextCursor: offset + page.length < events.length ? String(offset + page.length) : null,
+    total: events.length,
   });
 }
 

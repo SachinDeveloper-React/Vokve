@@ -118,6 +118,8 @@ export const CONFIG_DEFAULTS = {
     maxAgeDays: 30,
     /** How many search results `GET /foods` returns at most. */
     searchLimit: 25,
+    /** How many foods one page of `GET /foods/library` holds at most. */
+    libraryPageSize: 20,
   },
   /** Water (RULES §Y). */
   hydration: {

@@ -32,6 +32,8 @@ interface Props {
   /** Jumps back to the month the user is actually in. */
   onPressToday?: () => void;
   onPressHowItWorks: () => void;
+  /** Opens one day of the month in full. */
+  onPressDay?: (date: IsoDate) => void;
 }
 
 /** The freeze line at the foot, by state. */
@@ -64,6 +66,7 @@ export const StreakCalendarCard = memo(
     onPressInfo,
     onPressToday,
     onPressHowItWorks,
+    onPressDay,
   }: Props) => (
     <Card radius="xl" padding="base">
       <VStack gap="base">
@@ -89,6 +92,7 @@ export const StreakCalendarCard = memo(
           completedDays={completedDays}
           protectedDays={protectedDays}
           streakDays={streakDays}
+          onPressDay={onPressDay}
         />
 
         <CalendarLegend />

@@ -1,10 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Alert } from '../../components/feedback/Alert';
 import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
+import { DayTotalsCard } from '../../components/history/DayTotalsCard';
+import { RangeSummaryCard } from '../../components/history/RangeSummaryCard';
 import { CalorieSummaryCard } from '../../components/nutrition/CalorieSummaryCard';
 import { DailyGoalCard } from '../../components/nutrition/DailyGoalCard';
+import { GoalEditorSheet } from '../../components/nutrition/GoalEditorSheet';
 import { MealsCard } from '../../components/nutrition/MealsCard';
 import { NutritionHeader } from '../../components/nutrition/NutritionHeader';
 import {
@@ -21,10 +25,11 @@ import {
   NUTRITION_GOAL_LABEL,
 } from '../../components/nutrition/nutritionLabels';
 import { LoadState } from '../../components/ui/LoadState';
+import { Button } from '../../components/ui/Button';
 import { Screen } from '../../components/ui/Screen';
 import { useActivityDay } from '../../hooks/useActivity';
 import { useTip } from '../../hooks/useContent';
-import { useNutritionDay } from '../../hooks/useNutrition';
+import { useNutritionDay, useNutritionDays } from '../../hooks/useNutrition';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
@@ -35,13 +40,27 @@ import type {
   MealPlan,
   MealSlot,
   NutritionGoal,
+  NutritionGoals,
 } from '../../types/models';
-import { todayIso, type IsoDate } from '../../utils/date';
+import { addDays, todayIso, type IsoDate } from '../../utils/date';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
   });
+
+/**
+ * How many days each period covers, counting back from the day on the chip.
+ *
+ * A run of days ending on the chosen day rather than a calendar week or month:
+ * the chip sits beside a date, so "Week" has to mean something relative to
+ * that date, and "the seven days up to here" is the only reading that holds
+ * however far back the user has paged.
+ */
+const PERIOD_DAYS: Record<Exclude<NutritionPeriod, 'day'>, number> = {
+  week: 7,
+  month: 30,
+};
 
 /** What each preference tile offers, in the order the sheet lists them. */
 const DIET_OPTIONS = Object.keys(DIET_LABEL) as DietType[];
@@ -58,6 +77,12 @@ const GOAL_OPTIONS = Object.keys(NUTRITION_GOAL_LABEL) as NutritionGoal[];
  * the only reason the "+" belongs on this screen rather than behind a
  * separate diary. The targets and preferences are the server's profile; the
  * tip is the day's from its content.
+ *
+ * Week and Month read the same diary a run of days at a time
+ * (`GET /nutrition/days`) and are **averaged, not added**: the targets are
+ * daily ones, so a week's total has nothing on this screen to be measured
+ * against. Those periods show the day-by-day list in place of the meal rows,
+ * since a meal breakdown of thirty days is a different screen (the history).
  *
  * Calories burned are the server's figure for the day's activity rather than
  * the plate's: they are the one figure here the user does not eat, and the
@@ -79,11 +104,26 @@ export const NutritionScreen = () => {
   const isSyncing = useNutritionStore(s => s.isSyncing);
   const syncError = useNutritionStore(s => s.syncError);
   const hydrateFromServer = useNutritionStore(s => s.hydrateFromServer);
+  const clearSyncError = useNutritionStore(s => s.clearSyncError);
   const refreshIfStale = useNutritionStore(s => s.refreshIfStale);
   const setPreferences = useNutritionStore(s => s.setPreferences);
   const day = useNutritionDay(date);
   const burned = useActivityDay(date).data?.caloriesBurned ?? 0;
   const tip = useTip('nutrition');
+
+  // The days a week or a month covers, and what each came to. Asked for only
+  // while one of those chips is chosen: on the day view there is nothing to
+  // average, and a read nobody is looking at is still a read.
+  const periodDates = useMemo(
+    () =>
+      period === 'day'
+        ? []
+        : Array.from({ length: PERIOD_DAYS[period] }, (_, index) =>
+            addDays(date, -(PERIOD_DAYS[period] - 1 - index)),
+          ),
+    [date, period],
+  );
+  const periodDays = useNutritionDays(periodDates);
 
   useRefreshOnFocus(refreshIfStale);
 
@@ -99,12 +139,32 @@ export const NutritionScreen = () => {
     }
   }, [hydrateFromServer, reloadDay]);
   const [isCalendarOpen, setCalendarOpen] = useState(false);
+  const [isGoalOpen, setGoalOpen] = useState(false);
   /** Which preference picker is open, or null while none is. */
   const [editing, setEditing] = useState<PreferenceKind | null>(null);
 
   const openCalendar = useCallback(() => setCalendarOpen(true), []);
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
   const closeEditing = useCallback(() => setEditing(null), []);
+  const retrySync = useCallback(() => {
+    clearSyncError();
+    hydrateFromServer();
+  }, [clearSyncError, hydrateFromServer]);
+
+  const openGoal = useCallback(() => setGoalOpen(true), []);
+  const closeGoal = useCallback(() => setGoalOpen(false), []);
+
+  const setGoals = useNutritionStore(s => s.setGoals);
+  const saveGoals = useCallback(
+    (goals: NutritionGoals) => setGoals(goals),
+    [setGoals],
+  );
+
+  /** Tapping a day in the week or month list brings the day view to it. */
+  const openDay = useCallback((picked: IsoDate) => {
+    setDate(picked);
+    setPeriod('day');
+  }, []);
 
   /**
    * The picker's options, built from whichever preference was tapped. One
@@ -216,6 +276,26 @@ export const NutritionScreen = () => {
           onPressDate={openCalendar}
         />
 
+        {/* A meal that could not be sent, or that the server refused, is said
+            here. Without this a refused plate appears for a second and then
+            vanishes, and the user is left thinking the app lost it. */}
+        {profile !== null && syncError !== null ? (
+          <Alert
+            tone="warning"
+            title="A meal didn't save"
+            message={syncError}
+            onDismiss={clearSyncError}
+            action={
+              <Button
+                label="Try again"
+                variant="secondary"
+                size="sm"
+                onPress={retrySync}
+              />
+            }
+          />
+        ) : null}
+
         {profile === null ? (
           <LoadState
             loading={isSyncing || syncError === null}
@@ -225,30 +305,64 @@ export const NutritionScreen = () => {
           />
         ) : (
           <>
-            <CalorieSummaryCard
-              consumed={day.totals.calories}
-              goal={profile.goals.calories}
-              burned={burned}
-              proteinG={day.totals.proteinG}
-              carbsG={day.totals.carbsG}
-              fatsG={day.totals.fatsG}
-              proteinGoalG={profile.goals.proteinG}
-              carbsGoalG={profile.goals.carbsG}
-              fatsGoalG={profile.goals.fatsG}
-              onPressLearnMore={notImplemented}
-            />
+            {/* A week or a month is averaged rather than added up: nobody has
+                a weekly calorie target, and a ring drawing 13,000 against
+                2,200 would be a picture of nothing. */}
+            {period === 'day' ? (
+              <CalorieSummaryCard
+                consumed={day.totals.calories}
+                goal={profile.goals.calories}
+                burned={burned}
+                proteinG={day.totals.proteinG}
+                carbsG={day.totals.carbsG}
+                fatsG={day.totals.fatsG}
+                proteinGoalG={profile.goals.proteinG}
+                carbsGoalG={profile.goals.carbsG}
+                fatsGoalG={profile.goals.fatsG}
+                onPressLearnMore={notImplemented}
+              />
+            ) : periodDays.data ? (
+              <RangeSummaryCard
+                title={period === 'week' ? 'The last 7 days' : 'The last 30 days'}
+                days={periodDays.data}
+                goals={profile.goals}
+              />
+            ) : (
+              <LoadState
+                loading={periodDays.loading}
+                title={
+                  period === 'week'
+                    ? "Couldn't load the week"
+                    : "Couldn't load the month"
+                }
+                message={periodDays.error}
+                onRetry={periodDays.reload}
+              />
+            )}
 
             <DailyGoalCard
               calories={profile.goals.calories}
               proteinG={profile.goals.proteinG}
               carbsG={profile.goals.carbsG}
               fatsG={profile.goals.fatsG}
-              onPressEdit={notImplemented}
+              onPressEdit={openGoal}
             />
           </>
         )}
 
-        {day.loaded ? (
+        {/* The meal rows are one day's; a period gets the day-by-day list
+            instead, whose rows walk back into a single day. */}
+        {period !== 'day' ? (
+          periodDays.data ? (
+            <DayTotalsCard
+              title="Day by day"
+              days={periodDays.data}
+              actionLabel="View All"
+              onPressAction={onOpenHistory}
+              onPressDay={openDay}
+            />
+          ) : null
+        ) : day.loaded ? (
           <MealsCard
             meals={day.meals}
             tip={tip?.text ?? null}
@@ -290,6 +404,15 @@ export const NutritionScreen = () => {
         onClose={closeCalendar}
         title="Show nutrition for"
       />
+
+      {profile !== null ? (
+        <GoalEditorSheet
+          visible={isGoalOpen}
+          goals={profile.goals}
+          onSubmit={saveGoals}
+          onClose={closeGoal}
+        />
+      ) : null}
     </Screen>
   );
 };

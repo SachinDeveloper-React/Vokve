@@ -128,6 +128,15 @@ export type RootStackParamList = {
   /** The streak's whole record, from the streak screen's "View All". */
   StreakHistory: undefined;
   /**
+   * One day of the streak in full, from a cell of the calendar or a row of the
+   * record.
+   *
+   * `date` is `YYYY-MM-DD` and is required: the screen is about one particular
+   * day, and a default of "today" would quietly open a different day from the
+   * one that was tapped.
+   */
+  StreakDay: { date: string };
+  /**
    * `tab` picks which half opens — the prizes, or the rules that award them.
    * Optional, so the plain `navigate('LeaderboardRewards')` still lands on the
    * prizes, which is what the account's rewards row wants.
@@ -166,12 +175,19 @@ export type RootStackParamList = {
   Nutrition: undefined;
   /** Opened from the nutrition screen's meal plan preferences. */
   DietPlan: undefined;
+  /** The plan library, from the diet plan screen's "Change plan" (RULES N10). */
+  DietPlans: undefined;
   /**
    * `slot` is the meal whose "+" was pressed and `date` the day being looked
    * at. Both optional, so a plain `navigate('AddMeal')` opens on breakfast,
    * today.
    */
   AddMeal: { slot?: MealSlot; date?: string } | undefined;
+  /**
+   * The whole food library, from the Add Meal screen's "View all" (RULES N8).
+   * Foods picked here land on the meal being assembled, not in the diary.
+   */
+  FoodLibrary: undefined;
   /** Reached from the notification centre and from the account's shortcuts. */
   NotificationSettings: undefined;
   /** Opened from the nutrition screen's "View All" meals link. */

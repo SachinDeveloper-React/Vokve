@@ -87,6 +87,18 @@ interface AuthState {
    */
   updateProfile: (patch: Partial<User>) => Promise<User>;
   /**
+   * Re-reads the signed-in member from the server (`GET /me`).
+   *
+   * The session's copy of the user is taken at launch and then only replaced
+   * by the writes this app makes — but the server moves it too: a weight
+   * logged on the health screen becomes the profile's weight (RULES V4), and
+   * another phone can save a profile edit. Any screen that *shows the
+   * member's own figures back to them* asks for them again rather than
+   * trusting that snapshot. Silent: a screen that already has something to
+   * show must not be emptied because the network was busy.
+   */
+  refreshUser: () => Promise<User | null>;
+  /**
    * Replaces the profile photo, or drops it when passed null (RULES P10).
    * Throws the `ApiError` so the picker can word a refusal — a photo too
    * large is something the member can act on.
@@ -450,6 +462,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       set({ isSavingAvatar: false });
       throw toApiError(error);
+    }
+  },
+
+  refreshUser: async () => {
+    // No session, nothing to read: the splash is what asks in that case.
+    if (!get().user) return null;
+    try {
+      const user = await userApi.me();
+      // An answer that is not a user is not a reason to forget who is signed
+      // in: the screens reading `user` would blank out mid-session.
+      if (!user) return null;
+      set({ user });
+      return user;
+    } catch (error) {
+      logger.warn(
+        'authStore',
+        `Profile refresh failed: ${toApiError(error).code ?? 'unknown'}`,
+      );
+      return null;
     }
   },
 

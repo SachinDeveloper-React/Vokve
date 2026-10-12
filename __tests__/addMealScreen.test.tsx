@@ -19,12 +19,31 @@ import { verdictFor } from '../src/components/meal/MealSummaryCard';
 import { ToastProvider } from '../src/components/feedback/Toast';
 import { ThemeProvider } from '../src/theme';
 import { useNutritionStore } from '../src/stores/nutritionStore';
+import { useMealDraftStore } from '../src/stores/mealDraftStore';
+import { seedFoodEntries } from '../src/constants/seedData';
+import { addDays, todayIso } from '../src/utils/date';
+import { ApiError } from '../src/services/api/errors';
 import { clearServerReads } from '../src/hooks/useServerRead';
 import { mockAuthApi } from '../src/services/api/mockApi';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
-let mockParams: { slot?: 'breakfast' | 'lunch' | 'snack' | 'dinner' } | undefined;
+let mockParams:
+  | { slot?: 'breakfast' | 'lunch' | 'snack' | 'dinner'; date?: string }
+  | undefined;
+
+/**
+ * The screen empties the draft when it leaves the stack, which React
+ * Navigation announces as `beforeRemove`. The listeners are held here so a
+ * test can fire that event — a pop, a hardware back or a swipe — without a
+ * real navigator.
+ */
+let mockRemoveListeners: (() => void)[] = [];
+const fireBeforeRemove = async () => {
+  await ReactTestRenderer.act(async () => {
+    for (const listener of mockRemoveListeners) listener();
+  });
+};
 
 // Only the two hooks are replaced: the theme layer imports `DefaultTheme` from
 // this same module, and a blanket mock takes that down with it.
@@ -34,6 +53,12 @@ jest.mock('@react-navigation/native', () => ({
     navigate: mockNavigate,
     goBack: mockGoBack,
     canGoBack: () => true,
+    addListener: (event: string, listener: () => void) => {
+      if (event === 'beforeRemove') mockRemoveListeners.push(listener);
+      return () => {
+        mockRemoveListeners = mockRemoveListeners.filter(each => each !== listener);
+      };
+    },
   }),
   useRoute: () => ({ params: mockParams }),
 }));
@@ -55,6 +80,13 @@ jest.mock('../src/services/api/endpoints', () => {
         api.mockNutritionApi.searchFoods(query),
       ),
       quickAddFoods: jest.fn(() => api.mockNutritionApi.quickAddFoods()),
+      day: jest.fn((date: string) => api.mockNutritionApi.day(date)),
+      remove: jest.fn((id: string, options: unknown) =>
+        api.mockNutritionApi.remove(id, options),
+      ),
+      createCustomFood: jest.fn((input: unknown) =>
+        api.mockNutritionApi.createCustomFood(input),
+      ),
       log: jest.fn((entries: unknown, options: unknown) =>
         api.mockNutritionApi.log(entries, options),
       ),
@@ -63,7 +95,12 @@ jest.mock('../src/services/api/endpoints', () => {
 });
 
 const { nutritionApi } = jest.requireMock('../src/services/api/endpoints') as {
-  nutritionApi: { searchFoods: jest.Mock; log: jest.Mock };
+  nutritionApi: {
+    searchFoods: jest.Mock;
+    log: jest.Mock;
+    day: jest.Mock;
+    remove: jest.Mock;
+  };
 };
 
 const metrics = {
@@ -81,7 +118,10 @@ beforeEach(async () => {
   await mockAuthApi.signOut();
   nutritionApi.searchFoods.mockClear();
   nutritionApi.log.mockClear();
+  nutritionApi.remove.mockClear();
   useNutritionStore.getState().reset();
+  useMealDraftStore.getState().clear();
+  mockRemoveListeners = [];
 });
 
 /** Lets the server's answers land — and the search's pause pass. */
@@ -121,6 +161,29 @@ const render = async () => {
 
 const allText = (tree: ReactTestRenderer.ReactTestRenderer) =>
   textOf(tree, RNText);
+
+/**
+ * Saving is asynchronous — it waits for the server before it says what
+ * happened — so pressing it has to be awaited, or the test ends while the
+ * handler is still running and finishes against an unmounted tree.
+ */
+const pressAsync = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  prefix: string,
+) => {
+  const node = tree.root
+    .findAll(
+      n =>
+        typeof n.props?.accessibilityLabel === 'string' &&
+        (n.props.accessibilityLabel as string).startsWith(prefix),
+    )
+    .find(n => typeof n.props.onPress === 'function');
+
+  if (!node) throw new Error(`No pressable labelled "${prefix}…"`);
+  await ReactTestRenderer.act(async () => {
+    await node.props.onPress();
+  });
+};
 
 const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
   const node = tree.root
@@ -198,9 +261,12 @@ describe('AddMealScreen', () => {
     press(tree, 'Add Banana');
     expect(allText(tree)).toContain('Added Foods (1)');
 
-    press(tree, 'Remove Banana');
+    // The seed's breakfast holds a banana of its own, so the two bins on this
+    // screen have to be told apart: this one is the draft's.
+    press(tree, 'Remove Banana from this meal');
 
     expect(allText(tree)).toContain('Added Foods (0)');
+    expect(nutritionApi.remove).not.toHaveBeenCalled();
   });
 
   test('search finds a food and adding one clears the term', async () => {
@@ -227,7 +293,7 @@ describe('AddMealScreen', () => {
 
     press(tree, 'Add Banana');
     press(tree, 'Add Boiled Egg');
-    press(tree, 'Save Meal');
+    await pressAsync(tree, 'Save Meal');
     await settle();
 
     // One meal, sent together, each food with its own id.
@@ -260,5 +326,242 @@ describe('AddMealScreen', () => {
     expect(sent()).toEqual([]);
     expect(nutritionApi.log).not.toHaveBeenCalled();
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the draft across screens (D-69)', () => {
+  test('foods picked in the food library survive this screen being rebuilt', async () => {
+    const tree = await render();
+    press(tree, 'Add Banana');
+    expect(allText(tree)).toContain('Added Foods (1)');
+
+    // Pushing the library over this screen can take it off the tree and put
+    // it back when the library pops. What was picked must still be there —
+    // emptying the draft on the way in is what lost it.
+    await ReactTestRenderer.act(() => {
+      tree.unmount();
+    });
+    mounted = null;
+    const second = await render();
+
+    expect(allText(second)).toContain('Added Foods (1)');
+    expect(allText(second)).toContain('Banana');
+
+    // And it can still be saved, which is what the user was trying to do.
+    await pressAsync(second, 'Save Meal');
+    await settle();
+    expect(nutritionApi.log).toHaveBeenCalledTimes(1);
+    const [entries] = nutritionApi.log.mock.calls[0] as [{ name: string }[]];
+    expect(entries.map(entry => entry.name)).toEqual(['Banana']);
+  });
+
+  test('a food added in the library is on the meal when the screen is built', async () => {
+    // What the library screen does: it adds to the same draft.
+    useMealDraftStore.getState().add({
+      id: 'fl-chapati',
+      name: 'Chapati',
+      portion: '1 piece (40 g)',
+      emoji: '🫓',
+      calories: 104,
+      proteinG: 3,
+      carbsG: 20,
+      fatsG: 1.5,
+      fiberG: 2,
+    });
+
+    mockParams = { slot: 'lunch' };
+    const tree = await render();
+
+    expect(allText(tree)).toContain('Added Foods (1)');
+    expect(allText(tree)).toContain('Chapati');
+
+    await pressAsync(tree, 'Save Meal');
+    await settle();
+
+    const [entries] = nutritionApi.log.mock.calls[0] as [
+      { name: string; slot: string }[],
+    ];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ name: 'Chapati', slot: 'lunch' });
+  });
+
+  test('leaving by the chevron throws the meal away', async () => {
+    const tree = await render();
+    press(tree, 'Add Banana');
+    expect(useMealDraftStore.getState().foods).toHaveLength(1);
+
+    press(tree, 'Back');
+
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(useMealDraftStore.getState().foods).toEqual([]);
+    expect(nutritionApi.log).not.toHaveBeenCalled();
+  });
+
+  test('leaving by the hardware back or a swipe throws it away too', async () => {
+    const tree = await render();
+    press(tree, 'Add Banana');
+    expect(useMealDraftStore.getState().foods).toHaveLength(1);
+
+    // No chevron involved: this is the stack telling the screen it is going.
+    await fireBeforeRemove();
+
+    expect(useMealDraftStore.getState().foods).toEqual([]);
+  });
+
+  test('a saved meal leaves nothing behind for the next one', async () => {
+    const tree = await render();
+    press(tree, 'Add Banana');
+    await pressAsync(tree, 'Save Meal');
+    await settle();
+
+    expect(useMealDraftStore.getState().foods).toEqual([]);
+  });
+});
+
+describe('what Save says', () => {
+  test('a meal the server takes is called saved, and the screen leaves', async () => {
+    const tree = await render();
+    press(tree, 'Add Banana');
+    await pressAsync(tree, 'Save Meal');
+    await settle();
+
+    expect(nutritionApi.log).toHaveBeenCalledTimes(1);
+    expect(allText(tree)).toContain('Meal saved');
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    expect(useMealDraftStore.getState().foods).toEqual([]);
+  });
+
+  test('a meal the server refuses keeps the draft and says why', async () => {
+    nutritionApi.log.mockRejectedValueOnce(
+      new ApiError(
+        'validation',
+        'Only the last 30 days can be logged.',
+        422,
+        null,
+        'VALIDATION_FAILED',
+      ),
+    );
+
+    const tree = await render();
+    press(tree, 'Add Banana');
+    await pressAsync(tree, 'Save Meal');
+    await settle();
+
+    // Not "Meal saved": the plate never landed, and saying otherwise is how a
+    // food appears in the diary for a second and then vanishes.
+    const text = allText(tree);
+    expect(text).toContain("This meal wasn't saved");
+    expect(text).toContain('Only the last 30 days can be logged.');
+    expect(text).not.toContain('Meal saved');
+    // The draft stays, so the meal can be fixed rather than retyped.
+    expect(useMealDraftStore.getState().foods).toHaveLength(1);
+    expect(mockGoBack).not.toHaveBeenCalled();
+  });
+
+  test('a 404 on the save is not the meal’s fault: it stays queued', async () => {
+    // A stale server or a wrong base URL answers 404. Dropping somebody's
+    // dinner for that is the one outcome that cannot be undone, so it waits.
+    nutritionApi.log.mockRejectedValueOnce(
+      new ApiError('not_found', 'That could not be found.', 404),
+    );
+
+    const tree = await render();
+    press(tree, 'Add Banana');
+    await pressAsync(tree, 'Save Meal');
+
+    expect(allText(tree)).toContain('Meal waiting to sync');
+    expect(
+      useNutritionStore
+        .getState()
+        .outbox.some(change => change.kind === 'add'),
+    ).toBe(true);
+  });
+
+  test('a meal that cannot go yet says it will sync, and still leaves', async () => {
+    nutritionApi.log.mockRejectedValueOnce(
+      new ApiError('network', 'No connection.'),
+    );
+
+    const tree = await render();
+    press(tree, 'Add Banana');
+    await pressAsync(tree, 'Save Meal');
+    await settle();
+
+    const text = allText(tree);
+    expect(text).toContain('Meal waiting to sync');
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    // It is still queued, so the diary shows it and the next flush sends it.
+    expect(
+      useNutritionStore
+        .getState()
+        .outbox.some(
+          change =>
+            change.kind === 'add' && change.entries[0].name === 'Banana',
+        ),
+    ).toBe(true);
+  });
+});
+
+describe('what the meal already holds', () => {
+  test('a meal that already has food says so instead of reading zero', async () => {
+    // The seed's own lunch, on the day the screen opens.
+    const lunch = seedFoodEntries.filter(entry => entry.slot === 'lunch');
+    expect(lunch.length).toBeGreaterThan(0);
+
+    mockParams = { slot: 'lunch' };
+    const tree = await render();
+
+    const text = allText(tree);
+    expect(text).toContain('Already in Lunch');
+    for (const entry of lunch) {
+      expect(text).toContain(entry.name);
+    }
+    // The draft is still its own thing, and still empty.
+    expect(text).toContain('Added Foods (0)');
+  });
+
+  test('the slot picker moves it to whatever meal is chosen', async () => {
+    mockParams = { slot: 'lunch' };
+    const tree = await render();
+    expect(allText(tree)).toContain('Already in Lunch');
+
+    press(tree, 'Dinner');
+    await settle();
+
+    const text = allText(tree);
+    expect(text).toContain('Already in Dinner');
+    expect(text).not.toContain('Already in Lunch');
+  });
+
+  test('a meal with nothing in it shows no such card at all', async () => {
+    // A day the diary has nothing on: the card is for what is there, so with
+    // nothing there it is not a card reading zero — it is absent.
+    mockParams = { slot: 'lunch', date: addDays(todayIso(), -3) };
+    const tree = await render();
+
+    const text = allText(tree);
+    expect(text).not.toContain('Already in Lunch');
+    expect(text).toContain('Added Foods (0)');
+  });
+
+  test('the bin on a logged row takes it out of the diary', async () => {
+    const lunch = seedFoodEntries.filter(entry => entry.slot === 'lunch');
+    const first = lunch[0];
+
+    mockParams = { slot: 'lunch' };
+    const tree = await render();
+
+    await pressAsync(tree, `Remove ${first.name} from the diary`);
+    await settle();
+
+    // Gone at once, and the server is told under its own id.
+    expect(allText(tree)).not.toContain(first.name);
+    expect(nutritionApi.remove).toHaveBeenCalledWith(
+      first.id,
+      expect.anything(),
+    );
+    // The draft was never involved.
+    expect(useMealDraftStore.getState().foods).toEqual([]);
+    expect(nutritionApi.log).not.toHaveBeenCalled();
   });
 });

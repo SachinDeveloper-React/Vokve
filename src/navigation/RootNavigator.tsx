@@ -19,6 +19,8 @@ import { ChallengeListScreen } from '../screens/main/ChallengeListScreen';
 import { ChallengesScreen } from '../screens/main/ChallengesScreen';
 import { CoinHistoryScreen } from '../screens/main/CoinHistoryScreen';
 import { DietPlanScreen } from '../screens/main/DietPlanScreen';
+import { DietPlansScreen } from '../screens/main/DietPlansScreen';
+import { FoodLibraryScreen } from '../screens/main/FoodLibraryScreen';
 import { HealthCheckupScreen } from '../screens/main/HealthCheckupScreen';
 import { HeartRateScreen } from '../screens/main/HeartRateScreen';
 import { HydrationHistoryScreen } from '../screens/main/HydrationHistoryScreen';
@@ -55,6 +57,7 @@ import { ShopBrowseScreen } from '../screens/main/ShopBrowseScreen';
 import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
 import { WishlistScreen } from '../screens/main/WishlistScreen';
 import { WriteReviewScreen } from '../screens/main/WriteReviewScreen';
+import { StreakDayScreen } from '../screens/main/StreakDayScreen';
 import { StreakHistoryScreen } from '../screens/main/StreakHistoryScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { StepGoalScreen } from '../screens/main/StepGoalScreen';
@@ -204,8 +207,18 @@ export const RootNavigator = () => {
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen
+              name="FoodLibrary"
+              component={FoodLibraryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="DietPlan"
               component={DietPlanScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="DietPlans"
+              component={DietPlansScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen
@@ -411,6 +424,11 @@ export const RootNavigator = () => {
             <Stack.Screen
               name="StreakHistory"
               component={StreakHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="StreakDay"
+              component={StreakDayScreen}
               options={{ animation: 'slide_from_right' }}
             />
             <Stack.Screen

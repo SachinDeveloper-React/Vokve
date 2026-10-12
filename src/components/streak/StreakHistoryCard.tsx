@@ -20,6 +20,8 @@ interface Props {
   /** Days on record in total — what "View All" opens onto. */
   total: number;
   onPressViewAll: () => void;
+  /** Opens one of the rows in full. */
+  onPressDay?: (date: string) => void;
 }
 
 /**
@@ -32,7 +34,7 @@ interface Props {
  * done about it.
  */
 export const StreakHistoryCard = memo(
-  ({ days, loading = false, total, onPressViewAll }: Props) => {
+  ({ days, loading = false, total, onPressViewAll, onPressDay }: Props) => {
     const { colors } = useTheme();
     const visible = days.slice(0, MAX_ROWS);
 
@@ -72,7 +74,7 @@ export const StreakHistoryCard = memo(
             visible.map((entry, index) => (
               <React.Fragment key={entry.date}>
                 {index > 0 ? <Divider /> : null}
-                <StreakHistoryRow entry={entry} />
+                <StreakHistoryRow entry={entry} onPress={onPressDay} />
               </React.Fragment>
             ))
           )}

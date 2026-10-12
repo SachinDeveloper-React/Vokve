@@ -1269,3 +1269,65 @@ describe('mock streak history', () => {
     expect(second.data[0].date < first.data[4].date).toBe(true);
   });
 });
+
+describe('mock streak day', () => {
+  test('words a counted day as the record words it, with the day in its run', async () => {
+    const { data } = await mockStreakApi.history(undefined, 40);
+    const counted = data.find(entry => entry.status === 'completed')!;
+    const day = await mockStreakApi.day(counted.date);
+
+    expect(day).toMatchObject({
+      date: counted.date,
+      status: 'completed',
+      counted: true,
+      day: counted.day,
+      detail: counted.detail,
+    });
+    expect(day.title).toContain(`Day ${counted.day}`);
+    expect(day.run?.length).toBeGreaterThanOrEqual(counted.day!);
+    expect(day.metrics.map(metric => metric.id)).toEqual(
+      expect.arrayContaining(['distance', 'activeMinutes', 'calories']),
+    );
+  });
+
+  test('a missed day counts nothing and says what would have counted it', async () => {
+    const { data } = await mockStreakApi.history(undefined, 40);
+    const missed = data.find(entry => entry.status === 'missed')!;
+    const day = await mockStreakApi.day(missed.date);
+
+    expect(day).toMatchObject({
+      status: 'missed',
+      counted: false,
+      day: null,
+      run: null,
+      goalMet: false,
+    });
+    expect(day.note).not.toBeNull();
+  });
+
+  test('a day still to come is upcoming, and pages nowhere forward', async () => {
+    const today = (await mockStreakApi.get()).today;
+    const tomorrow = addDays(today, 1);
+    const day = await mockStreakApi.day(tomorrow);
+
+    expect(day).toMatchObject({ status: 'upcoming', counted: false });
+    expect(day.metrics).toEqual([]);
+    expect(day.nextDate).toBeNull();
+    expect(day.previousDate).toBe(today);
+  });
+
+  test("the day's log pages on an offset into that one day", async () => {
+    const today = (await mockStreakApi.get()).today;
+    const whole = await mockStreakApi.dayEvents(today, undefined, 100);
+    expect(whole.total).toBe(whole.data.length);
+    expect(whole.nextCursor).toBeNull();
+
+    if (whole.total > 1) {
+      const first = await mockStreakApi.dayEvents(today, undefined, 1);
+      expect(first.data).toHaveLength(1);
+      expect(first.nextCursor).toBe('1');
+      const second = await mockStreakApi.dayEvents(today, first.nextCursor!, 1);
+      expect(second.data[0].id).not.toBe(first.data[0].id);
+    }
+  });
+});

@@ -262,6 +262,13 @@ export const StreakScreen = () => {
     [navigation],
   );
 
+  // A cell of the calendar, or a row of the record under it: both open the
+  // day itself, which is where what happened on it is actually written down.
+  const onPressDay = useCallback(
+    (date: string) => navigation.navigate('StreakDay', { date }),
+    [navigation],
+  );
+
   // The gap banner is a shortcut to the two tools, which are the next thing
   // down the screen: a restore is what it is really offering, so it goes
   // straight there rather than scrolling and leaving the user to find it.
@@ -326,6 +333,7 @@ export const StreakScreen = () => {
               canGoNext={!isCurrentMonth}
               onPressToday={showToday}
               onPressHowItWorks={onPressHelp}
+              onPressDay={onPressDay}
             />
 
             {summary.canRestore ? (
@@ -356,6 +364,7 @@ export const StreakScreen = () => {
               loading={history.isLoading}
               total={history.total}
               onPressViewAll={onViewAllHistory}
+              onPressDay={onPressDay}
             />
 
             {/* Not on the design, kept because it is the only place the

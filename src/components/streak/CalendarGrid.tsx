@@ -16,6 +16,12 @@ interface Props {
   /** The days of the run that is still going. */
   streakDays: Set<IsoDate>;
   today: IsoDate;
+  /**
+   * Opens one day. Only the month's own days that have happened are wired to
+   * it — a neighbouring month's day is drawn for alignment, and a day still
+   * to come has nothing to show.
+   */
+  onPressDay?: (date: IsoDate) => void;
 }
 
 interface Cell {
@@ -69,7 +75,15 @@ function cellsFor(
  * three days that were missed.
  */
 export const CalendarGrid = memo(
-  ({ year, month, completedDays, protectedDays, streakDays, today }: Props) => {
+  ({
+    year,
+    month,
+    completedDays,
+    protectedDays,
+    streakDays,
+    today,
+    onPressDay,
+  }: Props) => {
     const cells = useMemo(
       () => cellsFor(year, month, completedDays, protectedDays, today),
       [year, month, completedDays, protectedDays, today],
@@ -94,6 +108,13 @@ export const CalendarGrid = memo(
               inStreak={cell.status !== 'outside' && streakDays.has(cell.iso)}
               isToday={cell.iso === today}
               accessibilityLabel={formatLongDate(cell.iso)}
+              onPress={
+                onPressDay === undefined ||
+                cell.status === 'outside' ||
+                cell.status === 'future'
+                  ? undefined
+                  : () => onPressDay(cell.iso)
+              }
             />
           ))}
         </Grid>

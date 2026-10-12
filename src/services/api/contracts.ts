@@ -30,8 +30,11 @@ import type {
   DeviceAttestationResult,
   DietPlanDay,
   DietPlanDaySummary,
+  DietPlanDetail,
+  DietPlanSummary,
   FoodEntry,
   FoodItem,
+  FoodLibraryPage,
   DeviceRegistration,
   EarnRule,
   HealthScore,
@@ -68,6 +71,8 @@ import type {
   StepIngestResult,
   StepSourcesReport,
   StreakRestoreResult,
+  StreakDayDetail,
+  StreakDayEventsPage,
   StreakHistoryPage,
   StreakSummary,
   AppGuide,
@@ -674,6 +679,21 @@ export interface StreakApi {
    * leaving the app to infer them from the days it was not sent.
    */
   history(cursor?: string, limit?: number): Promise<StreakHistoryPage>;
+  /**
+   * One day of the streak in full (`YYYY-MM-DD`), opened from a cell of the
+   * calendar or a row of the record: how the day went, the figures behind it,
+   * and the days either side for paging.
+   */
+  day(date: string): Promise<StreakDayDetail>;
+  /**
+   * The day's own log, newest first, a page at a time. The cursor is an
+   * offset into that one day — the server's, not a date.
+   */
+  dayEvents(
+    date: string,
+    cursor?: string,
+    limit?: number,
+  ): Promise<StreakDayEventsPage>;
 }
 
 export interface ChallengeApi {
@@ -756,13 +776,34 @@ export interface ContentApi {
   tip(topic: ContentTopic): Promise<ContentTip>;
 }
 
+/** What `GET /foods/library` takes: a word to narrow by, and where the last page ended. */
+export interface FoodLibraryQuery {
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** A food the member adds themselves (RULES N8). */
+export interface CustomFoodInput {
+  name: string;
+  portion: string;
+  emoji?: string;
+  calories: number;
+  proteinG?: number;
+  carbsG?: number;
+  fatsG?: number;
+  fiberG?: number;
+}
+
 export interface NutritionProfilePatch {
   goals?: Partial<NutritionGoals>;
   preferences?: Partial<NutritionPreferences>;
+  /** A plan from the library, or null to hand the choice back to the server (RULES N10). */
+  selectedPlanId?: string | null;
 }
 
 export interface NutritionApi {
-  /** The targets and the preferences (RULES N4). */
+  /** The targets, the preferences and the chosen plan (RULES N4, N10). */
   profile(): Promise<NutritionProfile>;
   /** Changes them field by field; answers the whole profile as stored. */
   updateProfile(
@@ -784,10 +825,18 @@ export interface NutritionApi {
   searchFoods(query: string): Promise<FoodItem[]>;
   /** The add-meal screen's shortcuts. */
   quickAddFoods(): Promise<FoodItem[]>;
-  /** The plan for a day, chosen from the preferences (RULES N6, N7). */
+  /** A page of the whole library, for the browse screen (RULES N8). */
+  foodLibrary(query: FoodLibraryQuery): Promise<FoodLibraryPage>;
+  /** A food of the member's own, kept for next time (RULES N8). */
+  createCustomFood(input: CustomFoodInput): Promise<FoodItem>;
+  /** The plan for a day — the chosen one, else one from the preferences (RULES N6, N7, N10). */
   plan(date: string): Promise<DietPlanDay>;
   /** A run of days' plans in brief. */
   planDays(from: string, to: string): Promise<DietPlanDaySummary[]>;
+  /** The plans on offer, the ones that suit the user first (RULES N10). */
+  dietPlans(): Promise<DietPlanSummary[]>;
+  /** One plan with every day of it, so it can be read before it is chosen. */
+  dietPlan(id: string): Promise<DietPlanDetail>;
 }
 
 export interface VitalsApi {

@@ -26,6 +26,10 @@ import {
 import {
   achievementSchema,
   dietPlanDaySchema,
+  dietPlanDetailSchema,
+  dietPlanSummarySchema,
+  foodItemSchema,
+  foodLibraryPageSchema,
   healthScoreSchema,
   nutritionDaySchema,
   nutritionProfileSchema,
@@ -49,6 +53,8 @@ import {
   stepGoalSchema,
   stepIngestResultSchema,
   stepSourcesReportSchema,
+  streakDayDetailSchema,
+  streakDayEventsPageSchema,
   streakHistoryPageSchema,
   streakRestoreResultSchema,
   streakSummarySchema,
@@ -67,7 +73,12 @@ import {
   type Challenge,
   type CheckoutResult,
   type ContentTopic,
+  type DietType,
   type FoodEntry,
+  type FoodItem,
+  type MealPlan,
+  type NutritionTotals,
+  type PlannedMeal,
   type HydrationReminderPlan,
   type ReminderSound,
   type NutritionProfile,
@@ -95,6 +106,9 @@ import {
   type DailyActivity,
   type StepIngestResult,
   type StreakRun,
+  type StreakDayDetail,
+  type StreakDayEvent,
+  type StreakDayEventsPage,
   type StreakHistoryPage,
   type StreakSummary,
   type AppliedCoupon,
@@ -577,6 +591,7 @@ export const mockAuthApi: AuthApi = {
     mockWater = new Map();
     mockPlan = mockDefaultPlan();
     mockNutritionProfile = mockDefaultNutrition();
+    mockCustomFoods = [];
     mockFood = new Map(seedFoodEntries.map(entry => [entry.id, entry]));
     mockVitals = new Map(
       seedVitals
@@ -605,7 +620,26 @@ export const mockUserApi: UserApi = {
     if (!currentUser) {
       throw new ApiError('unauthorized', 'Your session has expired.', 401);
     }
+    const weightBefore = currentUser.weightKg;
     currentUser = userSchema.parse({ ...currentUser, ...patch });
+
+    // A weight saved on the profile is the same figure the health screen
+    // keeps (RULES V4), so the server records it as a reading — and so does
+    // the mock, or the health tile would disagree with the profile here and
+    // nowhere else.
+    if (typeof patch.weightKg === 'number' && patch.weightKg !== weightBefore) {
+      const id = `profile-${Date.now()}`;
+      mockVitals.set(
+        id,
+        vitalReadingSchema.parse({
+          id,
+          kind: 'weight',
+          value: patch.weightKg,
+          secondary: null,
+          recordedAt: new Date().toISOString(),
+        }),
+      );
+    }
     return currentUser;
   },
 
@@ -1422,6 +1456,14 @@ function mockStreakSummary(): StreakSummary {
 }
 
 /**
+ * The mock has no activity table, so a day's steps are derived from its date
+ * — made up, but the same on every read, which is what a list and the day
+ * behind it both need.
+ */
+const mockStepsOn = (date: string) =>
+  7_800 + ((Number(date.slice(-2)) * 173) % 4_200);
+
+/**
  * The streak's record, the way the server builds it: a walk over the
  * calendar rather than over the days that counted, so a day with no row
  * comes back as a missed one instead of simply not being there.
@@ -1455,11 +1497,6 @@ function mockStreakHistory(cursor?: string, limit = 30): StreakHistoryPage {
     dates.push(day);
   }
 
-  // The mock has no activity table, so a day's steps are derived from its
-  // date — made up, but the same on every read, which is what a list needs.
-  const stepsOn = (date: string) =>
-    7_800 + ((Number(date.slice(-2)) * 173) % 4_200);
-
   const data = dates.map(date => {
     if (mockStreak.protectedDays.has(date)) {
       return {
@@ -1471,7 +1508,7 @@ function mockStreakHistory(cursor?: string, limit = 30): StreakHistoryPage {
       };
     }
     if (all.has(date)) {
-      const steps = stepsOn(date);
+      const steps = mockStepsOn(date);
       return {
         date,
         day: runIndex.get(date) ?? null,
@@ -1494,6 +1531,232 @@ function mockStreakHistory(cursor?: string, limit = 30): StreakHistoryPage {
     data,
     nextCursor: oldest !== undefined && oldest > first ? oldest : null,
     total: mockDays(first, today) + 1,
+  });
+}
+
+/** The run that covers `date`, however long ago it ended — the server's `runAt`. */
+function mockRunAt(days: Set<string>, date: string): StreakRun | null {
+  if (!days.has(date)) return null;
+  let start = date;
+  while (days.has(addMockDays(start, -1))) start = addMockDays(start, -1);
+  let end = date;
+  while (days.has(addMockDays(end, 1))) end = addMockDays(end, 1);
+  return { length: mockDays(start, end) + 1, start, end };
+}
+
+/**
+ * One day of the streak in full (`GET /streak/day`), worded as the server
+ * words it — the same `detail` the record's row carries, so tapping a cell
+ * cannot tell a different story from the list.
+ *
+ * The mock has no activity table, so the figures under the steps are derived
+ * from them at the rates the server's rollup uses. Water and food are the
+ * real mock diaries, which is what makes the screen worth looking at.
+ */
+function mockStreakDay(date: string): StreakDayDetail {
+  const today = mockToday();
+  const all = new Set([...mockStreak.completed, ...mockStreak.protectedDays]);
+  const frozen = mockStreak.protectedDays.has(date);
+  const counted = all.has(date);
+  const upcoming = date > today;
+  const steps = counted && !frozen ? mockStepsOn(date) : 0;
+
+  const run = mockRunAt(all, date);
+  const currentEnd = all.has(today) ? today : addMockDays(today, -1);
+  const current = mockRunAt(all, currentEnd);
+  const day = run ? mockDays(run.start, date) + 1 : null;
+
+  const status = upcoming
+    ? ('upcoming' as const)
+    : frozen
+    ? ('frozen' as const)
+    : counted
+    ? ('completed' as const)
+    : ('missed' as const);
+
+  const water = mockWaterEntries(date);
+  const consumedMl = water.reduce((sum, entry) => sum + entry.ml, 0);
+  const food = mockFoodDay(date);
+
+  const metrics = upcoming
+    ? []
+    : [
+        {
+          id: 'distance',
+          label: 'Distance',
+          value: `${(steps / 1_312).toFixed(1)} km`,
+          caption: null,
+        },
+        {
+          id: 'activeMinutes',
+          label: 'Active',
+          value: `${Math.round(steps / 115)} min`,
+          caption: null,
+        },
+        {
+          id: 'calories',
+          label: 'Calories',
+          value: `${Math.round(steps * 0.04).toLocaleString('en-IN')} kcal`,
+          caption: 'Walking and workouts',
+        },
+        { id: 'workouts', label: 'Workouts', value: '0', caption: null },
+        ...(consumedMl > 0
+          ? [
+              {
+                id: 'water',
+                label: 'Water',
+                value: `${consumedMl.toLocaleString('en-IN')} ml`,
+                caption: `Goal ${mockSettings.dailyWaterGoalMl.toLocaleString(
+                  'en-IN',
+                )} ml`,
+              },
+            ]
+          : []),
+        ...(food.entries.length > 0
+          ? [
+              {
+                id: 'food',
+                label: 'Food',
+                value: `${Math.round(food.totals.calories).toLocaleString(
+                  'en-IN',
+                )} kcal`,
+                caption: `${food.entries.length} ${
+                  food.entries.length === 1 ? 'item' : 'items'
+                } logged`,
+              },
+            ]
+          : []),
+      ];
+
+  const { gap } = mockRuns(all, today);
+  const recorded = [...all].sort();
+  const first = recorded[0] ?? today;
+  const howToEarn = `Finish a workout or walk ${mockSettings.dailyStepGoal.toLocaleString(
+    'en-IN',
+  )} steps in a day.`;
+
+  return streakDayDetailSchema.parse({
+    date,
+    today,
+    status,
+    title: upcoming
+      ? 'Still to come'
+      : run && day !== null
+      ? current !== null && current.start === run.start
+        ? `Day ${day} of your current streak`
+        : `Day ${day} of a ${run.length}-day run`
+      : date === today
+      ? 'Not counted yet'
+      : 'Day missed',
+    detail: upcoming
+      ? 'This day has not happened yet.'
+      : frozen
+      ? 'Freeze used'
+      : counted
+      ? `${steps.toLocaleString('en-IN')} steps`
+      : 'No activity',
+    day,
+    run,
+    counted,
+    steps,
+    stepGoal: mockSettings.dailyStepGoal,
+    goalMet: steps >= mockSettings.dailyStepGoal,
+    verified: counted && !frozen,
+    metrics,
+    coinsEarned: seedCoinTransactions
+      .filter(entry => mockLocalDay(entry.createdAt) === date)
+      .reduce((sum, entry) => sum + entry.amount, 0),
+    note: upcoming
+      ? null
+      : gap.includes(date)
+      ? `A restore would bring this day back for ${MOCK_STREAK_RULES.restoreCost} coins.`
+      : counted
+      ? null
+      : howToEarn,
+    previousDate: date > first ? addMockDays(date, -1) : null,
+    nextDate: date < today ? addMockDays(date, 1) : null,
+  });
+}
+
+/**
+ * The day's log, newest first, paged on an offset into that one day
+ * (`GET /streak/day/events`) — what decided the day, the coins it moved, the
+ * water drunk and the food logged.
+ */
+function mockStreakDayEvents(
+  date: string,
+  cursor?: string,
+  limit = 20,
+): StreakDayEventsPage {
+  const page = Math.min(100, Math.max(1, limit));
+  const offset = Math.max(0, Number(cursor ?? 0));
+  const all = new Set([...mockStreak.completed, ...mockStreak.protectedDays]);
+  const frozen = mockStreak.protectedDays.has(date);
+  const midnight = `${date}T00:00:00.000Z`;
+
+  const events: StreakDayEvent[] = [];
+  if (all.has(date)) {
+    events.push({
+      id: `streak:${date}`,
+      kind: 'streak',
+      title: frozen ? 'Streak Freeze used' : 'Step goal reached',
+      detail: frozen
+        ? 'Freeze used'
+        : `${mockStepsOn(date).toLocaleString('en-IN')} steps`,
+      at: midnight,
+      coins: null,
+    });
+  }
+  for (const entry of seedCoinTransactions.filter(
+    row => mockLocalDay(row.createdAt) === date,
+  )) {
+    events.push({
+      id: `coins:${entry.id}`,
+      kind: 'coins',
+      title: entry.title,
+      detail: null,
+      at: entry.createdAt,
+      coins: entry.amount,
+    });
+  }
+  for (const entry of mockWaterEntries(date)) {
+    events.push({
+      id: `water:${entry.id}`,
+      kind: 'water',
+      title: `${entry.ml.toLocaleString('en-IN')} ml of water`,
+      detail: null,
+      at: entry.at,
+      coins: null,
+    });
+  }
+  for (const entry of mockFoodDay(date).entries) {
+    events.push({
+      id: `meal:${entry.id}`,
+      kind: 'meal',
+      title: entry.name,
+      detail: `${entry.slot[0].toUpperCase()}${entry.slot.slice(
+        1,
+      )} · ${Math.round(entry.calories).toLocaleString('en-IN')} kcal`,
+      at: entry.loggedAt,
+      coins: null,
+    });
+  }
+
+  events.sort((a, b) => {
+    if (a.at === b.at) return a.id < b.id ? 1 : -1;
+    if (a.at === null) return 1;
+    if (b.at === null) return -1;
+    return a.at < b.at ? 1 : -1;
+  });
+
+  const rows = events.slice(offset, offset + page);
+  return streakDayEventsPageSchema.parse({
+    data: rows,
+    nextCursor:
+      offset + rows.length < events.length
+        ? String(offset + rows.length)
+        : null,
+    total: events.length,
   });
 }
 
@@ -1533,6 +1796,14 @@ export const mockStreakApi: StreakApi = {
   async history(cursor, limit) {
     await delay();
     return mockStreakHistory(cursor, limit);
+  },
+  async day(date) {
+    await delay();
+    return mockStreakDay(date);
+  },
+  async dayEvents(date, cursor, limit) {
+    await delay();
+    return mockStreakDayEvents(date, cursor, limit);
   },
   async restore() {
     await delay();
@@ -1940,9 +2211,21 @@ const mockDefaultNutrition = (): NutritionProfile => ({
     mealPlan: 'balanced',
     goal: 'gain_weight',
   },
+  selectedPlanId: null,
 });
 
 let mockNutritionProfile = mockDefaultNutrition();
+/** The foods this member has added themselves (RULES N8) — nobody else sees them. */
+let mockCustomFoods: FoodItem[] = [];
+/** How many foods one page of the library holds (⚙ `nutrition.libraryPageSize`). */
+const MOCK_LIBRARY_PAGE = 20;
+/** The library is ordered, so a cursor is just where the last page ended. */
+const mockCursorOffset = (cursor?: string) => {
+  if (!cursor) return 0;
+  const n = Number(cursor.replace(/^offset:/, ''));
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+};
+const mockCursor = (offset: number) => `offset:${offset}`;
 /** The diary, by id — today's plate from the seed to start with. */
 let mockFood = new Map<string, FoodEntry>(
   seedFoodEntries.map(entry => [entry.id, entry]),
@@ -1969,10 +2252,120 @@ function mockFoodDay(date: string) {
   });
 }
 
-function mockPlanFor(date: string) {
-  const cycle = dietPlanRotation.length;
+/**
+ * How the server words the basis line. Its own wording, not the screen's
+ * label maps: the mock stands in for the server, so it has to say what the
+ * server says rather than what a card happens to print.
+ */
+const MOCK_DIET_WORD: Record<DietType, string> = {
+  vegetarian: 'Vegetarian',
+  vegan: 'Vegan',
+  eggetarian: 'Eggetarian',
+  non_vegetarian: 'Non-vegetarian',
+};
+const MOCK_PLAN_WORD: Record<MealPlan, string> = {
+  balanced: 'Balanced',
+  high_protein: 'High protein',
+  low_carb: 'Low carb',
+  keto: 'Keto',
+};
+
+/**
+ * The plan library the mock offers (RULES N10) — the seed's rotation cut into
+ * two named programmes, so the browse-and-choose screen has something to
+ * choose between without a backend.
+ */
+const mockPlanLibrary: {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  dietTypes: DietType[];
+  mealPlans: MealPlan[];
+  days: PlannedMeal[][];
+}[] = [
+  {
+    id: 'plan-everyday-veg',
+    name: 'Everyday Veg',
+    description:
+      'A three-day vegetarian rotation built around dal, paneer and whole grains.',
+    emoji: '🥗',
+    dietTypes: ['vegetarian', 'eggetarian'],
+    mealPlans: ['balanced', 'high_protein'],
+    days: dietPlanRotation,
+  },
+  {
+    id: 'plan-high-protein-nonveg',
+    name: 'High-Protein Non-Veg',
+    description:
+      'Two days with eggs, chicken or fish at the main meals, and protein in every slot.',
+    emoji: '🍗',
+    dietTypes: ['non_vegetarian'],
+    mealPlans: ['balanced', 'high_protein', 'low_carb'],
+    days: dietPlanRotation.slice(0, 2),
+  },
+];
+
+const mockPlanTotals = (meals: PlannedMeal[]) => ({
+  calories: meals.reduce((sum, m) => sum + m.calories, 0),
+  proteinG: meals.reduce((sum, m) => sum + m.proteinG, 0),
+  carbsG: meals.reduce((sum, m) => sum + m.carbsG, 0),
+  fatsG: meals.reduce((sum, m) => sum + m.fatsG, 0),
+  fiberG: 0,
+});
+
+const mockPlanSuits = (plan: (typeof mockPlanLibrary)[number]) =>
+  plan.dietTypes.includes(mockNutritionProfile.preferences.dietType) &&
+  plan.mealPlans.includes(mockNutritionProfile.preferences.mealPlan);
+
+/** The same resolution the server does: the chosen plan, else the first that suits. */
+function mockPlanInForce() {
+  const chosen = mockPlanLibrary.find(
+    plan => plan.id === mockNutritionProfile.selectedPlanId,
+  );
+  if (chosen) return { plan: chosen, chosenByUser: true };
+  const suited =
+    mockPlanLibrary.find(mockPlanSuits) ??
+    mockPlanLibrary.find(plan =>
+      plan.dietTypes.includes(mockNutritionProfile.preferences.dietType),
+    ) ??
+    mockPlanLibrary[0];
+  return { plan: suited, chosenByUser: false };
+}
+
+function mockPlanDayIndex(date: string, cycle: number) {
   const days = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86_400_000);
-  return dietPlanRotation[((days % cycle) + cycle) % cycle];
+  return ((days % cycle) + cycle) % cycle;
+}
+
+function mockPlanSummary(plan: (typeof mockPlanLibrary)[number]) {
+  const perDay = (pick: (totals: NutritionTotals) => number) =>
+    Math.round(
+      plan.days.reduce((sum, meals) => sum + pick(mockPlanTotals(meals)), 0) /
+        plan.days.length,
+    );
+  return dietPlanSummarySchema.parse({
+    id: plan.id,
+    name: plan.name,
+    description: plan.description,
+    emoji: plan.emoji,
+    dietTypes: plan.dietTypes,
+    mealPlans: plan.mealPlans,
+    dayCount: plan.days.length,
+    mealsPerDay: Math.round(
+      plan.days.reduce((sum, meals) => sum + meals.length, 0) /
+        plan.days.length,
+    ),
+    perDay: {
+      calories: perDay(totals => totals.calories),
+      proteinG: perDay(totals => totals.proteinG),
+      carbsG: perDay(totals => totals.carbsG),
+      fatsG: perDay(totals => totals.fatsG),
+      fiberG: 0,
+    },
+    suitsPreferences: mockPlanSuits(plan),
+    selected: plan.id === mockNutritionProfile.selectedPlanId,
+  });
 }
 
 export const mockNutritionApi: NutritionApi = {
@@ -1982,12 +2375,22 @@ export const mockNutritionApi: NutritionApi = {
   },
   async updateProfile(patch) {
     await delay();
+    if (
+      typeof patch.selectedPlanId === 'string' &&
+      !mockPlanLibrary.some(plan => plan.id === patch.selectedPlanId)
+    ) {
+      throw notFound('That diet plan');
+    }
     mockNutritionProfile = nutritionProfileSchema.parse({
       goals: { ...mockNutritionProfile.goals, ...patch.goals },
       preferences: {
         ...mockNutritionProfile.preferences,
         ...patch.preferences,
       },
+      selectedPlanId:
+        patch.selectedPlanId === undefined
+          ? mockNutritionProfile.selectedPlanId
+          : patch.selectedPlanId,
     });
     return mockNutritionProfile;
   },
@@ -2041,7 +2444,7 @@ export const mockNutritionApi: NutritionApi = {
   async searchFoods(query) {
     await delay();
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    return foodLibrary.filter(item =>
+    return [...mockCustomFoods, ...foodLibrary].filter(item =>
       words.every(word =>
         item.name
           .toLowerCase()
@@ -2056,28 +2459,78 @@ export const mockNutritionApi: NutritionApi = {
       .map(id => foodLibrary.find(item => item.id === id))
       .filter((item): item is (typeof foodLibrary)[number] => !!item);
   },
+  async foodLibrary({ q = '', cursor, limit = MOCK_LIBRARY_PAGE }) {
+    await delay();
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matching = [...mockCustomFoods, ...foodLibrary].filter(item =>
+      words.every(word =>
+        item.name
+          .toLowerCase()
+          .split(/[\s(]+/)
+          .some(part => part.startsWith(word)),
+      ),
+    );
+    const offset = mockCursorOffset(cursor);
+    const page = matching.slice(offset, offset + limit);
+    const end = offset + page.length;
+    return foodLibraryPageSchema.parse({
+      data: page,
+      nextCursor: end < matching.length ? mockCursor(end) : null,
+      total: matching.length,
+    });
+  },
+  async createCustomFood(input) {
+    await delay();
+    const name = input.name.trim();
+    if (name.length === 0) {
+      throw new ApiError(
+        'validation',
+        'Give it a name.',
+        422,
+        { name: 'Give it a name.' },
+        'VALIDATION_FAILED',
+      );
+    }
+    const food = foodItemSchema.parse({
+      id: `food-${mockCustomFoods.length + 1}-${Date.now()}`,
+      name,
+      portion: input.portion.trim() || '1 serving',
+      emoji: input.emoji ?? '🍽️',
+      calories: Math.max(0, Math.round(input.calories)),
+      proteinG: Math.max(0, input.proteinG ?? 0),
+      carbsG: Math.max(0, input.carbsG ?? 0),
+      fatsG: Math.max(0, input.fatsG ?? 0),
+      fiberG: Math.max(0, input.fiberG ?? 0),
+    });
+    // The member's own foods lead the library, as the server sorts them.
+    mockCustomFoods.unshift(food);
+    return food;
+  },
   async plan(date) {
     await delay();
-    const meals = mockPlanFor(date);
+    const { plan, chosenByUser } = mockPlanInForce();
+    const dayNumber = mockPlanDayIndex(date, plan.days.length) + 1;
+    const meals = plan.days[dayNumber - 1];
     return dietPlanDaySchema.parse({
       date,
       meals,
-      totals: {
-        calories: meals.reduce((sum, m) => sum + m.calories, 0),
-        proteinG: meals.reduce((sum, m) => sum + m.proteinG, 0),
-        carbsG: meals.reduce((sum, m) => sum + m.carbsG, 0),
-        fatsG: meals.reduce((sum, m) => sum + m.fatsG, 0),
-        fiberG: 0,
-      },
-      cycleLength: dietPlanRotation.length,
-      basis: 'Vegetarian · Balanced',
+      totals: mockPlanTotals(meals),
+      cycleLength: plan.days.length,
+      basis: `${MOCK_DIET_WORD[mockNutritionProfile.preferences.dietType]} · ${
+        MOCK_PLAN_WORD[mockNutritionProfile.preferences.mealPlan]
+      }`,
+      planId: plan.id,
+      planName: plan.name,
+      dayNumber,
+      chosenByUser,
     });
   },
   async planDays(from, to) {
     await delay();
+    const { plan } = mockPlanInForce();
     const days = [];
     for (let day = from; day <= to; day = mockStreakDayShift(day, 1)) {
-      const meals = mockPlanFor(day);
+      const meals = plan.days[mockPlanDayIndex(day, plan.days.length)];
       days.push({
         date: day,
         meals: meals.length,
@@ -2085,6 +2538,30 @@ export const mockNutritionApi: NutritionApi = {
       });
     }
     return days;
+  },
+  async dietPlans() {
+    await delay();
+    return [...mockPlanLibrary]
+      .map(mockPlanSummary)
+      .sort(
+        (a, b) => Number(b.suitsPreferences) - Number(a.suitsPreferences),
+      );
+  },
+  async dietPlan(id) {
+    await delay();
+    const plan = mockPlanLibrary.find(candidate => candidate.id === id);
+    if (!plan) {
+      throw notFound('That diet plan');
+    }
+    return dietPlanDetailSchema.parse({
+      ...mockPlanSummary(plan),
+      days: plan.days.map((meals, index) => ({
+        dayNumber: index + 1,
+        label: '',
+        meals,
+        totals: mockPlanTotals(meals),
+      })),
+    });
   },
 };
 

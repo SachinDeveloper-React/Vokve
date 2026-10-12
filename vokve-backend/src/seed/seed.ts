@@ -7,13 +7,32 @@ import { CouponModel, ShopInventoryModel, ShopItemModel } from '../modules/comme
 import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.js';
 import { AchievementDefinitionModel, ChallengeDefinitionModel } from '../modules/challenges/models.js';
 import { ContentTipModel } from '../modules/content/models.js';
-import { DietPlanTemplateModel, FoodItemModel } from '../modules/nutrition/models.js';
+import { DietPlanModel, FoodItemModel } from '../modules/nutrition/models.js';
 import { addDays } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 import {
-  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLAN_TEMPLATES, EXERCISES, FOOD_ITEMS, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
+  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLANS, EXERCISES, FOOD_ITEMS, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
   SUPPORT_FAQS, SUPPORT_GUIDE_SECTIONS, WORKOUT_TEMPLATES,
 } from './data.js';
+
+/**
+ * Which of `ids` an operator has written since, and the seed must leave alone.
+ *
+ * The food library and the diet plans are content the seed starts and the
+ * operator then owns. A re-seed that `$set` them back would quietly undo the
+ * real plan somebody wrote through `/v1/admin/*` — and a re-seed happens on
+ * every deploy, so the loss would arrive without anybody touching the plan.
+ * `updatedBy` is the mark: `seed` means nobody has.
+ */
+async function operatorOwned(
+  model: { find: (filter: object, projection: object) => { lean: () => Promise<{ _id: string }[]> } },
+  ids: string[],
+): Promise<Set<string>> {
+  const rows = await model
+    .find({ _id: { $in: ids }, updatedBy: { $exists: true, $nin: [null, 'seed'] } }, { _id: 1 })
+    .lean();
+  return new Set(rows.map(row => row._id));
+}
 
 /** Idempotent: safe to run on every deploy. Never touches user data. */
 export async function seed(): Promise<void> {
@@ -53,11 +72,27 @@ export async function seed(): Promise<void> {
   // The tips' wording is the seed's to keep current; whether one is shown is the operator's.
   await Promise.all(CONTENT_TIPS.map(({ _id, ...t }) =>
     ContentTipModel.updateOne({ _id }, { $set: t, $setOnInsert: { active: true } }, { upsert: true })));
-  // The global food library and the plan's curated days are the seed's to keep current.
-  await Promise.all(FOOD_ITEMS.map(({ _id, ...f }) =>
-    FoodItemModel.updateOne({ _id }, { $set: { ...f, ownerUserId: null } }, { upsert: true })));
-  await Promise.all(DIET_PLAN_TEMPLATES.map(({ _id, ...t }) =>
-    DietPlanTemplateModel.updateOne({ _id }, { $set: t, $setOnInsert: { active: true } }, { upsert: true })));
+  // The foods the app ships with. Whether one is still offered is the
+  // operator's (they retire it through /v1/admin/foods), so a re-seed
+  // restores the figures without putting a retired food back on the shelf —
+  // and a food the operator has edited is theirs now, so it is skipped.
+  const ownedFoods = await operatorOwned(FoodItemModel, FOOD_ITEMS.map(f => f._id));
+  await Promise.all(FOOD_ITEMS.filter(f => !ownedFoods.has(f._id)).map(({ _id, ...f }) =>
+    FoodItemModel.updateOne(
+      { _id },
+      { $set: { ...f, ownerUserId: null, updatedBy: 'seed' }, $setOnInsert: { active: true } },
+      { upsert: true },
+    )));
+  // The plans the app ships with. A re-seed restores the wording of the three
+  // it shipped with and leaves whether they are on offer to the operator; one
+  // they have edited is no longer the seed's to rewrite.
+  const ownedPlans = await operatorOwned(DietPlanModel, DIET_PLANS.map(p => p._id));
+  await Promise.all(DIET_PLANS.filter(p => !ownedPlans.has(p._id)).map(({ _id, ...plan }) =>
+    DietPlanModel.updateOne(
+      { _id },
+      { $set: { ...plan, updatedBy: 'seed' }, $setOnInsert: { active: true } },
+      { upsert: true },
+    )));
   // Config documents are created only if absent, so an operator's override survives a re-seed.
   for (const [key, value] of Object.entries(CONFIG_DEFAULTS)) {
     await AppConfigModel.updateOne({ _id: key }, { $setOnInsert: { _id: key, value, updatedBy: 'seed' } }, { upsert: true });

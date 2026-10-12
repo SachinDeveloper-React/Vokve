@@ -7,6 +7,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { validate } from '../../middleware/validate.js';
 import { AuditLogModel } from '../platform/models.js';
+import { logReading } from '../vitals/service.js';
 import { NotificationPreferencesModel, UserModel, UserSettingsModel } from './models.js';
 import { toUser } from './serialize.js';
 
@@ -39,6 +40,18 @@ meRouter.patch('/me', validate('body', patchMeBody), async (req, res) => {
   const user = await UserModel.findByIdAndUpdate(req.ctx.userId, { $set: req.body }, { new: true });
   await AuditLogModel.create({ actorType: 'user', actorId: req.ctx.userId, deviceId: req.ctx.deviceId, appVersion: req.ctx.appVersion,
     action: 'user.patch', subjectType: 'user', subjectId: req.ctx.userId, before: pick(before, Object.keys(req.body)), after: req.body });
+
+  // A weight saved on the profile is the same figure the health screen keeps
+  // (RULES V4), so it is recorded as a reading too — otherwise the tile, the
+  // BMI and the health score would go on standing on an older number while
+  // the profile said something else. A fresh id per edit: reusing one would
+  // let `logReading` answer from the existing row and put the old weight
+  // back. Clearing the weight writes nothing — a measurement that was taken
+  // is history, not something an edit undoes.
+  if (typeof req.body.weightKg === 'number' && req.body.weightKg !== before.weightKg) {
+    await logReading(req.ctx.userId!, { id: `profile-${Date.now()}`, kind: 'weight', value: req.body.weightKg });
+  }
+
   res.json(toUser(user!));
 });
 

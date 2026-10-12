@@ -4,6 +4,8 @@ export { MealWhenRow } from './MealWhenRow';
 export { FoodSearchRow } from './FoodSearchRow';
 export { FoodSearchResults } from './FoodSearchResults';
 export { FoodQuickAddRow } from './FoodQuickAddRow';
+export { FoodLibraryRow } from './FoodLibraryRow';
+export { LoggedFoodsCard } from './LoggedFoodsCard';
 export { AddedFoodsCard } from './AddedFoodsCard';
 export type { DraftFood } from './AddedFoodsCard';
 export { MealSummaryCard, verdictFor } from './MealSummaryCard';

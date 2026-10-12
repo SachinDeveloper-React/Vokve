@@ -15,3 +15,4 @@ export {
   MEAL_STYLE,
   NUTRITION_GOAL_LABEL,
 } from './nutritionLabels';
+export { GoalEditorSheet } from './GoalEditorSheet';

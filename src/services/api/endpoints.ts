@@ -43,6 +43,9 @@ import {
   deviceAttestationResultSchema,
   dietPlanDaySchema,
   dietPlanDaySummarySchema,
+  dietPlanDetailSchema,
+  dietPlanSummarySchema,
+  foodLibraryPageSchema,
   foodItemSchema,
   deviceRegistrationSchema,
   earnRuleSchema,
@@ -60,6 +63,8 @@ import {
   stepIngestResultSchema,
   reminderSoundSchema,
   stepSourcesReportSchema,
+  streakDayDetailSchema,
+  streakDayEventsPageSchema,
   streakHistoryPageSchema,
   streakRestoreResultSchema,
   streakSummarySchema,
@@ -617,6 +622,14 @@ const realStreakApi: StreakApi = {
     request(streakHistoryPageSchema, client =>
       client.get('/streak/history', { params: { cursor, limit } }),
     ),
+  day: date =>
+    request(streakDayDetailSchema, client =>
+      client.get('/streak/day', { params: { date } }),
+    ),
+  dayEvents: (date, cursor, limit) =>
+    request(streakDayEventsPageSchema, client =>
+      client.get('/streak/day/events', { params: { date, cursor, limit } }),
+    ),
 };
 
 const realChallengeApi: ChallengeApi = {
@@ -748,6 +761,12 @@ const realNutritionApi: NutritionApi = {
     ),
   quickAddFoods: () =>
     request(z.array(foodItemSchema), client => client.get('/foods/quick-add')),
+  foodLibrary: query =>
+    request(foodLibraryPageSchema, client =>
+      client.get('/foods/library', { params: query }),
+    ),
+  createCustomFood: input =>
+    request(foodItemSchema, client => client.post('/foods/custom', input)),
   plan: date =>
     request(dietPlanDaySchema, client =>
       client.get('/diet-plan', { params: { date } }),
@@ -755,6 +774,12 @@ const realNutritionApi: NutritionApi = {
   planDays: (from, to) =>
     request(z.array(dietPlanDaySummarySchema), client =>
       client.get('/diet-plan/days', { params: { from, to } }),
+    ),
+  dietPlans: () =>
+    request(z.array(dietPlanSummarySchema), client => client.get('/diet-plans')),
+  dietPlan: id =>
+    request(dietPlanDetailSchema, client =>
+      client.get(`/diet-plans/${encodeURIComponent(id)}`),
     ),
 };
 
@@ -1006,6 +1031,9 @@ export const streakApi: StreakApi = {
   restore: options => pick(mockStreakApi, realStreakApi).restore(options),
   history: (cursor, limit) =>
     pick(mockStreakApi, realStreakApi).history(cursor, limit),
+  day: date => pick(mockStreakApi, realStreakApi).day(date),
+  dayEvents: (date, cursor, limit) =>
+    pick(mockStreakApi, realStreakApi).dayEvents(date, cursor, limit),
 };
 
 export const challengeApi: ChallengeApi = {
@@ -1059,6 +1087,12 @@ export const nutritionApi: NutritionApi = {
   plan: date => pick(mockNutritionApi, realNutritionApi).plan(date),
   planDays: (from, to) =>
     pick(mockNutritionApi, realNutritionApi).planDays(from, to),
+  foodLibrary: query =>
+    pick(mockNutritionApi, realNutritionApi).foodLibrary(query),
+  createCustomFood: input =>
+    pick(mockNutritionApi, realNutritionApi).createCustomFood(input),
+  dietPlans: () => pick(mockNutritionApi, realNutritionApi).dietPlans(),
+  dietPlan: id => pick(mockNutritionApi, realNutritionApi).dietPlan(id),
 };
 
 export const vitalsApi: VitalsApi = {

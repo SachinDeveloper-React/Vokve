@@ -4,6 +4,7 @@ import { Check, Snowflake } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import { withAlpha } from '../../utils/color';
+import { Pressable } from '../form/Pressable';
 import { VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
@@ -29,6 +30,11 @@ interface Props {
   isToday?: boolean;
   /** For the screen reader — "26 May 2025". */
   accessibilityLabel: string;
+  /**
+   * Opens the day. Left off for a cell there is nothing to open — a day from
+   * a neighbouring month, or one that has not happened yet.
+   */
+  onPress?: () => void;
 }
 
 /** The disc's diameter at the 375pt baseline; seven of them share a row. */
@@ -44,7 +50,14 @@ const DISC = moderateScale(34);
  * exactly the break the user came here to see.
  */
 export const CalendarDay = memo(
-  ({ day, status, inStreak = false, isToday = false, accessibilityLabel }: Props) => {
+  ({
+    day,
+    status,
+    inStreak = false,
+    isToday = false,
+    accessibilityLabel,
+    onPress,
+  }: Props) => {
     const { colors, isDark } = useTheme();
 
     const numberColor =
@@ -72,13 +85,8 @@ export const CalendarDay = memo(
         ? `${accessibilityLabel}, missed`
         : accessibilityLabel;
 
-    return (
-      <VStack
-        align="center"
-        gap="xxs"
-        accessible
-        accessibilityLabel={inStreak ? `${label}, current streak` : label}
-      >
+    const cell = (
+      <VStack align="center" gap="xxs">
         <View
           style={[
             styles.disc,
@@ -101,6 +109,28 @@ export const CalendarDay = memo(
             <Icon as={Snowflake} size={moderateScale(10)} color="primary" />
           ) : null}
         </View>
+      </VStack>
+    );
+
+    const spoken = inStreak ? `${label}, current streak` : label;
+
+    // A tappable cell is announced as the button it is; one with nowhere to
+    // go stays a label, because a cell that does nothing when tapped reads as
+    // broken to anyone who tries it.
+    return onPress ? (
+      <Pressable
+        onPress={onPress}
+        feedback="opacity"
+        visualSize={DISC}
+        accessibilityRole="button"
+        accessibilityLabel={spoken}
+        accessibilityHint="Opens this day"
+      >
+        {cell}
+      </Pressable>
+    ) : (
+      <VStack accessible accessibilityLabel={spoken}>
+        {cell}
       </VStack>
     );
   },

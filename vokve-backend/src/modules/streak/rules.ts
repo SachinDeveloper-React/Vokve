@@ -75,3 +75,20 @@ export function restoreGapOf(days: ReadonlySet<IsoDate>, today: IsoDate, windowD
   return [];
 }
 
+
+/**
+ * The run that covers `day` — however long ago it ended — or null when the
+ * day does not count.
+ *
+ * `currentRunOf` only ever looks at the run ending now; this is the same walk
+ * around any day on the record, which is what a day's own screen needs to say
+ * "Day 18 of a 23-day run" about a run that broke in March.
+ */
+export function runAt(days: ReadonlySet<IsoDate>, day: IsoDate): StreakRun | null {
+  if (!days.has(day)) return null;
+  let start = day;
+  while (days.has(addDays(start, -1))) start = addDays(start, -1);
+  let end = day;
+  while (days.has(addDays(end, 1))) end = addDays(end, 1);
+  return { length: daysBetween(start, end) + 1, start, end };
+}

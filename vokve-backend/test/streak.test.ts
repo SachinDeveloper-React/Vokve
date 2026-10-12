@@ -4,9 +4,11 @@ import { invalidateConfig } from '../src/config/remote.js';
 import { addDays, localDayOf } from '../src/lib/dates.js';
 import { ActivityDailyModel } from '../src/modules/activity/models.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../src/modules/economy/models.js';
+import { HydrationEntryModel } from '../src/modules/hydration/models.js';
 import { credit } from '../src/modules/economy/service.js';
 import { UserModel } from '../src/modules/identity/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
+import { FoodEntryModel } from '../src/modules/nutrition/models.js';
 import { AppConfigModel } from '../src/modules/platform/models.js';
 import { StreakDayModel, StreakStateModel } from '../src/modules/streak/models.js';
 import {
@@ -462,5 +464,255 @@ describe('streak: the record (GET /streak/history)', () => {
     const session = await signUpAndRegister();
     expect((await request(app).get('/v1/streak/history?cursor=yesterday').set(authed(session))).status).toBe(422);
     expect((await request(app).get('/v1/streak/history?limit=500').set(authed(session))).status).toBe(422);
+  });
+});
+
+describe('streak: one day (GET /streak/day)', () => {
+  async function day(session: Session, date: string) {
+    const res = await request(app).get(`/v1/streak/day?date=${date}`).set(authed(session));
+    expect(res.status).toBe(200);
+    return res.body as {
+      date: string;
+      today: string;
+      status: string;
+      title: string;
+      detail: string;
+      day: number | null;
+      run: { length: number; start: string; end: string } | null;
+      counted: boolean;
+      steps: number;
+      stepGoal: number;
+      goalMet: boolean;
+      metrics: { id: string; label: string; value: string; caption: string | null }[];
+      coinsEarned: number;
+      note: string | null;
+      previousDate: string | null;
+      nextDate: string | null;
+    };
+  }
+
+  async function walked(session: Session, localDay: string, steps: number, extra: Record<string, unknown> = {}) {
+    await ActivityDailyModel.updateOne(
+      { _id: `${session.userId}:${localDay}` },
+      { $set: { userId: session.userId, localDay, verifiedSteps: steps, steps, verified: true, ...extra } },
+      { upsert: true },
+    );
+  }
+
+  it('says which day of the current run it was, with the steps read against the goal', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, run(2, 0));
+    await walked(session, ago(1), 10_428, { distanceKm: 7.2, activeMinutes: 64, stepCalories: 311, workoutsCompleted: 1 });
+
+    const result = await day(session, ago(1));
+    expect(result).toMatchObject({
+      date: ago(1),
+      today: today(),
+      status: 'completed',
+      title: 'Day 2 of your current streak',
+      detail: '10,428 steps',
+      day: 2,
+      counted: true,
+      steps: 10_428,
+      stepGoal: 10_000,
+      goalMet: true,
+      note: null,
+    });
+    expect(result.run).toEqual({ length: 3, start: ago(2), end: today() });
+    expect(result.metrics.map(m => [m.id, m.value])).toEqual([
+      ['distance', '7.2 km'],
+      ['activeMinutes', '64 min'],
+      ['calories', '311 kcal'],
+      ['workouts', '1'],
+    ]);
+  });
+
+  it('numbers a day inside a run that has since broken by that run, not by the live one', async () => {
+    const session = await signUpAndRegister();
+    // A three-day run that ended five days ago, and a fresh day today.
+    await earned(session, [ago(7), ago(6), ago(5), today()]);
+
+    expect(await day(session, ago(6))).toMatchObject({
+      title: 'Day 2 of a 3-day run',
+      day: 2,
+      run: { length: 3, start: ago(7), end: ago(5) },
+    });
+  });
+
+  it('words a missed day and offers the restore while the gap is still inside the window', async () => {
+    const session = await signUpAndRegister();
+    // A run that ended three days ago: the two days since are the restore gap (S6).
+    await earned(session, run(5, 3));
+    await walked(session, ago(2), 3_100);
+
+    expect(await day(session, ago(2))).toMatchObject({
+      status: 'missed',
+      title: 'Day missed',
+      detail: '3,100 steps — short of your goal',
+      day: null,
+      run: null,
+      counted: false,
+      goalMet: false,
+      note: 'A restore would bring this day back for 50 coins.',
+    });
+  });
+
+  it('tells a missed day outside the gap what would have counted it', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, [ago(9), today()]);
+
+    expect(await day(session, ago(8))).toMatchObject({
+      status: 'missed',
+      detail: 'No activity',
+      note: 'Finish a workout or walk 10,000 steps in a day.',
+    });
+  });
+
+  it('names a frozen day as the record does', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, run(3, 1));
+    await StreakStateModel.updateOne({ _id: session.userId }, { $set: { freezesAvailable: 2 } }, { upsert: true });
+    expect((await request(app).post('/v1/streak/freeze').set({ ...authed(session), 'idempotency-key': 'fd1' }).send()).status).toBe(200);
+
+    expect(await day(session, today())).toMatchObject({
+      status: 'frozen',
+      detail: 'Freeze used',
+      counted: true,
+      title: 'Day 4 of your current streak',
+    });
+  });
+
+  it('names a restored day with what the restore cost, and counts the debit against the day', async () => {
+    const session = await signUpAndRegister();
+    await fund(session, 500);
+    await earned(session, run(5, 3));
+    expect((await request(app).post('/v1/streak/restore').set({ ...authed(session), 'idempotency-key': 'rd1' }).send()).status).toBe(200);
+
+    const result = await day(session, ago(1));
+    expect(result).toMatchObject({ status: 'restored', detail: 'Restored (50 coins for 2 days)', counted: true });
+    // The restore was debited today, so it is today's coin figure that carries it.
+    expect((await day(session, today())).coinsEarned).toBe(450);
+  });
+
+  it('stops paging at the first day on record and at today', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, run(2, 0));
+
+    expect(await day(session, ago(2))).toMatchObject({ previousDate: null, nextDate: ago(1) });
+    expect(await day(session, today())).toMatchObject({ previousDate: ago(1), nextDate: null });
+  });
+
+  it('calls a day that has not happened upcoming, with nothing on it', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, [today()]);
+
+    expect(await day(session, addDays(today(), 1))).toMatchObject({
+      status: 'upcoming',
+      title: 'Still to come',
+      counted: false,
+      metrics: [],
+      note: null,
+      nextDate: null,
+    });
+  });
+
+  it('adds the water and the food logged that day to the figures', async () => {
+    const session = await signUpAndRegister();
+    await earned(session, [today()]);
+    await HydrationEntryModel.create({
+      _id: `${session.userId}:w1`, userId: session.userId, clientId: 'w1', ml: 600, at: new Date(), localDay: today(),
+    });
+    await FoodEntryModel.create({
+      _id: `${session.userId}:f1`, userId: session.userId, clientId: 'f1', slot: 'lunch', name: 'Dal and rice',
+      calories: 540, loggedAt: new Date(), localDay: today(),
+    });
+
+    const result = await day(session, today());
+    expect(result.metrics.find(m => m.id === 'water')).toMatchObject({ value: '600 ml', caption: 'Goal 2,500 ml' });
+    expect(result.metrics.find(m => m.id === 'food')).toMatchObject({ value: '540 kcal', caption: '1 item logged' });
+  });
+
+  it('refuses a date it cannot read', async () => {
+    const session = await signUpAndRegister();
+    expect((await request(app).get('/v1/streak/day?date=yesterday').set(authed(session))).status).toBe(422);
+    expect((await request(app).get('/v1/streak/day').set(authed(session))).status).toBe(422);
+  });
+});
+
+describe("streak: the day's log (GET /streak/day/events)", () => {
+  async function events(session: Session, date: string, query = '') {
+    const res = await request(app).get(`/v1/streak/day/events?date=${date}${query}`).set(authed(session));
+    expect(res.status).toBe(200);
+    return res.body as {
+      data: { id: string; kind: string; title: string; detail: string | null; at: string | null; coins: number | null }[];
+      nextCursor: string | null;
+      total: number;
+    };
+  }
+
+  it('is empty for a day nothing happened on', async () => {
+    const session = await signUpAndRegister();
+    expect(await events(session, ago(3))).toEqual({ data: [], nextCursor: null, total: 0 });
+  });
+
+  it('lists what decided the day beside the coins, the water and the food', async () => {
+    const session = await signUpAndRegister();
+    await ActivityDailyModel.updateOne(
+      { _id: `${session.userId}:${today()}` },
+      { $set: { userId: session.userId, localDay: today(), verifiedSteps: 11_200, steps: 11_200, verified: true } },
+      { upsert: true },
+    );
+    await earned(session, [today()]);
+    await fund(session, 120);
+    await HydrationEntryModel.create({
+      _id: `${session.userId}:w2`, userId: session.userId, clientId: 'w2', ml: 250, at: new Date(), localDay: today(),
+    });
+    await FoodEntryModel.create({
+      _id: `${session.userId}:f2`, userId: session.userId, clientId: 'f2', slot: 'breakfast', name: 'Poha',
+      calories: 310, loggedAt: new Date(), localDay: today(),
+    });
+
+    const { data, total } = await events(session, today());
+    expect(total).toBe(4);
+    const byKind = Object.fromEntries(data.map(row => [row.kind, row]));
+    expect(byKind.streak).toMatchObject({ title: 'Step goal reached', detail: '11,200 steps' });
+    expect(byKind.coins).toMatchObject({ title: 'Test funds', detail: 'Refund', coins: 120 });
+    expect(byKind.water).toMatchObject({ title: '250 ml of water' });
+    expect(byKind.meal).toMatchObject({ title: 'Poha', detail: 'Breakfast · 310 kcal' });
+    // Newest first: every row here was written in the same breath, so only the
+    // order being stable matters — the dated ones all carry a time.
+    expect(data.every(row => row.at !== null)).toBe(true);
+  });
+
+  it('pages the log and stops when the last row is out', async () => {
+    const session = await signUpAndRegister();
+    for (let i = 0; i < 5; i++) {
+      await HydrationEntryModel.create({
+        _id: `${session.userId}:p${i}`, userId: session.userId, clientId: `p${i}`, ml: 200 + i,
+        at: new Date(Date.now() - i * 60_000), localDay: today(),
+      });
+    }
+
+    const first = await events(session, today(), '&limit=2');
+    expect(first.data).toHaveLength(2);
+    expect(first.total).toBe(5);
+    expect(first.nextCursor).toBe('2');
+
+    const second = await events(session, today(), `&limit=2&cursor=${first.nextCursor}`);
+    expect(second.data).toHaveLength(2);
+    expect(second.nextCursor).toBe('4');
+
+    const last = await events(session, today(), `&limit=2&cursor=${second.nextCursor}`);
+    expect(last.data).toHaveLength(1);
+    expect(last.nextCursor).toBeNull();
+    // Every row, once, across the three pages.
+    const ids = [...first.data, ...second.data, ...last.data].map(row => row.id);
+    expect(new Set(ids).size).toBe(5);
+  });
+
+  it('refuses a cursor or a page size it did not give', async () => {
+    const session = await signUpAndRegister();
+    expect((await request(app).get(`/v1/streak/day/events?date=${today()}&cursor=${today()}`).set(authed(session))).status).toBe(422);
+    expect((await request(app).get(`/v1/streak/day/events?date=${today()}&limit=500`).set(authed(session))).status).toBe(422);
   });
 });

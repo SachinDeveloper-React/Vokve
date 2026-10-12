@@ -1,0 +1,105 @@
+[
+  {
+    "id": "plan-my-veg-week",
+    "name": "My Veg Week",
+    "description": "Replace every figure here with your own dietitian's. This file is a shape to copy, not a plan to follow.",
+    "emoji": "🥗",
+    "dietTypes": ["vegetarian", "eggetarian"],
+    "mealPlans": ["balanced"],
+    "sort": 10,
+    "days": [
+      {
+        "label": "Day 1",
+        "meals": [
+          {
+            "slot": "breakfast",
+            "time": "08:00",
+            "calories": 320,
+            "proteinG": 18,
+            "carbsG": 42,
+            "fatsG": 9,
+            "items": [
+              { "name": "Oats with banana", "quantity": "1 bowl (200g)" },
+              { "name": "Green tea", "quantity": "1 cup" }
+            ]
+          },
+          {
+            "slot": "lunch",
+            "time": "13:00",
+            "calories": 450,
+            "proteinG": 26,
+            "carbsG": 58,
+            "fatsG": 14,
+            "items": [
+              { "name": "Roti", "quantity": "3" },
+              { "name": "Dal", "quantity": "1 bowl (150g)" },
+              { "name": "Mixed salad", "quantity": "1 bowl" }
+            ]
+          },
+          {
+            "slot": "snack",
+            "time": "17:00",
+            "calories": 180,
+            "proteinG": 6,
+            "carbsG": 18,
+            "fatsG": 11,
+            "items": [{ "name": "Mixed nuts", "quantity": "30g" }]
+          },
+          {
+            "slot": "dinner",
+            "time": "20:00",
+            "calories": 300,
+            "proteinG": 24,
+            "carbsG": 32,
+            "fatsG": 10,
+            "items": [
+              { "name": "Paneer bhurji", "quantity": "100g" },
+              { "name": "Jowar roti", "quantity": "2" }
+            ]
+          }
+        ]
+      },
+      {
+        "label": "Day 2",
+        "meals": [
+          {
+            "slot": "breakfast",
+            "time": "08:00",
+            "calories": 330,
+            "proteinG": 20,
+            "carbsG": 40,
+            "fatsG": 10,
+            "items": [{ "name": "Besan chilla", "quantity": "2" }]
+          },
+          {
+            "slot": "lunch",
+            "time": "13:00",
+            "calories": 460,
+            "proteinG": 25,
+            "carbsG": 60,
+            "fatsG": 12,
+            "items": [{ "name": "Vegetable pulao", "quantity": "1 bowl (180g)" }]
+          },
+          {
+            "slot": "snack",
+            "time": "17:00",
+            "calories": 160,
+            "proteinG": 12,
+            "carbsG": 14,
+            "fatsG": 5,
+            "items": [{ "name": "Sprouts chaat", "quantity": "1 bowl" }]
+          },
+          {
+            "slot": "dinner",
+            "time": "20:00",
+            "calories": 310,
+            "proteinG": 26,
+            "carbsG": 34,
+            "fatsG": 10,
+            "items": [{ "name": "Tofu stir-fry", "quantity": "120g" }]
+          }
+        ]
+      }
+    ]
+  }
+]

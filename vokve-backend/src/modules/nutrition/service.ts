@@ -2,14 +2,21 @@ import { getConfig } from '../../config/remote.js';
 import {
   dietPlanDaySchema,
   dietPlanDaySummarySchema,
+  dietPlanDetailSchema,
+  dietPlanSummarySchema,
   foodItemSchema,
+  foodLibraryPageSchema,
   nutritionDaySchema,
   nutritionDayTotalSchema,
   nutritionProfileSchema,
   plannedMealSchema,
   type DietPlanDay,
   type DietPlanDaySummary,
+  type DietPlanDetail,
+  type DietPlanProgramDay,
+  type DietPlanSummary,
   type FoodItem,
+  type FoodLibraryPage,
   type NutritionDay,
   type NutritionDayTotal,
   type NutritionGoals,
@@ -21,7 +28,7 @@ import { addDays, localDayOf, type IsoDate } from '../../lib/dates.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { daysBetween } from '../streak/rules.js';
-import { DietPlanTemplateModel, FoodEntryModel, FoodItemModel, NutritionProfileModel } from './models.js';
+import { DietPlanModel, FoodEntryModel, FoodItemModel, NutritionProfileModel } from './models.js';
 
 /**
  * Food (RULES §N), on the server: the diary (every food logged, its day
@@ -53,20 +60,35 @@ export async function getProfile(userId: string): Promise<NutritionProfile> {
   return nutritionProfileSchema.parse({
     goals: row?.goals ?? config.nutrition.defaultGoals,
     preferences: row?.preferences ?? config.nutrition.defaultPreferences,
+    selectedPlanId: row?.selectedPlanId ?? null,
   });
 }
 
 export interface ProfilePatch {
   goals?: Partial<NutritionGoals>;
   preferences?: Partial<NutritionPreferences>;
+  /** A plan from the library, or null to hand the choice back to the server (RULES N10). */
+  selectedPlanId?: string | null;
 }
 
-/** Changes the targets or the preferences, field by field; a new plan follows from the preferences at once. */
+/**
+ * Changes the targets, the preferences or the chosen plan, field by field; a
+ * new plan follows at once.
+ *
+ * A plan named here must be one on offer: a member cannot pick a plan that
+ * was retired, and silently storing an id that resolves to nothing would show
+ * them a chosen plan whose days came from somewhere else.
+ */
 export async function updateProfile(userId: string, patch: ProfilePatch): Promise<NutritionProfile> {
   const current = await getProfile(userId);
+  if (typeof patch.selectedPlanId === 'string') {
+    const exists = await DietPlanModel.exists({ _id: patch.selectedPlanId, active: true });
+    if (!exists) throw Errors.notFound('That diet plan');
+  }
   const next = nutritionProfileSchema.parse({
     goals: { ...current.goals, ...patch.goals },
     preferences: { ...current.preferences, ...patch.preferences },
+    selectedPlanId: patch.selectedPlanId === undefined ? current.selectedPlanId : patch.selectedPlanId,
   });
   await NutritionProfileModel.updateOne({ _id: userId }, { $set: next }, { upsert: true });
   return next;
@@ -234,18 +256,26 @@ function toFood(row: { _id: string; name: string; portion: string; emoji?: strin
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** What a member may see: everyone's foods and their own, and nothing retired. */
+const visibleTo = (userId: string) => ({
+  active: { $ne: false },
+  $or: [{ ownerUserId: null }, { ownerUserId: userId }],
+});
+
+/** Every word typed must start a word of the name — a typed "chap" finds "Chapati". */
+function nameFilter(query: string) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+  return words.map(word => ({ name: { $regex: `(^|\\s|\\()${escapeRegex(word)}`, $options: 'i' } }));
+}
+
 /**
  * Searches the library a member can see — everyone's foods and their own
- * custom ones — by word prefix: every word typed must start a word of the
- * name. Their own foods come first.
+ * custom ones — by word prefix. Their own foods come first.
  */
 export async function searchFoods(userId: string, query: string, limit?: number): Promise<FoodItem[]> {
   const config = await getConfig();
-  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const visible = { $or: [{ ownerUserId: null }, { ownerUserId: userId }] };
-  const filter = words.length === 0
-    ? visible
-    : { $and: [visible, ...words.map(word => ({ name: { $regex: `(^|\\s|\\()${escapeRegex(word)}`, $options: 'i' } }))] };
+  const words = nameFilter(query);
+  const filter = words.length === 0 ? visibleTo(userId) : { $and: [visibleTo(userId), ...words] };
   const rows = await FoodItemModel.find(filter)
     .sort({ ownerUserId: -1, sort: 1, name: 1 })
     .limit(Math.min(limit ?? config.nutrition.searchLimit, config.nutrition.searchLimit))
@@ -255,8 +285,58 @@ export async function searchFoods(userId: string, query: string, limit?: number)
 
 /** The add-meal screen's shortcuts. */
 export async function quickAddFoods(): Promise<FoodItem[]> {
-  const rows = await FoodItemModel.find({ ownerUserId: null, quickAdd: true }).sort({ sort: 1, name: 1 }).lean();
+  const rows = await FoodItemModel.find({ ownerUserId: null, quickAdd: true, active: { $ne: false } })
+    .sort({ sort: 1, name: 1 })
+    .lean();
   return rows.map(toFood);
+}
+
+/**
+ * The library is ordered server-side and read in pages, so the cursor is
+ * simply where the last page ended — the same scheme the catalogue uses.
+ */
+const offsetOf = (cursor?: string) => {
+  if (!cursor) return 0;
+  const n = Number(Buffer.from(cursor, 'base64url').toString('utf8').replace(/^offset:/, ''));
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+};
+const cursorFor = (offset: number) => Buffer.from(`offset:${offset}`, 'utf8').toString('base64url');
+
+export interface FoodLibraryQuery {
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/**
+ * A page of the whole library, for browsing it (RULES N8): the member's own
+ * foods first, then everyone's, in the order an operator put them in.
+ *
+ * Paged rather than capped like the search, because this answers "show me
+ * everything" — a list that silently stopped at twenty-five would be a
+ * library with no way to reach the twenty-sixth food.
+ */
+export async function listFoodLibrary(userId: string, query: FoodLibraryQuery): Promise<FoodLibraryPage> {
+  const config = await getConfig();
+  const words = nameFilter(query.q ?? '');
+  const filter = words.length === 0 ? visibleTo(userId) : { $and: [visibleTo(userId), ...words] };
+  const limit = Math.min(Math.max(1, query.limit ?? config.nutrition.libraryPageSize), config.nutrition.libraryPageSize);
+  const offset = offsetOf(query.cursor);
+
+  const [total, rows] = await Promise.all([
+    FoodItemModel.countDocuments(filter),
+    FoodItemModel.find(filter)
+      .sort({ ownerUserId: -1, sort: 1, name: 1, _id: 1 })
+      .skip(offset)
+      .limit(limit)
+      .lean(),
+  ]);
+  const end = offset + rows.length;
+  return foodLibraryPageSchema.parse({
+    data: rows.map(toFood),
+    nextCursor: end < total ? cursorFor(end) : null,
+    total,
+  });
 }
 
 export interface CustomFoodInput {
@@ -289,24 +369,150 @@ export async function createCustomFood(userId: string, input: CustomFoodInput): 
   return toFood(row.toObject());
 }
 
-// ─── The diet plan (RULES N6, N7) ──────────────────────────────────────────
+// ─── The diet plan library (RULES N6, N7, N10) ─────────────────────────────
 
 const minutesOf = (time: string) => {
   const [h, m] = time.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
 };
 
+function totalsOf(meals: PlannedMeal[]) {
+  return {
+    calories: meals.reduce((sum, m) => sum + m.calories, 0),
+    proteinG: round1(meals.reduce((sum, m) => sum + m.proteinG, 0)),
+    carbsG: round1(meals.reduce((sum, m) => sum + m.carbsG, 0)),
+    fatsG: round1(meals.reduce((sum, m) => sum + m.fatsG, 0)),
+    fiberG: 0,
+  };
+}
+
+/** A plan row as Mongo holds it — `days` is written by hand, so it is read as unknown. */
+export type PlanRow = {
+  _id: string;
+  name: string;
+  description?: string | null;
+  emoji?: string | null;
+  dietTypes: string[];
+  mealPlans: string[];
+  days: unknown[];
+  active?: boolean;
+};
+
 /**
- * The days that suit a member's preferences: those made for both their diet
- * type and meal plan; failing that, their diet type alone; failing that,
- * all of them — a plan that suits less well beats no plan.
+ * A plan's days, parsed and put in clock order, numbered from 1.
+ *
+ * Meal ids are built from the plan and the day as well as the slot: two days
+ * of one plan both have a breakfast, and ids that collided would make a list
+ * key that is not a key.
  */
-async function templatesFor(preferences: NutritionPreferences) {
-  const all = await DietPlanTemplateModel.find({ active: true }).sort({ sort: 1, _id: 1 }).lean();
-  const both = all.filter(t => t.dietTypes.includes(preferences.dietType) && t.mealPlans.includes(preferences.mealPlan));
-  if (both.length > 0) return both;
-  const diet = all.filter(t => t.dietTypes.includes(preferences.dietType));
-  return diet.length > 0 ? diet : all;
+export function programDaysOf(row: PlanRow): DietPlanProgramDay[] {
+  return row.days.map((day, index) => {
+    const { label, meals } = (day ?? {}) as { label?: string; meals?: unknown[] };
+    const parsed = (meals ?? [])
+      .map(meal =>
+        plannedMealSchema.parse({
+          ...(meal as object),
+          id: `${row._id}-d${index + 1}-${(meal as { slot: string }).slot}`,
+        }),
+      )
+      .sort((a, b) => minutesOf(a.time) - minutesOf(b.time));
+    return {
+      dayNumber: index + 1,
+      label: label ?? '',
+      meals: parsed,
+      totals: totalsOf(parsed),
+    };
+  });
+}
+
+/** What an average day of the plan comes to — what the library row states. */
+export function perDayOf(days: DietPlanProgramDay[]) {
+  const count = Math.max(1, days.length);
+  const sum = (pick: (day: DietPlanProgramDay) => number) => round1(days.reduce((total, day) => total + pick(day), 0) / count);
+  return {
+    calories: Math.round(days.reduce((total, day) => total + day.totals.calories, 0) / count),
+    proteinG: sum(day => day.totals.proteinG),
+    carbsG: sum(day => day.totals.carbsG),
+    fatsG: sum(day => day.totals.fatsG),
+    fiberG: 0,
+  };
+}
+
+const suits = (row: PlanRow, preferences: NutritionPreferences) =>
+  row.dietTypes.includes(preferences.dietType) && row.mealPlans.includes(preferences.mealPlan);
+
+function toSummary(row: PlanRow, preferences: NutritionPreferences, selectedPlanId: string | null): DietPlanSummary {
+  const days = programDaysOf(row);
+  return dietPlanSummarySchema.parse({
+    id: row._id,
+    name: row.name,
+    description: row.description ?? '',
+    emoji: row.emoji ?? '🥗',
+    dietTypes: row.dietTypes,
+    mealPlans: row.mealPlans,
+    dayCount: Math.max(1, days.length),
+    mealsPerDay: days.length > 0 ? Math.round(days.reduce((total, day) => total + day.meals.length, 0) / days.length) : 0,
+    perDay: perDayOf(days),
+    suitsPreferences: suits(row, preferences),
+    selected: row._id === selectedPlanId,
+  });
+}
+
+/**
+ * The plans on offer (RULES N10): the ones that suit the member first, then
+ * the rest — a library that hid the others would leave a vegetarian unable to
+ * see what else exists, and the tag on each row already says who it is for.
+ */
+export async function listDietPlans(userId: string): Promise<DietPlanSummary[]> {
+  const { preferences, selectedPlanId } = await getProfile(userId);
+  const rows = await DietPlanModel.find({ active: true }).sort({ sort: 1, _id: 1 }).lean<PlanRow[]>();
+  return rows
+    .map(row => toSummary(row, preferences, selectedPlanId))
+    .sort((a, b) => Number(b.suitsPreferences) - Number(a.suitsPreferences));
+}
+
+/**
+ * One plan with every day of it. A member's own chosen plan is readable even
+ * once it is retired, so the screen can still name what they are following.
+ */
+export async function getDietPlanDetail(userId: string, planId: string): Promise<DietPlanDetail> {
+  const { preferences, selectedPlanId } = await getProfile(userId);
+  const row = await DietPlanModel.findById(planId).lean<PlanRow | null>();
+  if (!row || (row.active === false && row._id !== selectedPlanId)) throw Errors.notFound('That diet plan');
+  return dietPlanDetailSchema.parse({
+    ...toSummary(row, preferences, selectedPlanId),
+    days: programDaysOf(row),
+  });
+}
+
+/**
+ * Which plan the server would choose for a set of preferences, and why: the
+ * first that suits both, else their diet type alone, else any — a plan that
+ * suits less well beats no plan.
+ *
+ * Exported because the operator's script answers "who gets what" with it. A
+ * second copy of this rule in a tool would be a tool that lies the first time
+ * either copy changes.
+ */
+export async function planForPreferences(
+  preferences: NutritionPreferences,
+): Promise<{ row: PlanRow; basis: 'both' | 'diet_type' | 'any' } | null> {
+  const rows = await DietPlanModel.find({ active: true }).sort({ sort: 1, _id: 1 }).lean<PlanRow[]>();
+  const both = rows.find(candidate => suits(candidate, preferences));
+  if (both) return { row: both, basis: 'both' };
+  const byDiet = rows.find(candidate => candidate.dietTypes.includes(preferences.dietType));
+  if (byDiet) return { row: byDiet, basis: 'diet_type' };
+  return rows[0] ? { row: rows[0], basis: 'any' } : null;
+}
+
+/** The plan in force for a member: the one they picked, else the server's choice. */
+async function planInForce(profile: NutritionProfile): Promise<{ row: PlanRow; chosenByUser: boolean } | null> {
+  if (profile.selectedPlanId !== null) {
+    const chosen = await DietPlanModel.findById(profile.selectedPlanId).lean<PlanRow | null>();
+    if (chosen && chosen.active !== false) return { row: chosen, chosenByUser: true };
+  }
+  const chosen = await planForPreferences(profile.preferences);
+  return chosen ? { row: chosen.row, chosenByUser: false } : null;
 }
 
 /** Which of `cycle` days a date falls on — the same however the user pages through. */
@@ -315,31 +521,24 @@ function cycleIndexOf(date: IsoDate, cycle: number): number {
   return ((days % cycle) + cycle) % cycle;
 }
 
-function totalsOf(meals: PlannedMeal[]) {
-  return {
-    calories: meals.reduce((sum, m) => sum + m.calories, 0),
-    proteinG: meals.reduce((sum, m) => sum + m.proteinG, 0),
-    carbsG: meals.reduce((sum, m) => sum + m.carbsG, 0),
-    fatsG: meals.reduce((sum, m) => sum + m.fatsG, 0),
-    fiberG: 0,
-  };
-}
-
-/** The plan for one day: the suiting days in rotation, chosen by date (N6, N7). */
+/** The plan for one day: the plan in force, its days in rotation, chosen by date (N6, N7, N10). */
 export async function getDietPlan(userId: string, date: IsoDate): Promise<DietPlanDay> {
-  const { preferences } = await getProfile(userId);
-  const templates = await templatesFor(preferences);
-  if (templates.length === 0) throw Errors.notFound('A diet plan');
-  const template = templates[cycleIndexOf(date, templates.length)];
-  const meals = (template.meals as unknown[])
-    .map(meal => plannedMealSchema.parse({ ...(meal as object), id: `${template._id}-${(meal as { slot: string }).slot}` }))
-    .sort((a, b) => minutesOf(a.time) - minutesOf(b.time));
+  const profile = await getProfile(userId);
+  const inForce = await planInForce(profile);
+  if (inForce === null) throw Errors.notFound('A diet plan');
+  const days = programDaysOf(inForce.row);
+  if (days.length === 0) throw Errors.notFound('A diet plan');
+  const day = days[cycleIndexOf(date, days.length)];
   return dietPlanDaySchema.parse({
     date,
-    meals,
-    totals: totalsOf(meals),
-    cycleLength: templates.length,
-    basis: `${DIET_LABEL[preferences.dietType]} · ${PLAN_LABEL[preferences.mealPlan]}`,
+    meals: day.meals,
+    totals: day.totals,
+    cycleLength: days.length,
+    basis: `${DIET_LABEL[profile.preferences.dietType]} · ${PLAN_LABEL[profile.preferences.mealPlan]}`,
+    planId: inForce.row._id,
+    planName: inForce.row.name,
+    dayNumber: day.dayNumber,
+    chosenByUser: inForce.chosenByUser,
   });
 }
 
@@ -347,17 +546,17 @@ export async function getDietPlan(userId: string, date: IsoDate): Promise<DietPl
 export async function getDietPlanDays(userId: string, from: IsoDate, to: IsoDate): Promise<DietPlanDaySummary[]> {
   if (daysBetween(from, to) < 0) throw Errors.validation({ to: 'Must not be before from.' });
   if (daysBetween(from, to) > 62) throw new ApiError(422, 'RANGE_TOO_LONG', 'Ask for two months at most.');
-  const { preferences } = await getProfile(userId);
-  const templates = await templatesFor(preferences);
-  const days: DietPlanDaySummary[] = [];
+  const profile = await getProfile(userId);
+  const inForce = await planInForce(profile);
+  const days = inForce ? programDaysOf(inForce.row) : [];
+  const out: DietPlanDaySummary[] = [];
   for (let day = from; day <= to; day = addDays(day, 1)) {
-    const template = templates.length > 0 ? templates[cycleIndexOf(day, templates.length)] : null;
-    const meals = (template?.meals as { calories: number }[] | undefined) ?? [];
-    days.push(dietPlanDaySummarySchema.parse({
+    const planned = days.length > 0 ? days[cycleIndexOf(day, days.length)] : null;
+    out.push(dietPlanDaySummarySchema.parse({
       date: day,
-      meals: meals.length,
-      calories: meals.reduce((sum, m) => sum + m.calories, 0),
+      meals: planned?.meals.length ?? 0,
+      calories: planned?.totals.calories ?? 0,
     }));
   }
-  return days;
+  return out;
 }

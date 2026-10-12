@@ -1614,6 +1614,22 @@ export const foodItemSchema = z.object({
 });
 export type FoodItem = z.infer<typeof foodItemSchema>;
 
+/**
+ * `GET /foods/library`: a page of the whole library, for browsing rather than
+ * searching (RULES N8).
+ *
+ * Its own endpoint rather than a shape change to `GET /foods`, which answers a
+ * flat array and is what the search field calls: an installed build must keep
+ * getting the answer it was written for (X2).
+ */
+export const foodLibraryPageSchema = z.object({
+  data: z.array(foodItemSchema),
+  nextCursor: z.string().nullable().default(null),
+  /** How many the whole query holds, so a screen can say "42 foods". */
+  total: z.number().int().nonnegative(),
+});
+export type FoodLibraryPage = z.infer<typeof foodLibraryPageSchema>;
+
 /** What the user will and will not eat, which the meal plan is built from. */
 export const dietTypeSchema = z.enum([
   'vegetarian',
@@ -2614,6 +2630,131 @@ export const streakHistoryPageSchema = z.object({
 });
 export type StreakHistoryPage = z.infer<typeof streakHistoryPageSchema>;
 
+/**
+ * How one day went, on the day's own screen.
+ *
+ * The record's four states (`streakHistoryStatusSchema`) plus `upcoming`: the
+ * calendar can be paged into the current month's future days, and a day that
+ * has not happened yet is not a missed one.
+ */
+export const streakDayStatusSchema = z.enum([
+  'completed',
+  'frozen',
+  'restored',
+  'missed',
+  'upcoming',
+]);
+export type StreakDayStatus = z.infer<typeof streakDayStatusSchema>;
+
+/**
+ * One figure on the day, already worded and formatted by the server.
+ *
+ * `id` is not an enum on purpose: the server decides which figures a day is
+ * worth showing, and a day that starts carrying a new one must not make an
+ * installed build fail to parse it (RULES X2). The app draws an icon for the
+ * ids it knows and a neutral one for the rest.
+ */
+export const streakDayMetricSchema = z.object({
+  /** `steps`, `distance`, `activeMinutes`, `calories`, `workouts`, `water`, `food`, … */
+  id: z.string(),
+  label: z.string(),
+  /** Ready to print — "3.4 km", "2,100 ml". */
+  value: z.string(),
+  /** The line under it — "Goal 3,000 ml" — or null. */
+  caption: z.string().nullable().default(null),
+});
+export type StreakDayMetric = z.infer<typeof streakDayMetricSchema>;
+
+/**
+ * `GET /streak/day?date=` — one day of the streak in full, opened from a cell
+ * of the calendar or a row of the record.
+ *
+ * Everything on it is the server's. What makes a day count is config (⚙
+ * `streak.earnedBy`, RULES S9), what a restore cost is the ledger's to say,
+ * and whether a day can still be bought back depends on a window the app does
+ * not own — so the app words none of it.
+ *
+ * `previousDate` and `nextDate` are how the screen pages a day at a time
+ * without having to know where the record starts: the server stops at the
+ * first day it ever recorded and at today.
+ */
+export const streakDayDetailSchema = z.object({
+  /** The day this is about, `YYYY-MM-DD`. */
+  date: z.string(),
+  /** The user's today, as the server counts it, so the screen agrees with the calendar. */
+  today: z.string(),
+  status: streakDayStatusSchema,
+  /** The headline — "Day 18 of your current streak", "Day missed". */
+  title: z.string(),
+  /** The line under it — "10,428 steps", "Freeze used", "Restored (50 coins)". */
+  detail: z.string(),
+  /**
+   * Which day of its own run this was — the "Day 18". Null for a day no run
+   * covers, which is every missed and every upcoming one.
+   */
+  day: z.number().int().positive().nullable().default(null),
+  /** The run the day belongs to, for "Day 18 of 23". Null when none does. */
+  run: streakRunSchema.nullable().default(null),
+  /** The day counts towards a streak — earned, frozen or restored (RULES S1). */
+  counted: z.boolean(),
+  /** Verified steps on the day, and the goal they are read against. */
+  steps: z.number().nonnegative().default(0),
+  stepGoal: z.number().int().positive(),
+  goalMet: z.boolean().default(false),
+  /** The day's steps passed the checks (RULES A20). Unverified steps never earn a day. */
+  verified: z.boolean().default(false),
+  /** The day's other figures, in the order the server wants them read. */
+  metrics: z.array(streakDayMetricSchema),
+  /** Coins the day moved, net — a restore that covered it counts against it. */
+  coinsEarned: z.number().default(0),
+  /** What can still be done about the day, in the server's words, or null. */
+  note: z.string().nullable().default(null),
+  /** The day before on the record, or null at the first day there is. */
+  previousDate: z.string().nullable().default(null),
+  /** The day after, or null on today — there is nothing past it to look at. */
+  nextDate: z.string().nullable().default(null),
+});
+export type StreakDayDetail = z.infer<typeof streakDayDetailSchema>;
+
+/**
+ * One thing that happened on the day: the step goal being reached, a workout,
+ * coins in or out, a glass of water, something eaten.
+ *
+ * `kind` is an open string for the reason `streakDayMetricSchema.id` is
+ * (RULES X2) — the day's log grows as the app does, and an installed build
+ * draws what it knows and a dot for the rest.
+ */
+export const streakDayEventSchema = z.object({
+  id: z.string(),
+  /** `streak`, `workout`, `coins`, `water`, `meal`, … */
+  kind: z.string(),
+  title: z.string(),
+  detail: z.string().nullable().default(null),
+  /** When it happened, ISO; null for something the day carries without a time. */
+  at: z.string().nullable().default(null),
+  /** Coins the row moved, signed, or null when it moved none. */
+  coins: z.number().nullable().default(null),
+});
+export type StreakDayEvent = z.infer<typeof streakDayEventSchema>;
+
+/**
+ * `GET /streak/day/events?date=&cursor=&limit=`: the day's log, newest first,
+ * a page at a time.
+ *
+ * Paged rather than served whole because one day can hold a great many rows —
+ * eight glasses of water, a day of meals, every coin movement — and the
+ * screen above it must paint before they are all in. The cursor is an offset
+ * into one day's log, which for a day that is over can never shift.
+ */
+export const streakDayEventsPageSchema = z.object({
+  data: z.array(streakDayEventSchema),
+  /** Where to continue, or null once the last row is on screen. */
+  nextCursor: z.string().nullable().default(null),
+  /** Rows the day has in all. */
+  total: z.number().int().nonnegative(),
+});
+export type StreakDayEventsPage = z.infer<typeof streakDayEventsPageSchema>;
+
 // ─── Leaderboard ───────────────────────────────────────────────────────────
 
 /** One prize rung (⚙ `leaderboard.tiers`, RULES L7). */
@@ -2901,10 +3042,18 @@ export const nutritionPreferencesSchema = z.object({
 });
 export type NutritionPreferences = z.infer<typeof nutritionPreferencesSchema>;
 
-/** `GET/PUT /nutrition/profile`: the targets and the preferences, kept by the server. */
+/** `GET/PUT /nutrition/profile`: the targets, the preferences and the chosen plan. */
 export const nutritionProfileSchema = z.object({
   goals: nutritionGoalsSchema,
   preferences: nutritionPreferencesSchema,
+  /**
+   * The plan the member picked from the library (RULES N10), or null while
+   * the server is still choosing one from their preferences. A choice made by
+   * hand outranks the preferences: it is the one the member can see the name
+   * of, and silently replacing it when they change their diet type would
+   * answer a question they did not ask.
+   */
+  selectedPlanId: z.string().nullable().default(null),
 });
 export type NutritionProfile = z.infer<typeof nutritionProfileSchema>;
 
@@ -2931,7 +3080,7 @@ export const nutritionDayTotalSchema = z.object({
 });
 export type NutritionDayTotal = z.infer<typeof nutritionDayTotalSchema>;
 
-/** `GET /diet-plan?date=`: the plan the server chose for a day, from the user's preferences (RULES N6, N7). */
+/** `GET /diet-plan?date=`: the plan for a day — the user's chosen one, else one from their preferences (RULES N6, N7, N10). */
 export const dietPlanDaySchema = z.object({
   date: z.string(),
   /** In clock order. */
@@ -2941,6 +3090,14 @@ export const dietPlanDaySchema = z.object({
   cycleLength: z.number().int().positive(),
   /** What the plan was chosen by, for people — "Vegetarian · Balanced". */
   basis: z.string(),
+  /** The plan this day came out of. Null only where the library is empty. */
+  planId: z.string().nullable().default(null),
+  /** Its name, for the screen's header — "Everyday Veg". */
+  planName: z.string().default(''),
+  /** Which day of the plan this is, counting from 1. */
+  dayNumber: z.number().int().positive().default(1),
+  /** True where the user picked this plan themselves rather than the server choosing it. */
+  chosenByUser: z.boolean().default(false),
 });
 export type DietPlanDay = z.infer<typeof dietPlanDaySchema>;
 
@@ -2951,6 +3108,52 @@ export const dietPlanDaySummarySchema = z.object({
   calories: z.number().nonnegative(),
 });
 export type DietPlanDaySummary = z.infer<typeof dietPlanDaySummarySchema>;
+
+/**
+ * One row of `GET /diet-plans`: a plan the user may pick (RULES N10).
+ *
+ * A plan is a named programme of several days, not one day's menu: the
+ * library is something a user browses and chooses from, and a row with no
+ * name is nothing to choose between.
+ */
+export const dietPlanSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(''),
+  emoji: z.string().default('🥗'),
+  /** Who it is written for. */
+  dietTypes: z.array(dietTypeSchema).default([]),
+  mealPlans: z.array(mealPlanSchema).default([]),
+  /** How many days it runs before it starts again. */
+  dayCount: z.number().int().positive(),
+  /** How many meals one of its days holds. */
+  mealsPerDay: z.number().int().nonnegative().default(0),
+  /** What an average day of it comes to. */
+  perDay: nutritionTotalsSchema,
+  /** True where it is made for the user's own diet type and meal plan. */
+  suitsPreferences: z.boolean().default(false),
+  /** True where it is the plan in force for this user. */
+  selected: z.boolean().default(false),
+});
+export type DietPlanSummary = z.infer<typeof dietPlanSummarySchema>;
+
+/** One day of a plan, as the library shows it — not tied to a date. */
+export const dietPlanProgramDaySchema = z.object({
+  /** Counting from 1, in the order the plan runs. */
+  dayNumber: z.number().int().positive(),
+  /** A heading where the plan gives one — "Day 1 · Light start". */
+  label: z.string().default(''),
+  /** In clock order. */
+  meals: z.array(plannedMealSchema),
+  totals: nutritionTotalsSchema,
+});
+export type DietPlanProgramDay = z.infer<typeof dietPlanProgramDaySchema>;
+
+/** `GET /diet-plans/:id`: one plan with every day of it (RULES N10). */
+export const dietPlanDetailSchema = dietPlanSummarySchema.extend({
+  days: z.array(dietPlanProgramDaySchema),
+});
+export type DietPlanDetail = z.infer<typeof dietPlanDetailSchema>;
 
 // ─── Vitals and health ─────────────────────────────────────────────────────
 

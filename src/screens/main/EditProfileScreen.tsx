@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useForm } from 'react-hook-form';
@@ -8,6 +8,7 @@ import { Ruler, Weight } from 'lucide-react-native';
 import { useToast } from '../../components/feedback/Toast';
 import {
   FormDateField,
+  FormFeetInchesField,
   FormInput,
   FormMeasureField,
   FormSegmentedControl,
@@ -89,6 +90,13 @@ const WEEKLY_GOALS = [1, 2, 3, 4, 5, 6, 7].map(n => ({
  * read as a set — the goal and the activity level answer each other — and a
  * screen that wrote on every blur would have the member watching six
  * requests go by while they filled it in.
+ *
+ * The figures are asked for again on the way in (`GET /me`) and applied when
+ * they land. The session's copy of the member is taken at launch, and the
+ * server moves it without this app's help — a weight logged on the health
+ * screen *is* the profile's weight (RULES V4), and another phone can save an
+ * edit — so a form built once from that snapshot would show a member blank
+ * or stale fields and give them no way to find out.
  */
 export const EditProfileScreen = () => {
   const styles = useThemedStyles(makeStyles);
@@ -98,6 +106,7 @@ export const EditProfileScreen = () => {
   const user = useCurrentUser();
   const balance = useCoinBalance();
   const updateProfile = useAuthStore(s => s.updateProfile);
+  const refreshUser = useAuthStore(s => s.refreshUser);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const hydrateProfile = useAccountStore(s => s.hydrateFromServer);
   const storedUnits = useSettingsStore(s => s.units);
@@ -131,17 +140,44 @@ export const EditProfileScreen = () => {
     [units, user],
   );
 
-  const { control, handleSubmit, setValue, getValues, setError, watch } =
-    useForm<EditProfileValues>({
-      resolver: zodResolver(editProfileSchema),
-      defaultValues,
-      mode: 'onBlur',
-    });
+  const {
+    control,
+    handleSubmit,
+    setValue,
+    getValues,
+    setError,
+    watch,
+    reset,
+    formState,
+  } = useForm<EditProfileValues>({
+    resolver: zodResolver(editProfileSchema),
+    defaultValues,
+    mode: 'onBlur',
+  });
+
+  // What the server has now, not what this install remembered at launch.
+  useEffect(() => {
+    refreshUser();
+  }, [refreshUser]);
+
+  // A form keeps the defaults it was handed at mount, so the answer has to be
+  // applied when it arrives — and only while the member has not started
+  // typing, because nobody's half-entered weight should be replaced by a
+  // figure that landed a moment later.
+  const { isDirty } = formState;
+  useEffect(() => {
+    // Only over a member we actually have: a read that came back with
+    // nothing leaves the form as it is rather than emptying it.
+    if (!isDirty && user) reset(defaultValues);
+  }, [defaultValues, isDirty, reset, user]);
 
   const currentUnits = watch('units');
+  // Imperial height is picked in feet and inches, as onboarding does it: the
+  // stored figure is the same single number either way, and nobody knows
+  // their height as 69 inches.
   const unitLabels =
     currentUnits === 'imperial'
-      ? { height: 'in', weight: 'lb' }
+      ? { height: 'ft/in', weight: 'lb' }
       : { height: 'cm', weight: 'kg' };
 
   /**
@@ -281,28 +317,48 @@ export const EditProfileScreen = () => {
                 {currentUnits === 'imperial' ? 'Imperial' : 'Metric'}
               </AppText>
             </HStack>
-            <HStack gap="sm">
-              <FormMeasureField
-                control={control}
-                name="height"
-                label="Height"
-                placeholder="175"
-                unit={unitLabels.height}
-                onUnitPress={toggleUnits}
-                leading={<Icon as={Ruler} size="md" color="textTertiary" />}
-                style={styles.grow}
-              />
-              <FormMeasureField
-                control={control}
-                name="weight"
-                label="Weight"
-                placeholder="70"
-                unit={unitLabels.weight}
-                onUnitPress={toggleUnits}
-                leading={<Icon as={Weight} size="md" color="textTertiary" />}
-                style={styles.grow}
-              />
+            <HStack gap="sm" align="start">
+              <VStack flex={1}>
+                {currentUnits === 'imperial' ? (
+                  <FormFeetInchesField
+                    control={control}
+                    name="height"
+                    label="Height"
+                    sheetTitle="Select your height"
+                    unit={unitLabels.height}
+                    onUnitPress={toggleUnits}
+                    leading={<Icon as={Ruler} size="md" color="textTertiary" />}
+                  />
+                ) : (
+                  <FormMeasureField
+                    control={control}
+                    name="height"
+                    label="Height"
+                    placeholder="175"
+                    unit={unitLabels.height}
+                    onUnitPress={toggleUnits}
+                    leading={<Icon as={Ruler} size="md" color="textTertiary" />}
+                  />
+                )}
+              </VStack>
+              <VStack flex={1}>
+                <FormMeasureField
+                  control={control}
+                  name="weight"
+                  label="Weight"
+                  placeholder="70"
+                  unit={unitLabels.weight}
+                  onUnitPress={toggleUnits}
+                  leading={<Icon as={Weight} size="md" color="textTertiary" />}
+                />
+              </VStack>
             </HStack>
+
+            <AppText variant="micro" color="textTertiary">
+              Used for calories, BMI and your health score. A weight logged on
+              the health screen is this same figure — saving it here records it
+              there too.
+            </AppText>
           </VStack>
         </Card>
 
