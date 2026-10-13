@@ -21,6 +21,7 @@ import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
 import { useCatalogue } from '../../hooks/useCatalogue';
+import { track } from '../../services/analytics';
 import {
   useRecentShopSearches,
   useShopSearchStore,
@@ -118,8 +119,23 @@ export const ShopSearchScreen = () => {
   useEffect(() => {
     if (isSearching && !catalogue.isLoading && catalogue.total !== null) {
       remember(query);
+      // The term and what it found: a search that returns nothing is the
+      // most useful row in the trail, because it names something the shop
+      // should stock and does not.
+      track('shop_search', {
+        query: query.slice(0, 60),
+        results: catalogue.total,
+        category: category ?? null,
+      });
     }
-  }, [catalogue.isLoading, catalogue.total, isSearching, query, remember]);
+  }, [
+    catalogue.isLoading,
+    catalogue.total,
+    category,
+    isSearching,
+    query,
+    remember,
+  ]);
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {

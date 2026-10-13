@@ -81,7 +81,18 @@ const deviceSchema = new Schema(
      * sign-in.
      */
     counting: {
-      type: [{ _id: false, from: { type: Date, required: true }, to: { type: Date, default: null } }],
+      type: [{
+        _id: false,
+        from: { type: Date, required: true },
+        to: { type: Date, default: null },
+        /**
+         * The build that signed in, where the sign-in knew it. Kept for the
+         * operator's read of "when did they last sign in, and on what"
+         * (RULES P16) — the step rules look only at `from` and `to`, so a
+         * period from before this was recorded is not any less usable.
+         */
+        appVersion: { type: String, default: null },
+      }],
       default: undefined,
     },
   },

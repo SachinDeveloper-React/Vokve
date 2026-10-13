@@ -45,6 +45,19 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform(v => v === 'true' || v === '1'),
+  /**
+   * The developer endpoints — `POST /dev/steps`, `POST /dev/jobs/*` — which
+   * set a day's verified steps and run the jobs by hand. They are off in
+   * production by `NODE_ENV` alone, but `NODE_ENV` is one forgotten
+   * environment variable away from being wrong, and a deployment that
+   * forgot it would be handing every member an endpoint that writes their
+   * own step count. `DEV_ROUTES=false` switches them off whatever
+   * `NODE_ENV` says, so a real deployment can refuse them twice.
+   */
+  DEV_ROUTES: z
+    .string()
+    .optional()
+    .transform(v => v !== 'false' && v !== '0'),
   LOG_LEVEL: z.string().default('info'),
 
   /**
@@ -82,6 +95,12 @@ export const env = envSchema.parse(process.env);
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * Whether the developer endpoints are mounted at all (RULES A26): never in
+ * production, and only where `DEV_ROUTES` has not been turned off.
+ */
+export const devRoutesEnabled = !isProduction && env.DEV_ROUTES;
 
 if (isProduction && env.OTP_DEV_ECHO) {
   throw new Error('OTP_DEV_ECHO must not be enabled in production');

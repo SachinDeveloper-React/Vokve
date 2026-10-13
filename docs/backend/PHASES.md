@@ -22,7 +22,7 @@ P0 Foundations ─► P1 Existing contracts ─► P2 Steps (observe) ─► P3 
 - Fastify + zod type provider; request lifecycle plugins from ARCHITECTURE §4: requestId, otel, auth stub, header capture, rate limit, idempotency, error mapper.
 - MongoDB (Atlas dev cluster; local `mongodb-memory-server` replica set) + Redis; Mongoose models with declared indexes and `$jsonSchema` validators for `users`, `refresh_tokens`, `otp_challenges`, `devices`, `app_releases`, `idempotency_keys`, `audit_log`, `app_config`, `feature_flags`, `events`.
 - **Device registration** (`POST /devices/register`, heartbeat, `X-Vokve-*` header capture, 428/426 gates) and `GET /releases` — every later phase depends on device attribution.
-- `POST /events` analytics sink.
+- `POST /events` analytics sink, and `PUT /me/permissions` beside it — the trail and what each install allows (RULES P13, P14), with the operator's read-only `/admin/users…` over both (P15).
 - CI: typecheck, lint, unit, integration on a memory replica set, index/validator drift check, migration dry-run, release-flag assertion (RULES Q2).
 - Staging environment at `api.staging.vokve.app` with TLS.
 - `GET /health`, `GET /config` (static values from `app_config`).

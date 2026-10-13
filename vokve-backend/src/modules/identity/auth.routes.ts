@@ -10,7 +10,13 @@ import { z } from 'zod';
 
 export const authRouter = Router();
 
-const meta = (req: Parameters<Parameters<typeof authRouter.post>[1]>[0]) => ({ deviceId: req.ctx.deviceId, ip: req.ip });
+const meta = (req: Parameters<Parameters<typeof authRouter.post>[1]>[0]) => ({
+  deviceId: req.ctx.deviceId,
+  ip: req.ip,
+  // Kept on the sign-in period, so "when did they sign in" comes with "on
+  // which build" (RULES P16).
+  appVersion: req.ctx.appVersion,
+});
 
 // SMS costs money and is an abuse target: tightest limits in the API (RULES Z3).
 const otpSendLimits = [

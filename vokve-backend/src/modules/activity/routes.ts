@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { isProduction } from '../../config/env.js';
+import { devRoutesEnabled } from '../../config/env.js';
 import { localDayOf } from '../../lib/dates.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
@@ -92,7 +92,7 @@ activityRouter.post(
  * Dev only: set today's verified steps and run the credit path, so the cap,
  * escrow and wallet can be exercised without a phone. Absent in production.
  */
-if (!isProduction) {
+if (devRoutesEnabled) {
   const body = z.object({ steps: z.number().int().min(0).max(200_000), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
   activityRouter.post('/dev/steps', validate('body', body), async (req, res) => {
     const localDay = req.body.date ?? localDayOf(new Date(), req.ctx.timezone);

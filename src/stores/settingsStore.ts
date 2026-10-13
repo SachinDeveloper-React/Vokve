@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { track } from '../services/analytics';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { settingsApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
@@ -106,6 +107,7 @@ export const useSettingsStore = create<SettingsState>()(
           set({ dailyStepGoal });
           try {
             set(fromServer(await settingsApi.update({ dailyStepGoal })));
+            track('step_goal_set', { steps: dailyStepGoal });
           } catch (error) {
             set({ dailyStepGoal: previous });
             throw error;

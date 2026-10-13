@@ -3195,3 +3195,92 @@ export const healthScoreSchema = z.object({
   disclaimer: z.string(),
 });
 export type HealthScore = z.infer<typeof healthScoreSchema>;
+
+// ─── Telemetry: what the member does, and what the phone allows ────────────
+
+/**
+ * The permissions this app asks the OS for, by the name the server files
+ * them under. Closed: a key the server does not know is refused, so a new
+ * permission needs a line here and a line there, which is the point.
+ */
+export const appPermissionSchema = z.enum([
+  /** Android's `ACTIVITY_RECOGNITION` — without it nothing counts steps. */
+  'activityRecognition',
+  /** `POST_NOTIFICATIONS` on Android 13+, the Firebase grant on iOS. */
+  'notifications',
+  /** Health Connect `READ_STEPS` — a watch's steps, and another app's. */
+  'healthConnectReadSteps',
+  /** Health Connect `WRITE_STEPS` — this phone's own steps, written back (D-57). */
+  'healthConnectWriteSteps',
+  /** This app is exempt from battery optimisation, so counting survives doze. */
+  'batteryUnrestricted',
+  /** `CAMERA`, for a profile photo taken rather than picked. */
+  'camera',
+  /** The photo library, for a profile photo picked rather than taken. */
+  'photos',
+]);
+export type AppPermission = z.infer<typeof appPermissionSchema>;
+
+/**
+ * What the OS answers about one permission. `blocked` is a refusal the app
+ * can no longer ask about — only Settings can change it — which is why it is
+ * not folded into `denied`; `unavailable` is a permission this phone does
+ * not have at all; `unknown` is "could not find out", which is not a no.
+ */
+export const permissionStateSchema = z.enum([
+  'granted',
+  'denied',
+  'blocked',
+  'unavailable',
+  'unknown',
+]);
+export type PermissionState = z.infer<typeof permissionStateSchema>;
+
+/** One permission as the app reports it. */
+export const permissionEntrySchema = z.object({
+  key: appPermissionSchema,
+  state: permissionStateSchema,
+  /** What the OS said, where a word helps: "update_required", "aggressive OEM". */
+  detail: z.string().max(120).optional(),
+});
+export type PermissionEntry = z.infer<typeof permissionEntrySchema>;
+
+/** One permission as the server holds it, with when it last changed. */
+export const permissionStatusSchema = permissionEntrySchema.extend({
+  /** When this state was first seen. */
+  since: z.string(),
+  /** When it was last confirmed still so. */
+  checkedAt: z.string(),
+});
+export type PermissionStatusReport = z.infer<typeof permissionStatusSchema>;
+
+/** `GET`/`PUT /me/permissions`: what this install last told the server. */
+export const permissionSnapshotSchema = z.object({
+  deviceId: z.string(),
+  permissions: z.array(permissionStatusSchema),
+  updatedAt: z.string().nullable(),
+});
+export type PermissionSnapshot = z.infer<typeof permissionSnapshotSchema>;
+
+/**
+ * One thing the member did. The device, platform and app version are *not*
+ * here: the server reads those from the headers every request already
+ * carries, where a hurried build cannot leave them out.
+ */
+export interface AnalyticsEvent {
+  /** `screen_view`, `water_logged`, `order_paid` — lower_snake_case. */
+  name: string;
+  /** When it happened on this phone, which may be long before it is sent. */
+  at: string;
+  /** The app launch it belongs to, so a visit can be read as a session. */
+  sessionId?: string;
+  /** Whatever the event needs said about it — never anything secret. */
+  props?: Record<string, string | number | boolean | null>;
+}
+
+/** `POST /events`: how much of the batch the server took (RULES P7 drops the rest). */
+export const eventIntakeSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+  dropped: z.number().int().nonnegative().optional(),
+});
+export type EventIntake = z.infer<typeof eventIntakeSchema>;

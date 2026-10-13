@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { BellRing, Droplets, Footprints, Gift } from 'lucide-react-native';
 import { PermissionStepLayout } from '../../components';
 import { usePermissionStep } from '../../navigation/permissionsFlow';
+import { recordPermissionAnswer } from '../../services/permissions';
 import { enablePushNotifications } from '../../services/push';
 import { useTheme } from '../../theme';
 
@@ -18,8 +19,17 @@ export const NotificationPermissionScreen = () => {
 
   const onAllow = useCallback(async () => {
     setBusy(true);
-    await enablePushNotifications();
+    const allowed = await enablePushNotifications();
     setBusy(false);
+    recordPermissionAnswer(
+      'notifications',
+      allowed ? 'granted' : 'denied',
+    );
+    next();
+  }, [next]);
+
+  const onSkip = useCallback(() => {
+    recordPermissionAnswer('notifications', 'skipped');
     next();
   }, [next]);
 
@@ -45,7 +55,7 @@ export const NotificationPermissionScreen = () => {
       allowLabel="Allow notifications"
       onAllow={onAllow}
       busy={busy}
-      onSkip={next}
+      onSkip={onSkip}
       footnote={
         Platform.OS === 'android'
           ? 'Android will ask to allow notifications. You can pick what you get in Settings.'

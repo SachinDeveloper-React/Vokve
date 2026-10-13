@@ -68,7 +68,9 @@ import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
 import { UpgradeRequiredScreen } from '../screens/system/UpgradeRequiredScreen';
 import { useUpgradeRequired } from '../stores/appStatusStore';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
+import { usePermissionReporting } from '../hooks/usePermissionReporting';
 import { useReminderNotifications } from '../hooks/useReminderNotifications';
+import { trackScreen } from '../services/analytics';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
@@ -104,6 +106,42 @@ const styles = StyleSheet.create({
   splash: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
 
+/**
+ * The route parameters a screen view may carry (PRD ADV2). An allowlist, not
+ * a filter: route parameters are whatever a screen needed, and a trail that
+ * copied all of them would eventually carry something a member typed.
+ */
+const TRACKED_PARAMS = new Set([
+  'id',
+  'itemId',
+  'orderId',
+  'category',
+  'challengeId',
+  'topic',
+  'date',
+  'kind',
+  'focus',
+  'select',
+]);
+
+/** What a route says about itself that is safe to keep. */
+function screenProps(
+  params: object | undefined,
+): Record<string, string | number | boolean> {
+  const props: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (!TRACKED_PARAMS.has(key)) continue;
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      props[key] = value;
+    }
+  }
+  return props;
+}
+
 export const RootNavigator = () => {
   const { colors, navigationTheme } = useTheme();
   const status = useAuthStatus();
@@ -115,7 +153,20 @@ export const RootNavigator = () => {
   const upgradeRequired = useUpgradeRequired();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const [isNavReady, setNavReady] = useState(false);
-  const onNavReady = useCallback(() => setNavReady(true), []);
+
+  // Where the member is, every time it changes: the screen trail the
+  // operator reads (`screen_view`, PRD ADV2). Taken from the container
+  // rather than from each screen, so a new screen is instrumented by
+  // existing — and none is ever forgotten.
+  const trackCurrentScreen = useCallback(() => {
+    const route = navigationRef.getCurrentRoute();
+    if (route) trackScreen(route.name, screenProps(route.params));
+  }, [navigationRef]);
+
+  const onNavReady = useCallback(() => {
+    setNavReady(true);
+    trackCurrentScreen();
+  }, [trackCurrentScreen]);
   const promptedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -124,6 +175,9 @@ export const RootNavigator = () => {
 
   // Step counting follows the session, not any one screen.
   useStepTrackingSession();
+
+  // Nor does what the phone allows (RULES P14).
+  usePermissionReporting();
 
   // The same for hydration reminders: the plan stays scheduled with the OS
   // whatever is on screen, and a tapped reminder opens the water log.
@@ -192,6 +246,7 @@ export const RootNavigator = () => {
       ref={navigationRef}
       theme={navigationTheme}
       onReady={onNavReady}
+      onStateChange={trackCurrentScreen}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {needsOnboarding ? (

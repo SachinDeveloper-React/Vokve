@@ -44,7 +44,7 @@ export const refreshBody = z.object({ refreshToken: z.string().min(1) });
 export const otpRequestBody = z.object({ identifier: z.string().trim().min(1), purpose: z.enum(['login', 'reset_password']) });
 export const resetPasswordBody = z.object({ verificationId: z.string().min(1), code: z.string().regex(/^\d{4,8}$/), password: signUpBody.shape.password });
 
-interface Meta { deviceId?: string; ip?: string }
+interface Meta { deviceId?: string; ip?: string; appVersion?: string }
 
 // ─── Sign-up → phone OTP → (account) → email OTP ───────────────────────────
 
@@ -234,7 +234,7 @@ export async function signIn(identifier: string, password: string, meta: Meta): 
  * new, starts when it registers; a period still open simply carries on.
  */
 async function signedInOn(user: UserDoc, meta: Meta): Promise<void> {
-  if (meta.deviceId) await startCounting(user._id, meta.deviceId);
+  if (meta.deviceId) await startCounting(user._id, meta.deviceId, new Date(), meta.appVersion);
 }
 
 /** Constant-time-ish: always run one bcrypt compare so a missing user is not faster. */

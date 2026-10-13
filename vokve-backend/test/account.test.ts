@@ -9,7 +9,7 @@ import { credit } from '../src/modules/economy/service.js';
 import { RefreshTokenModel, UserModel } from '../src/modules/identity/models.js';
 import { notify } from '../src/modules/notifications/service.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
-import { EventModel } from '../src/modules/platform/models.js';
+import { EventModel } from '../src/modules/telemetry/models.js';
 import { StreakDayModel } from '../src/modules/streak/models.js';
 import { WorkoutModel } from '../src/modules/training/models.js';
 import { app, authed, baseHeaders, signUpAndRegister, type Session } from './helpers.js';

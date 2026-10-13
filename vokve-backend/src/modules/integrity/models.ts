@@ -44,6 +44,10 @@ const fraudFlagSchema = new Schema(
     details: { type: Schema.Types.Mixed, default: null },
     status: { type: String, enum: ['open', 'confirmed', 'dismissed'], default: 'open' },
     lastSeenAt: { type: Date, default: Date.now },
+    /** Who judged it and when, from the review queue (RULES A27). */
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: String, default: null },
+    reviewNote: { type: String, default: null },
   },
   { timestamps: true, collection: 'fraud_flags' },
 );

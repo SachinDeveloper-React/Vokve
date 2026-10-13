@@ -11,6 +11,7 @@ import { PermissionStepLayout } from '../../components';
 import { healthConnectCardState } from '../../components/steps/HealthConnectCard';
 import { useToast } from '../../components/feedback/Toast';
 import { usePermissionStep } from '../../navigation/permissionsFlow';
+import { recordPermissionAnswer } from '../../services/permissions';
 import { connectHealthConnect } from '../../services/steps';
 import {
   useHealthConnectStatus,
@@ -51,10 +52,16 @@ export const HealthConnectPermissionScreen = () => {
     setBusy(true);
     try {
       const after = await connectHealthConnect();
-      if (after.stepsGranted ?? after.canReadSteps ?? after.canRead) {
+      const allowed = after.stepsGranted ?? after.canReadSteps ?? after.canRead;
+      recordPermissionAnswer(
+        'healthConnect',
+        allowed ? 'granted' : 'denied',
+      );
+      if (allowed) {
         next();
       }
     } catch {
+      recordPermissionAnswer('healthConnect', 'failed');
       toast.show({
         title: "Couldn't open Health Connect",
         message: 'You can connect it later from Step tracking.',
@@ -64,6 +71,11 @@ export const HealthConnectPermissionScreen = () => {
       setBusy(false);
     }
   }, [next, toast]);
+
+  const onSkip = useCallback(() => {
+    recordPermissionAnswer('healthConnect', 'skipped');
+    next();
+  }, [next]);
 
   return (
     <PermissionStepLayout
@@ -110,7 +122,7 @@ export const HealthConnectPermissionScreen = () => {
       onAllow={onAllow}
       busy={busy}
       skipLabel="Skip"
-      onSkip={next}
+      onSkip={onSkip}
     />
   );
 };

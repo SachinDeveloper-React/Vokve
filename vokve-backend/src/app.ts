@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { requestContext } from './middleware/requestContext.js';
 import { versionGate } from './middleware/version.js';
 import { accountRouter, aboutRouter } from './modules/account/routes.js';
+import { adminUsersRouter } from './modules/admin/routes.js';
 import { activityRouter } from './modules/activity/routes.js';
 import { challengesRouter } from './modules/challenges/routes.js';
 import { commerceRouter } from './modules/commerce/routes.js';
@@ -24,6 +25,7 @@ import { nutritionRouter } from './modules/nutrition/routes.js';
 import { platformRouter } from './modules/platform/routes.js';
 import { socialRouter } from './modules/social/routes.js';
 import { streakRouter } from './modules/streak/routes.js';
+import { telemetryRouter } from './modules/telemetry/routes.js';
 import { trainingRouter } from './modules/training/routes.js';
 import { vitalsRouter } from './modules/vitals/routes.js';
 
@@ -81,9 +83,11 @@ export function createApp() {
   v1.use(contentRouter);
   v1.use(nutritionRouter);
   v1.use(vitalsRouter);
+  v1.use(telemetryRouter);
   // The operator's own surface, last and under its own gate: it answers the
   // admin key alone, and 404s where no key is configured.
   v1.use(adminNutritionRouter);
+  v1.use(adminUsersRouter);
   app.use('/v1', v1);
 
   app.use((_req, res) => {

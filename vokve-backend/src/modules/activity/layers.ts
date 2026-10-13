@@ -34,6 +34,13 @@ export interface DeviceInput {
     deviceLocked: boolean | null;
   } | null;
   play: { verdict: string; reasons: string[] } | null;
+  /**
+   * Whether this server asks for Play Integrity at all (a Cloud project is
+   * configured). Only then is a day that carried no verdict the phone's
+   * silence rather than the operator's choice — so only then does it cost
+   * anything (RULES A24).
+   */
+  integrityExpected?: boolean;
   /** Other accounts this install or vendor id is registered to (A18). */
   sharedAccounts: number;
   /** Other accounts holding this device's attestation key. */
@@ -170,6 +177,20 @@ export function scoreDevice(
   }
 
   const play = input.play;
+  const integrity = config.integrity;
+  if (!key?.attested && integrity.requireAttested) {
+    // Turned on for the rollout (A12): until then the soft penalty above is
+    // what a key that cannot be attested costs.
+    l0 = 0;
+    flag('L0', 'attestation_required', 'hard', { failure: key?.failure ?? null });
+  }
+  if (!play && input.integrityExpected) {
+    // The server asks for a verdict and this day carried none: an old build,
+    // a phone without Play services — or a build that would rather not say.
+    l0 = Math.min(l0, 70);
+    flag('L0', 'play_integrity_missing', integrity.requireVerdict ? 'hard' : 'soft');
+    if (integrity.requireVerdict) l0 = 0;
+  }
   if (play) {
     if (play.verdict === 'fail') {
       const hardReasons = play.reasons.filter(reason => reason !== 'stale_token' && reason !== 'unlicensed');
@@ -182,7 +203,8 @@ export function scoreDevice(
       }
     } else if (play.verdict === 'unavailable') {
       l0 = Math.min(l0, 70);
-      flag('L0', 'play_integrity_unavailable', 'soft', { reasons: play.reasons });
+      flag('L0', 'play_integrity_unavailable', integrity.requireVerdict ? 'hard' : 'soft', { reasons: play.reasons });
+      if (integrity.requireVerdict) l0 = 0;
     }
   }
 
@@ -305,10 +327,41 @@ export function scoreDevice(
       }
     }
   }
+  // A6, as the server can check it: one minute nobody could have walked.
+  // The phone sends what it counted and the minutes it counted them in, so
+  // an impossible cadence is arithmetic, not a judgement call — which is why
+  // this is hard from the first day rather than waiting on shadow data.
+  if (ev.minutes.status === 'enabled' && ev.minutes.peakMinuteSteps > t.maxStepsPerMinute) {
+    l2 = 0;
+    flag('L2', 'cadence_impossible', 'hard', { peakMinuteSteps: ev.minutes.peakMinuteSteps, max: t.maxStepsPerMinute });
+  }
+  // The simplest tamper there is: leave the minutes alone and raise the
+  // total. Steps the counter handed over in a backlog, and steps its own
+  // checks flagged, are already off `phoneClean`, so what is left here is a
+  // count with no minute of the day behind it.
+  if (ev.minutes.status === 'enabled' && phoneClean > 0) {
+    const placed = ev.minutes.timedSteps + ev.minutes.untimedSteps;
+    const unaccounted = Math.max(0, phoneClean - placed);
+    const share = unaccounted / phoneClean;
+    const hardAt = t.unaccountedShareHard;
+    if (share > t.unaccountedShare) {
+      const hard = hardAt !== null && share > hardAt;
+      l2 = hard ? 0 : Math.min(l2, 30);
+      flag('L2', 'steps_unaccounted', hard ? 'hard' : 'soft', {
+        phoneClean, placed, unaccounted, share: round2(share),
+      });
+    }
+  }
   const dayTotal = Math.max(deviceSteps, candidate);
   if (dayTotal > t.maxDailySteps) {
     l2 = Math.min(l2, 60);
     flag('L2', 'daily_volume', 'soft', { steps: dayTotal });
+  }
+  if (dayTotal > t.impossibleDailySteps) {
+    // Past what a 24-hour race walker covers: not a day to be doubted, a day
+    // to be refused.
+    l2 = 0;
+    flag('L2', 'daily_volume_impossible', 'hard', { steps: dayTotal, max: t.impossibleDailySteps });
   }
   if (!ev.checks.enabled) {
     l2 = Math.min(l2, 50);
@@ -335,10 +388,19 @@ export function scoreDevice(
 
   // ─── L4 · motion signature ──────────────────────────────────────────────
   let l4: number | null = null;
-  if (ev.motion.status === 'disabled') {
-    // Opting out lowers trust, never blocks (D-23).
-    flag('L4', 'motion_disabled', 'info');
-  } else if (ev.motion.status === 'enabled' && ev.motion.stepWindows > 0) {
+  const motionAsked = config.activity.tracker.motionSampling.enabled;
+  if (ev.motion.status !== 'enabled') {
+    // Opting out lowers trust, never blocks (D-23) — but it has to *lower*
+    // something. A layer left out of the mean scored better than an honest
+    // phone with a few shaken windows in it, which made switching the
+    // sampling off the cheapest thing a tampered build could do.
+    if (motionAsked) {
+      l4 = t.motion.absentScore;
+      flag('L4', 'motion_absent', 'soft', { status: ev.motion.status });
+    } else {
+      flag('L4', 'motion_disabled', 'info', { status: ev.motion.status });
+    }
+  } else if (ev.motion.stepWindows > 0) {
     const nonWalk = ev.motion.shake + ev.motion.still;
     const share = nonWalk / ev.motion.stepWindows;
     l4 = Math.round(100 * (1 - share));
@@ -381,6 +443,20 @@ export function scoreDevice(
   if (input.sharedAccounts + 1 >= config.devices.flagAtAccountsPerDevice) {
     l6 = Math.min(l6, 50);
     flag('L6', 'device_shared', 'soft', { accounts: input.sharedAccounts + 1 });
+  }
+
+  // ─── Nothing behind the count ───────────────────────────────────────────
+  // A day with no minutes, no motion windows and no allowed Health Connect
+  // app behind it is a number and nothing else. Small days still stand — a
+  // phone that could not sample a short walk is ordinary — but a day that
+  // claims a marathon with no evidence at all is not verified (A25).
+  const dayClaim = Math.max(deviceSteps, candidate);
+  const corroborated = ev.minutes.status === 'enabled' || ev.motion.status === 'enabled' || external.length > 0;
+  if (!corroborated && dayClaim > t.uncorroboratedSteps) {
+    l2 = 0;
+    flag('L2', 'no_corroboration', 'hard', {
+      steps: dayClaim, minutes: ev.minutes.status, motion: ev.motion.status, sources: ev.sources.length,
+    });
   }
 
   const layers: Record<LayerName, number | null> = { L0: l0, L1: l1, L2: l2, L3: l3, L4: l4, L5: l5, L6: l6 };

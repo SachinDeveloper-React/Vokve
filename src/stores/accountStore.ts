@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { setAnalyticsAllowed } from '../services/analytics';
 import { accountApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import type {
@@ -103,7 +104,12 @@ export const useAccountStore = create<AccountState>()(
 
       loadPrivacy: async () => {
         try {
-          set({ privacy: await accountApi.privacy() });
+          const privacy = await accountApi.privacy();
+          set({ privacy });
+          // The server drops the rows of a member who opted out (RULES P7);
+          // knowing the switch here means not sending them at all, over
+          // their data, in the first place.
+          setAnalyticsAllowed(privacy.analytics);
         } catch (error) {
           logger.warn('accountStore', 'Privacy load failed', toApiError(error));
         }
@@ -124,6 +130,7 @@ export const useAccountStore = create<AccountState>()(
             privacy: saved,
             savingPrivacy: state.savingPrivacy.filter(entry => entry !== key),
           }));
+          setAnalyticsAllowed(saved.analytics);
         } catch (error) {
           set(state => ({
             privacy: before,

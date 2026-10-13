@@ -3191,3 +3191,105 @@ export const healthScoreSchema = z.object({
   disclaimer: z.string(),
 });
 export type HealthScore = z.infer<typeof healthScoreSchema>;
+
+// ─── Telemetry: what the member does, and what the phone lets us do ────────
+
+/**
+ * The permissions this app asks the OS for, by the name both sides use
+ * (RULES P14). Closed on purpose: a snapshot is only useful if the operator
+ * reading it knows every key it can contain, and an unknown key from a newer
+ * build is better refused than silently filed under a name nothing queries.
+ */
+export const appPermissionSchema = z.enum([
+  /** Android's `ACTIVITY_RECOGNITION` — without it nothing counts steps. */
+  'activityRecognition',
+  /** `POST_NOTIFICATIONS` on Android 13+, the Firebase grant on iOS. */
+  'notifications',
+  /** Health Connect `READ_STEPS` — a watch's steps, and another app's. */
+  'healthConnectReadSteps',
+  /** Health Connect `WRITE_STEPS` — this phone's own steps, written back (D-57). */
+  'healthConnectWriteSteps',
+  /** This app is exempt from battery optimisation, so counting survives doze. */
+  'batteryUnrestricted',
+  /** `CAMERA`, for a profile photo taken rather than picked. */
+  'camera',
+  /** The photo library, for a profile photo picked rather than taken. */
+  'photos',
+]);
+export type AppPermission = z.infer<typeof appPermissionSchema>;
+
+/**
+ * What the OS answers about one permission. `blocked` is a refusal that can
+ * no longer be asked for in-app (Android's "don't ask again", iOS after the
+ * first no) — the app must send the member to Settings, which is why it is
+ * not folded into `denied`. `unavailable` means this phone has no such
+ * permission at all (Health Connect on iOS, notifications before Android 13);
+ * `unknown` means the app could not find out, which is not the same as no.
+ */
+export const permissionStateSchema = z.enum(['granted', 'denied', 'blocked', 'unavailable', 'unknown']);
+export type PermissionState = z.infer<typeof permissionStateSchema>;
+
+export const permissionEntrySchema = z.object({
+  key: appPermissionSchema,
+  state: permissionStateSchema,
+  /** What the OS said, where a word helps: "update_required", "aggressive OEM". */
+  detail: z.string().trim().max(120).optional(),
+});
+export type PermissionEntry = z.infer<typeof permissionEntrySchema>;
+
+/** `PUT /me/permissions`: every permission this install knows about, in one go. */
+export const permissionReportSchema = z.object({
+  /**
+   * The whole set, not a patch: a report that left a permission out could
+   * never say it had been turned off, and a missing key is exactly what a
+   * revoked permission looks like.
+   */
+  permissions: z.array(permissionEntrySchema).min(1).max(20),
+});
+export type PermissionReport = z.infer<typeof permissionReportSchema>;
+
+/** One permission as the server holds it, with when it last changed. */
+export const permissionStatusSchema = permissionEntrySchema.extend({
+  /** When this state was first seen. */
+  since: z.string(),
+  /** When it was last confirmed still so. */
+  checkedAt: z.string(),
+});
+export type PermissionStatus = z.infer<typeof permissionStatusSchema>;
+
+/** `GET /me/permissions`: what this install last told the server. */
+export const permissionSnapshotSchema = z.object({
+  deviceId: z.string(),
+  permissions: z.array(permissionStatusSchema),
+  updatedAt: z.string().nullable(),
+});
+export type PermissionSnapshot = z.infer<typeof permissionSnapshotSchema>;
+
+/**
+ * One thing the member did, as the app reports it (`POST /events`, PRD ADV2).
+ * Device, platform and app version are *not* here: the server takes those
+ * from the request headers, where they cannot be forged by an older build or
+ * left out by a hurried one.
+ */
+export const analyticsEventSchema = z.object({
+  /** `screen_view`, `water_logged`, `order_paid` — lower snake case, a closed shape by convention. */
+  name: z.string().trim().regex(/^[a-z][a-z0-9_]{2,59}$/, 'Event names are lower_snake_case'),
+  /** When it happened on the phone, which may be long before it is sent. */
+  at: z.string().datetime({ offset: true }),
+  /** The app launch it belongs to, so a visit can be read as a session. */
+  sessionId: z.string().trim().max(64).optional(),
+  /**
+   * Whatever the event needs said about it. Never anything secret: these
+   * rows are read by operators and exported to a warehouse. Bounded so one
+   * event cannot carry a payload the collection was not sized for.
+   */
+  props: z
+    .record(z.string().max(40), z.union([z.string().max(200), z.number(), z.boolean(), z.null()]))
+    .refine(props => Object.keys(props).length <= 20, 'Too many properties')
+    .optional(),
+});
+export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>;
+
+/** A batch of them. The app sends every few seconds, not every event. */
+export const eventBatchSchema = z.object({ events: z.array(analyticsEventSchema).min(1).max(100) });
+export type EventBatch = z.infer<typeof eventBatchSchema>;

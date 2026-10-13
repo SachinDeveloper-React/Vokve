@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
+import { track } from '../services/analytics';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { hydrationApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
@@ -125,6 +126,7 @@ export const useHydrationStore = create<HydrationState>()(
         };
         set(state => ({ outbox: [...state.outbox, { kind: 'add', entry }] }));
         get().flush();
+        track('water_logged', { ml: amount });
       },
 
       remove: id => {

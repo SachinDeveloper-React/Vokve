@@ -35,17 +35,5 @@ const idempotencySchema = new Schema(
 );
 export const IdempotencyModel = model('Idempotency', idempotencySchema);
 
-const eventSchema = new Schema(
-  {
-    userId: String,
-    deviceId: String,
-    appVersion: String,
-    platform: String,
-    name: { type: String, required: true },
-    props: Schema.Types.Mixed,
-    at: { type: Date, required: true, expires: 60 * 60 * 24 * 400 },
-  },
-  { collection: 'events', versionKey: false },
-);
-eventSchema.index({ userId: 1, at: -1 });
-export const EventModel = model('Event', eventSchema);
+// The `events` collection lives in `modules/telemetry` now, beside the
+// permission snapshots and the operator's reads of both.

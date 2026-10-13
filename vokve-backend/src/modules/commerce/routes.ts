@@ -200,6 +200,7 @@ commerceRouter.post('/checkout', requireVerifiedContacts, validate('body', check
     userId: req.ctx.userId!, lines: body.lines, fromCart: body.fromCart, addressId: body.addressId, coins: body.coins, couponCode: body.couponCode,
     delivery: body.delivery, paymentMethod: body.paymentMethod, stepUpToken: body.stepUpToken,
     idempotencyKey: req.ctx.idempotencyKey, trustTier: req.ctx.trustTier, deviceId: req.ctx.deviceId, appVersion: req.ctx.appVersion,
+    timezone: req.ctx.timezone,
   }));
 });
 

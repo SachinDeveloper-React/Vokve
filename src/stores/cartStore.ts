@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { track } from '../services/analytics';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { cartApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
@@ -117,6 +118,7 @@ export const useCartStore = create<CartState>()(
       },
 
       add: async (item, size = null, quantity = 1, color = null) => {
+        track('cart_item_added', { itemId: item.id, quantity });
         const current =
           get().cart?.lines.find(
             line =>

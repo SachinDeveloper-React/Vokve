@@ -145,6 +145,7 @@ import type {
   ShopApi,
   StreakApi,
   SupportApi,
+  TelemetryApi,
   UserApi,
   VitalsApi,
   WalletApi,
@@ -5524,5 +5525,34 @@ export const mockAppApi: AppApi = {
       },
       supportEmail: 'support@vokve.app',
     };
+  },
+};
+
+/**
+ * The sink with nothing behind it: a mock build has no server to file a
+ * trail with, and swallowing the batch is exactly what the real one does
+ * for a member who has turned analytics off (RULES P7). The events are
+ * logged instead, which is what anyone running against mocks wants to see.
+ */
+export const mockTelemetryApi: TelemetryApi = {
+  async sendEvents(events) {
+    await delay();
+    for (const event of events) {
+      logger.debug('analytics', `${event.name}`, event.props);
+    }
+    return { accepted: events.length };
+  },
+  async reportPermissions(permissions) {
+    await delay();
+    const now = new Date().toISOString();
+    return {
+      deviceId: 'dev_mock',
+      permissions: permissions.map(p => ({ ...p, since: now, checkedAt: now })),
+      updatedAt: now,
+    };
+  },
+  async permissions() {
+    await delay();
+    return { deviceId: 'dev_mock', permissions: [], updatedAt: null };
   },
 };

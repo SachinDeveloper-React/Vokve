@@ -69,6 +69,8 @@ import {
   streakRestoreResultSchema,
   streakSummarySchema,
   verificationChallengeSchema,
+  eventIntakeSchema,
+  permissionSnapshotSchema,
   userSchema,
   userSettingsSchema,
   vitalReadingSchema,
@@ -109,6 +111,7 @@ import type {
   ShopApi,
   StreakApi,
   SupportApi,
+  TelemetryApi,
   UserApi,
   VitalsApi,
   WalletApi,
@@ -137,6 +140,7 @@ import {
   mockSettingsApi,
   mockShopApi,
   mockStreakApi,
+  mockTelemetryApi,
   mockUserApi,
   mockSupportApi,
   mockVitalsApi,
@@ -253,6 +257,23 @@ const realDeviceApi: DeviceApi = {
         attestation,
       ),
     ),
+};
+
+/**
+ * The trail and the permission snapshot (PRD ADV2, RULES P14). Both are
+ * fire-and-forget as far as the screens are concerned: nothing the member
+ * sees depends on either landing, which is why the only caller is
+ * `services/analytics`.
+ */
+const realTelemetryApi: TelemetryApi = {
+  sendEvents: events =>
+    request(eventIntakeSchema, client => client.post('/events', { events })),
+  reportPermissions: permissions =>
+    request(permissionSnapshotSchema, client =>
+      client.put('/me/permissions', { permissions }),
+    ),
+  permissions: () =>
+    request(permissionSnapshotSchema, client => client.get('/me/permissions')),
 };
 
 const realWalletApi: WalletApi = {
@@ -928,6 +949,14 @@ export const deviceApi: DeviceApi = {
     pick(mockDeviceApi, realDeviceApi).attestationChallenge(deviceId),
   submitAttestation: (deviceId, attestation) =>
     pick(mockDeviceApi, realDeviceApi).submitAttestation(deviceId, attestation),
+};
+
+export const telemetryApi: TelemetryApi = {
+  sendEvents: events =>
+    pick(mockTelemetryApi, realTelemetryApi).sendEvents(events),
+  reportPermissions: permissions =>
+    pick(mockTelemetryApi, realTelemetryApi).reportPermissions(permissions),
+  permissions: () => pick(mockTelemetryApi, realTelemetryApi).permissions(),
 };
 
 export const walletApi: WalletApi = {

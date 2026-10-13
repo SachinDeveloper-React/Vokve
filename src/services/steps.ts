@@ -21,6 +21,7 @@ import type {
 import { addDays, toIsoDate, todayIso } from '../utils/date';
 import { logger } from '../utils/logger';
 import { uuid } from '../utils/uuid';
+import { track } from './analytics';
 import type { IngestIntegrity } from './api/contracts';
 import { activityApi, deviceApi } from './api/endpoints';
 import { ApiError, toApiError } from './api/errors';
@@ -719,6 +720,7 @@ async function startCounting(): Promise<EnableTrackingResult> {
   });
   refreshStepStatus();
   scheduleSync([todayIso()]);
+  track('step_tracking_started');
   return 'started';
 }
 
@@ -822,6 +824,7 @@ export async function resumeStepTracking(): Promise<void> {
 
 /** Turns counting off until the user turns it on again — sign-ins included. */
 export async function stopStepTracking(): Promise<void> {
+  track('step_tracking_stopped');
   const snapshot = await StepTracker.stopTracking();
   useStepsStore.setState({
     today: snapshot,

@@ -95,7 +95,7 @@ export async function registerDevice(userId: string, body: RegisterDeviceBody, r
     : null;
   const inserted = device.firstSeenAt?.getTime() === now.getTime();
   if (inserted || (before && before.deviceId !== device._id)) {
-    await startCounting(userId, device._id, now);
+    await startCounting(userId, device._id, now, body.profile.app.version);
   }
 
   const min = config.app.minVersion[body.platform];
@@ -130,10 +130,15 @@ const MAX_COUNTING_PERIODS = 50;
  * A period already open — a second sign-in path for the same session, or a
  * sign-out the server never heard about — carries on instead.
  */
-export async function startCounting(userId: string, deviceId: string, at = new Date()): Promise<void> {
+export async function startCounting(
+  userId: string,
+  deviceId: string,
+  at = new Date(),
+  appVersion?: string,
+): Promise<void> {
   await DeviceModel.updateOne(
     { _id: deviceId, userId, counting: { $not: { $elemMatch: { to: null } } } },
-    { $push: { counting: { $each: [{ from: at, to: null }], $slice: -MAX_COUNTING_PERIODS } } },
+    { $push: { counting: { $each: [{ from: at, to: null, appVersion: appVersion ?? null }], $slice: -MAX_COUNTING_PERIODS } } },
   );
 }
 

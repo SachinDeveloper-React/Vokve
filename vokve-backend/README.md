@@ -209,6 +209,95 @@ curl -s -X PUT $A/admin/diet-plans/<id> -H "$K" -H 'Content-Type: application/js
 curl -s -X DELETE $A/admin/diet-plans/<id> -H "$K" | jq '{released, active: .plan.active}'
 ```
 
+## What a member did, and what their phone allows
+
+Two separate things, kept apart on purpose (RULES P13, P14).
+
+The **trail** is product analytics. The app queues an event for every screen it
+opens and every action worth a row, keeps the queue across launches, and sends
+it in batches to `POST /events`; the server attaches the device, platform,
+version, build, OS and timezone from the request's own headers and answers
+**202** with what it filed. A member who turned usage analytics off has the
+whole batch dropped on arrival (P7) — accepted, not refused, because the app
+should not have to know the setting. Rows live 400 days.
+
+The **permission snapshot** is operational state: what each install's OS
+currently allows, the whole set at once (`PUT /me/permissions`), with when each
+answer last changed and the last twenty changes beside it. It is **kept even
+for a member who opted out of analytics** — it is the first thing to look at
+when steps read zero or a reminder never arrived, not a metric — and reporting
+it never asks the member for anything.
+
+The operator reads both, read-only, under the same admin key — along with
+everything else the server knows about the member (RULES P15, P16):
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# who is this? (id, email, phone or part of a name) — each row says what they
+# are running and when they installed it
+curl -s "$A/admin/users?q=asha@example.com" -H "$K" | jq '.data[0]'
+
+# the member in full: account, every phone, sessions, wallet, orders, trail
+curl -s "$A/admin/users/<userId>" -H "$K" | jq '.account, .activity, .counts'
+curl -s "$A/admin/users/<userId>" -H "$K" | jq '.installs[] | {
+  model: .device.model, os: .device.osVersion, installed: .installedAt,
+  installedWith: .app.firstVersion, running: .app.version,
+  signedIn, signedInAt, lastActive: .lastActiveAt,
+  push: .push.hasToken, denied: .permissions.denied }'
+
+# every sign-in, newest first: when, on which phone, on which build
+curl -s "$A/admin/users/<userId>/logins?limit=20" -H "$K" | jq '.data'
+
+# where have they been, newest first (filter by name= or screen=, page with cursor=)
+curl -s "$A/admin/users/<userId>/activity?limit=20" -H "$K" | jq '.data[] | {at, name, screen}'
+curl -s "$A/admin/users/<userId>/activity?name=order_paid" -H "$K" | jq '.data'
+
+# the same trail as a shape: screens by visits, actions by count, events by day
+curl -s "$A/admin/users/<userId>/activity/summary?days=30" -H "$K" | jq '{events, sessions, screens: .screens[0:5], actions}'
+
+# every phone on the account: what it allows, when that changed, and whether it can be pushed to
+curl -s "$A/admin/users/<userId>/permissions" -H "$K" | jq '.data[] | {model, appVersion, hasPushToken, permissions, history}'
+```
+
+## Fake steps, and who looks at them
+
+The layers have been scoring every day since the first snapshot (RULES A14–A25, `modules/activity/layers.ts`). What the server refuses outright, on evidence that needs no judgement call: an emulator, a forged attestation chain, an unlocked bootloader, a failed Play verdict, a key seen on another account, half the count flagged by the tracker's own checks, two in five motion windows non-walk, **a minute above 240 steps**, **a day above 120,000**, and **a day with no minutes, no motion and no allowed source behind more than 2,000 steps**. What costs score instead: a total the minutes cannot explain, motion sampling asked for and not delivered, a denylisted or hand-typed source, a pedometer ratio outside 0.7–1.3, round or identical totals, night steps.
+
+**Three switches are off and are meant to go on for the rollout** (RULES A12, A24) — turn each on once the shadow period says what honest phones really send:
+
+```sh
+# a Keystore key that cannot be attested stops costing 40 points and refuses the day
+# a day that carried no Play verdict does the same
+# and a count the minutes cannot explain by more than 50% becomes a refusal
+mongosh "$MONGODB_URI" --eval '
+  db.app_config.updateOne({_id:"integrity"}, {$set:{"value.requireAttested":true,"value.requireVerdict":true}}, {upsert:true});
+  db.app_config.updateOne({_id:"activity"}, {$set:{"value.thresholds.unaccountedShareHard":0.5}}, {upsert:true})'
+```
+
+The queue an operator reads them in (RULES A27), under the admin key:
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# who has something to answer for — hard flags first, with the coins still in escrow
+curl -s "$A/admin/fraud/queue?days=30" -H "$K" | jq '.data[] | {email, flags, kinds, heldCoins, steps, verifiedSteps}'
+
+# the case file: every flag, the days behind them with their layer scores, each phone's proof
+curl -s "$A/admin/fraud/users/<userId>" -H "$K" | jq '{flags: .flags, day: .days[0], holds: .holds}'
+
+# the verdict. confirm voids what that day was holding (RULES T7); dismiss gives the trust back
+curl -s -X POST "$A/admin/fraud/flags/<flagId>/confirm" -H "$K" -H 'Content-Type: application/json' -d '{"note":"shaken phone"}' | jq
+curl -s -X POST "$A/admin/fraud/flags/<flagId>/dismiss" -H "$K" -H 'Content-Type: application/json' -d '{}' | jq
+
+# what a tightened threshold would have done to a real day, from the stored snapshot
+curl -s -X POST "$A/admin/users/<userId>/days/2026-10-13/rescore" -H "$K" | jq '{before, after}'
+```
+
+**At checkout there is one more layer** (L7, RULES A19): coins spent within ⚙ 60 minutes of the account's first ever credit (`fast_redemption`) and one street line + postcode behind ⚙ 3 accounts (`address_reuse`). Both are soft flags raised before the order exists — so a farm's first cash-out is on the record even if the payment never completes — and neither refuses an order on its own; the gate behind them is the trust tier's (T5).
+
+`POST /dev/steps` writes a day's verified steps and exists for exactly this kind of exercise — which is why it is off in production and off again wherever `DEV_ROUTES=false` (RULES A26). A server that mounts it says so in its first screen of logs.
+
 ## Notifications and push
 
 `modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once `FIREBASE_SERVICE_ACCOUNT` is set (the service-account JSON, or a path to it — see `.env.example`); without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.

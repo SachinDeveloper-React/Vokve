@@ -4,13 +4,17 @@ import type {
   AccountDeletion,
   AccountSession,
   Address,
+  AnalyticsEvent,
   AppAbout,
   Cart,
   Challenge,
   ChallengeDetail,
   CheckoutResult,
   DeliveryPreferences,
+  EventIntake,
   PaymentMethod,
+  PermissionEntry,
+  PermissionSnapshot,
   PurchaseLine,
   Quote,
   Review,
@@ -855,4 +859,24 @@ export interface VitalsApi {
   remove(id: string, options: IdempotentOptions): Promise<{ ok: boolean }>;
   /** One number for how the user is doing, and what made it (RULES V8). */
   score(): Promise<HealthScore>;
+}
+
+export interface TelemetryApi {
+  /**
+   * A batch of what the member did (`POST /events`). The server takes it
+   * and says how much it filed: a member who turned usage analytics off has
+   * their rows dropped on arrival (RULES P7), which is not a failure and
+   * must not be retried.
+   */
+  sendEvents(events: AnalyticsEvent[]): Promise<EventIntake>;
+  /**
+   * What this phone's OS currently lets the app do (RULES P14) — the whole
+   * set, not a patch, so a permission the member revoked arrives as a
+   * refusal rather than as a gap.
+   */
+  reportPermissions(
+    permissions: PermissionEntry[],
+  ): Promise<PermissionSnapshot>;
+  /** The same snapshot back, as the server holds it. */
+  permissions(): Promise<PermissionSnapshot>;
 }

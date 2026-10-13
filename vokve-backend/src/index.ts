@@ -1,5 +1,5 @@
 import { createApp } from './app.js';
-import { env } from './config/env.js';
+import { devRoutesEnabled, env } from './config/env.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { getKV } from './db/redis.js';
 import { startScheduler } from './jobs/scheduler.js';
@@ -14,8 +14,17 @@ async function main() {
   await configurePlayIntegrityFromEnv();
   const app = createApp();
   const server = app.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, env: env.NODE_ENV, otpEcho: env.OTP_DEV_ECHO }, 'vokve-backend listening');
+    logger.info({ port: env.PORT, env: env.NODE_ENV, otpEcho: env.OTP_DEV_ECHO, devRoutes: devRoutesEnabled }, 'vokve-backend listening');
   });
+  if (devRoutesEnabled) {
+    // Loud on purpose: these write a member's own step count and run the
+    // jobs by hand. Anybody reading the first screen of logs on a server
+    // that should not have them should see them (RULES A26).
+    logger.warn(
+      { routes: ['POST /v1/dev/steps', 'POST /v1/dev/jobs/coin-expiry', 'POST /v1/dev/jobs/coin-expiry-warn'] },
+      'developer endpoints are mounted — set NODE_ENV=production or DEV_ROUTES=false on a real deployment',
+    );
+  }
   const stopScheduler = startScheduler();
 
   const shutdown = async (signal: string) => {

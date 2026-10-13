@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { track } from '../services/analytics';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { NutritionProfilePatch } from '../services/api/contracts';
 import { nutritionApi } from '../services/api/endpoints';
@@ -235,6 +236,11 @@ export const useNutritionStore = create<NutritionState>()(
             syncError: null,
           }));
           get().flush();
+          track('meal_logged', {
+            slot: entries[0].slot,
+            items: entries.length,
+            calories: Math.round(entries.reduce((sum, e) => sum + e.calories, 0)),
+          });
           return entries[0].id;
         },
 

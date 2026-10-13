@@ -257,21 +257,29 @@ devices {
           carrier, locale, timezone, screen:{w,h,scale}, hasBiometrics },
   app:  { version, build, bundleId, firstVersion, updatedAt },
   push: { token, provider:'fcm', updatedAt, invalidAt },
+  counting: [{ from, to, appVersion }],       // sign-in → sign-out per install (D-56); also the login history (RULES P16)
   integrity: { provider:'play_integrity'|'app_attest', keyId, verdict, checkedAt, raw: Mixed },
   signals: { rooted, emulator, debugBuild, hookingFramework, mockLocation, developerMode },
   trust: { score, tier },
-  firstSeenAt, lastSeenAt, revokedAt
+  firstSeenAt, lastSeenAt, revokedAt         // the install; last active (the device gate's 5-minute heartbeat, DV1)
 }
 idx: {userId,installId} unique · {installId} · {vendorId} · {'integrity.keyId'} · {'push.token'} · {lastSeenAt:-1} · {'app.version',platform}
-device_sessions { _id, deviceId, userId, startedAt, endedAt, appVersion, ip, country }   idx: {userId,startedAt:-1} · TTL 180d
+// device_sessions was planned here; it is NOT built and should not be —
+// `devices.counting` already holds a period per sign-in with the build it
+// came from, and it is the record the step rules are judged against (D-56),
+// so a second session log could only ever disagree with it (RULES P16).
+// ip / country are deliberately not kept.
 app_releases    { _id, platform, version, build, status:'current'|'supported'|'deprecated'|'blocked', minOs, releasedAt, notes }
                 idx: {platform,version,build} unique
 version_stats   { _id:{platform,version,day}, dau, installs, crashes }        // materialised daily
 
 // ───────────── integrity ─────────────
 attestations    { _id, userId, deviceId, provider, verdict, details: Mixed, checkedAt }  TTL 90d
-fraud_flags     { _id, userId, deviceId, layer:'L0'..'L7', kind, severity:1-5, evidence: Mixed, day, status:'open'|'confirmed'|'dismissed', reviewedBy, reviewedAt }
-                idx: {userId,status} · {status,severity:-1,createdAt:-1} · {userId,layer,kind,day} unique
+fraud_flags     { _id, userId, deviceId, localDay, layer:'L0'..'L7', kind, severity:'hard'|'soft'|'info', details: Mixed,
+                  status:'open'|'confirmed'|'dismissed', lastSeenAt, reviewedBy, reviewedAt, reviewNote }
+                // as built: severity is the word, not a number, and the day is `localDay`; the review fields
+                // are written by the queue (RULES A27), one row per (user, day, kind)
+                idx: {userId,localDay,kind} unique · {status,severity,createdAt:-1} · {kind,createdAt:-1}
 trust_history   { _id, userId, day, score, tier, inputs: Mixed }             idx: {userId,day} unique
 review_queue    { _id, userId, reason, priority, assignedTo, status, resolution, openedAt, closedAt }
 idempotency_keys{ _id:{userId,key}, status, body: Mixed, createdAt }        TTL 24h
@@ -363,7 +371,11 @@ campaigns       { _id, name, category, segment: Mixed, payload, scheduledAt, sta
 // ───────────── platform ─────────────
 app_config      { _id: key, value: Mixed, updatedAt, updatedBy }
 feature_flags   { _id: key, enabled, rollout: Number, cohorts:[String], platforms:[String], minVersion }
-events          { _id, userId, deviceId, name, props: Mixed, at, appVersion }   // product analytics; TTL 400d or export to warehouse
+events          { _id, userId, deviceId, name, screen, sessionId, props: Mixed, at, receivedAt, platform, appVersion, build, osVersion, timezone }
+                // the trail (RULES P13); TTL 400d on receivedAt; idx {userId,at:-1} {name,at:-1} {screen,at:-1}
+device_permissions { _id: `${userId}:${deviceId}`, userId, deviceId, platform, appVersion,
+                     permissions: [{ key, state, detail, since, checkedAt }], history: [{ key, from, to, at }] }
+                // what each install's OS allows (RULES P14); current state, capped history, kept whatever the analytics switch says
 content_quotes  { _id, text, active }
 ```
 

@@ -213,6 +213,10 @@ export interface DayShape {
   sources?: Record<string, unknown>[];
   records?: Record<string, unknown>[];
   emulator?: boolean;
+  /** What the phone says it sent: a build that keeps no minutes, no motion windows, or runs no checks. */
+  minutesStatus?: 'enabled' | 'disabled';
+  motionStatus?: 'enabled' | 'disabled';
+  checksEnabled?: boolean;
 }
 
 /** A `VerificationSnapshot` as react-native-step-tracker-pro 2.4 builds one, with the parts a test varies. */
@@ -249,17 +253,17 @@ export function snapshotPayload(shape: DayShape): Record<string, unknown> {
     clock: { wallClockMs: shape.signedAt ?? Date.now(), bootId: Date.now() - 3_600_000, timezone, utcOffsetMinutes: 330 },
     suspectSteps: shape.suspectSteps ?? 0,
     integrity: {
-      date: shape.date, enabled: true, mode: 'flag', deviceSteps: shape.deviceSteps, suspectSteps: shape.suspectSteps ?? 0,
+      date: shape.date, enabled: shape.checksEnabled ?? true, mode: 'flag', deviceSteps: shape.deviceSteps, suspectSteps: shape.suspectSteps ?? 0,
       flags: shape.suspectSteps ? [{ type: 'cadence', severity: 'strong', from: start, to: start + 60_000, steps: shape.suspectSteps, evidence: {} }] : [],
       events: [], minutes: {}, evaluatedAt: Date.now(), rules: {}, charging: false,
       activityRecognition: { requested: false, available: false, current: 'unknown' },
       device: { emulator: shape.emulator ?? false, testKeysBuild: false, suBinary: false, adbEnabled: false, developerOptions: false, appDebuggable: false, stepCounter: null },
     },
     include: ['minutes', 'motionWindows', ...(shape.records ? ['healthConnectRecords'] : [])],
-    minutesStatus: 'enabled',
-    minutes,
-    motionWindowsStatus: 'enabled',
-    motionWindows: windows,
+    minutesStatus: shape.minutesStatus ?? 'enabled',
+    ...(shape.minutesStatus === 'disabled' ? {} : { minutes }),
+    motionWindowsStatus: shape.motionStatus ?? 'enabled',
+    ...(shape.motionStatus === 'disabled' ? {} : { motionWindows: windows }),
     ...(shape.records ? { healthConnectRecords: { status: 'read', recordTypes: ['steps'], records: shape.records, truncated: false } } : {}),
     nonce: shape.nonce,
     signedAt: shape.signedAt ?? Date.now(),

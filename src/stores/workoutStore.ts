@@ -1,5 +1,6 @@
 import { produce } from 'immer';
 import { create } from 'zustand';
+import { track } from '../services/analytics';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { workoutApi } from '../services/api/endpoints';
 import { toApiError, type ApiError } from '../services/api/errors';
@@ -153,6 +154,12 @@ export const useWorkoutStore = create<WorkoutState>()(
           isSyncing: true,
           error: null,
         }));
+
+        track('workout_finished', {
+          workoutId: finished.id,
+          exercises: finished.exercises.length,
+          volumeKg: Math.round(finished.totalVolumeKg),
+        });
 
         try {
           const saved = await workoutApi.save(finished);

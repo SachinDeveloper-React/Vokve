@@ -1,4 +1,9 @@
 import { create } from 'zustand';
+import {
+  flushEvents,
+  setAnalyticsIdentity,
+  track,
+} from '../services/analytics';
 import { authApi, userApi } from '../services/api/endpoints';
 import { setOnSessionExpired } from '../services/api/client';
 import { ApiError, toApiError } from '../services/api/errors';
@@ -232,6 +237,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       set({ status: 'authenticated', user, isSubmitting: false, notice: null });
       hydrateUserCaches();
+      track('sign_in', { method: 'password' });
       return true;
     } catch (error) {
       set({ error: toApiError(error), isSubmitting: false });
@@ -295,6 +301,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isSubmitting: false,
       });
       hydrateUserCaches();
+      track('otp_verified', { channel: pending.channel });
       return true;
     } catch (error) {
       const apiError = toApiError(error);
@@ -512,6 +519,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    // What they did goes up first, while this session can still be used to
+    // send it: afterwards the tokens are gone and the batch would be refused.
+    track('sign_out');
+    await flushEvents();
     // Tell the server if we can, but never block the user from leaving. The
     // push token goes first, while the session can still say whose it was.
     try {
@@ -561,6 +572,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
  * and records its own failure; none of them holds up the others.
  */
 function hydrateUserCaches(): void {
+  // The trail is attributed before anything else is fetched, so the events
+  // those fetches cause belong to the member who caused them. The privacy
+  // switches come with them, since one of them decides whether there is a
+  // trail at all (RULES P7).
+  setAnalyticsIdentity(useAuthStore.getState().user?.id ?? null);
+  useAccountStore.getState().loadPrivacy();
   useCoinsStore.getState().hydrateFromServer();
   useNotificationsStore.getState().hydrateFromServer();
   useNotificationSettingsStore.getState().hydrateFromServer();
@@ -580,6 +597,9 @@ function hydrateUserCaches(): void {
 
 /** The caches above, emptied: what the next user must not see of this one. */
 function resetUserCaches(): void {
+  // Nothing more is attributed to the member who left, and what they did
+  // has already been sent (see `signOut`).
+  setAnalyticsIdentity(null);
   useCoinsStore.getState().reset();
   useNotificationsStore.getState().reset();
   useOrdersStore.getState().reset();

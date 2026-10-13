@@ -3,6 +3,7 @@ import { getConfig } from '../../config/remote.js';
 import { withTransaction } from '../../db/mongo.js';
 import { getKV } from '../../db/redis.js';
 import { toCoins, toMilli } from '../../lib/coins.js';
+import { localDayOf } from '../../lib/dates.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
@@ -50,6 +51,7 @@ import {
 } from '../../contracts/index.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../economy/models.js';
 import { UserModel } from '../identity/models.js';
+import { checkRedemption } from '../integrity/economic.service.js';
 import { notify } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
 import {
@@ -1224,6 +1226,8 @@ export interface CheckoutInput {
   trustTier?: string;
   deviceId?: string;
   appVersion?: string;
+  /** The member's own zone, so an L7 flag sits on the day they spent (RULES A19). */
+  timezone?: string;
 }
 
 /** The tiers that may buy at all, and the ones that must step up to (RULES T5). */
@@ -1398,6 +1402,20 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
   // under watch, once enforcement is out of shadow mode (RULES O8, T5).
   if (!config.trust.shadow && STEP_UP_TIERS.has(tier)) {
     await consumeStepUp(input.userId, input.stepUpToken, cfg.stepUpThreshold);
+  }
+
+  // L7 (RULES A19): what this redemption shows about the account, raised
+  // before the order exists so a farm's first cash-out is on the record
+  // even if the payment never completes. Flags only — the gate is the trust
+  // tier's (T5), checked above.
+  const raised = await checkRedemption({
+    userId: input.userId,
+    localDay: localDayOf(new Date(), input.timezone ?? config.locale.timezone),
+    coinsApplied: q.coinsApplied,
+    addressId: input.addressId,
+  });
+  if (raised.length > 0) {
+    logger.info({ userId: input.userId, raised, coins: q.coinsApplied }, 'economic.flags_raised');
   }
 
   const orderId = newId('ord');

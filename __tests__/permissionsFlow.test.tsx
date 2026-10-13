@@ -32,6 +32,9 @@ import { userSchema, type StepGoal } from '../src/types/models';
 jest.mock('../src/services/permissions', () => ({
   pendingPermissionSteps: jest.fn(),
   stepGoalNeedsChoosing: jest.fn(),
+  // Each screen tells the server what it heard (RULES P11); nothing about
+  // the flow depends on that landing.
+  recordPermissionAnswer: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../src/services/api/endpoints', () => ({
   ...jest.requireActual('../src/services/api/endpoints'),

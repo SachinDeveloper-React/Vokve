@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { track } from '../services/analytics';
 import { checkoutApi } from '../services/api/endpoints';
 import { ApiError, toApiError } from '../services/api/errors';
 import { collectPayment } from '../services/payments';
@@ -173,6 +174,11 @@ async function runAttempt(
   set: Set,
 ): Promise<CheckoutOutcome> {
   set({ isPlacing: true });
+  track('checkout_started', {
+    coins: attempt.coins ?? 0,
+    fromCart: Boolean(attempt.fromCart),
+    paymentMethod: attempt.paymentMethod ?? null,
+  });
   try {
     const { order, balance, payment } = await checkoutApi.place(
       {
@@ -188,6 +194,7 @@ async function runAttempt(
       { idempotencyKey: attempt.idempotencyKey },
     );
     set({ isPlacing: false, pendingCheckout: null });
+    track('order_placed', { orderId: order.id, coins: attempt.coins ?? 0 });
     absorb(order, balance);
     if (attempt.fromCart) {
       useCartStore.getState().hydrateFromServer();
@@ -244,6 +251,7 @@ async function settlePayment(
       idempotencyKey: `${intent.orderId}:pay`,
     });
     set({ isPaying: false });
+    track('order_paid', { orderId: paid.order.id, amount: intent.amount });
     absorb(paid.order, paid.balance);
     return { status: 'placed', order: paid.order, balance: paid.balance };
   } catch (caught) {

@@ -8,6 +8,7 @@ import {
 import { PermissionStepLayout } from '../../components';
 import { useToast } from '../../components/feedback/Toast';
 import { usePermissionStep } from '../../navigation/permissionsFlow';
+import { recordPermissionAnswer } from '../../services/permissions';
 import { enableStepCounting } from '../../services/steps';
 import { useTheme } from '../../theme';
 
@@ -27,6 +28,16 @@ export const ActivityPermissionScreen = () => {
     setBusy(true);
     const result = await enableStepCounting();
     setBusy(false);
+    recordPermissionAnswer(
+      'activity',
+      result === 'started'
+        ? 'granted'
+        : result === 'permission_denied'
+          ? 'denied'
+          : result === 'no_sensor'
+            ? 'unavailable'
+            : 'failed',
+    );
     if (result === 'permission_denied') {
       toast.show({
         title: 'Step counting is off',
@@ -48,6 +59,11 @@ export const ActivityPermissionScreen = () => {
     }
     next();
   }, [next, toast]);
+
+  const onSkip = useCallback(() => {
+    recordPermissionAnswer('activity', 'skipped');
+    next();
+  }, [next]);
 
   return (
     <PermissionStepLayout
@@ -74,7 +90,7 @@ export const ActivityPermissionScreen = () => {
       allowLabel="Allow physical activity"
       onAllow={onAllow}
       busy={busy}
-      onSkip={next}
+      onSkip={onSkip}
       footnote={'Android will ask to allow "Physical activity".'}
     />
   );

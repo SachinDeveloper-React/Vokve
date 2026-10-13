@@ -308,7 +308,7 @@ pending: z.number().int().nonnegative().default(0),
 |---|---|
 | `coin_ledger`, `coin_balances`, `coin_holds` | Append-only ledger + materialised balance + escrow (§8) |
 | `activity_samples`, `activity_daily`, `motion_windows` | Raw health samples, per-local-day rollups, motion-signature features (§7) |
-| `devices`, `device_sessions`, `app_releases`, `version_stats` | Device registry, per-device sessions, known builds, adoption (§13) |
+| `devices`, `app_releases`, `version_stats` | Device registry — profile, installed build, install and last-active times, and a period per sign-in (`counting`, D-56, which is also the login history, RULES P16) — known builds, adoption (§13). No separate `device_sessions`: a second session log could only disagree with the periods the coin rules already use |
 | `health_connections`, `attestations`, `fraud_flags`, `trust_history`, `review_queue` | Provider grants, integrity verdicts, fraud layers, trust score (§7) |
 | `streak_days`, `streak_freezes` | Earned/protected days; freeze grants and spends |
 | `challenge_definitions`, `challenge_enrollments`, `achievements`, `user_achievements` | Catalogue vs per-user progress |
@@ -320,7 +320,7 @@ pending: z.number().int().nonnegative().default(0),
 | `vital_readings` | HR, BP, weight (BMI derived) |
 | `referrals`, `referral_codes` | Programme |
 | `user_settings` | Mirror of `settingsStore` |
-| `idempotency_keys`, `audit_log`, `events`, `feature_flags`, `campaigns` | Integrity, analytics, remote config, push campaigns |
+| `idempotency_keys`, `audit_log`, `events`, `device_permissions`, `feature_flags`, `campaigns` | Integrity, the trail, what each install allows, remote config, push campaigns |
 
 Full collection schemas and indexes in [ARCHITECTURE.md §6](backend/ARCHITECTURE.md). The two properties the economy needs — *one event pays once* and *balance never negative under concurrency* — are a unique compound index on `coin_ledger` and an atomic `findOneAndUpdate({ balance: { $gte: price } }, { $inc })` on `coin_balances`, wrapped in a session transaction with the order and inventory writes.
 
@@ -836,7 +836,9 @@ Beside the HTTP API, `npm run plans` (`src/scripts/diet-plans.ts`) is the same j
 | N | `GET /me/devices` | All devices on the account with last seen, app version, current flag |
 | N | `DELETE /me/devices/:deviceId` | Revoke that device's refresh token(s) and push token ("sign out other device") |
 | N | `GET /releases?platform=` (public) | Known builds with status; `minSupported`, `current` |
-| N | `POST /events` | Product analytics batch `[{ name, props, at }]` — device/version attached server-side |
+| ✓ | `POST /events` | Product analytics batch `{ events: [{ name, at, sessionId?, props? }] }`, ≤ 100 — device, platform, version, build, OS and timezone attached server-side; **202** with `{ accepted, dropped? }`; `screen_view` lifts `props.screen` onto the row (RULES P13) |
+| ✓ | `PUT /me/permissions` | What this phone's OS allows, the whole set: `{ permissions: [{ key, state, detail? }] }` → the snapshot with each answer's `since` (RULES P14). Not dropped by the analytics switch — it is support's state, not a metric |
+| ✓ | `GET /me/permissions` | The same snapshot back, for the app's own "what's off" |
 
 ---
 
@@ -890,6 +892,10 @@ Both platforms say **where a sample came from and how it was recorded**. Filter 
 
 No single check catches fake steps. Each layer below is cheap, independent, and produces a score contribution and zero or more `fraud_flags`. The layers run in order on every daily rollup; L0–L2 also run inline on ingest so an obviously bad batch is marked before it is stored.
 
+**What a day is refused for outright** (hard: the day shows its steps and verifies none of them, RULES A24, A25) — an emulator, a chain that proves a forgery, an unlocked bootloader, a failed Play verdict, a key shared across accounts, ≥ 50% of the count flagged by the tracker's own checks, ≥ 40% of the step-bearing motion windows non-walk, a snapshot signed ahead of the server's clock, **a minute above 240 steps**, **a day above 120,000 steps**, and **a day with no minutes, no motion windows and no allowed source behind more than 2,000 steps**. Two more are a config switch away, meant for the rollout: a key that cannot be attested (`integrity.requireAttested`) and a day that carried no Play verdict where one was asked for (`integrity.requireVerdict`).
+
+**What costs score rather than the day**: a count the minutes cannot explain (`steps_unaccounted`, hard only once `thresholds.unaccountedShareHard` is set), motion sampling asked for and not delivered (40 points, never dropped from the mean — a layer that drops out scores *better* than an honest phone with a shaken window in it), a denylisted or manual source, a pedometer ratio outside 0.7–1.3, a day over 45,000 steps, round or identical totals, night steps, a new install's first big day, and a device or vendor id on three accounts.
+
 | Layer | Signal | Source | What it catches |
 |---|---|---|---|
 | **L0 Device integrity** | Play Integrity / App Attest verdict; `isEmulator()`; root/jailbreak indicators; debug build; hooking frameworks (Frida/Xposed); mock-location enabled; developer mode; app signature mismatch | `devices.signals`, `attestations` | Emulators, patched APKs, instrumented apps, sensor-injection tools |
@@ -899,7 +905,7 @@ No single check catches fake steps. Each layer below is cheap, independent, and 
 | **L4 Motion signature** | Client samples the accelerometer for 10 s every 5 min while steps accrue and sends **features only** — dominant frequency, variance, zero-crossing rate, peak ratio. Walking: 1.4–2.5 Hz, moderate variance; shaking: > 3 Hz, high variance; vehicle: < 1 Hz with steps present; still: no periodicity with steps present | `motion_windows` | Phone on a dog, in a dryer, on a swing, in a car |
 | **L5 Temporal & behavioural** | Round-number totals; identical totals on consecutive days; > 20% of steps 01:00–05:00 local; high counts within 24 h of install; app used only to sync (no other actions); steps only on payout-relevant days | `activity_daily`, `events` | Bots and scripted uploads |
 | **L6 Graph & network** | Same `installId`/`vendorId`/attestation key across accounts; same push token; IP/ASN clusters with correlated step patterns; referral rings where invitees share devices | `devices`, `referrals`, request logs | Multi-accounting, referral farms |
-| **L7 Economic** | Earn→redeem velocity; redemption within minutes of first credit; address reuse across accounts; leaderboard rank jumps > 3σ week-over-week | `coin_ledger`, `orders`, `leaderboard_scores` | The payout side of every scheme above |
+| **L7 Economic** *(the two cheap halves built, RULES A19)* | Redemption within ⚙ 60 min of the **first ever** credit (`fast_redemption`) and one street line + postcode behind ⚙ 3 accounts (`address_reuse`), both raised at checkout as soft flags. Not built: earn→redeem velocity over time, leaderboard rank jumps > 3σ | `coin_ledger`, `addresses`, `fraud_flags` | A farm cashing out before anybody looks, and one doorstep taking every parcel |
 
 **Scoring.** Each layer yields 0–100; the day's `plausibility` is a weighted mean (L0 25 · L1 20 · L2 20 · L3 15 · L4 10 · L5 5 · L6 5 — L7 feeds trust, not the day). Any **hard reject** (L0 failed attestation, L1 manual entry, L2 impossible timestamps) sets `verified=false` regardless of score.
 
@@ -1157,16 +1163,16 @@ Beyond the screens. Each is small on its own; together they are what make the pr
 | 2 | **Passwordless OTP login** | Sign in with a code to phone or email; no password needed | `POST /auth/otp/request`, `verify-otp` purpose `login` | P1 |
 | 3 | **Step-up verification** | OTP re-auth before redemptions ≥ 1,000 coins ⚙, address changes, device revocation | `POST /auth/step-up`, `stepUpToken` | P5 |
 | 4 | **Trust score & coin escrow** | Per-user tier; step coins held 24 h–7 d before release; voided on new flags | `coin_holds`, `users.trust`, `trust_history`, `releaseHolds` job | P3 |
-| 5 | **Fraud review queue** | Prioritised queue of flagged accounts with evidence, one-click actions, appeals | admin `GET /fraud/queue`, `POST /fraud/:id/{confirm,dismiss,void,clawback,ban}` | P3 |
+| 5 | **Fraud review queue** *(built, RULES A27)* | Accounts with open flags, worst first, with what they were flagged for, the coins in escrow and the shown-vs-verified gap; the case file behind each (flags, the days with their layer scores, each phone's proof, the holds, the attestation history); `confirm` (voids the day's holds, T7) and `dismiss` (gives back the trust), both audited; and a re-score of a stored day so a threshold can be judged before it is turned on. Still to come: clawback of released coins, ban, and appeals | `GET /v1/admin/fraud/queue`, `/admin/fraud/users/:id`, `POST /admin/fraud/flags/:id/{confirm,dismiss}`, `POST /admin/users/:id/days/:date/rescore` | P3 |
 | 6 | **Offline-first sync** | One `POST /sync` with per-collection cursors; upsert by `clientId`, LWW by `updatedAt` | `POST /sync`; `clientId` unique indexes on hydration/food/vitals | P4 |
-| 7 | **Product analytics events** | Batched client events with device/version attached; exported nightly to a warehouse | `POST /events`, `events` (TTL 400 d) | P1 |
+| 7 | **Product analytics events** *(built)* | Batched client events with device/version attached; screens and actions; exported nightly to a warehouse | `POST /events`, `events` (TTL 400 d) | P1 |
 | 8 | **Remote config, flags, cohorts** | Every ⚙ value; percentage rollouts; cohorts by tier/country/version; kill switches | `GET /config`, `app_config`, `feature_flags` | P0→ |
 | 9 | **Push campaigns & segmentation** | Offers/announcements to a segment (country, tier, inactivity, version) with quiet-hours respect and per-category consent | `campaigns`, admin `POST /campaigns` | P4 |
 | 10 | **Weekly insights digest** | Push/email: steps vs last week, health score trend, streak, nutrition adherence | `weeklyDigest` job | P4 |
 | 11 | **Referral deep links & attribution** | Universal/App Links `vokve.app/r/CODE` → server redirect page → store → deferred attribution by `installId`/`vendorId` on first register | `GET /r/:code`, `referrals.attribution` | P5 |
 | 12 | **KYC-lite before shipping** | Verified email + phone + address + trust ≥ Normal + step-up above threshold | precondition on `/checkout` | P5 |
 | 13 | **Version gating & adoption** | `app_releases` statuses; `426` on blocked builds; adoption dashboard; fraud-by-build view | `GET /releases`, `version_stats` | P1 |
-| 14 | **Admin console API** | User 360 (devices, ledger, holds, flags, orders, samples), order ops, config editor, read-only impersonation for support | `apps/admin-api` | P3→P5 |
+| 14 | **Admin console API** *(the read half built)* | User 360 read-only under `ADMIN_API_KEY` (RULES P15, P16): find the account; the member in full (account, every install with its device profile, installed build, install and last-active times, sign-in state, live sessions, push token, integrity and permissions, plus wallet and order totals); every sign-in; the trail and its summary; every install's permissions. Still to come: the ledger and holds in detail, fraud flags, order ops, the config editor, read-only impersonation | `/v1/admin/users…`, `apps/admin-api` | P3→P5 |
 | 15 | **Data lifecycle automation** | Retention jobs per collection, export bundles, deletion with legal hold, consent log | `retention` job, `users.flags.legalHold` | P1, P6 |
 | 16 | **Real-time updates (optional)** | SSE stream for wallet/leaderboard changes so the app does not poll | `GET /stream` | P6 |
 | 17 | **Motion-signature verification** | Client-side accelerometer features (L4) — the strongest cheap signal against shaken phones | `motion_windows` | P2 |

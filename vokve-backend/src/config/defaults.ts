@@ -68,6 +68,16 @@ export const CONFIG_DEFAULTS = {
     flagPenalty: 5,
     maxFlagPenalty: 30,
     upgradeCleanDays: 7,
+    /**
+     * L7, the economic layer (RULES A19). Coins minted and spent inside
+     * this many minutes is the shape of a farm — mint, spend, abandon — and
+     * one street address behind this many accounts is a shared drop-off.
+     * Both raise a soft flag at checkout; neither refuses an order on its
+     * own, because a keen new member really does spend their first coins
+     * the day they earn them and a family really does share a doorstep.
+     */
+    fastRedemptionMinutes: 60,
+    flagAtAccountsPerAddress: 3,
     /** Shadow mode: score and tier are computed but never enforced (RULES T9). */
     shadow: true,
   },
@@ -499,8 +509,15 @@ export const CONFIG_DEFAULTS = {
       suspectShareHard: 0.5,
       /** A15: external ÷ phone outside min–max flags; above `hard` the external count is not trusted. */
       pedometerRatio: { min: 0.7, max: 1.3, hard: 2.0 },
-      /** A16: dominant frequency bands, Hz, and the non-walk share that rejects a day. */
-      motion: { walkMinHz: 1.2, walkMaxHz: 2.8, shakeMinHz: 3, shakeMinVariance: 15, stillMaxHz: 1, nonWalkHardShare: 0.4 },
+      /**
+       * A16: dominant frequency bands, Hz, and the non-walk share that
+       * rejects a day. `absentScore` is what the layer is worth when the
+       * server asked for motion sampling and the snapshot carries none:
+       * without it, switching the sampling off dropped the layer out of the
+       * mean, which scored *better* than an honest phone with a few shaken
+       * windows in it.
+       */
+      motion: { walkMinHz: 1.2, walkMaxHz: 2.8, shakeMinHz: 3, shakeMinVariance: 15, stillMaxHz: 1, nonWalkHardShare: 0.4, absentScore: 40 },
       /** A17: share of steps between 01:00 and 05:00 local. */
       nightShare: 0.2,
       /** A17: steps within 24 h of a device's first registration that read as farming. */
@@ -511,6 +528,45 @@ export const CONFIG_DEFAULTS = {
       strideMeters: { min: 0.35, max: 1.2 },
       /** A clock moved by more than this, in minutes, is logged as a jump. */
       clockJumpMinutes: 5,
+      /**
+       * A6, as the server can check it: steps in a single minute that no
+       * human produces. Elite running cadence is about 3.5 steps a second
+       * (210 a minute) and nobody holds it for a whole minute, so 240 is
+       * past anything a body does and only a fabricated count reaches it.
+       * A minute above this rejects the day outright.
+       */
+      maxStepsPerMinute: 240,
+      /**
+       * A day's steps that cannot be walked at all. A 24-hour race walker
+       * covers roughly 100,000 steps; `maxDailySteps` (45,000) is where a
+       * day stops being credited and starts being flagged, and this is where
+       * it stops being believed.
+       */
+      impossibleDailySteps: 120_000,
+      /**
+       * A5/A6 together: the share of a day's own count that no minute of
+       * the day accounts for. The phone reports what it counted *and* the
+       * minutes it counted them in, and the simplest tamper there is — hold
+       * the minutes, raise the total — shows up here and nowhere else.
+       * Steps the counter handed over in a backlog are taken off first, so
+       * an honest recovery is not this.
+       */
+      unaccountedShare: 0.25,
+      /**
+       * The same share, past which the day is refused rather than doubted.
+       * Null until the shadow period says what honest phones really send
+       * (A12, D-05) — a hard reject here costs a member their streak, so it
+       * is turned on from data, not from first principles.
+       */
+      unaccountedShareHard: null as number | null,
+      /**
+       * A day with **no** evidence behind its count — no minutes, no motion
+       * windows and no allowed Health Connect source — is not verified above
+       * this many steps. Below it the day stands: a phone that could not
+       * sample a short walk is ordinary, while one that claims a marathon
+       * with nothing to show for it is not.
+       */
+      uncorroboratedSteps: 2_000,
     },
   },
   /**
@@ -540,6 +596,23 @@ export const CONFIG_DEFAULTS = {
     /** How long an attestation challenge and an ingest nonce stay live. */
     challengeTtlSeconds: 600,
     nonceTtlSeconds: 600,
+    /**
+     * What a day must have proved about the phone before it can be verified.
+     * Both start off, and both are meant to be turned on for the rollout
+     * (A12, T9): until then the flags say what they would have cost, which
+     * is the only honest way to pick a threshold.
+     *
+     * `requireAttested` — a Keystore key that could not be attested stops
+     * being a 40-point penalty and becomes a refusal. Turn it on once the
+     * shadow data shows how many genuine phones cannot attest at all.
+     *
+     * `requireVerdict` — a day that carried no Play Integrity verdict, on a
+     * server that asks for one, stops being a 70-point penalty and becomes a
+     * refusal. Turn it on once `cloudProjectNumber` is set and the fleet is
+     * on a build that sends tokens.
+     */
+    requireAttested: false,
+    requireVerdict: false,
   },
   app: {
     minVersion: { ios: '1.0.0', android: '1.0.0' },

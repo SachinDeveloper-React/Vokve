@@ -66,6 +66,29 @@ function validate(config: AppConfig): void {
   if (!(min > 0 && min < max && increment > 0)) {
     throw new Error(`activity.goal: ${min}–${max} by ${increment} is not a range a goal can be set in`);
   }
+  // The fraud ladder has to climb too (RULES A24, A25): a day that is
+  // flagged, then one that is refused. The wrong way round and a day would
+  // be refused before anybody was ever warned about it.
+  const t = config.activity.thresholds;
+  if (t.impossibleDailySteps <= t.maxDailySteps) {
+    throw new Error(
+      `activity.thresholds.impossibleDailySteps (${t.impossibleDailySteps}) must be above maxDailySteps (${t.maxDailySteps})`,
+    );
+  }
+  if (!(t.maxStepsPerMinute > 0)) {
+    throw new Error('activity.thresholds.maxStepsPerMinute must be above zero');
+  }
+  if (!(t.unaccountedShare > 0 && t.unaccountedShare <= 1)) {
+    throw new Error(`activity.thresholds.unaccountedShare (${t.unaccountedShare}) must sit inside 0–1`);
+  }
+  if (t.unaccountedShareHard !== null && t.unaccountedShareHard < t.unaccountedShare) {
+    throw new Error(
+      `activity.thresholds.unaccountedShareHard (${t.unaccountedShareHard}) is below unaccountedShare (${t.unaccountedShare})`,
+    );
+  }
+  if (!(t.motion.absentScore >= 0 && t.motion.absentScore <= 100)) {
+    throw new Error(`activity.thresholds.motion.absentScore (${t.motion.absentScore}) must be a score, 0–100`);
+  }
   // The water ladder has to climb (RULES Y1b): a single drink, then the ask,
   // then the health note, then the refusal. Out of order, a member could be
   // refused a day they were never warned about — or, worse, have their own

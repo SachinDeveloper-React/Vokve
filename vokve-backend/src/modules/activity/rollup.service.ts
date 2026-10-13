@@ -5,6 +5,7 @@ import { isValidTimeZone, localDayOf } from '../../lib/dates.js';
 import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import { DeviceModel } from '../devices/models.js';
+import { playIntegrityProjectNumber } from '../integrity/service.js';
 import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { FraudFlagModel } from '../integrity/models.js';
 import { updateTrust } from '../integrity/trust.service.js';
@@ -66,6 +67,9 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
     { _id: { $in: deviceDays.map(d => d.deviceId) } },
     { installId: 1, vendorId: 1, firstSeenAt: 1, 'attestation.keyId': 1 },
   ).lean();
+  // Whether this server asks for a Play verdict at all: only then is a day
+  // that carried none the phone's silence rather than our own choice (A24).
+  const integrityExpected = (await playIntegrityProjectNumber()) !== null;
   const byId = new Map(devices.map(d => [d._id, d]));
 
   const inputs: DeviceInput[] = await Promise.all(
@@ -92,6 +96,7 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
         sharedAccounts,
         keySharedAccounts,
         firstSeenAt: device?.firstSeenAt ?? null,
+        integrityExpected,
       };
     }),
   );

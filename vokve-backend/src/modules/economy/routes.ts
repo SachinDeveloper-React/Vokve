@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { isProduction } from '../../config/env.js';
+import { devRoutesEnabled } from '../../config/env.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { validate } from '../../middleware/validate.js';
@@ -34,7 +34,7 @@ walletRouter.get('/wallet/earn-rules', async (_req, res) => {
  * the wallet's "your coins expired" path can be seen without waiting ninety
  * days. Absent in production — the scheduler is the only caller there.
  */
-if (!isProduction) {
+if (devRoutesEnabled) {
   const body = z.object({ now: z.string().datetime().optional() });
   walletRouter.post('/dev/jobs/coin-expiry', requireAuth, requireDevice, validate('body', body), async (req, res) => {
     const now = req.body.now ? new Date(req.body.now) : new Date();
