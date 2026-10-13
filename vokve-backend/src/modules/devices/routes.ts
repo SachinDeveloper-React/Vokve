@@ -9,6 +9,7 @@ import { hashToken } from '../../lib/tokens.js';
 import { attestationBody, issueAttestationChallenge, submitAttestation } from '../integrity/service.js';
 import { AppReleaseModel, DeviceModel } from './models.js';
 import { listDevices, registerDevice, registerDeviceBody, revokeDevice } from './service.js';
+import { appUpdate } from './update.service.js';
 
 export const devicesRouter = Router();
 
@@ -86,6 +87,19 @@ devicesRouter.get('/me/devices', requireAuth, requireDevice, async (req, res) =>
 devicesRouter.delete('/me/devices/:deviceId', requireAuth, requireDevice, async (req, res) => {
   await revokeDevice(req.ctx.userId!, String(req.params.deviceId), req.ctx.deviceId);
   res.json({ ok: true });
+});
+
+/**
+ * Public, and exempt from the version gate: this is the endpoint a build
+ * that is about to be refused calls to find out what to tell its member
+ * (RULES DV12). Gating it would leave a blocked build with nothing to say.
+ *
+ * The verdict comes from the headers every request already carries — the
+ * platform, the version and the build — so there is nothing to pass and
+ * nothing a stale client can get wrong.
+ */
+devicesRouter.get('/app/update', async (req, res) => {
+  res.json(await appUpdate({ platform: req.ctx.platform, appVersion: req.ctx.appVersion, build: req.ctx.build }));
 });
 
 devicesRouter.get('/releases', async (req, res) => {

@@ -18,10 +18,16 @@ const styles = StyleSheet.create({
 });
 
 /**
- * The server has retired this build (426). Every request would fail the same
- * way, so the root navigator shows this instead of the app and there is no
- * way past it but the store — which is the point: a build the server has
- * blocked is one it no longer trusts.
+ * The wall (RULES DV12): this build is below the minimum or blocked
+ * outright, so every request would fail the same way. The root navigator
+ * shows this instead of the app and there is no way past it but the store —
+ * which is the point: a build the server has blocked is one it no longer
+ * trusts.
+ *
+ * It is drawn for either messenger: a request refused with 426, or
+ * `GET /app/update` saying `hard` before anything was refused. The second is
+ * what a member sees in practice, because it arrives on launch; the first is
+ * the backstop for a wall put up mid-session.
  */
 export const UpgradeRequiredScreen = () => {
   const { colors } = useTheme();
@@ -51,7 +57,7 @@ export const UpgradeRequiredScreen = () => {
 
         <VStack align="center" gap="xs" style={styles.body}>
           <AppText variant="h2" center>
-            Update VOKVE to continue
+            {requirement?.title ?? 'Update VOKVE to continue'}
           </AppText>
           <AppText variant="body" color="textSecondary" center>
             {requirement?.message ?? 'This version is no longer supported.'}
@@ -64,7 +70,7 @@ export const UpgradeRequiredScreen = () => {
         </VStack>
 
         <Button
-          label="Open the store"
+          label={requirement?.actionLabel ?? 'Open the store'}
           variant="brand"
           size="lg"
           fullWidth

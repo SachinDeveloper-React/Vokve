@@ -615,10 +615,39 @@ export const CONFIG_DEFAULTS = {
     requireVerdict: false,
   },
   app: {
+    /**
+     * The line a build must reach to be served at all (RULES DV6): below
+     * it every request answers 426 and the app shows the wall. Raising this
+     * is how an update is made mandatory — one config write, no deploy.
+     */
     minVersion: { ios: '1.0.0', android: '1.0.0' },
     storeUrl: {
       ios: 'https://apps.apple.com/app/vokve',
       android: 'https://play.google.com/store/apps/details?id=com.vokve',
+    },
+    /**
+     * What `GET /app/update` tells a build about its own version (RULES
+     * DV12). Every word here is the server's, so a wall can go up, come
+     * down or be reworded without shipping an app to say it; `{version}`,
+     * `{latest}` and `{min}` are filled in.
+     *
+     * `nudgeOnNewer` is the difference between telling members about every
+     * release and only about the ones that matter. On, a newer `current`
+     * release in `app_releases` knocks once a day; off, only a build marked
+     * `deprecated` does — which is the quieter default for an app that
+     * ships often.
+     */
+    update: {
+      nudgeOnNewer: true,
+      /** How long a dismissed soft prompt stays quiet. */
+      remindAfterHours: 24,
+      hardTitle: 'Update VOKVE to continue',
+      hardMessage:
+        'This version of VOKVE ({version}) is no longer supported. Update to {latest} to carry on — your steps, coins and streak are safe.',
+      softTitle: 'A new VOKVE is out',
+      softMessage: 'Version {latest} is ready. Updating takes a moment and your place is kept.',
+      actionLabel: 'Update now',
+      laterLabel: 'Later',
     },
   },
   /**

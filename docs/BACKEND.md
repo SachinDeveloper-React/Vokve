@@ -836,6 +836,10 @@ Beside the HTTP API, `npm run plans` (`src/scripts/diet-plans.ts`) is the same j
 | N | `GET /me/devices` | All devices on the account with last seen, app version, current flag |
 | N | `DELETE /me/devices/:deviceId` | Revoke that device's refresh token(s) and push token ("sign out other device") |
 | N | `GET /releases?platform=` (public) | Known builds with status; `minSupported`, `current` |
+| ✓ | `GET /app/update` (public, ungated) | What this build must do about its own version (RULES DV12): `{ status: none\|soft\|hard, installed, latest, minVersion, storeUrl, title, message, actionLabel, laterLabel, dismissible, remindAfterHours, reason }`, all worded by the server. Exempt from the version gate — it is how a refused build learns what to say |
+| ✓ | `GET /v1/admin/releases?platform=` | Every known build with its status, the minimum in force, and which builds that minimum refuses |
+| ✓ | `POST /v1/admin/releases` | Records the build the store now serves — `{ platform, version, build, status, notes?, minOs?, releasedAt? }`, idempotent on the three; `current` is exclusive per platform. A knock at most, never a wall |
+| ✓ | `PUT /v1/admin/app/update-policy` | Raises or lowers the wall (`minVersion` per platform) and rewords both prompts. `409 NO_BUILD_TO_UPDATE_TO` if the minimum would exceed what the store is serving |
 | ✓ | `POST /events` | Product analytics batch `{ events: [{ name, at, sessionId?, props? }] }`, ≤ 100 — device, platform, version, build, OS and timezone attached server-side; **202** with `{ accepted, dropped? }`; `screen_view` lifts `props.screen` onto the row (RULES P13) |
 | ✓ | `PUT /me/permissions` | What this phone's OS allows, the whole set: `{ permissions: [{ key, state, detail? }] }` → the snapshot with each answer's `since` (RULES P14). Not dropped by the analytics switch — it is support's state, not a metric |
 | ✓ | `GET /me/permissions` | The same snapshot back, for the app's own "what's off" |

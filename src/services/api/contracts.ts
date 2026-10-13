@@ -6,6 +6,7 @@ import type {
   Address,
   AnalyticsEvent,
   AppAbout,
+  AppUpdate,
   Cart,
   Challenge,
   ChallengeDetail,
@@ -661,6 +662,12 @@ export interface SupportApi {
 export interface AppApi {
   /** Version, update state, release notes and the legal links. */
   about(): Promise<AppAbout>;
+  /**
+   * What this build must do about its own version: nothing, a knock, or a
+   * wall. Served to a build the API has already retired — it is how that
+   * build learns what to tell its member — so it is never gated.
+   */
+  update(): Promise<AppUpdate>;
 }
 
 export interface StreakApi {

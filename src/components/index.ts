@@ -65,3 +65,4 @@ export { StepBarColumn } from './fitness/StepBarColumn';
 export type { DaySteps } from './fitness/WeeklyStepsChart';
 export { StatTile } from './fitness/StatTile';
 export { WorkoutCard } from './fitness/WorkoutCard';
+export { UpdateSheet } from './system/UpdateSheet';

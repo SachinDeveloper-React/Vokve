@@ -5493,6 +5493,30 @@ export const mockSupportApi: SupportApi = {
 };
 
 export const mockAppApi: AppApi = {
+  /**
+   * Silence, like a build that is current. The mock has no releases behind
+   * it, and an app that nagged about an update nobody published would make
+   * every mock session start with a popup. `MOCK_RULES` says how to see the
+   * other two: point `config.apiBaseUrl` at the real server.
+   */
+  async update() {
+    await delay();
+    return {
+      status: 'none' as const,
+      installed: { version: config.appVersion, build: '1' },
+      latest: { version: config.appVersion, build: '1', releasedAt: daysAgoIso(3), notes: null },
+      minVersion: '1.0.0',
+      storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve',
+      title: 'A new VOKVE is out',
+      message: `Version ${config.appVersion} is ready.`,
+      actionLabel: 'Update now',
+      laterLabel: 'Later',
+      dismissible: true,
+      remindAfterHours: null,
+      reason: null,
+    };
+  },
+
   async about() {
     await delay();
     return {

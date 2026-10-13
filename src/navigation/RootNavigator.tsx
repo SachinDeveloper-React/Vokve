@@ -66,8 +66,10 @@ import { StepTrackingScreen } from '../screens/main/StepTrackingScreen';
 import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
 import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
 import { UpgradeRequiredScreen } from '../screens/system/UpgradeRequiredScreen';
+import { UpdateSheet } from '../components/system/UpdateSheet';
 import { useUpgradeRequired } from '../stores/appStatusStore';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
+import { useAppUpdate } from '../hooks/useAppUpdate';
 import { usePermissionReporting } from '../hooks/usePermissionReporting';
 import { useReminderNotifications } from '../hooks/useReminderNotifications';
 import { trackScreen } from '../services/analytics';
@@ -179,6 +181,10 @@ export const RootNavigator = () => {
   // Nor does what the phone allows (RULES P14).
   usePermissionReporting();
 
+  // What this build should do about its own version (RULES DV12): asked on
+  // launch and on every foreground, before anything has been refused.
+  const { update: softUpdate, dismiss: dismissUpdate } = useAppUpdate();
+
   // The same for hydration reminders: the plan stays scheduled with the OS
   // whatever is on screen, and a tapped reminder opens the water log.
   useReminderNotifications(navigationRef, isNavReady);
@@ -248,6 +254,8 @@ export const RootNavigator = () => {
       onReady={onNavReady}
       onStateChange={trackCurrentScreen}
     >
+      {/* The knock sits over whatever is on screen; the wall replaces it. */}
+      <UpdateSheet update={softUpdate} onDismiss={dismissUpdate} />
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {needsOnboarding ? (
           <Stack.Screen name="Onboarding" component={OnboardingNavigator} />

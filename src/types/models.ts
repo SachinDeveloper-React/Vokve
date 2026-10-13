@@ -2510,6 +2510,47 @@ export const appAboutSchema = z.object({
 });
 export type AppAbout = z.infer<typeof appAboutSchema>;
 
+// ─── Updating the app ──────────────────────────────────────────────────────
+
+/**
+ * What this build must do about its own version.
+ *
+ * `hard` is a wall: the API has retired this build and the app shows one
+ * screen until the store has been visited. `soft` is a knock: there is
+ * something newer, this build still works, and the member may say "later".
+ * `none` is silence, which is the answer on almost every launch.
+ */
+export const updateUrgencySchema = z.enum(['none', 'soft', 'hard']);
+export type UpdateUrgency = z.infer<typeof updateUrgencySchema>;
+
+/** `GET /app/update` — the server's verdict on the caller's own version. */
+export const appUpdateSchema = z.object({
+  status: updateUrgencySchema,
+  installed: z.object({ version: z.string(), build: z.string().nullable() }),
+  latest: z
+    .object({
+      version: z.string(),
+      build: z.string().nullable(),
+      releasedAt: z.string().nullable(),
+      /** What is new, as the release says it — the soft prompt shows it. */
+      notes: z.string().nullable(),
+    })
+    .nullable(),
+  minVersion: z.string(),
+  storeUrl: z.string(),
+  /** Every word is the server's, so a wall can be reworded without a release. */
+  title: z.string(),
+  message: z.string(),
+  actionLabel: z.string(),
+  /** The way out of a soft prompt; null on a hard one, which has none. */
+  laterLabel: z.string().nullable(),
+  dismissible: z.boolean(),
+  /** How long a dismissed soft prompt stays quiet. */
+  remindAfterHours: z.number().int().positive().nullable(),
+  reason: z.string().nullable(),
+});
+export type AppUpdate = z.infer<typeof appUpdateSchema>;
+
 // ─── Streak ────────────────────────────────────────────────────────────────
 
 /** An unbroken run of counting days, both ends included. */

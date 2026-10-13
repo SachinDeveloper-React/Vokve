@@ -2506,6 +2506,54 @@ export const appAboutSchema = z.object({
 });
 export type AppAbout = z.infer<typeof appAboutSchema>;
 
+// ─── Updating the app (RULES DV12) ─────────────────────────────────────────
+
+/**
+ * What this build must do about its own version.
+ *
+ * `hard` is a wall: the build is below the minimum, or its exact build is
+ * blocked, and nothing in the app works until the store has been visited.
+ * `soft` is a knock: there is something newer and this one still works, so
+ * the member may say "later" and be asked again after a while. `none` is
+ * silence, which is the answer on almost every launch.
+ */
+export const updateUrgencySchema = z.enum(['none', 'soft', 'hard']);
+export type UpdateUrgency = z.infer<typeof updateUrgencySchema>;
+
+export const appUpdateSchema = z.object({
+  status: updateUrgencySchema,
+  /** The caller's own version and build, echoed so a screen never guesses. */
+  installed: z.object({ version: z.string(), build: z.string().nullable() }),
+  /** The newest release for this platform, when there is one on file. */
+  latest: z
+    .object({
+      version: z.string(),
+      build: z.string().nullable(),
+      releasedAt: z.string().nullable(),
+      /** What is new, as the release row words it — the soft prompt shows it. */
+      notes: z.string().nullable(),
+    })
+    .nullable(),
+  /** The line below which the API refuses a build outright (RULES DV6). */
+  minVersion: z.string(),
+  storeUrl: z.string(),
+  /**
+   * Worded by the server (⚙ `app.update`), so a wall can be put up, taken
+   * down or reworded without shipping an app to say it.
+   */
+  title: z.string(),
+  message: z.string(),
+  actionLabel: z.string(),
+  /** The way out of a soft prompt; null on a hard one, which has none. */
+  laterLabel: z.string().nullable(),
+  dismissible: z.boolean(),
+  /** How long a dismissed soft prompt stays quiet. Null when nothing is being asked. */
+  remindAfterHours: z.number().int().positive().nullable(),
+  /** Why, for the log: `blocked_build`, `below_min`, `deprecated`, `newer_available`. */
+  reason: z.string().nullable(),
+});
+export type AppUpdate = z.infer<typeof appUpdateSchema>;
+
 // ─── Streak ────────────────────────────────────────────────────────────────
 
 /** An unbroken run of counting days, both ends included. */

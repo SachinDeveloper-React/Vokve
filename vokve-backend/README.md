@@ -298,6 +298,51 @@ curl -s -X POST "$A/admin/users/<userId>/days/2026-10-13/rescore" -H "$K" | jq '
 
 `POST /dev/steps` writes a day's verified steps and exists for exactly this kind of exercise — which is why it is off in production and off again wherever `DEV_ROUTES=false` (RULES A26). A server that mounts it says so in its first screen of logs.
 
+## Shipping an update: the knock and the wall
+
+Two kinds, one endpoint (RULES DV12). The app asks `GET /app/update` on launch
+and on every return to the foreground, and the server answers `none`, `soft`
+(a dismissible sheet, "Later" remembered for 24 h) or `hard` (a full screen
+with no way past it but the store). Every word in the prompt is the server's,
+so the same build can be asked nicely today and told firmly next week.
+
+**Publishing a build is not forcing it.** These are two calls on purpose:
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# 1. you uploaded 1.3.0 (build 13) to Play. Tell the server — this is a KNOCK:
+#    everyone below it gets the soft sheet, nobody is locked out.
+curl -s -X POST "$A/admin/releases" -H "$K" -H 'Content-Type: application/json' \
+  -d '{"platform":"android","version":"1.3.0","build":"13","status":"current","notes":"Faster step sync and the new shop."}' | jq
+
+# 2. now make it mandatory — this is the WALL. Everything below 1.3.0 gets the
+#    blocking screen, and every API call from it answers 426.
+curl -s -X PUT "$A/admin/app/update-policy" -H "$K" -H 'Content-Type: application/json' \
+  -d '{"minVersion":{"android":"1.3.0"}}' | jq
+
+# the wall comes down the same way
+curl -s -X PUT "$A/admin/app/update-policy" -H "$K" -H 'Content-Type: application/json' \
+  -d '{"minVersion":{"android":"1.0.0"}}' | jq
+
+# one broken build, without moving the minimum for everybody
+curl -s -X POST "$A/admin/releases" -H "$K" -H 'Content-Type: application/json' \
+  -d '{"platform":"android","version":"1.3.0","build":"14","status":"blocked"}' | jq
+
+# what the fleet looks like, and which builds the minimum refuses
+curl -s "$A/admin/releases?platform=android" -H "$K" | jq '{minVersion, data}'
+
+# what a given build is told (the app sends these headers itself)
+curl -s "$A/app/update" -H 'x-vokve-platform: android' -H 'x-vokve-app-version: 1.2.0' -H 'x-vokve-build: 12' | jq
+```
+
+Raising the minimum above what the store is serving is refused
+(`NO_BUILD_TO_UPDATE_TO`): a wall with nowhere to go is worse than an old
+build. The wording and the quiet window are config too —
+`{"softTitle":"…","hardMessage":"Purana version {version} band ho gaya. {latest} install karein.","remindAfterHours":48}`
+on the same call, and `{"nudgeOnNewer":false}` if only a `deprecated` version
+should knock rather than every release.
+
 ## Notifications and push
 
 `modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once `FIREBASE_SERVICE_ACCOUNT` is set (the service-account JSON, or a path to it — see `.env.example`); without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.

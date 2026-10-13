@@ -15,11 +15,12 @@ export function compareVersions(a: string, b: string): number {
 
 /**
  * The endpoints a refused build still has to reach: the health check, the
- * remote config, and the About screen — which is where that build is told
- * it must update and pointed at the store. Gating those would leave a
- * blocked app with nothing to say but "something went wrong".
+ * remote config, the About screen, and `/app/update` — which is how that
+ * build learns it must update and where the store is (RULES DV12). Gating
+ * those would leave a blocked app with nothing to say but "something went
+ * wrong".
  */
-const ALWAYS_ALLOWED = new Set(['/v1/health', '/v1/config', '/v1/app/about']);
+const ALWAYS_ALLOWED = new Set(['/v1/health', '/v1/config', '/v1/app/about', '/v1/app/update']);
 
 /**
  * Blocks builds the product has retired (RULES DV6): either below the

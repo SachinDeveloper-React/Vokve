@@ -5,6 +5,13 @@ import { requireAdmin } from '../../middleware/admin.js';
 import { validate } from '../../middleware/validate.js';
 import { confirmFlag, dismissFlag, fraudCase, fraudQueue, rescoreDay } from './fraud.service.js';
 import {
+  listReleases,
+  releaseBody,
+  saveRelease,
+  setUpdatePolicy,
+  updatePolicyBody,
+} from './releases.service.js';
+import {
   activity,
   activitySummary,
   devicePermissions,
@@ -144,3 +151,32 @@ adminUsersRouter.post(
     res.json(await rescoreDay(req.ctx.adminActor!, String(req.params.userId), String(req.params.date)));
   },
 );
+
+// ─── Releases and the update wall (RULES DV12) ─────────────────────────────
+
+/** Every known build with its status, the minimum in force, and which builds it refuses. */
+adminUsersRouter.get(
+  '/admin/releases',
+  validate('query', z.object({ platform: z.enum(['ios', 'android']).optional() })),
+  async (req, res) => {
+    const { platform } = req.query as unknown as { platform?: 'ios' | 'android' };
+    res.json(await listReleases(platform));
+  },
+);
+
+/**
+ * Records the build the store is now serving. A knock at most: it never
+ * walls anybody off on its own — that is the minimum, below.
+ */
+adminUsersRouter.post('/admin/releases', validate('body', releaseBody), async (req, res) => {
+  res.status(201).json(await saveRelease(req.ctx.adminActor!, req.body));
+});
+
+/**
+ * The wall itself, and the words on both prompts. Raising `minVersion` is
+ * what makes an update mandatory; it is refused if it would leave members
+ * with no build to update to.
+ */
+adminUsersRouter.put('/admin/app/update-policy', validate('body', updatePolicyBody), async (req, res) => {
+  res.json(await setUpdatePolicy(req.ctx.adminActor!, req.body));
+});
