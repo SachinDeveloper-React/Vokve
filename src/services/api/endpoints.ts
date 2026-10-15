@@ -70,6 +70,8 @@ import {
   streakSummarySchema,
   verificationChallengeSchema,
   appUpdateSchema,
+  appErrorIntakeSchema,
+  deviceHealthSnapshotSchema,
   eventIntakeSchema,
   permissionSnapshotSchema,
   userSchema,
@@ -269,6 +271,12 @@ const realDeviceApi: DeviceApi = {
 const realTelemetryApi: TelemetryApi = {
   sendEvents: events =>
     request(eventIntakeSchema, client => client.post('/events', { events })),
+  reportErrors: errors =>
+    request(appErrorIntakeSchema, client => client.post('/me/errors', { errors })),
+  reportDeviceHealth: report =>
+    request(deviceHealthSnapshotSchema, client =>
+      client.put('/me/device-health', report),
+    ),
   reportPermissions: permissions =>
     request(permissionSnapshotSchema, client =>
       client.put('/me/permissions', { permissions }),
@@ -956,6 +964,10 @@ export const deviceApi: DeviceApi = {
 export const telemetryApi: TelemetryApi = {
   sendEvents: events =>
     pick(mockTelemetryApi, realTelemetryApi).sendEvents(events),
+  reportErrors: errors =>
+    pick(mockTelemetryApi, realTelemetryApi).reportErrors(errors),
+  reportDeviceHealth: report =>
+    pick(mockTelemetryApi, realTelemetryApi).reportDeviceHealth(report),
   reportPermissions: permissions =>
     pick(mockTelemetryApi, realTelemetryApi).reportPermissions(permissions),
   permissions: () => pick(mockTelemetryApi, realTelemetryApi).permissions(),

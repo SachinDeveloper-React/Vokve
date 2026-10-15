@@ -874,6 +874,7 @@ export const mockWalletApi: WalletApi = {
     return {
       balance,
       pending: 0,
+      pendingReleaseAt: null,
       lifetimeEarned: earned,
       expiresAt: new Date(Date.now() + 90 * 86_400_000).toISOString(),
       expiryDaysLeft: 90,
@@ -5565,6 +5566,23 @@ export const mockTelemetryApi: TelemetryApi = {
       logger.debug('analytics', `${event.name}`, event.props);
     }
     return { accepted: events.length };
+  },
+  async reportErrors(errors) {
+    await delay();
+    // Loud on purpose: in a mock build the console is the operator.
+    for (const error of errors) {
+      logger.warn('errors', `${error.kind}: ${error.message}`, {
+        scope: error.scope,
+        screen: error.screen,
+        fatal: error.fatal,
+      });
+    }
+    return { accepted: errors.length };
+  },
+  async reportDeviceHealth(report) {
+    await delay();
+    logger.debug('deviceHealth', 'Reported', report.tracking);
+    return { ...report, deviceId: 'dev_mock', at: new Date().toISOString() };
   },
   async reportPermissions(permissions) {
     await delay();

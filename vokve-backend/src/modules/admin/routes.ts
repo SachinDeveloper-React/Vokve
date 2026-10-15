@@ -11,9 +11,12 @@ import {
   setUpdatePolicy,
   updatePolicyBody,
 } from './releases.service.js';
+import { fleetHealth, userProblems } from './problems.service.js';
+import { shadowReport } from './shadow.service.js';
 import {
   activity,
   activitySummary,
+  deviceHealth,
   devicePermissions,
   findUsers,
   loginHistory,
@@ -97,6 +100,61 @@ adminUsersRouter.get(
 /** Every install on the account, what it allows, and when that last changed. */
 adminUsersRouter.get('/admin/users/:userId/permissions', async (req, res) => {
   res.json(await devicePermissions(String(req.params.userId)));
+});
+
+/**
+ * The diagnosis, in words (RULES P18): what is wrong for this member, worst
+ * first, each finding with the evidence behind it and what to do about it.
+ *
+ * The read support actually wants. Everything in it can be had from the five
+ * endpoints above — this is the one that asks the questions in the right
+ * order so nobody has to know what order that is.
+ */
+adminUsersRouter.get('/admin/users/:userId/problems', async (req, res) => {
+  res.json(await userProblems(String(req.params.userId)));
+});
+
+const fleetQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(7) });
+
+/**
+ * The same questions asked of every install (RULES P18): how many are quiet,
+ * how many have a dead counter and on whose phones, which build is crashing,
+ * and the faults themselves worst first.
+ *
+ * Under `/admin/health/...` rather than a member's path, because it is not
+ * about a member: it is the list of what to fix next.
+ */
+adminUsersRouter.get('/admin/health/fleet', validate('query', fleetQuery), async (req, res) => {
+  const { days } = req.query as unknown as z.infer<typeof fleetQuery>;
+  res.json(await fleetHealth(days));
+});
+
+const healthQuery = z.object({ errors: z.coerce.number().int().min(1).max(100).default(25) });
+
+/**
+ * Why the app is not working for them (RULES P17): each install's own
+ * verdict on itself — the step service, Health Connect, the sync — beside
+ * when it last reported steps, and the faults the app has hit, grouped and
+ * newest first.
+ */
+adminUsersRouter.get('/admin/users/:userId/health', validate('query', healthQuery), async (req, res) => {
+  const { errors } = req.query as unknown as z.infer<typeof healthQuery>;
+  res.json(await deviceHealth(String(req.params.userId), errors));
+});
+
+// ─── Step coins before they are switched on (D-05) ─────────────────────────
+
+const shadowQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(30) });
+
+/**
+ * What ⚙ `coins.steps.enabled` would have cost, and how much of what members
+ * walked the layers actually verified. The read behind that decision: a coin
+ * once minted cannot be taken back, so the rate is judged on days already
+ * scored rather than on the first week of live minting.
+ */
+adminUsersRouter.get('/admin/activity/shadow', validate('query', shadowQuery), async (req, res) => {
+  const { days } = req.query as unknown as z.infer<typeof shadowQuery>;
+  res.json(await shadowReport(days, req.ctx.timezone));
 });
 
 // ─── The fraud review queue (RULES A27) ────────────────────────────────────

@@ -285,6 +285,17 @@ describe('WalletScreen', () => {
     expect(allText(await render())).toContain('+23.75 pending verification');
   });
 
+  test('and when they clear, as the server said — the escrow window is not the app’s to guess', async () => {
+    synced({
+      pending: 23.75,
+      pendingReleaseAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+
+    expect(allText(await render())).toContain(
+      '+23.75 pending verification · clears in 2 days',
+    );
+  });
+
   test('nothing is said about pending coins when there are none', async () => {
     synced({ pending: 0 });
 

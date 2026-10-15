@@ -8,7 +8,7 @@ import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.
 import { AchievementDefinitionModel, ChallengeDefinitionModel } from '../modules/challenges/models.js';
 import { ContentTipModel } from '../modules/content/models.js';
 import { DietPlanModel, FoodItemModel } from '../modules/nutrition/models.js';
-import { addDays } from '../lib/dates.js';
+import { addDays, localDayOf } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 import {
   ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLANS, EXERCISES, FOOD_ITEMS, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
@@ -34,8 +34,14 @@ async function operatorOwned(
   return new Set(rows.map(row => row._id));
 }
 
-/** Idempotent: safe to run on every deploy. Never touches user data. */
-export async function seed(): Promise<void> {
+/**
+ * Idempotent: safe to run on every deploy. Never touches user data.
+ *
+ * `now` is a parameter so a test can seed at an instant where the server's
+ * own calendar and the members' differ — the mistake the challenge opening
+ * days were making (see `seededOn`).
+ */
+export async function seed(now = new Date()): Promise<void> {
   await Promise.all(EXERCISES.map(e => ExerciseModel.updateOne({ _id: e._id }, { $set: e }, { upsert: true })));
   await Promise.all(WORKOUT_TEMPLATES.map(t => WorkoutTemplateModel.updateOne({ _id: t._id }, { $set: t }, { upsert: true })));
   // Catalogue rows are the seed's to overwrite — copy, tags, price — except
@@ -61,7 +67,12 @@ export async function seed(): Promise<void> {
   await Promise.all(SUPPORT_GUIDE_SECTIONS.map(s => SupportGuideSectionModel.updateOne({ _id: s._id }, { $set: s }, { upsert: true })));
   // The challenge board and the achievement shelf are the seed's wording, but
   // an opening day, once set, is never moved by a re-seed.
-  const seededOn = new Date().toISOString().slice(0, 10);
+  // The calendar the challenge rules are judged on, not the server's:
+  // `startsOn <= day` is asked of the member's local day, so a day taken
+  // from UTC is one behind for every zone ahead of it. In IST that is true
+  // from 18:30 UTC each evening, which made a challenge seeded to open
+  // "tomorrow" open today.
+  const seededOn = localDayOf(now, CONFIG_DEFAULTS.locale.timezone);
   await Promise.all(CHALLENGES.map(({ startsInDays, ...c }) =>
     ChallengeDefinitionModel.updateOne(
       { _id: c._id },
@@ -102,7 +113,8 @@ export async function seed(): Promise<void> {
 const isEntry = process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js');
 if (isEntry) {
   connectMongo()
-    .then(seed)
+    // Not `.then(seed)`: that would hand the resolved value in as `now`.
+    .then(() => seed())
     .then(() => logger.info('seeded'))
     .catch(err => { logger.error({ err }, 'seed failed'); process.exitCode = 1; })
     .finally(disconnectMongo);

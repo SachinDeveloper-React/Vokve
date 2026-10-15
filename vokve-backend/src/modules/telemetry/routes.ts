@@ -1,13 +1,13 @@
 import { Router } from 'express';
-import { eventBatchSchema, permissionReportSchema } from '../../contracts/index.js';
+import { appErrorBatchSchema, deviceHealthReportSchema, eventBatchSchema, permissionReportSchema } from '../../contracts/index.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
-import { readPermissions, recordEvents, savePermissions } from './service.js';
+import { readPermissions, recordErrors, recordEvents, saveDeviceHealth, savePermissions } from './service.js';
 
 export const telemetryRouter = Router();
-telemetryRouter.use(['/events', '/me/permissions'], requireAuth, requireDevice);
+telemetryRouter.use(['/events', '/me/permissions', '/me/errors', '/me/device-health'], requireAuth, requireDevice);
 
 /**
  * The analytics sink (PRD ADV2): a batch of what the member did, with the
@@ -51,3 +51,41 @@ telemetryRouter.put(
 telemetryRouter.get('/me/permissions', async (req, res) => {
   res.json(await readPermissions(req.ctx.userId!, req.ctx.deviceId!));
 });
+
+/**
+ * What went wrong on this phone (RULES P17).
+ *
+ * `202` like the trail: the server has taken the batch, and whether a row
+ * was folded into a group already there or dropped as too old is not
+ * something the app should behave differently about. Unlike the trail it is
+ * kept for a member with usage analytics off — an error is the record of
+ * the app failing them, not of what interests them.
+ *
+ * The limit is tighter than the trail's, because errors are rare by
+ * definition and a build sending them at speed is the thing being limited.
+ */
+telemetryRouter.post(
+  '/me/errors',
+  rateLimit({ name: 'app-errors', max: 60, windowSeconds: 600, by: 'device' }),
+  validate('body', appErrorBatchSchema),
+  async (req, res) => {
+    const { accepted, dropped } = await recordErrors(req.ctx.userId!, req.ctx.deviceId!, req.ctx, req.body.errors);
+    res.status(202).json(dropped > 0 ? { accepted, dropped } : { accepted });
+  },
+);
+
+/**
+ * Whether this install is working (RULES P17): the tracker's own health,
+ * Health Connect's grants, the state of the step sync. Sent on launch, on a
+ * foreground and when any of it changes — the same three moments as the
+ * permission snapshot, and diffed on the phone the same way, so a phone
+ * where nothing moves says it twice a day.
+ */
+telemetryRouter.put(
+  '/me/device-health',
+  rateLimit({ name: 'device-health', max: 60, windowSeconds: 600, by: 'device' }),
+  validate('body', deviceHealthReportSchema),
+  async (req, res) => {
+    res.json(await saveDeviceHealth(req.ctx.userId!, req.ctx.deviceId!, req.ctx, req.body));
+  },
+);

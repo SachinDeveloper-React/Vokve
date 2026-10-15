@@ -15,3 +15,5 @@ export type { Catalogue } from './useCatalogue';
 export { REVIEWS_PAGE_SIZE, useReviews } from './useReviews';
 export type { Reviews } from './useReviews';
 export { useReminderNotifications } from './useReminderNotifications';
+export { usePushNotifications } from './usePushNotifications';
+export { useDeviceHealthReporting } from './useDeviceHealthReporting';

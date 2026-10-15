@@ -111,6 +111,12 @@ describe('step ingest: signed snapshots (BACKEND §7.3)', () => {
     expect(stored?.signedPayload).toBe(body.snapshot.signedPayload);
     expect(await DeviceDayModel.countDocuments({ userId: session.userId })).toBe(1);
     expect(await IngestNonceModel.countDocuments({ userId: session.userId })).toBe(0);
+
+    // This install has reported, so the nudge job's clock starts again
+    // (RULES A28) — the one field that says a phone that counts also speaks.
+    const device = await DeviceModel.findById(session.deviceId, { stepSync: 1 }).lean();
+    expect(device?.stepSync?.uploadedAt).toBeTruthy();
+    expect(device?.stepSync?.nudgedAt ?? null).toBeNull();
   });
 
   it('answers the same snapshot again as it did the first time, and refuses a spent nonce', async () => {
@@ -161,7 +167,8 @@ describe('step ingest: signed snapshots (BACKEND §7.3)', () => {
     const damagedRes = await post(session, { ...damaged, snapshot: { ...damaged.snapshot, payloadSha256: 'a'.repeat(64) } });
     expect(damagedRes.body.error.code).toBe('SNAPSHOT_INVALID');
 
-    const old = await snapshotFor(session, key, { deviceSteps: 2000, date: addDays(today(), -8) });
+    // A day past the ingest window (⚙ `activity.maxAgeDays`, now a fortnight).
+    const old = await snapshotFor(session, key, { deviceSteps: 2000, date: addDays(today(), -15) });
     const oldRes = await post(session, old);
     expect(oldRes.status).toBe(422);
     expect(oldRes.body.error.code).toBe('SNAPSHOT_DATE_OUT_OF_RANGE');
@@ -441,7 +448,7 @@ describe('reading steps back: config, ranges and sources', () => {
         gapRecovery: 'split', privacyPolicyUrl: 'https://vokve.app/privacy',
         wearableTrust: 'catalog', wearableAllowlist: ['com.google.android.apps.fitness'],
       },
-      sync: { intervalMinutes: 3, maxAgeDays: 7, include: ['minutes', 'motionWindows', 'healthConnectRecords'] },
+      sync: { intervalMinutes: 3, maxAgeDays: 14, include: ['minutes', 'motionWindows', 'healthConnectRecords'] },
       playIntegrity: { cloudProjectNumber: null },
     });
   });

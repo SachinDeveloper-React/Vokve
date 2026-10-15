@@ -8,6 +8,25 @@ process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
 // The operator's door is open in tests, so the admin API can be exercised.
 process.env.ADMIN_API_KEY = 'test-admin-key-test-admin-key';
 delete process.env.REDIS_URL;
+// No reaching out to a real mail server either. A developer's own `.env`
+// carries working SMTP credentials, and every `signUpAndRegister` sends the
+// email OTP — so a full run was quietly sending hundreds of real emails and
+// then failing with `EMAIL_UNAVAILABLE` once the provider rate-limited it.
+// `auth.test.ts` stands up a capturing transport and sets these on `env`
+// itself for the tests that are actually about email.
+// Emptied rather than deleted: `config/env.ts` does `import 'dotenv/config'`,
+// and dotenv fills a variable that is *missing* — it leaves one that is
+// already set, even to ''. A delete here would simply be undone by `.env`.
+process.env.SMTP_HOST = '';
+process.env.SMTP_USER = '';
+process.env.SMTP_PASS = '';
+process.env.MAIL_FROM = '';
+// And no live push provider: a developer's `.env` now points at a real
+// Firebase service account, and a suite that initialised it would be one
+// `sendPush` away from putting a test notification on a real phone. The
+// tests that are about push stand up their own capturing transport
+// (`setPushTransport`).
+process.env.FIREBASE_SERVICE_ACCOUNT = '';
 // No reaching out to Google from a test: the revocation list is stubbed where it matters.
 process.env.ATTESTATION_STATUS_URL = '';
 delete process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT;

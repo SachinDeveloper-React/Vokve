@@ -78,6 +78,19 @@ function validate(config: AppConfig): void {
   if (!(t.maxStepsPerMinute > 0)) {
     throw new Error('activity.thresholds.maxStepsPerMinute must be above zero');
   }
+  // The nudge ladder has to climb too (RULES A28): the silent push first,
+  // the member told only after it has had time to fail. The wrong way round
+  // and somebody who missed one upload would be notified about it before
+  // the sync that would have fixed it was ever attempted.
+  const nudge = config.activity.syncNudge;
+  if (nudge.remindAfterHours < nudge.silentAfterHours) {
+    throw new Error(
+      `activity.syncNudge.remindAfterHours (${nudge.remindAfterHours}) is below silentAfterHours (${nudge.silentAfterHours})`,
+    );
+  }
+  if (!(nudge.cooldownHours > 0 && nudge.batch > 0)) {
+    throw new Error('activity.syncNudge: cooldownHours and batch must both be above zero');
+  }
   if (!(t.unaccountedShare > 0 && t.unaccountedShare <= 1)) {
     throw new Error(`activity.thresholds.unaccountedShare (${t.unaccountedShare}) must sit inside 0–1`);
   }

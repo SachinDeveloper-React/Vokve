@@ -6,12 +6,16 @@ import type {
   Address,
   AnalyticsEvent,
   AppAbout,
+  AppError,
+  AppErrorIntake,
   AppUpdate,
   Cart,
   Challenge,
   ChallengeDetail,
   CheckoutResult,
   DeliveryPreferences,
+  DeviceHealthReport,
+  DeviceHealthSnapshot,
   EventIntake,
   PaymentMethod,
   PermissionEntry,
@@ -881,6 +885,18 @@ export interface TelemetryApi {
    * set, not a patch, so a permission the member revoked arrives as a
    * refusal rather than as a gap.
    */
+  /**
+   * What went wrong on this phone (`POST /me/errors`, RULES P17). Grouped
+   * on arrival, so sending the same fault twice costs a count rather than a
+   * row. Kept for a member with usage analytics off, unlike the trail.
+   */
+  reportErrors(errors: AppError[]): Promise<AppErrorIntake>;
+  /**
+   * Whether this install is working (`PUT /me/device-health`): the step
+   * service, Health Connect's grants, the sync's state — the answer to "my
+   * steps are not counting", which otherwise only exists on the phone.
+   */
+  reportDeviceHealth(report: DeviceHealthReport): Promise<DeviceHealthSnapshot>;
   reportPermissions(
     permissions: PermissionEntry[],
   ): Promise<PermissionSnapshot>;

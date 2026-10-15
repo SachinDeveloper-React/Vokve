@@ -3,7 +3,7 @@ import { StyleSheet } from 'react-native';
 import { useTheme } from '../../theme';
 import type { CoinExpiryUrgency } from '../../stores/coinsStore';
 import { withAlpha } from '../../utils/color';
-import { formatCoins } from '../../utils/format';
+import { formatCoins, formatDaysUntil } from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
@@ -22,6 +22,14 @@ interface Props {
    * "on its way" rather than "ignored". Omitted or zero draws nothing.
    */
   pending?: number;
+  /**
+   * When the earliest of those holds clears (RULES E15), as the server said.
+   * Shown with the figure because "+28.5 pending" on its own reads as coins
+   * that may never arrive; the escrow window is the trust tier's, so only
+   * the server knows the date. Null where nothing is held, or where an
+   * operator has to release it by hand.
+   */
+  pendingReleaseAt?: string | null;
   /** Every coin ever credited, spent or not. */
   lifetimeEarned: number;
   /** Days until the coins in hand lapse. */
@@ -46,6 +54,7 @@ export const CoinBalanceCard = memo(
   ({
     balance,
     pending = 0,
+    pendingReleaseAt = null,
     lifetimeEarned,
     expiryDaysLeft,
     expiryUrgency,
@@ -55,6 +64,10 @@ export const CoinBalanceCard = memo(
   }: Props) => {
     const { colors, isDark } = useTheme();
     const spent = Math.max(0, lifetimeEarned - balance);
+    const clears = pendingReleaseAt ? formatDaysUntil(pendingReleaseAt) : '';
+    const pendingLine = `+${formatCoins(pending)} pending verification${
+      clears ? ` · clears ${clears}` : ''
+    }`;
 
     return (
       <Card
@@ -90,9 +103,9 @@ export const CoinBalanceCard = memo(
                 variant="micro"
                 color="textSecondary"
                 numberOfLines={1}
-                accessibilityLabel={`${formatCoins(pending)} coins pending verification`}
+                accessibilityLabel={pendingLine}
               >
-                {`+${formatCoins(pending)} pending verification`}
+                {pendingLine}
               </AppText>
             ) : null}
 

@@ -16,7 +16,9 @@ import {
   enableStepCounting,
   endStepSession,
   startStepSession,
+  runStepSyncTask,
   stopStepsForSignOut,
+  syncStepsInBackground,
   type StepProfile,
 } from '../src/services/steps';
 import { useStepsStore } from '../src/stores/stepsStore';
@@ -670,5 +672,147 @@ describe('the permission screens’ ask (D-54)', () => {
 
     expect(await enableStepCounting()).toBe('permission_denied');
     expect(tracker.startTracking).not.toHaveBeenCalled();
+  });
+});
+
+describe('the headless sync behind the server’s silent push (A28)', () => {
+  test('sends the day with no session, no screen and no initialize()', async () => {
+    // What a phone that has been counting with the app closed looks like:
+    // the store is hydrated from MMKV, and nothing has been started.
+    useStepsStore.setState({ ownerId: PROFILE.userId });
+
+    await expect(syncStepsInBackground()).resolves.toBe('sent');
+
+    expect(mockActivityApi.ingest).toHaveBeenCalledTimes(1);
+    expect(mockActivityApi.ingest.mock.calls[0][0]).toMatchObject({
+      date: today,
+      snapshot: SIGNATURE,
+    });
+    // The tracker reads on the config it already holds; a headless pass that
+    // initialised it would be pushing a config nobody has loaded.
+    expect(tracker.initialize).not.toHaveBeenCalled();
+    expect(useStepsStore.getState().synced[today]?.steps).toBe(500);
+  });
+
+  test('a phone that was closed for days sends every day the window still owes', async () => {
+    // Walked on three past days and today; nothing on the rest. The events
+    // that used to queue a past day — `dayChanged`, `historyBackfilled` —
+    // only fire while a React instance is alive, so a phone that was shut
+    // has nobody to have queued them.
+    const walked = [addDays(today, -3), addDays(today, -2), addDays(today, -1)];
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === today ? 500 : walked.includes(date) ? 900 : 0),
+    );
+    useStepsStore.setState({ ownerId: PROFILE.userId });
+
+    await syncStepsInBackground();
+
+    // Oldest first, and the empty days cost a local read rather than a request.
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toEqual([
+      ...walked,
+      today,
+    ]);
+    expect(useStepsStore.getState().queue).toEqual([]);
+  });
+
+  test('a day left queued from before goes up with the rest', async () => {
+    const yesterday = addDays(today, -1);
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === today || date === yesterday ? 500 : 0),
+    );
+    useStepsStore.setState({ ownerId: PROFILE.userId, queue: [yesterday] });
+
+    await syncStepsInBackground();
+
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toEqual([
+      yesterday,
+      today,
+    ]);
+    expect(useStepsStore.getState().queue).toEqual([]);
+  });
+
+  test('a day the server refuses outright is not offered again with the same numbers', async () => {
+    const stale = addDays(today, -4);
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === stale ? 700 : date === today ? 500 : 0),
+    );
+    mockActivityApi.ingest.mockImplementation(async ({ date }: { date: string }) => {
+      if (date === stale) {
+        throw new ApiError('validation', 'That day can no longer be synced.');
+      }
+      return ingested(500);
+    });
+    useStepsStore.setState({ ownerId: PROFILE.userId });
+
+    await syncStepsInBackground();
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toContain(stale);
+    expect(useStepsStore.getState().refused[stale]).toMatchObject({ steps: 700 });
+
+    // The window offers it again on every pass; the refusal is what stops it.
+    mockActivityApi.ingest.mockClear();
+    await syncStepsInBackground();
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).not.toContain(stale);
+
+    // Unless its count has moved since, which the refusal says nothing about.
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === stale ? 1200 : date === today ? 500 : 0),
+    );
+    mockActivityApi.ingest.mockClear();
+    await syncStepsInBackground();
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toContain(stale);
+  });
+
+  test('a phone nobody is signed in on sends nothing', async () => {
+    await expect(syncStepsInBackground()).resolves.toBe('no_owner');
+    expect(mockActivityApi.ingest).not.toHaveBeenCalled();
+  });
+
+  test('a phone whose account has signed out sends nothing', async () => {
+    // The days stay for the same account coming back, but there are no
+    // tokens left to send them with.
+    useStepsStore.setState({ ownerId: PROFILE.userId, signedOutAt: Date.now() });
+
+    await expect(syncStepsInBackground()).resolves.toBe('signed_out');
+    expect(mockActivityApi.ingest).not.toHaveBeenCalled();
+  });
+
+  test('the daily worker runs the same sync, and never throws at the OS', async () => {
+    useStepsStore.setState({ ownerId: PROFILE.userId });
+
+    await expect(runStepSyncTask()).resolves.toBeUndefined();
+    expect(mockActivityApi.ingest).toHaveBeenCalled();
+
+    // A failure is logged, not rejected: a headless task that rejects is
+    // counted against the app by the OS, and there is nobody to tell.
+    mockActivityApi.ingest.mockRejectedValue(new Error('boom'));
+    useStepsStore.setState({ synced: {}, queue: [] });
+    await expect(runStepSyncTask()).resolves.toBeUndefined();
+  });
+
+  test('two triggers landing together do not cut each other short', async () => {
+    const yesterday = addDays(today, -1);
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === today || date === yesterday ? 500 : 0),
+    );
+    useStepsStore.setState({ ownerId: PROFILE.userId });
+
+    // The push and the daily worker, at the same moment.
+    await Promise.all([syncStepsInBackground(), syncStepsInBackground()]);
+
+    // Both days still went up — the first to finish did not clear the owner
+    // the second was sending under.
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date).sort()).toEqual([
+      yesterday,
+      today,
+    ]);
+    expect(useStepsStore.getState().queue).toEqual([]);
+  });
+
+  test('with the app running, the session sends them instead', async () => {
+    await startStepSession(PROFILE);
+    await settle();
+    jest.clearAllMocks();
+
+    await expect(syncStepsInBackground()).resolves.toBe('session');
   });
 });

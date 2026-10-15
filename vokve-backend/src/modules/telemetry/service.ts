@@ -1,12 +1,24 @@
 import type {
   AnalyticsEvent,
+  AppError,
+  AppErrorIntake,
+  DeviceHealthReport,
+  DeviceHealthSnapshot,
   PermissionEntry,
   PermissionSnapshot,
   PermissionStatus,
 } from '../../contracts/index.js';
+import { getConfig } from '../../config/remote.js';
 import { newId } from '../../lib/ids.js';
+import { sha256Hex } from '../../lib/signatures.js';
 import { privacyAllows } from '../account/service.js';
-import { DevicePermissionsModel, EventModel, PERMISSION_HISTORY_LIMIT } from './models.js';
+import {
+  AppErrorModel,
+  DeviceHealthModel,
+  DevicePermissionsModel,
+  EventModel,
+  PERMISSION_HISTORY_LIMIT,
+} from './models.js';
 
 /** What the request itself says about the phone that made it (BACKEND §3.8). */
 export interface EventContext {
@@ -187,4 +199,130 @@ export function toPermissionStatus(p: StoredPermission): PermissionStatus {
     since: p.since.toISOString(),
     checkedAt: p.checkedAt.toISOString(),
   };
+}
+
+// ─── What went wrong (RULES P17) ───────────────────────────────────────────
+
+/**
+ * What makes two reports the same fault: the kind, the error's own name, its
+ * message and the first frame of the stack.
+ *
+ * The message is included because `undefined is not an object (evaluating
+ * 'a.b')` and the same for `c.d` are different bugs; the first frame because
+ * one helper throwing the same message from two call sites usually is too.
+ * Everything below the first frame is left out, so a stack that differs only
+ * in how deep it was does not split a group.
+ */
+function fingerprintOf(error: AppError): string {
+  const frame = (error.stack ?? '').split('\n').map(line => line.trim()).find(line => line.length > 0) ?? '';
+  return sha256Hex([error.kind, error.name ?? '', error.message, frame].join('\u0000')).slice(0, 32);
+}
+
+/**
+ * Takes what went wrong on a phone (RULES P17).
+ *
+ * Grouped on arrival: a report that matches a group already on this install
+ * increments its count, moves `lastAt` and replaces the stack and context
+ * with the newer ones. A report of something new is a new group — up to
+ * ⚙ `telemetry.errors.maxGroupsPerDevicePerDay`, past which a build in a
+ * crash loop with a changing message cannot keep writing.
+ *
+ * Unlike the trail, this is kept for a member with usage analytics off: it
+ * is the record of the app failing them, and support reads it (RULES P7).
+ * A row that cannot be read is dropped rather than failing the batch — the
+ * app must not be taught to retry a report it cannot fix.
+ */
+export async function recordErrors(
+  userId: string,
+  deviceId: string,
+  ctx: EventContext,
+  errors: AppError[],
+): Promise<AppErrorIntake> {
+  const config = await getConfig();
+  const now = new Date();
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  let groupsToday = await AppErrorModel.countDocuments({ deviceId, firstAt: { $gte: dayAgo } });
+
+  let accepted = 0;
+  let dropped = 0;
+  for (const error of errors) {
+    const at = Date.parse(error.at);
+    if (Number.isNaN(at) || at > now.getTime() + MAX_CLOCK_SKEW_MS || now.getTime() - at > MAX_EVENT_AGE_MS) {
+      dropped += 1;
+      continue;
+    }
+    const fingerprint = fingerprintOf(error);
+    const _id = `${userId}:${deviceId}:${fingerprint}`;
+    const existing = await AppErrorModel.exists({ _id });
+    if (!existing && groupsToday >= config.telemetry.errors.maxGroupsPerDevicePerDay) {
+      dropped += 1;
+      continue;
+    }
+    await AppErrorModel.updateOne(
+      { _id },
+      {
+        $setOnInsert: { _id, userId, deviceId, fingerprint, kind: error.kind, firstAt: new Date(at) },
+        $set: {
+          name: error.name ?? null,
+          message: error.message,
+          scope: error.scope ?? null,
+          screen: error.screen ?? null,
+          stack: error.stack ?? null,
+          fatal: error.fatal,
+          context: error.context && Object.keys(error.context).length > 0 ? error.context : undefined,
+          sessionId: error.sessionId ?? null,
+          platform: ctx.platform ?? null,
+          appVersion: ctx.appVersion ?? null,
+          build: ctx.build ?? null,
+          osVersion: ctx.osVersion ?? null,
+          receivedAt: now,
+        },
+        $max: { lastAt: new Date(at) },
+        $inc: { count: 1 },
+      },
+      { upsert: true },
+    );
+    if (!existing) groupsToday += 1;
+    accepted += 1;
+  }
+  return { accepted, dropped };
+}
+
+// ─── Whether the phone is working (RULES P17) ──────────────────────────────
+
+/**
+ * Takes an install's verdict on itself: the tracker's health, Health
+ * Connect's grants, the state of the sync.
+ *
+ * Replaced rather than appended to — this is current state, and the history
+ * that matters is kept elsewhere (`device_permissions` for what the member
+ * allowed, `devices.stepSync` for when this install last reported). Kept
+ * whatever the analytics switch says, for the same reason as the permission
+ * snapshot: it is what support reads when steps are zero.
+ */
+export async function saveDeviceHealth(
+  userId: string,
+  deviceId: string,
+  ctx: EventContext,
+  report: DeviceHealthReport,
+): Promise<DeviceHealthSnapshot> {
+  const now = new Date();
+  const _id = `${userId}:${deviceId}`;
+  await DeviceHealthModel.updateOne(
+    { _id },
+    {
+      $setOnInsert: { _id, userId, deviceId },
+      $set: {
+        platform: ctx.platform ?? null,
+        appVersion: ctx.appVersion ?? null,
+        tracking: report.tracking,
+        healthConnect: report.healthConnect,
+        sync: report.sync,
+        at: now,
+        receivedAt: now,
+      },
+    },
+    { upsert: true },
+  );
+  return { ...report, deviceId, at: now.toISOString() };
 }

@@ -7,6 +7,7 @@ import {
 import { authApi, userApi } from '../services/api/endpoints';
 import { setOnSessionExpired } from '../services/api/client';
 import { ApiError, toApiError } from '../services/api/errors';
+import { setErrorIdentity } from '../services/errorReporting';
 import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
 import { cancelHydrationReminders } from '../services/notifications';
@@ -577,6 +578,10 @@ function hydrateUserCaches(): void {
   // switches come with them, since one of them decides whether there is a
   // trail at all (RULES P7).
   setAnalyticsIdentity(useAuthStore.getState().user?.id ?? null);
+  // And whose faults they are (RULES P17). Not part of the trail: this one
+  // is set whatever the privacy switches say, because a crash is the record
+  // of the app failing them rather than of what they were interested in.
+  setErrorIdentity(useAuthStore.getState().user?.id ?? null);
   useAccountStore.getState().loadPrivacy();
   useCoinsStore.getState().hydrateFromServer();
   useNotificationsStore.getState().hydrateFromServer();
@@ -600,6 +605,7 @@ function resetUserCaches(): void {
   // Nothing more is attributed to the member who left, and what they did
   // has already been sent (see `signOut`).
   setAnalyticsIdentity(null);
+  setErrorIdentity(null);
   useCoinsStore.getState().reset();
   useNotificationsStore.getState().reset();
   useOrdersStore.getState().reset();

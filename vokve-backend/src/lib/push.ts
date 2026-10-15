@@ -2,10 +2,18 @@ import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
 export interface PushMessage {
-  title: string;
-  body: string;
+  /** Left out by a silent message: there is nothing to show. */
+  title?: string;
+  body?: string;
   /** Small string map the app reads on tap — the topic, the row id. */
   data: Record<string, string>;
+  /**
+   * Data only: no notification block, so the OS shows nothing and wakes the
+   * app's background handler instead (RULES A28). What the app does with it
+   * is in `data`; a silent message with no `data` would be a no-op that
+   * still spent a wake-up, so the type asks for one.
+   */
+  silent?: boolean;
 }
 
 export interface PushResult {
@@ -59,7 +67,7 @@ export async function configurePushFromEnv(): Promise<boolean> {
 export async function sendPush(tokens: string[], message: PushMessage): Promise<PushResult> {
   if (tokens.length === 0) return { sent: 0, invalid: [] };
   if (!transport) {
-    logger.debug({ tokens: tokens.length, title: message.title }, 'push.no_provider');
+    logger.debug({ tokens: tokens.length, title: message.title, silent: message.silent === true }, 'push.no_provider');
     return { sent: 0, invalid: [] };
   }
   try {

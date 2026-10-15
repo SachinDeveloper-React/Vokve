@@ -73,3 +73,10 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Credentials. The Firebase service account is a private key: it signs pushes
+# as the project, so it never belongs in the repo — and `android/app/` is the
+# client, which is the one place it must never sit.
+vokve-backend/secrets/
+**/*firebase-adminsdk*.json
+**/*service-account*.json

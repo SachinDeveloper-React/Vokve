@@ -71,6 +71,18 @@ interface StepsState {
   /** Days waiting to reach the server, `YYYY-MM-DD`. */
   queue: string[];
   synced: Record<string, SyncedDayMark>;
+  /**
+   * Days the server refused outright, and the figures it refused — a day
+   * past the ingest window, or one the tracker cannot read.
+   *
+   * Kept because the app now re-offers every day in the window on each
+   * foreground (`daysToCatchUp`), and without this a day that can never be
+   * accepted would be offered, refused and dropped again on every single
+   * one. Keyed on the figures rather than the date alone, so a day whose
+   * count has since *moved* is tried once more: the same numbers being
+   * refused twice says something permanent, a new number says nothing yet.
+   */
+  refused: Record<string, SyncedDayMark>;
   /** The server's side of each synced day — what it verified. */
   serverDays: Record<string, DailyActivity>;
   /**
@@ -121,6 +133,7 @@ export const useStepsStore = create<StepsState>()(
       trackingWanted: false,
       queue: [],
       synced: {},
+      refused: {},
       serverDays: {},
       serverWeek: [],
       serverWeekAt: null,
@@ -151,6 +164,7 @@ export const useStepsStore = create<StepsState>()(
         trackingWanted: state.trackingWanted,
         queue: state.queue,
         synced: state.synced,
+        refused: state.refused,
         serverDays: state.serverDays,
         serverWeek: state.serverWeek,
         serverWeekAt: state.serverWeekAt,

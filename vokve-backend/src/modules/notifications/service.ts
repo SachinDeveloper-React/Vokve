@@ -10,6 +10,7 @@ import { sendPush } from '../../lib/push.js';
 import { DeviceModel } from '../devices/models.js';
 import { privacyAllows } from '../account/service.js';
 import { NotificationPreferencesModel, UserModel } from '../identity/models.js';
+import { DevicePermissionsModel } from '../telemetry/models.js';
 import { NotificationModel } from './models.js';
 
 /**
@@ -124,8 +125,13 @@ export interface NotifyResult {
   id: string | null;
   /** `suppressed` is a targeted message the member has opted out of (RULES P7). */
   status: 'created' | 'duplicate' | 'suppressed';
-  /** Where the push went: sent now, held for quiet hours, or not wanted. */
-  push: 'sent' | 'deferred' | 'no_provider' | 'category_off' | 'no_device' | 'skipped' | 'local';
+  /**
+   * Where the push went: sent now, held for quiet hours, or not wanted.
+   * `not_permitted` is an install that has a token — every install
+   * registers one for the silent sync (A28) — but whose member refused
+   * notifications at the OS, so nothing may be shown on it.
+   */
+  push: 'sent' | 'deferred' | 'no_provider' | 'category_off' | 'no_device' | 'not_permitted' | 'skipped' | 'local';
 }
 
 /**
@@ -188,10 +194,47 @@ async function inQuietHours(userId: string, now: Date): Promise<boolean> {
   return quietHoursDelayMs(now, user?.timezone ?? 'UTC', quiet) > 0;
 }
 
+/**
+ * The installs of an account that have refused notifications (RULES P14).
+ *
+ * An install now registers its FCM token whatever the member answered about
+ * notifications, because the silent step-sync ping needs one and shows
+ * nothing (A28). So having a token no longer means a message may be *shown*
+ * there, and this is where that is honoured: an install whose permission
+ * snapshot says `denied` or `blocked` is left out, so a refusal still means
+ * feed rows only and a push is never counted as sent to a phone that will
+ * drop it.
+ *
+ * Only an explicit refusal counts. `unknown`, `unavailable` or no snapshot
+ * at all is not a refusal — it is an install that has not reported yet, and
+ * guessing "no" there would silence somebody who never said it.
+ */
+async function refusedNotifications(userId: string, deviceIds: string[]): Promise<Set<string>> {
+  if (deviceIds.length === 0) return new Set();
+  const snapshots = await DevicePermissionsModel.find(
+    { userId, deviceId: { $in: deviceIds } },
+    { deviceId: 1, permissions: 1 },
+  ).lean();
+  const refused = new Set<string>();
+  for (const snapshot of snapshots) {
+    const state = snapshot.permissions?.find(p => p.key === 'notifications')?.state;
+    if (state === 'denied' || state === 'blocked') refused.add(snapshot.deviceId);
+  }
+  return refused;
+}
+
 async function pushRow(id: string, userId: string, title: string, message: string, topic: NotificationTopic): Promise<NotifyResult['push']> {
   const devices = await DeviceModel.find({ userId, 'push.token': { $type: 'string' }, 'push.invalidAt': null }, { 'push.token': 1 }).lean();
-  const tokens = devices.map(d => d.push?.token).filter((t): t is string => typeof t === 'string');
-  if (tokens.length === 0) return 'no_device';
+  if (devices.length === 0) return 'no_device';
+
+  const refused = await refusedNotifications(userId, devices.map(d => d._id));
+  const tokens = devices
+    .filter(d => !refused.has(d._id))
+    .map(d => d.push?.token)
+    .filter((t): t is string => typeof t === 'string');
+  // Every install that could be reached has said no: the feed row stands as
+  // the only channel, and that is worth telling apart from having no phone.
+  if (tokens.length === 0) return 'not_permitted';
 
   const result = await sendPush(tokens, { title, body: message, data: { topic, notificationId: id } });
   if (result.invalid.length > 0) {

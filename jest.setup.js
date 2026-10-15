@@ -48,10 +48,12 @@ jest.mock('@react-native-community/netinfo', () => ({
   },
 }));
 
-// Firebase Messaging has no JS-only implementation; the app only ever asks
-// it whether it may notify, for permission and for a token, so that is all
-// the double provides. Allowed by default, so screens do not stop at the
-// notification permission unless a test says so.
+// Firebase Messaging has no JS-only implementation. The app asks it whether
+// it may notify, for a token, and for the three message channels — one
+// while the app is open, one for a notification tapped from the background,
+// and one for the notification the app was opened by. Allowed by default,
+// so screens do not stop at the notification permission unless a test says
+// so; the listeners hand back their unsubscribe, as the real ones do.
 jest.mock('@react-native-firebase/messaging', () => ({
   AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2, EPHEMERAL: 3 },
   getMessaging: jest.fn(() => ({})),
@@ -59,6 +61,22 @@ jest.mock('@react-native-firebase/messaging', () => ({
   hasPermission: jest.fn().mockResolvedValue(1),
   requestPermission: jest.fn().mockResolvedValue(1),
   onTokenRefresh: jest.fn(() => jest.fn()),
+  onMessage: jest.fn(() => jest.fn()),
+  onNotificationOpenedApp: jest.fn(() => jest.fn()),
+  getInitialNotification: jest.fn().mockResolvedValue(null),
+  setBackgroundMessageHandler: jest.fn(),
+}));
+
+// Crashlytics is a native module too. The app only ever asks it to take an
+// error, a user id or an attribute, and none of those answer anything — so
+// the double records the calls and resolves.
+jest.mock('@react-native-firebase/crashlytics', () => ({
+  getCrashlytics: jest.fn(() => ({})),
+  recordError: jest.fn(),
+  log: jest.fn(),
+  setUserId: jest.fn().mockResolvedValue(null),
+  setAttributes: jest.fn().mockResolvedValue(null),
+  setAttribute: jest.fn().mockResolvedValue(null),
 }));
 
 // Notifee is a native module. Its shipped mock answers every call and keeps

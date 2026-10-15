@@ -61,6 +61,14 @@ export function createApp() {
       }),
     }));
   }
+
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Vokve Backend is running",
+  });
+});
+
   app.use(versionGate);
 
   const v1 = express.Router();

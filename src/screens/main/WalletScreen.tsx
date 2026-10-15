@@ -29,6 +29,7 @@ import {
   useLifetimeEarned,
   useMonthlyCoinSummary,
   usePendingCoins,
+  usePendingReleaseAt,
   useWalletSyncError,
   useWalletSyncedAt,
 } from '../../stores/coinsStore';
@@ -61,6 +62,7 @@ export const WalletScreen = () => {
 
   const balance = useCoinBalance();
   const pending = usePendingCoins();
+  const pendingReleaseAt = usePendingReleaseAt();
   const lifetimeEarned = useLifetimeEarned();
   const transactions = useCoinTransactions();
   const summary = useMonthlyCoinSummary();
@@ -202,6 +204,7 @@ export const WalletScreen = () => {
             <CoinBalanceCard
               balance={balance}
               pending={pending}
+              pendingReleaseAt={pendingReleaseAt}
               lifetimeEarned={lifetimeEarned}
               expiryDaysLeft={expiry.daysLeft}
               expiryUrgency={expiry.urgency}
@@ -253,6 +256,7 @@ export const WalletScreen = () => {
         earnedToday={earnedToday}
         remainingToday={remainingToday}
         pending={pending}
+        pendingReleaseAt={pendingReleaseAt}
         onPressShop={onShopFromCoinsInfo}
       />
     </Screen>

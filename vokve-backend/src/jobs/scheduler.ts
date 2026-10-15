@@ -1,6 +1,7 @@
 import { getKV } from '../db/redis.js';
 import { logger } from '../lib/logger.js';
 import { purgeScheduledDeletions } from '../modules/account/service.js';
+import { nudgeStaleSyncs } from '../modules/activity/nudge.job.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { releaseDueHolds } from '../modules/economy/holds.service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
@@ -60,6 +61,10 @@ const HOURLY_JOBS: readonly DailyJob[] = [
   // Step coins out of escrow once their window has passed (RULES E15). A
   // hold is moved by a conditional update, so two instances split the work.
   { name: 'release-holds', run: () => releaseDueHolds() },
+  // Installs that are counting but not reporting (RULES A28): a silent push
+  // each, and the member told after three days of it. Its own cooldown is
+  // stamped per install, so an hourly tick does not mean an hourly push.
+  { name: 'sync-nudge', run: () => nudgeStaleSyncs() },
   // The evening nudge for a streak not yet covered today (RULES S10): each
   // user in the hour that is 19:00 for them, told once a day.
   { name: 'streak-at-risk', run: () => warnStreaksAtRisk() },

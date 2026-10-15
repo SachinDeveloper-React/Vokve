@@ -6,7 +6,7 @@ import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import { coinTransactionSchema, walletSchema, type CoinTransaction, type EarnRule, type Wallet } from '../../contracts/index.js';
 import { notify } from '../notifications/service.js';
-import { CoinBalanceModel, CoinDailyCapModel, CoinLedgerModel } from './models.js';
+import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel } from './models.js';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -34,10 +34,18 @@ function expiryOf(bal: { balanceMc?: number; lastCreditAt?: Date | null } | null
 export async function getWallet(userId: string, timeZone: string): Promise<Wallet> {
   const config = await getConfig();
   const today = localDayOf(new Date(), timeZone);
-  const [bal, cap, month] = await Promise.all([
+  const [bal, cap, month, nextOut] = await Promise.all([
     CoinBalanceModel.findById(userId).lean(),
     CoinDailyCapModel.findById(`${userId}:${today}`).lean(),
     monthSummary(userId, today.slice(0, 7), timeZone),
+    // The first hold due out, for the date the wallet shows against
+    // "pending". A hold with no `releaseAfter` is a restricted account's,
+    // which an operator releases by hand (RULES T4) — it has no date to
+    // promise, so it is left out rather than guessed at.
+    CoinHoldModel.find({ userId, status: 'held', releaseAfter: { $ne: null } }, { releaseAfter: 1 })
+      .sort({ releaseAfter: 1 })
+      .limit(1)
+      .lean(),
   ]);
 
   const { expiresAt, daysLeft } = expiryOf(bal, config.coins.expiryDays);
@@ -48,6 +56,7 @@ export async function getWallet(userId: string, timeZone: string): Promise<Walle
   return walletSchema.parse({
     balance: toCoins(bal?.balanceMc ?? 0),
     pending: toCoins(bal?.pendingMc ?? 0),
+    pendingReleaseAt: nextOut[0]?.releaseAfter?.toISOString() ?? null,
     lifetimeEarned: toCoins(bal?.lifetimeEarnedMc ?? 0),
     expiresAt: expiresAt?.toISOString() ?? null,
     expiryDaysLeft: daysLeft,

@@ -2049,6 +2049,13 @@ export const walletSchema = z.object({
   balance: z.number().nonnegative(),
   /** Step coins held pending verification (escrow). Not spendable. */
   pending: z.number().nonnegative().default(0),
+  /**
+   * When the earliest of those holds is due out of escrow (RULES E15), or
+   * null when nothing is held. The window is the member's trust tier's, not
+   * a fixed number, so the app cannot derive this — and "+28 pending" with
+   * no date reads as coins that may never come.
+   */
+  pendingReleaseAt: z.string().nullable().default(null),
   lifetimeEarned: z.number().nonnegative(),
   /** ISO-8601, or null when there is nothing to expire (RULES E11). */
   expiresAt: z.string().nullable(),
@@ -3341,3 +3348,120 @@ export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>;
 /** A batch of them. The app sends every few seconds, not every event. */
 export const eventBatchSchema = z.object({ events: z.array(analyticsEventSchema).min(1).max(100) });
 export type EventBatch = z.infer<typeof eventBatchSchema>;
+
+// ─── What went wrong, and whether the phone is working (RULES P17) ─────────
+
+/**
+ * Where an error came from.
+ *
+ * `boundary` is one that took a screen down — React caught it and drew the
+ * fallback — and `js` is one the global handler caught, which in release
+ * means the app is about to die. `api` is a request that failed in a way
+ * the member could not have caused: a 5xx, or a network that never
+ * answered. `native` is reported by the phone's own layer.
+ */
+export const appErrorKindSchema = z.enum(['boundary', 'js', 'api', 'native']);
+export type AppErrorKind = z.infer<typeof appErrorKindSchema>;
+
+/**
+ * One thing that went wrong on a phone (RULES P17).
+ *
+ * Operational, not analytics: it is kept for an account that has usage
+ * analytics switched off, for the same reason the permission snapshot is —
+ * it is what support reads when somebody says the app is broken, and it
+ * answers no question about what they like. The stack is bounded because a
+ * minified React Native trace can run for pages, and nothing beyond the
+ * first frames is read by a human.
+ */
+export const appErrorSchema = z.object({
+  kind: appErrorKindSchema,
+  /** The error's own class — `TypeError`, `ApiError` — where there is one. */
+  name: z.string().trim().max(120).optional(),
+  message: z.string().trim().min(1).max(500),
+  /** Who was running: a screen name, or a service's own scope (`steps`, `push`). */
+  scope: z.string().trim().max(80).optional(),
+  /** The screen the member was on, where the app knows it. */
+  screen: z.string().trim().max(80).optional(),
+  stack: z.string().max(4000).optional(),
+  /** It ended something: a screen replaced by the fallback, or the app itself. */
+  fatal: z.boolean().default(false),
+  at: z.string().datetime({ offset: true }),
+  sessionId: z.string().trim().max(64).optional(),
+  /** Whatever the site knows: the path and status of a request, the sync's state. */
+  context: z
+    .record(z.string().max(40), z.union([z.string().max(300), z.number(), z.boolean(), z.null()]))
+    .refine(context => Object.keys(context).length <= 20, 'Too many context keys')
+    .optional(),
+});
+export type AppError = z.infer<typeof appErrorSchema>;
+
+/** A handful at a time. Errors are rare; a batch of twenty is a bad day. */
+export const appErrorBatchSchema = z.object({ errors: z.array(appErrorSchema).min(1).max(20) });
+export type AppErrorBatch = z.infer<typeof appErrorBatchSchema>;
+
+export const appErrorIntakeSchema = z.object({
+  /** How many were filed, counting the ones folded into a group already there. */
+  accepted: z.number().int().nonnegative(),
+  dropped: z.number().int().nonnegative().default(0),
+});
+export type AppErrorIntake = z.infer<typeof appErrorIntakeSchema>;
+
+/**
+ * Whether this install is actually working (RULES P17).
+ *
+ * The question behind it is the commonest complaint there is — "my steps
+ * are not counting" — and the answer lives on the phone: a foreground
+ * service an OEM killed, a Health Connect grant withdrawn, a sync that has
+ * been failing for a day. The app reads all of it for its own screens; this
+ * is it saying so, so the same question can be answered without the member
+ * on the phone.
+ *
+ * Every part is optional: a phone that cannot read one of them should still
+ * report the rest.
+ */
+export const deviceHealthReportSchema = z.object({
+  tracking: z
+    .object({
+      /** `running`, `paused`, `stopped`, `idle` — the tracker's own word. */
+      state: z.string().trim().max(24).optional(),
+      /** Whether the member ever turned counting on and never turned it off. */
+      wanted: z.boolean().optional(),
+      serviceAlive: z.boolean().optional(),
+      /** Should be running and is not: an OEM killed the service. */
+      looksDead: z.boolean().optional(),
+      heartbeatAgeMs: z.number().nonnegative().max(2_592_000_000).optional(),
+      recoveryCount: z.number().int().nonnegative().max(100_000).optional(),
+      lastRecoveryReason: z.string().trim().max(40).nullable().optional(),
+      batteryOptimizationEnabled: z.boolean().optional(),
+      aggressiveOem: z.boolean().optional(),
+      manufacturer: z.string().trim().max(60).nullable().optional(),
+    })
+    .optional(),
+  healthConnect: z
+    .object({
+      availability: z.string().trim().max(40).nullable().optional(),
+      canRead: z.boolean().optional(),
+      canWrite: z.boolean().optional(),
+      grantedReadTypes: z.array(z.string().trim().max(40)).max(10).optional(),
+    })
+    .optional(),
+  sync: z
+    .object({
+      status: z.enum(['idle', 'syncing', 'failed']).optional(),
+      lastSyncedAt: z.string().datetime({ offset: true }).nullable().optional(),
+      /** Days waiting to go up. A queue that never empties is the symptom. */
+      queued: z.number().int().nonnegative().max(1000).optional(),
+      error: z.string().trim().max(300).nullable().optional(),
+      /** What the phone counted today, for "it says 4,000 and the server has 0". */
+      todaySteps: z.number().int().nonnegative().max(500_000).optional(),
+    })
+    .optional(),
+});
+export type DeviceHealthReport = z.infer<typeof deviceHealthReportSchema>;
+
+export const deviceHealthSnapshotSchema = deviceHealthReportSchema.extend({
+  deviceId: z.string(),
+  /** When the phone said so. */
+  at: z.string(),
+});
+export type DeviceHealthSnapshot = z.infer<typeof deviceHealthSnapshotSchema>;

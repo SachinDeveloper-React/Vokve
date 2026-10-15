@@ -14,6 +14,7 @@ import { CoinLedgerModel } from '../src/modules/economy/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
 import { AppConfigModel } from '../src/modules/platform/models.js';
 import { StreakDayModel } from '../src/modules/streak/models.js';
+import { seed } from '../src/seed/seed.js';
 import { app, authed, signUpAndRegister, type Session } from './helpers.js';
 
 const ZONE = 'Asia/Kolkata';
@@ -449,5 +450,24 @@ describe('achievements: one in full (GET /achievements/:id)', () => {
   it('404s a badge that is not in the catalogue', async () => {
     const session = await signUpAndRegister();
     expect((await request(app).get('/v1/achievements/a-nope').set(authed(session))).status).toBe(404);
+  });
+});
+
+describe('challenges: the day one opens on (RULES C1)', () => {
+  it('is the members’ calendar, not the server’s', async () => {
+    // 19:00 UTC on the 14th is already the 15th in IST, which is the zone
+    // the rules are judged in (`startsOn <= day`). Taking the day from UTC
+    // here stamped the 15th on a challenge that opens "tomorrow" — so from
+    // 18:30 UTC every evening it opened a day early, and the board showed
+    // it as already running.
+    const at = new Date('2026-10-14T19:00:00Z');
+    await ChallengeDefinitionModel.deleteMany({});
+    await seed(at);
+
+    const tomorrow = await ChallengeDefinitionModel.findById('ch-15k-steps', { startsOn: 1 }).lean();
+    expect(tomorrow?.startsOn).toBe('2026-10-16');
+    // And one that is open from the start has no opening day at all.
+    const running = await ChallengeDefinitionModel.findById('ch-10k-steps', { startsOn: 1 }).lean();
+    expect(running?.startsOn ?? null).toBeNull();
   });
 });

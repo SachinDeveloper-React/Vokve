@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
+import { ActivityDailyModel } from '../src/modules/activity/models.js';
 import { DeviceModel } from '../src/modules/devices/models.js';
 import { OrderModel } from '../src/modules/commerce/models.js';
 import { credit } from '../src/modules/economy/service.js';
@@ -269,5 +270,50 @@ describe('admin: finding the account (RULES P15)', () => {
     await signUpAndRegister();
     const res = await request(app).get('/v1/admin/users').query({ q: 'nobody@example.com' }).set(ADMIN);
     expect(res.body.data).toEqual([]);
+  });
+});
+
+describe('admin: what switching step coins on would cost (D-05)', () => {
+  /** A scored day, as the rollup would have left it. */
+  async function scoredDay(userId: string, localDay: string, steps: number, verifiedSteps: number) {
+    await ActivityDailyModel.create({
+      _id: `${userId}:${localDay}`, userId, localDay, steps, verifiedSteps,
+      verified: verifiedSteps > 0, scoredAt: new Date(),
+    });
+  }
+
+  it('reports the verified share and the coins the rate would have held', async () => {
+    const session = await signUpAndRegister();
+    const today = new Date().toISOString().slice(0, 10);
+    // 12,000 shown, 9,000 verified → 90 units × 0.095 = 8.55 coins.
+    await scoredDay(session.userId, today, 12_000, 9_000);
+    // A day the layers refused pays nothing and drags the share down.
+    await scoredDay(session.userId, '2000-01-01', 8_000, 0);
+
+    const res = await request(app).get('/v1/admin/activity/shadow').query({ days: 7 }).set(ADMIN);
+    expect(res.status).toBe(200);
+    // The old day is outside the window asked for; only today is counted.
+    expect(res.body.totals).toMatchObject({
+      users: 1, days: 1, steps: 12_000, verifiedSteps: 9_000, verifiedShare: 0.75,
+      verifiedDays: 1, unverifiedDays: 0, coins: 8.55,
+    });
+    // The rate the figures were worked out with, so nobody has to guess it.
+    expect(res.body.rate).toMatchObject({ enabled: false, unitSteps: 100, coinsPerUnit: 0.095, per1000: 0.95, sourceCap: 30 });
+    expect(res.body.byDay[0]).toMatchObject({ localDay: today, coins: 8.55, users: 1 });
+  });
+
+  it('caps a day at the ceilings the economy would have applied', async () => {
+    const session = await signUpAndRegister();
+    const today = new Date().toISOString().slice(0, 10);
+    // 90,000 verified steps: the trust tier's 30,000 is what would have been
+    // paid for, and 28.5 coins is under the 30 the source cap allows.
+    await scoredDay(session.userId, today, 95_000, 90_000);
+
+    const res = await request(app).get('/v1/admin/activity/shadow').set(ADMIN);
+    expect(res.body.totals.coins).toBe(28.5);
+  });
+
+  it('answers the admin key alone', async () => {
+    expect((await request(app).get('/v1/admin/activity/shadow')).status).toBe(401);
   });
 });

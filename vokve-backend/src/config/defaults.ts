@@ -11,8 +11,20 @@ export const CONFIG_DEFAULTS = {
     dailyCap: 300,
     /** Optional second ceiling over the calendar month; null = off. */
     monthlyCap: null as number | null,
-    /** Per-source ceilings; each must be ≤ dailyCap (RULES E8c). */
-    sourceCaps: { steps: 200, workout: 100, streak: 300, challenge: 300, referral: 300 },
+    /**
+     * Per-source ceilings; each must be ≤ dailyCap (RULES E8c).
+     *
+     * `steps` is sized to the rate it caps. At 0.095 per 100 the most a day
+     * can mint from walking is the trust tier's step ceiling — 30,000 steps
+     * → 300 units → **28.5 coins** — so the 200 this inherited from the old
+     * 10-per-1,000 rate could never be reached, and the cap that looked like
+     * the step ceiling was really `trust.stepCaps`. At 30 it binds just
+     * above a full day's walk, which is what makes the 300 daily budget
+     * readable: steps take at most 30 of it and the other sources keep 270.
+     * A rate change (D-32) has to come back here — this number is only
+     * meaningful next to `coins.steps.coinsPerUnit`.
+     */
+    sourceCaps: { steps: 30, workout: 100, streak: 300, challenge: 300, referral: 300 },
     /**
      * 0.095 coins per 100 verified steps (D-26). Both knobs are config.
      * `enabled` is what lets a scored day mint at all: off through Phase 2,
@@ -460,8 +472,58 @@ export const CONFIG_DEFAULTS = {
         bmiAdjust: { underweight: 0, healthy: 0, overweight: 1000, obese: 1000 },
       },
     },
-    /** A day older than this, in the phone's own zone, is refused (RULES A8). */
-    maxAgeDays: 7,
+    /**
+     * A day older than this, in the phone's own zone, is refused (RULES A8).
+     *
+     * Fourteen rather than seven: counting is native and survives the app
+     * being closed for weeks, but nothing uploads while it is closed (the
+     * periodic sync runs only in the foreground), so a seven-day window
+     * threw away a fortnight's real walking from anyone who did not open
+     * the app — a phone in a drawer, a holiday, a member who only shops
+     * monthly. The window is still bounded because stale evidence is
+     * weaker evidence: a day signed two weeks ago cannot be checked
+     * against anything that has happened since. `syncNudge` is the other
+     * half of this — it keeps the ordinary case uploading daily, so the
+     * window is a recovery path rather than the normal one.
+     */
+    maxAgeDays: 14,
+    /**
+     * The upload floor (RULES A28). Steps are counted natively with the app
+     * closed, but they only leave the phone from the foreground — the
+     * periodic sync asks for an active app — so a member who does not open
+     * it earns nothing until they do, and past `maxAgeDays` never will.
+     * Sweatcoin solves this by telling people to open the app every twelve
+     * hours. The server asking is better than the member remembering.
+     *
+     * A silent data push (`type: 'activity_sync'`) wakes the app's
+     * background handler on an install whose newest accepted snapshot is
+     * older than `silentAfterHours`, and it syncs with no screen involved.
+     * It is a ping, not a message: no feed row is written and quiet hours
+     * do not apply, because nothing rings.
+     *
+     * A push can go undelivered — a force-stopped app, no network, FCM not
+     * configured — so after `remindAfterHours` the member is told in as
+     * many words, through the ordinary notification path, where quiet hours
+     * and the activity switch do apply. That one is a message: opening the
+     * app is the only fix left.
+     */
+    syncNudge: {
+      enabled: true,
+      /** Hours since the newest accepted snapshot before the silent push goes. */
+      silentAfterHours: 20,
+      /** And before the same install is pushed again. */
+      cooldownHours: 8,
+      /** Hours of silence before the member is told, at most once a day. */
+      remindAfterHours: 72,
+      /**
+       * Installs this far behind are left alone: a phone that has not
+       * uploaded in a month has stopped being used, and what is still
+       * recoverable there is a retention question rather than a sync one.
+       */
+      giveUpAfterDays: 30,
+      /** Installs handled per run; the hourly tick takes the rest next time. */
+      batch: 500,
+    },
     /** A snapshot signed further ahead of the server's clock than this is flagged (A8). */
     futureSkewMinutes: 5,
     /** Timed steps in one minute that make it an active minute. */
@@ -708,6 +770,46 @@ export const CONFIG_DEFAULTS = {
     ] as { id: string; title: string; subtitle: string; kind: string; category: string | null; icon: string; tint: string }[],
   },
   locale: { country: 'IN', timezone: 'Asia/Kolkata' },
+  /**
+   * What the phones tell us about themselves (RULES P17). The trail's own
+   * retention is the TTL on `events`; these are the limits on the two
+   * operational feeds.
+   */
+  telemetry: {
+    errors: {
+      /**
+       * New fault *groups* one install may open in a day. A build in a
+       * crash loop whose message changes every time — an index in it, a
+       * timestamp — would otherwise write a row a second; at this ceiling
+       * the first fifty tell the story and the rest are dropped.
+       */
+      maxGroupsPerDevicePerDay: 50,
+    },
+    health: {
+      /**
+       * A health report older than this is not current state any more, and
+       * the operator's read says so rather than showing a week-old verdict
+       * as though it were now.
+       */
+      staleHours: 36,
+    },
+    /**
+     * Where the diagnosis draws its lines (RULES P18). Thresholds rather
+     * than code, because every one of them is a product judgement that only
+     * a few weeks of real phones can settle: a fortnight in, these are
+     * where the owner tunes "this is a problem" without a deploy.
+     */
+    problems: {
+      /** Counting on and nothing reported for this long is a finding. */
+      noUploadHours: 36,
+      /** How far back the fault list is read. */
+      errorDays: 7,
+      /** How many *kinds* of handled error make it worth saying. */
+      errorGroupsForFinding: 3,
+      /** How many days back the unverified ones are counted. */
+      unverifiedDays: 7,
+    },
+  },
 };
 
 export type AppConfig = typeof CONFIG_DEFAULTS;

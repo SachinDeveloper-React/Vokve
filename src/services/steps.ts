@@ -68,7 +68,7 @@ const FALLBACK_CONFIG: ActivityConfig = {
   sync: {
     intervalMinutes: 5,
     minGapSeconds: 120,
-    maxAgeDays: 7,
+    maxAgeDays: 14,
     include: ['minutes', 'motionWindows', 'healthConnectRecords'],
     healthConnectRecordTypes: ['steps', 'distance'],
   },
@@ -148,9 +148,24 @@ interface Session {
 let session: Session | null = null;
 let sessionCounter = 0;
 
+/**
+ * The user a sync with no session is running for: set only for the headless
+ * pass behind the server's silent "sync now" push (`syncStepsInBackground`).
+ * A session's own user always wins, so the two can never both be sending.
+ */
+let backgroundOwner: string | null = null;
+/**
+ * How many headless syncs are in flight. Two triggers can land together —
+ * the server's push and the daily worker (A28d) — and the first to finish
+ * must not clear the owner the second is still sending under.
+ */
+let backgroundSyncs = 0;
+
 /** Each await in a session's start can outlive it — a sign-out mid-way. */
 const isLive = (id: number) => session?.id === id;
 const steps = () => useStepsStore.getState();
+/** Whose days are being sent: the session's user, or the headless pass's. */
+const syncOwner = (): string | null => session?.userId ?? backgroundOwner;
 
 /** Tolerates one read failing without losing the others. */
 async function settle<T>(read: Promise<T>, what: string): Promise<T | null> {
@@ -268,7 +283,7 @@ async function catchUp(
   } catch (error) {
     logger.warn('steps', 'Counting did not resume', error);
   }
-  scheduleSync([addDays(todayIso(), -1), todayIso()]);
+  scheduleSync(daysToCatchUp());
   // A set-up changed on the server reaches the tracker on the next foreground
   // — and then, in a development build, today as the phone now sees it goes
   // to the console.
@@ -512,6 +527,7 @@ async function claimOwnership(userId: string): Promise<void> {
     trackingWanted: false,
     queue: [],
     synced: {},
+    refused: {},
     serverDays: {},
     lastSyncedAt: null,
     recoveriesAcknowledged: null,
@@ -909,14 +925,122 @@ export async function improveBackgroundCounting(): Promise<
  * again, so whatever asked sees the server's answer.
  */
 export async function syncStepsNow(): Promise<void> {
-  scheduleSync([addDays(todayIso(), -1), todayIso()], { force: true });
+  scheduleSync(daysToCatchUp(), { force: true });
   await flush();
   await refreshServerActivity();
   // Not awaited: whatever asked is waiting on the server, not on this.
   logStepDebug('sync now');
 }
 
+/**
+ * What one headless sync did, for the handler that logs it.
+ *
+ * `no_owner` is a phone that has never counted for anybody, `signed_out`
+ * one whose account has since left — the push was addressed to an install
+ * that is no longer theirs — and `session` means the app was already
+ * running and its own session sent the days instead.
+ */
+export type BackgroundSyncOutcome = 'sent' | 'session' | 'no_owner' | 'signed_out';
+
+/**
+ * Sends what this phone has not sent, with no session and no screen: the
+ * headless pass behind the server's silent "sync now" push (⚙
+ * `activity.syncNudge`).
+ *
+ * Counting is native and survives the app being closed, but until now
+ * uploading needed the app *open* — the periodic sync asks for an active
+ * app, and the other triggers are a foreground and a network coming back
+ * while it runs. So a phone counting faithfully in a pocket could go quiet
+ * for a fortnight and then have those days refused as too old (⚙
+ * `activity.maxAgeDays`). This is the floor under that: the server notices
+ * the silence and asks, and this answers without the member doing anything.
+ *
+ * Nothing here needs a screen to have been mounted. The tracker reads on the
+ * config it already holds — every method works before `initialize()` (tracker
+ * 2.7) — the store hydrates from MMKV synchronously on import, and the API
+ * client takes its tokens from the keychain per request and refreshes them
+ * itself. What it does need is for the phone to still be this user's: a
+ * signed-out install has nothing of theirs to send, and says so rather than
+ * sending the days anyway.
+ */
+export async function syncStepsInBackground(): Promise<BackgroundSyncOutcome> {
+  // The app is up: its session owns the queue, and a second sender beside it
+  // would race it for the same days and the same nonces.
+  if (session) {
+    await syncStepsNow();
+    return 'session';
+  }
+  const { ownerId, signedOutAt } = steps();
+  if (!ownerId) {
+    return 'no_owner';
+  }
+  // Signed out: the days are kept for the same account coming back
+  // (`claimOwnership`), but there are no tokens left to send them with, and
+  // nothing walked since is anybody's. The server does not nudge an install
+  // in this state either; this is the phone's own half of that rule.
+  if (signedOutAt !== null) {
+    return 'signed_out';
+  }
+  backgroundOwner = ownerId;
+  backgroundSyncs += 1;
+  try {
+    scheduleSync(daysToCatchUp());
+    await flush();
+  } finally {
+    backgroundSyncs -= 1;
+    if (backgroundSyncs === 0) {
+      backgroundOwner = null;
+    }
+  }
+  return 'sent';
+}
+
+/**
+ * What Android's daily worker runs (RULES A28d) — the same sync the push
+ * asks for, through the same code, so a day that arrives this way is
+ * indistinguishable from one that arrived by push.
+ *
+ * Never throws: a headless task that rejects is logged by the OS against
+ * the app, and there is nobody to tell. The days are still on the phone and
+ * the window is a fortnight.
+ */
+export async function runStepSyncTask(): Promise<void> {
+  try {
+    const outcome = await syncStepsInBackground();
+    logger.info('steps', `Daily step sync: ${outcome}`);
+  } catch (error) {
+    logger.warn('steps', 'Daily step sync failed', error);
+  }
+}
+
 // ─── Sync ───────────────────────────────────────────────────────────────────
+
+/**
+ * Every day the ingest window still covers, oldest first.
+ *
+ * Not "yesterday and today", which is what this used to offer and is what
+ * made the window a fiction: counting is native and survives the app being
+ * closed, but the events that queue a *past* day — `dayChanged`,
+ * `historyBackfilled` — only fire while a React instance is alive. So a
+ * phone closed for a week came back, sent yesterday and today, and left the
+ * five days in between on the device until they aged out (RULES A8) —
+ * days the server would gladly have taken.
+ *
+ * Offering the whole window costs one local read each (`getStepsForDate`
+ * is the tracker's own database, not the network) and almost no requests:
+ * `shouldSend` drops an empty day, a day whose figures match its last
+ * accepted sync, and a day already refused with these same numbers, all
+ * before anything is signed or sent. It also picks up what the lost
+ * `historyBackfilled` events would have said — a closed day that grew
+ * while the app was shut is simply a day whose figures no longer match.
+ */
+function daysToCatchUp(): string[] {
+  const today = todayIso();
+  const window = Math.max(1, activityConfig().sync.maxAgeDays);
+  return Array.from({ length: window + 1 }, (_, back) =>
+    addDays(today, -(window - back)),
+  );
+}
 
 /** Days whose next sync skips the gap kept between syncs of today. */
 const forced = new Set<string>();
@@ -925,7 +1049,7 @@ function scheduleSync(
   dates: string[],
   options: { force?: boolean } = {},
 ): void {
-  if (!session) {
+  if (!syncOwner()) {
     return;
   }
   if (options.force) {
@@ -967,11 +1091,15 @@ type SyncOutcome =
   | { kind: 'retry'; message: string };
 
 async function runFlush(): Promise<void> {
-  const id = session?.id;
+  const owner = syncOwner();
   // Nothing goes up as this user's while the phone still holds another's.
-  if (id === undefined || steps().ownerId !== session?.userId) {
+  if (!owner || steps().ownerId !== owner) {
     return;
   }
+  // A session that ends mid-flush abandons the rest of it. The headless pass
+  // has no session to end, so it runs until its own owner is cleared.
+  const id = session?.id;
+  const live = () => (id === undefined ? backgroundOwner === owner : isLive(id));
   pruneBookkeeping();
   const dates = [...steps().queue];
   if (dates.length === 0) {
@@ -983,7 +1111,7 @@ async function runFlush(): Promise<void> {
   let sent = false;
   for (const date of dates) {
     const outcome = await syncDay(date);
-    if (!isLive(id)) {
+    if (!live()) {
       return;
     }
     sent = sent || outcome.kind === 'sent';
@@ -1025,14 +1153,18 @@ function pruneBookkeeping(): void {
   useStepsStore.setState(state => ({
     queue: state.queue.filter(keep),
     synced: pick(state.synced),
+    refused: pick(state.refused),
     serverDays: pick(state.serverDays),
   }));
 }
 
 async function syncDay(date: string): Promise<SyncOutcome> {
+  // Held outside the try so a refusal can be remembered against the exact
+  // numbers that earned it.
+  let figures: Omit<SyncedDayMark, 'at'> | null = null;
   try {
     const record = await StepTracker.getStepsForDate(date);
-    const figures = {
+    figures = {
       steps: record.steps,
       recoveredSteps: record.recoveredSteps,
       suspectSteps: record.suspectSteps,
@@ -1060,7 +1192,13 @@ async function syncDay(date: string): Promise<SyncOutcome> {
     recordSent(date, figures, result);
     return { kind: 'sent' };
   } catch (error) {
-    return classify(error);
+    const outcome = classify(error);
+    // Refused for what it is: remembered, so the window's next pass does
+    // not offer the same numbers again (see `refused`).
+    if (outcome.kind === 'dropped' && figures) {
+      recordRefused(date, figures);
+    }
+    return outcome;
   }
 }
 
@@ -1076,7 +1214,14 @@ async function syncDay(date: string): Promise<SyncOutcome> {
  * nothing is not news — Health Connect may just not have answered.
  */
 function shouldSend(date: string, figures: Omit<SyncedDayMark, 'at'>): boolean {
-  const mark = steps().synced[date];
+  const state = steps();
+  // Already refused with exactly these numbers: the server said no for a
+  // reason that has not changed, and the window will offer this day again
+  // on every foreground until it ages out.
+  if (same(state.refused[date], figures)) {
+    return false;
+  }
+  const mark = state.synced[date];
   if (!mark) {
     return figures.steps > 0;
   }
@@ -1097,6 +1242,30 @@ function shouldSend(date: string, figures: Omit<SyncedDayMark, 'at'>): boolean {
     return false;
   }
   return true;
+}
+
+/** Whether a mark describes the figures in hand. */
+function same(
+  mark: SyncedDayMark | undefined,
+  figures: Omit<SyncedDayMark, 'at'>,
+): boolean {
+  return (
+    mark !== undefined &&
+    mark.steps === figures.steps &&
+    mark.recoveredSteps === figures.recoveredSteps &&
+    mark.suspectSteps === figures.suspectSteps &&
+    (mark.externalSteps ?? 0) === (figures.externalSteps ?? 0)
+  );
+}
+
+/** The day the server refused, and what it was refused with. */
+function recordRefused(
+  date: string,
+  figures: Omit<SyncedDayMark, 'at'>,
+): void {
+  useStepsStore.setState(state => ({
+    refused: { ...state.refused, [date]: { ...figures, at: Date.now() } },
+  }));
 }
 
 function recordSent(

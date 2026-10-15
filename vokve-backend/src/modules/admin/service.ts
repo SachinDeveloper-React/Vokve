@@ -1,10 +1,11 @@
+import { getConfig } from '../../config/remote.js';
 import { toCoins } from '../../lib/coins.js';
 import { Errors } from '../../lib/errors.js';
 import { OrderModel } from '../commerce/models.js';
 import { DeviceModel } from '../devices/models.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { RefreshTokenModel, UserModel } from '../identity/models.js';
-import { DevicePermissionsModel, EventModel } from '../telemetry/models.js';
+import { AppErrorModel, DeviceHealthModel, DevicePermissionsModel, EventModel } from '../telemetry/models.js';
 import { toPermissionStatus, type StoredPermission } from '../telemetry/service.js';
 
 /**
@@ -488,5 +489,91 @@ export async function devicePermissions(userId: string) {
       };
     }),
     nextCursor: null,
+  };
+}
+
+/**
+ * Why this member is unhappy, as far as the phones have said (RULES P17).
+ *
+ * Two feeds, read together because the answer is usually in both: what each
+ * install says about itself — the tracker's service, Health Connect's
+ * grants, the sync — and what has gone wrong in the app. Beside each
+ * install it also puts the one thing the server knows and the phone does
+ * not: when that install last actually reported steps (`stepSync`, A28).
+ *
+ * A health report is marked `stale` past ⚙ `telemetry.health.staleHours`,
+ * because a week-old verdict shown as current is worse than none: an
+ * install that has stopped reporting at all is itself the finding.
+ */
+export async function deviceHealth(userId: string, errorLimit = 25) {
+  const config = await getConfig();
+  const [devices, health, errors, errorTotal] = await Promise.all([
+    DeviceModel.find({ userId })
+      .select({ platform: 1, info: 1, app: 1, lastSeenAt: 1, revokedAt: 1, stepSync: 1, counting: 1 })
+      .sort({ lastSeenAt: -1 })
+      .lean(),
+    DeviceHealthModel.find({ userId }).lean(),
+    AppErrorModel.find({ userId }).sort({ lastAt: -1 }).limit(errorLimit).lean(),
+    AppErrorModel.countDocuments({ userId }),
+  ]);
+  const byDevice = new Map(health.map(row => [row.deviceId, row]));
+  const staleBefore = Date.now() - config.telemetry.health.staleHours * 3_600_000;
+
+  return {
+    devices: devices.map(device => {
+      const report = byDevice.get(device._id);
+      const open = (device.counting ?? []).some(period => period.to === null);
+      return {
+        deviceId: device._id,
+        platform: device.platform,
+        model: device.info?.model ?? null,
+        brand: device.info?.brand ?? null,
+        // What the phone said at registration. The tracker's own answer is
+        // in `health.tracking.manufacturer`, and that is the one the OEM
+        // rules are about — they can differ on a rebadged device.
+        manufacturer: device.info?.manufacturer ?? null,
+        appVersion: device.app?.version ?? null,
+        lastSeenAt: iso(device.lastSeenAt),
+        revoked: Boolean(device.revokedAt),
+        /** Whether the account is signed in on this install right now (D-56). */
+        signedIn: open,
+        /** The server's own half of the picture (RULES A28). */
+        stepSync: {
+          uploadedAt: iso(device.stepSync?.uploadedAt),
+          nudgedAt: iso(device.stepSync?.nudgedAt),
+          remindedAt: iso(device.stepSync?.remindedAt),
+        },
+        health: report
+          ? {
+              at: iso(report.at),
+              stale: report.at.getTime() < staleBefore,
+              tracking: report.tracking ?? null,
+              healthConnect: report.healthConnect ?? null,
+              sync: report.sync ?? null,
+            }
+          : null,
+      };
+    }),
+    errors: {
+      total: errorTotal,
+      data: errors.map(error => ({
+        fingerprint: error.fingerprint,
+        kind: error.kind,
+        name: error.name ?? null,
+        message: error.message,
+        scope: error.scope ?? null,
+        screen: error.screen ?? null,
+        fatal: error.fatal,
+        count: error.count,
+        firstAt: iso(error.firstAt),
+        lastAt: iso(error.lastAt),
+        appVersion: error.appVersion ?? null,
+        build: error.build ?? null,
+        osVersion: error.osVersion ?? null,
+        deviceId: error.deviceId,
+        context: error.context ?? null,
+        stack: error.stack ?? null,
+      })),
+    },
   };
 }

@@ -38,6 +38,13 @@ interface CoinsState {
   balance: number;
   /** Step coins the server is holding pending verification. Not spendable. */
   pending: number;
+  /**
+   * When the earliest of those holds is due out, as the server said (RULES
+   * E15). Null when nothing is held, before the first sync, or when the
+   * release is an operator's to make. Never derived here: the escrow window
+   * is the account's trust tier's, which the app is not told.
+   */
+  pendingReleaseAt: string | null;
   /** Every coin ever earned. Unaffected by spending. */
   lifetimeEarned: number;
   /** Newest first. Capped at `MAX_LEDGER_ENTRIES`. */
@@ -103,6 +110,7 @@ interface CoinsState {
 const EMPTY_WALLET = {
   balance: 0,
   pending: 0,
+  pendingReleaseAt: null,
   lifetimeEarned: 0,
   transactions: [] as CoinTransaction[],
   dailyCap: 0,
@@ -149,6 +157,7 @@ export const useCoinsStore = create<CoinsState>()(
           set({
             balance: wallet.balance,
             pending: wallet.pending,
+            pendingReleaseAt: wallet.pendingReleaseAt,
             lifetimeEarned: wallet.lifetimeEarned,
             transactions: page.data.slice(0, MAX_LEDGER_ENTRIES),
             dailyCap: wallet.dailyCap,
@@ -202,6 +211,7 @@ export const useCoinsStore = create<CoinsState>()(
       partialize: state => ({
         balance: state.balance,
         pending: state.pending,
+        pendingReleaseAt: state.pendingReleaseAt,
         lifetimeEarned: state.lifetimeEarned,
         transactions: state.transactions,
         dailyCap: state.dailyCap,
@@ -222,6 +232,8 @@ export const useCoinsStore = create<CoinsState>()(
 
 export const useCoinBalance = () => useCoinsStore(s => s.balance);
 export const usePendingCoins = () => useCoinsStore(s => s.pending);
+export const usePendingReleaseAt = () =>
+  useCoinsStore(s => s.pendingReleaseAt);
 export const useDailyCoinCap = () => useCoinsStore(s => s.dailyCap);
 export const useCoinsEarnedToday = () => useCoinsStore(s => s.earnedToday);
 export const useCoinsRemainingToday = () =>

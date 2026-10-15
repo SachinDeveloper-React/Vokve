@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../../theme';
+import { reportError } from '../../services/errorReporting';
 import { logger } from '../../utils/logger';
 
 interface Props {
@@ -79,11 +80,17 @@ class ErrorBoundary extends React.Component<Props, State> {
       componentStack,
     });
 
-    // Wire a crash reporter in here when one is added:
-    // recordError(error, this.props.context ?? 'errorBoundary', {
-    //   message: error?.message ?? String(error),
-    //   componentStack,
-    // });
+    // Reported with the thrown error itself rather than left to the logger's
+    // sink: this is the one place that has the component stack, which is
+    // what says *which* screen went down (RULES P17). `fatal` because the
+    // member is looking at the fallback, not at the app.
+    reportError({
+      kind: 'boundary',
+      error,
+      scope: this.props.context ?? 'ErrorBoundary',
+      fatal: true,
+      context: { componentStack: componentStack.slice(0, 300) },
+    });
   }
 
   handleReset = () => {

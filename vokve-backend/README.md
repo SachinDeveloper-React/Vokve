@@ -258,7 +258,32 @@ curl -s "$A/admin/users/<userId>/activity/summary?days=30" -H "$K" | jq '{events
 
 # every phone on the account: what it allows, when that changed, and whether it can be pushed to
 curl -s "$A/admin/users/<userId>/permissions" -H "$K" | jq '.data[] | {model, appVersion, hasPushToken, permissions, history}'
+
+# why the app is not working for them (RULES P17): each phone's own verdict,
+# when it last actually reported steps, and the faults it has hit
+curl -s "$A/admin/users/<userId>/health" -H "$K" | jq '.devices[] | {
+  model, appVersion, signedIn,
+  lastUpload: .stepSync.uploadedAt,
+  service: .health.tracking,         # looksDead, recoveryCount, battery, OEM
+  healthConnect: .health.healthConnect,
+  sync: .health.sync,                # status, queued, error, todaySteps
+  stale: .health.stale }'
+curl -s "$A/admin/users/<userId>/health?errors=50" -H "$K" | jq '.errors.data[] | {lastAt, count, kind, name, message, screen, appVersion}'
 ```
+
+```sh
+# the same thing as a verdict: what is wrong, worst first, with the fix (RULES P18)
+curl -s "$A/admin/users/<userId>/problems" -H "$K" | jq '.summary.headline, (.findings[] | {severity, code, title, detail, fix})'
+
+# and the same questions asked of every install — the list of what to fix next
+curl -s "$A/admin/health/fleet?days=7" -H "$K" | jq '{installs, problems}'
+curl -s "$A/admin/health/fleet?days=7" -H "$K" | jq '.byManufacturer, .byAppVersion[0:5]'
+curl -s "$A/admin/health/fleet?days=7" -H "$K" | jq '.topErrors[] | {users, occurrences, fatal, name, message, appVersions}'
+```
+
+`/problems` is the one to open first: it reads the five endpoints above for you and says, for example, *"Redmi Note 12 has stopped counting — the OS killed the service"* with the recovery count, the battery setting and the OEM in the sentence, and the battery screen as the fix. An empty `findings` is a real answer — nothing is guessed to fill it. `/health/fleet` is the same logic as counts: `problems` is how many installs each thing is true of, `byManufacturer` is where the dead counters live (usually one or two names), `byAppVersion` puts a crash count beside an install count, and `topErrors` ranks the faults **fatal first, by the accounts they hit** rather than by how often one unlucky phone hit one.
+
+**Reading the raw fields.** `service.looksDead` with a `recoveryCount` climbing and `batteryOptimizationEnabled: true` on an `aggressiveOem` is the commonest cause of "my steps stopped" — the fix is on the phone, in the OEM's battery settings, and the app has a screen for it. `healthConnect.canRead: false` after it was granted means the member revoked it in Settings. `sync.status: 'failed'` with a `queued` that never falls means the days are on the phone and not here — check `stepSync.uploadedAt` and RULES A28. And `health.stale: true` means this install has not said anything for a day and a half, which is itself the finding.
 
 ## Fake steps, and who looks at them
 
@@ -345,7 +370,7 @@ should knock rather than every release.
 
 ## Notifications and push
 
-`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once `FIREBASE_SERVICE_ACCOUNT` is set (the service-account JSON, or a path to it — see `.env.example`); without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.
+`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once `FIREBASE_SERVICE_ACCOUNT` is set (the service-account JSON, or a path to it — see `.env.example`; locally it lives in the gitignored `secrets/`); without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. Two kinds go out: an ordinary message, which carries `android.notification.channelId: 'vokve.default'` — the id the app creates at launch and names in `firebase.json`, so do not change it on one side alone — and a **silent** data-only message (`{ silent: true }`), which carries no notification block at all so the OS shows nothing and hands it to the app's background handler instead (RULES A28). The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.
 
 ## Tests
 
@@ -367,3 +392,4 @@ src/jobs        the in-process scheduler (daily: expiry warn + sweep, account pu
 src/seed        catalogue (shop, food, diet plans, challenges, achievements, tips) + config fixtures
 test            integration tests against a real replica set
 ```
+# Vokve-Backend

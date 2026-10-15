@@ -84,6 +84,23 @@ export const VIBRATION_PATTERN = [1, 250, 200, 250];
 const FALLBACK_CHANNEL_ID = `${CHANNEL_PREFIX}fallback`;
 
 /**
+ * The channel every push from the server arrives on.
+ *
+ * **This id is a contract with two other places**: the server names it on
+ * each message (`lib/fcm.ts` → `android.notification.channelId`) and
+ * `firebase.json` names it as the manifest default, which is what Android
+ * uses for a message that arrives before anything has created a channel.
+ * Android 8+ will not show a notification on a channel that does not exist
+ * — FCM substitutes its own "Miscellaneous" one — so this is created at
+ * launch rather than at the first push.
+ *
+ * Separate from the reminder channels because it is a different kind of
+ * message with a different switch in Android's own settings: somebody who
+ * silences coin news should keep their water reminders.
+ */
+export const DEFAULT_CHANNEL_ID = 'vokve.default';
+
+/**
  * The preview in the sound picker, cleared again a moment later.
  *
  * Deliberately outside `ALARM_ID_PREFIX`: a sample is not a reminder, and an
@@ -137,6 +154,65 @@ function iosSound(asset: SoundAsset): string | undefined {
  * A no-op off Android, where there are no channels; the caller does not
  * branch on the platform for it.
  */
+/**
+ * Creates the push channel, once a launch. Never throws: a phone that
+ * refuses it still gets the OS's fallback channel, which is worse-looking
+ * than ours and better than nothing.
+ */
+export async function ensureDefaultChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await notifee.createChannel({
+      id: DEFAULT_CHANNEL_ID,
+      name: 'Vokve',
+      description: 'Coins, challenges, orders and your streak.',
+      // HIGH: these arrive at a moment the server chose, and a heads-up is
+      // what makes a coin credit or an order update worth sending at all.
+      importance: AndroidImportance.HIGH,
+    });
+  } catch (error) {
+    logger.warn('notifications', 'The default channel was refused', error);
+  }
+}
+
+/**
+ * Shows a notification the OS decided not to show.
+ *
+ * Android draws an FCM notification message itself **only while the app is
+ * in the background**; in the foreground the message is handed to the app
+ * instead and nothing appears. Without this, a push that lands while
+ * somebody is looking at the app is silently lost — the feed row is
+ * written, but they have no idea anything happened.
+ *
+ * The data is carried onto the notification so a tap routes the same way a
+ * background tap does.
+ */
+export async function displayPushNotification(message: {
+  notification?: { title?: string; body?: string };
+  data?: Record<string, unknown>;
+}): Promise<void> {
+  const title = message.notification?.title;
+  const body = message.notification?.body;
+  if (!title && !body) return;
+  const data = Object.fromEntries(
+    Object.entries(message.data ?? {}).map(([key, value]) => [
+      key,
+      typeof value === 'string' ? value : String(value),
+    ]),
+  );
+  try {
+    await ensureDefaultChannel();
+    await notifee.displayNotification({
+      title,
+      body,
+      data,
+      android: { channelId: DEFAULT_CHANNEL_ID, pressAction: { id: 'default' } },
+    });
+  } catch (error) {
+    logger.warn('notifications', 'A push could not be shown', error);
+  }
+}
+
 async function ensureReminderChannel(
   soundId: string,
   vibration: boolean,
@@ -477,19 +553,75 @@ function isHydrationReminder(notification: Notification | undefined): boolean {
 }
 
 /**
- * Where a tapped reminder goes, held until the navigator is ready to take
- * it.
+ * Where a tapped notification goes, by the screen the root navigator names
+ * it. A closed set rather than a free string: a route the navigator has no
+ * screen for would throw at the moment somebody tapped a notification,
+ * which is the worst possible moment to find out.
+ */
+export type NotificationRoute =
+  /** A screen pushed onto the root stack. */
+  | {
+      kind: 'screen';
+      name:
+        | 'Hydration'
+        | 'StepTracking'
+        | 'Streak'
+        | 'Challenges'
+        | 'HealthCheckup'
+        | 'Notifications';
+    }
+  /** A tab, which is reached through `Main` rather than pushed. */
+  | { kind: 'tab'; name: 'Wallet' };
+
+const screen = (
+  name: Extract<NotificationRoute, { kind: 'screen' }>['name'],
+): NotificationRoute => ({ kind: 'screen', name });
+
+/**
+ * Which screen a topic's push belongs on (the server sends `topic` in every
+ * message's data).
+ *
+ * The feed is the honest answer wherever a topic does not name one place:
+ * `reward` covers an order as well as a prize, and taking somebody to the
+ * wallet for a parcel update would be a guess. Anything unknown — a topic
+ * added to the server after this build shipped — lands there too, which is
+ * why a new kind of message never needs an app release.
+ */
+export function routeForTopic(topic: string | undefined): NotificationRoute {
+  switch (topic) {
+    case 'hydration':
+      return screen('Hydration');
+    case 'steps':
+      return screen('StepTracking');
+    case 'streak':
+      return screen('Streak');
+    case 'coins':
+      return { kind: 'tab', name: 'Wallet' };
+    case 'challenge':
+      return screen('Challenges');
+    case 'health':
+      return screen('HealthCheckup');
+    default:
+      return screen('Notifications');
+  }
+}
+
+/**
+ * Where a tapped notification goes, held until the navigator is ready to
+ * take it.
  *
  * A notification tapped from a cold start arrives before any screen exists,
  * so it cannot be navigated to when it is read. One slot rather than a
  * queue: the user tapped one notification, and the second of two taps is
- * the one they meant.
+ * the one they meant. One slot for reminders *and* pushes, for the same
+ * reason — and so there is exactly one consumer navigating.
  */
-let pendingTap: 'hydration' | null = null;
+let pendingTap: NotificationRoute | null = null;
 const tapListeners = new Set<() => void>();
 
-function recordTap(): void {
-  pendingTap = 'hydration';
+/** A tap that has to wait for navigation. Called from the tap handlers. */
+export function recordNotificationTap(route: NotificationRoute): void {
+  pendingTap = route;
   tapListeners.forEach(listener => listener());
 }
 
@@ -497,7 +629,7 @@ function recordTap(): void {
  * The route a tapped notification asked for, if any — and taking it clears
  * it, so a remount does not navigate again.
  */
-export function takePendingNotificationRoute(): 'hydration' | null {
+export function takePendingNotificationRoute(): NotificationRoute | null {
   const route = pendingTap;
   pendingTap = null;
   return route;
@@ -535,7 +667,25 @@ export async function handleReminderBackgroundEvent({
   detail: { notification?: Notification };
 }): Promise<void> {
   if (type !== EventType.PRESS) return;
-  if (isHydrationReminder(detail.notification)) recordTap();
+  const route = routeForNotification(detail.notification);
+  if (route) recordNotificationTap(route);
+}
+
+/**
+ * The screen a notifee notification wants, or null for one that is not
+ * ours to route — a sound preview, say.
+ *
+ * Two kinds reach notifee: the reminders this app schedules, and the pushes
+ * `displayPushNotification` draws because the OS would not. Both carry
+ * `data.topic`, so both route from one place.
+ */
+function routeForNotification(
+  notification: Notification | undefined,
+): NotificationRoute | null {
+  if (!notification) return null;
+  if (isHydrationReminder(notification)) return screen('Hydration');
+  const topic = notification.data?.topic;
+  return typeof topic === 'string' ? routeForTopic(topic) : null;
 }
 
 /**
@@ -547,12 +697,14 @@ export function startReminderTapHandling(): () => void {
   notifee
     .getInitialNotification()
     .then(initial => {
-      if (initial && isHydrationReminder(initial.notification)) recordTap();
+      const route = routeForNotification(initial?.notification);
+      if (route) recordNotificationTap(route);
     })
     .catch(error => logger.warn('notifications', 'Could not read the opening notification', error));
 
   return notifee.onForegroundEvent(({ type, detail }) => {
     if (type !== EventType.PRESS) return;
-    if (isHydrationReminder(detail.notification)) recordTap();
+    const route = routeForNotification(detail.notification);
+    if (route) recordNotificationTap(route);
   });
 }

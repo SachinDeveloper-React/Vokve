@@ -195,6 +195,15 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
     now,
   });
 
+  // This install has reported: the nudge job's clock starts again, and the
+  // restraint it was keeping is cleared with it (RULES A28). Stamped after
+  // the snapshot is stored and before the day is scored — a rollup that
+  // throws must not leave the install looking silent.
+  await DeviceModel.updateOne(
+    { _id: ctx.deviceId },
+    { $set: { 'stepSync.uploadedAt': now, 'stepSync.nudgedAt': null, 'stepSync.remindedAt': null } },
+  );
+
   const result = await rollupDay(ctx.userId, localDay, now);
   const response: IngestResponse = { ...result, duplicate: false };
   await StepUploadModel.updateOne({ _id: uploadId }, { $set: { response } });

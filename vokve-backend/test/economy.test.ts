@@ -18,6 +18,11 @@ async function setCoinConfig(patch: Record<string, unknown>) {
 describe('economy: ledger, daily cap, escrow', () => {
   it('pays an event once, refuses the second workout by source cap, and never exceeds the daily ceiling', async () => {
     const { userId } = await signUpAndRegister();
+    // The ceilings this test is about are set here rather than taken from
+    // the defaults: it is about the cap mechanism — one grant, a partial
+    // grant, then nothing — and a product tuning of `sourceCaps.steps`
+    // should not read as a broken ledger.
+    await setCoinConfig({ dailyCap: 300, sourceCaps: { steps: 200, workout: 100 } });
 
     const a = await credit({ userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day completed', localDay: DAY });
     expect(a).toMatchObject({ status: 'credited', granted: 100 });
@@ -29,7 +34,7 @@ describe('economy: ledger, daily cap, escrow', () => {
     const b = await credit({ userId, source: 'workout', referenceType: 'workout', referenceId: 'w2', amount: 100, title: 'Leg Day completed', localDay: DAY });
     expect(b).toMatchObject({ status: 'cap_reached', granted: 0, capped: 100 });
 
-    // sourceCaps.steps = 200 → a 250-coin step hold is partially granted (RULES E8b) and counts toward the day (E8a).
+    // The 200 set above → a 250-coin step hold is partially granted (RULES E8b) and counts toward the day (E8a).
     const s = await hold({ userId, source: 'steps', referenceType: 'activity_day', referenceId: DAY, amount: 250, title: 'steps', localDay: DAY }, null);
     expect(s).toMatchObject({ status: 'held', granted: 200, capped: 50 });
 
@@ -110,6 +115,11 @@ describe('economy: ledger, daily cap, escrow', () => {
     const wallet = await request(app).get('/v1/wallet').set(authed(session));
     expect(wallet.status).toBe(200);
     expect(wallet.body).toMatchObject({ balance: 0, pending: 23.75, dailyCap: 300, earnedToday: 23.75, remainingToday: 276.25 });
+    // And when the first of those holds clears — the normal tier's 72 hours
+    // (⚙ `trust.holdHours`), which the app cannot work out for itself.
+    const clears = new Date(wallet.body.pendingReleaseAt).getTime() - Date.now();
+    expect(clears).toBeGreaterThan(71 * 3_600_000);
+    expect(clears).toBeLessThanOrEqual(72 * 3_600_000);
 
     const rules = await request(app).get('/v1/wallet/earn-rules').set(authed(session));
     expect(rules.body.data[0]).toMatchObject({ source: 'steps', reward: 0.095 });

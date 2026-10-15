@@ -15,7 +15,7 @@ const LOCAL_API_HOST = Platform.OS === 'android' ? '192.168.0.112' : 'localhost'
 export const config = {
   apiBaseUrl: __DEV__
     ? `http://${LOCAL_API_HOST}:3000/v1`
-    : 'https://api.vokve.app/v1',
+    : 'https://vokve-backend-src.vercel.app/v1',
   /** Network calls that outlive this are almost always a dead connection. */
   requestTimeoutMs: 15000,
   /** Retries apply to transport failures only, never to 4xx responses. */

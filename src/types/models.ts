@@ -2049,6 +2049,13 @@ export const walletSchema = z.object({
   balance: z.number().nonnegative(),
   /** Step coins held pending verification (escrow). Not spendable. */
   pending: z.number().nonnegative().default(0),
+  /**
+   * When the earliest of those holds is due out (RULES E15), or null when
+   * nothing is held — and on a server from before this was sent, which is
+   * why it is defaulted rather than required. The window is the member's
+   * own trust tier's, so it cannot be worked out here.
+   */
+  pendingReleaseAt: z.string().nullable().default(null),
   lifetimeEarned: z.number().nonnegative(),
   /** ISO-8601, or null when there is nothing to expire (RULES E11). */
   expiresAt: z.string().nullable(),
@@ -3325,3 +3332,79 @@ export const eventIntakeSchema = z.object({
   dropped: z.number().int().nonnegative().optional(),
 });
 export type EventIntake = z.infer<typeof eventIntakeSchema>;
+
+/** Where a fault came from (RULES P17). */
+export type AppErrorKind = 'boundary' | 'js' | 'api' | 'native';
+
+/**
+ * One thing that went wrong, on its way to `POST /me/errors`.
+ *
+ * Like an event, the device and the build are not here — the headers carry
+ * them. Unlike an event, this is kept for a member who turned usage
+ * analytics off: it is the record of the app failing them.
+ */
+export interface AppError {
+  kind: AppErrorKind;
+  /** The error's own class, where there is one: `TypeError`, `ApiError`. */
+  name?: string;
+  message: string;
+  /** Who was running: a screen name, or a service's own scope. */
+  scope?: string;
+  screen?: string;
+  stack?: string;
+  /** It ended something — a screen replaced by the fallback, or the app. */
+  fatal: boolean;
+  at: string;
+  sessionId?: string;
+  context?: Record<string, string | number | boolean | null>;
+}
+
+export const appErrorIntakeSchema = z.object({
+  accepted: z.number().int().nonnegative(),
+  dropped: z.number().int().nonnegative().optional(),
+});
+export type AppErrorIntake = z.infer<typeof appErrorIntakeSchema>;
+
+/**
+ * Whether this install is working (`PUT /me/device-health`, RULES P17): the
+ * tracker's own health, Health Connect's grants, the state of the sync.
+ *
+ * Every part optional, so a phone that cannot read one still reports the
+ * rest — and so a build from before a field existed is not a refusal.
+ */
+export interface DeviceHealthReport {
+  tracking?: {
+    state?: string;
+    wanted?: boolean;
+    serviceAlive?: boolean;
+    /** Should be running and is not: an OEM killed the service. */
+    looksDead?: boolean;
+    heartbeatAgeMs?: number;
+    recoveryCount?: number;
+    lastRecoveryReason?: string | null;
+    batteryOptimizationEnabled?: boolean;
+    aggressiveOem?: boolean;
+    manufacturer?: string | null;
+  };
+  healthConnect?: {
+    availability?: string | null;
+    canRead?: boolean;
+    canWrite?: boolean;
+    grantedReadTypes?: string[];
+  };
+  sync?: {
+    status?: 'idle' | 'syncing' | 'failed';
+    lastSyncedAt?: string | null;
+    queued?: number;
+    error?: string | null;
+    todaySteps?: number;
+  };
+}
+
+/** The same report back, with when the server took it. */
+export const deviceHealthSnapshotSchema = z.object({
+  deviceId: z.string(),
+  at: z.string(),
+});
+export type DeviceHealthSnapshot = z.infer<typeof deviceHealthSnapshotSchema> &
+  DeviceHealthReport;

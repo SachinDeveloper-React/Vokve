@@ -33,6 +33,24 @@ const deviceSchema = new Schema(
      * cannot be relied on to ring.
      */
     remindersScheduledAt: { type: Date, default: null },
+    /**
+     * This install's step syncing, as the server has seen it (RULES A28).
+     *
+     * `uploadedAt` is the receipt of its newest accepted snapshot — the one
+     * thing that says whether a phone that is counting is also reporting.
+     * Stamped here rather than read from `step_uploads` because the nudge
+     * job asks the question "which installs have gone quiet?" of every
+     * install at once, and that is a field to index, not a per-device
+     * aggregate to run hourly.
+     *
+     * The other two are the job's own restraint: when this install was last
+     * pinged, and when the member was last told in as many words.
+     */
+    stepSync: {
+      uploadedAt: { type: Date, default: null },
+      nudgedAt: { type: Date, default: null },
+      remindedAt: { type: Date, default: null },
+    },
     integrity: { provider: String, keyId: String, verdict: String, checkedAt: Date, raw: Schema.Types.Mixed },
     /**
      * The Keystore key this install signs step snapshots with, as accepted
@@ -105,6 +123,10 @@ deviceSchema.index({ 'integrity.keyId': 1 }, { sparse: true });
 deviceSchema.index({ 'attestation.keyId': 1 }, { sparse: true });
 deviceSchema.index({ 'push.token': 1 }, { sparse: true });
 deviceSchema.index({ lastSeenAt: -1 });
+// The nudge job's own read: installs with a live push token, oldest upload
+// first (RULES A28). Sparse on the token, so the installs that could never
+// be pushed are not in it.
+deviceSchema.index({ 'stepSync.uploadedAt': 1 }, { sparse: true });
 deviceSchema.index({ 'app.version': 1, platform: 1 });
 export const DeviceModel = model('Device', deviceSchema);
 

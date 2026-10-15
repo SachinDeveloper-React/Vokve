@@ -3,7 +3,7 @@ import { ShieldCheck, Sunrise } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import type { EarnRule } from '../../types/models';
 import { withAlpha } from '../../utils/color';
-import { formatCoins } from '../../utils/format';
+import { formatCoins, formatDaysUntil } from '../../utils/format';
 import { BottomSheet } from '../disclosure/BottomSheet';
 import { Box } from '../layout/Box';
 import { HStack, VStack } from '../layout/Stack';
@@ -23,6 +23,8 @@ interface Props {
   remainingToday: number;
   /** Step coins the server is still verifying (RULES E15). */
   pending: number;
+  /** When the earliest of them clears, as the server said; null if none do. */
+  pendingReleaseAt?: string | null;
   onPressShop: () => void;
 }
 
@@ -44,6 +46,7 @@ export const CoinsInfoSheet = memo(
     earnedToday,
     remainingToday,
     pending,
+    pendingReleaseAt = null,
     onPressShop,
   }: Props) => {
     const { colors, isDark } = useTheme();
@@ -105,9 +108,11 @@ export const CoinsInfoSheet = memo(
               </AppText>
               <AppText variant="caption" color="textSecondary">
                 {pending > 0
-                  ? `${formatCoins(
-                      pending,
-                    )} coins from your steps are being verified and will be added once they clear — usually within a day or two.`
+                  ? `${formatCoins(pending)} coins from your steps are being verified${
+                      pendingReleaseAt
+                        ? ` and clear ${formatDaysUntil(pendingReleaseAt)}`
+                        : ' and will be added once they clear'
+                    }. Checking first is what keeps the shop's prices honest.`
                   : 'Coins from steps show as pending until they are verified, usually within a day or two, then join your balance.'}
               </AppText>
             </VStack>

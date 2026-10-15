@@ -217,6 +217,41 @@ describe('push plumbing', () => {
     expect(after.push).toBe('no_device');
   });
 
+  it('an install whose notifications were refused keeps its token but is not pushed to', async () => {
+    const session = await signUpAndRegister();
+    const sent = capturingTransport();
+    await UserModel.updateOne({ _id: session.userId }, { $set: { timezone: 'UTC' } });
+    // Every install registers a token now — the silent sync ping needs one
+    // and shows nothing (RULES A28) — so a token no longer means a message
+    // may be shown there.
+    await DeviceModel.updateOne({ _id: session.deviceId }, { $set: { 'push.token': 'tok-denied' } });
+    await request(app).put('/v1/me/permissions').set(authed(session))
+      .send({ permissions: [{ key: 'notifications', state: 'denied' }] });
+
+    const noon = new Date('2026-09-14T12:00:00Z');
+    const result = await notify({ userId: session.userId, topic: 'coins', title: 'T', message: 'M', now: noon });
+
+    // The feed row is still written: that is the channel that always works.
+    expect(result).toMatchObject({ status: 'created', push: 'not_permitted' });
+    expect(sent).toHaveLength(0);
+    // And the token is left alone, so the silent sync can still use it.
+    const device = await DeviceModel.findById(session.deviceId, { push: 1 }).lean();
+    expect(device?.push?.token).toBe('tok-denied');
+  });
+
+  it('an unreported or unknown permission is not a refusal', async () => {
+    const session = await signUpAndRegister();
+    const sent = capturingTransport();
+    await UserModel.updateOne({ _id: session.userId }, { $set: { timezone: 'UTC' } });
+    await DeviceModel.updateOne({ _id: session.deviceId }, { $set: { 'push.token': 'tok-quiet' } });
+    // No snapshot at all: an install that has not reported yet, which is
+    // not somebody saying no.
+    const result = await notify({ userId: session.userId, topic: 'coins', title: 'T', message: 'M', now: new Date('2026-09-14T12:00:00Z') });
+
+    expect(result.push).toBe('sent');
+    expect(sent).toHaveLength(1);
+  });
+
   it('without a service account there is no provider, and a provider that throws never fails the caller', async () => {
     expect(await configurePushFromEnv()).toBe(false);
 

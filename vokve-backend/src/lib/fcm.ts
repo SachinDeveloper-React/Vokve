@@ -34,13 +34,31 @@ export async function createFcmTransport(): Promise<PushTransport | null> {
 
   return {
     async send(tokens: string[], message: PushMessage): Promise<PushResult> {
-      const response = await messaging.sendEachForMulticast({
-        tokens,
-        notification: { title: message.title, body: message.body },
-        data: message.data,
-        android: { priority: 'high', notification: { channelId: 'vokve.default' } },
-        apns: { payload: { aps: { sound: 'default' } } },
-      });
+      // A silent message carries no notification block at all: with one,
+      // Android shows the tray entry itself and never hands the payload to
+      // the background handler, which is the whole point of sending it.
+      // `high` priority is what gets it past Doze; on iOS the background
+      // push type and `content-available` are the equivalent, and APNs
+      // caps those at priority 5.
+      const response = await messaging.sendEachForMulticast(
+        message.silent
+          ? {
+              tokens,
+              data: message.data,
+              android: { priority: 'high' },
+              apns: {
+                headers: { 'apns-push-type': 'background', 'apns-priority': '5' },
+                payload: { aps: { 'content-available': 1 } },
+              },
+            }
+          : {
+              tokens,
+              notification: { title: message.title ?? '', body: message.body ?? '' },
+              data: message.data,
+              android: { priority: 'high', notification: { channelId: 'vokve.default' } },
+              apns: { payload: { aps: { sound: 'default' } } },
+            },
+      );
       const invalid: string[] = [];
       response.responses.forEach((r, i) => {
         if (r.success) return;

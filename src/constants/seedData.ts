@@ -1224,11 +1224,21 @@ export const shopItems: ShopItem[] = shopItemRows.map(row => {
  * has to pin both, or the same seed would read as a different morning on every
  * launch.
  */
+/**
+ * A fixture moment: `days` ago at this clock time, and **never in the
+ * future**.
+ *
+ * The clamp is the point. A seeded reading at 09:30 today is in the future
+ * for anybody running before 09:30, and a screen whose job is to show the
+ * newest reading then cannot be moved by one logged now — which is how two
+ * vitals tests came to fail every morning and pass every afternoon. A
+ * fixture that has not happened yet is not a fixture of anything.
+ */
 function at(days: number, hours: number, minutes: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
   date.setHours(hours, minutes, 0, 0);
-  return date.toISOString();
+  return new Date(Math.min(date.getTime(), Date.now() - 60_000)).toISOString();
 }
 
 /**

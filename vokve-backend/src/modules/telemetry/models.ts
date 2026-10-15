@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { appPermissionSchema, permissionStateSchema } from '../../contracts/index.js';
+import { appErrorKindSchema, appPermissionSchema, permissionStateSchema } from '../../contracts/index.js';
 
 /** 400 days, as the retention table says (BACKEND §14.7) — thirteen months, so a year-on-year read still has both ends. */
 const EVENT_TTL_SECONDS = 400 * 24 * 60 * 60;
@@ -105,3 +105,95 @@ export const DevicePermissionsModel = model('DevicePermissions', devicePermissio
 
 /** How many changes one install's history keeps. */
 export const PERMISSION_HISTORY_LIMIT = 20;
+
+/**
+ * Thirty days, not the trail's four hundred (BACKEND §14.7): an error is
+ * read while it is happening or not at all, and a stack from a build three
+ * releases ago answers nothing.
+ */
+const ERROR_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * What went wrong on a phone, **grouped** (RULES P17).
+ *
+ * One row per (account, install, fingerprint) rather than per occurrence,
+ * for the reason every crash reporter does the same: the interesting number
+ * is "this has happened 240 times since Tuesday", and a loop that throws on
+ * every render must not be able to write 240 rows a minute. `count` carries
+ * the occurrences, `firstAt`/`lastAt` the span, and the stack and context
+ * are the **latest** ones — an older copy of the same fault says nothing
+ * new.
+ *
+ * Kept whatever the usage-analytics switch says, like the permission
+ * snapshot (RULES P7, P14): it is the record of the app failing somebody,
+ * not of what they were interested in.
+ */
+const appErrorSchema = new Schema(
+  {
+    /** `userId:deviceId:fingerprint`. */
+    _id: { type: String, required: true },
+    userId: { type: String, required: true },
+    deviceId: { type: String, required: true },
+    /** sha256 of the kind, the name, the message and the first frame. */
+    fingerprint: { type: String, required: true },
+    kind: { type: String, enum: appErrorKindSchema.options, required: true },
+    name: { type: String, default: null },
+    message: { type: String, required: true },
+    scope: { type: String, default: null },
+    screen: { type: String, default: null },
+    stack: { type: String, default: null },
+    fatal: { type: Boolean, default: false },
+    context: { type: Schema.Types.Mixed, default: undefined },
+    sessionId: { type: String, default: null },
+    count: { type: Number, default: 1 },
+    firstAt: { type: Date, required: true },
+    lastAt: { type: Date, required: true },
+    /** The build it last happened on, which is what a fix ships against. */
+    platform: { type: String, enum: ['ios', 'android', null], default: null },
+    appVersion: { type: String, default: null },
+    build: { type: String, default: null },
+    osVersion: { type: String, default: null },
+    receivedAt: { type: Date, required: true, default: Date.now },
+  },
+  { collection: 'app_errors', timestamps: false },
+);
+// The operator's read: one member's faults, most recent first.
+appErrorSchema.index({ userId: 1, lastAt: -1 });
+// And across accounts: what is breaking, and on which build.
+appErrorSchema.index({ fingerprint: 1, lastAt: -1 });
+appErrorSchema.index({ appVersion: 1, lastAt: -1 });
+appErrorSchema.index({ receivedAt: 1 }, { expireAfterSeconds: ERROR_TTL_SECONDS });
+export const AppErrorModel = model('AppError', appErrorSchema);
+
+/**
+ * Whether an install is actually working (RULES P17): the tracker's own
+ * health, Health Connect's grants and the state of the step sync, as the
+ * phone last reported them.
+ *
+ * Current state, one document per (account, install) — not a stream. The
+ * history of it is already answered elsewhere: `device_permissions` keeps
+ * what the member allowed and when it changed, `devices.stepSync` when this
+ * install last reported, and `events` what they were doing at the time.
+ * What was missing was the phone's own verdict on itself.
+ */
+const deviceHealthSchema = new Schema(
+  {
+    /** `userId:deviceId`. */
+    _id: { type: String, required: true },
+    userId: { type: String, required: true },
+    deviceId: { type: String, required: true },
+    platform: { type: String, enum: ['ios', 'android', null], default: null },
+    appVersion: { type: String, default: null },
+    tracking: { type: Schema.Types.Mixed, default: undefined },
+    healthConnect: { type: Schema.Types.Mixed, default: undefined },
+    sync: { type: Schema.Types.Mixed, default: undefined },
+    /** The phone's clock, when it put the report together. */
+    at: { type: Date, required: true },
+    receivedAt: { type: Date, required: true, default: Date.now },
+  },
+  { collection: 'device_health', timestamps: true },
+);
+deviceHealthSchema.index({ userId: 1, at: -1 });
+// The fleet read: every install whose service is dead, worst first.
+deviceHealthSchema.index({ 'tracking.looksDead': 1, at: -1 });
+export const DeviceHealthModel = model('DeviceHealth', deviceHealthSchema);

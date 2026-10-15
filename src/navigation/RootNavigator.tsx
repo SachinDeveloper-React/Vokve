@@ -71,8 +71,11 @@ import { useUpgradeRequired } from '../stores/appStatusStore';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { usePermissionReporting } from '../hooks/usePermissionReporting';
+import { useDeviceHealthReporting } from '../hooks/useDeviceHealthReporting';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useReminderNotifications } from '../hooks/useReminderNotifications';
 import { trackScreen } from '../services/analytics';
+import { setErrorScreen } from '../services/errorReporting';
 import { WorkoutDetailScreen } from '../screens/main/WorkoutDetailScreen';
 import {
   useAuthStatus,
@@ -162,7 +165,11 @@ export const RootNavigator = () => {
   // existing — and none is ever forgotten.
   const trackCurrentScreen = useCallback(() => {
     const route = navigationRef.getCurrentRoute();
-    if (route) trackScreen(route.name, screenProps(route.params));
+    if (!route) return;
+    trackScreen(route.name, screenProps(route.params));
+    // The same move tells the crash reporter where the member is, so a
+    // fault arrives naming the screen it happened on (RULES P17).
+    setErrorScreen(route.name);
   }, [navigationRef]);
 
   const onNavReady = useCallback(() => {
@@ -181,13 +188,22 @@ export const RootNavigator = () => {
   // Nor does what the phone allows (RULES P14).
   usePermissionReporting();
 
+  // Nor whether it is actually working (RULES P17): a step service an OEM
+  // killed, a Health Connect grant withdrawn, a sync that keeps failing.
+  useDeviceHealthReporting();
+
   // What this build should do about its own version (RULES DV12): asked on
   // launch and on every foreground, before anything has been refused.
   const { update: softUpdate, dismiss: dismissUpdate } = useAppUpdate();
 
   // The same for hydration reminders: the plan stays scheduled with the OS
   // whatever is on screen, and a tapped reminder opens the water log.
-  useReminderNotifications(navigationRef, isNavReady);
+  useReminderNotifications();
+
+  // And for pushes: shown when the OS will not show them, the bell kept
+  // current, and a tapped notification taken wherever it asked to go —
+  // reminders included, since both share one slot (RULES A28, P13).
+  usePushNotifications(navigationRef, isNavReady);
 
   const isSignedIn = status === 'authenticated' || shouldBypassAuth();
 
