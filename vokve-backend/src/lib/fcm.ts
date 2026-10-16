@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import { env } from '../config/env.js';
+import { resolveServiceAccount } from '../config/serviceAccount.js';
 import { logger } from './logger.js';
 import type { PushMessage, PushResult, PushTransport } from './push.js';
 
@@ -11,20 +10,19 @@ const DEAD_TOKEN_CODES = new Set([
 ]);
 
 /**
- * Push over Firebase Cloud Messaging, built from the service account in
- * `FIREBASE_SERVICE_ACCOUNT` (the JSON, or a path to it). Loaded lazily and
- * only when configured, so the SDK is never initialised — or even imported —
- * on a laptop without credentials.
+ * Push over Firebase Cloud Messaging, built from the service account the
+ * environment carries (`FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,
+ * `FIREBASE_PRIVATE_KEY`). Loaded lazily and only when configured, so the
+ * SDK is never initialised — or even imported — on a laptop without
+ * credentials.
  *
  * Tokens FCM reports dead come back as `invalid`; the caller retires them.
  * Every other per-token failure is logged and counted as not sent.
  */
 export async function createFcmTransport(): Promise<PushTransport | null> {
-  const raw = env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw) return null;
+  const credential = resolveServiceAccount('FIREBASE');
+  if (!credential) return null;
 
-  const json = raw.trim().startsWith('{') ? raw : fs.readFileSync(raw, 'utf8');
-  const credential = JSON.parse(json) as { project_id?: string };
   const admin = await import('firebase-admin');
   const app = admin.default.apps.length
     ? admin.default.app()

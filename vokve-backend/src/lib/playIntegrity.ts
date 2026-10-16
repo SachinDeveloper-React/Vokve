@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import { env } from '../config/env.js';
+import { hasServiceAccount, resolveServiceAccount } from '../config/serviceAccount.js';
 import { logger } from './logger.js';
 
 /**
@@ -48,18 +47,18 @@ export function setPlayIntegrityDecoder(next: PlayIntegrityDecoder | null): void
 }
 
 /**
- * Builds the decoder from `PLAY_INTEGRITY_SERVICE_ACCOUNT` when it is set.
- * Called once at boot; a failure is logged and leaves tokens unverifiable,
- * never a crash on start.
+ * Builds the decoder from the `PLAY_INTEGRITY_*` service account when it is
+ * set. Called once at boot; a failure is logged and leaves tokens
+ * unverifiable, never a crash on start.
  */
 export async function configurePlayIntegrityFromEnv(): Promise<boolean> {
-  const raw = env.PLAY_INTEGRITY_SERVICE_ACCOUNT;
-  if (!raw) return false;
+  if (!hasServiceAccount('PLAY_INTEGRITY')) return false;
   try {
-    const json = raw.trim().startsWith('{') ? raw : fs.readFileSync(raw, 'utf8');
+    const credentials = resolveServiceAccount('PLAY_INTEGRITY');
+    if (!credentials) return false;
     const { GoogleAuth } = await import('google-auth-library');
     const auth = new GoogleAuth({
-      credentials: JSON.parse(json),
+      credentials,
       scopes: ['https://www.googleapis.com/auth/playintegrity'],
     });
     const client = await auth.getClient();

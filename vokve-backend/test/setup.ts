@@ -21,15 +21,22 @@ process.env.SMTP_HOST = '';
 process.env.SMTP_USER = '';
 process.env.SMTP_PASS = '';
 process.env.MAIL_FROM = '';
-// And no live push provider: a developer's `.env` now points at a real
-// Firebase service account, and a suite that initialised it would be one
-// `sendPush` away from putting a test notification on a real phone. The
-// tests that are about push stand up their own capturing transport
-// (`setPushTransport`).
+// And no live push provider: a developer's `.env` now carries a real Firebase
+// service account, and a suite that initialised it would be one `sendPush`
+// away from putting a test notification on a real phone. The tests that are
+// about push stand up their own capturing transport (`setPushTransport`).
+// Every form the resolver accepts has to be emptied, not just one — leaving
+// the three keys set would hand the suite working credentials by the back door.
+process.env.FIREBASE_PROJECT_ID = '';
+process.env.FIREBASE_CLIENT_EMAIL = '';
+process.env.FIREBASE_PRIVATE_KEY = '';
 process.env.FIREBASE_SERVICE_ACCOUNT = '';
 // No reaching out to Google from a test: the revocation list is stubbed where it matters.
 process.env.ATTESTATION_STATUS_URL = '';
-delete process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT;
+process.env.PLAY_INTEGRITY_PROJECT_ID = '';
+process.env.PLAY_INTEGRITY_CLIENT_EMAIL = '';
+process.env.PLAY_INTEGRITY_PRIVATE_KEY = '';
+process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT = '';
 delete process.env.PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER;
 
 let replSet: MongoMemoryReplSet;

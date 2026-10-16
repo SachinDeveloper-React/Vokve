@@ -20,16 +20,25 @@ const envSchema = z.object({
    */
   PUBLIC_BASE_URL: z.string().url().default('http://localhost:3000'),
   /**
-   * The Firebase service account for push (FCM), as the JSON itself or a path
-   * to the file. Absent means no push channel: feed rows only, and every
-   * send is logged as `push.no_provider`.
+   * The Firebase service account for push (FCM), as its three fields. Absent
+   * means no push channel: feed rows only, and every send is logged as
+   * `push.no_provider`. `config/serviceAccount.ts` resolves them, and still
+   * accepts the whole JSON — or a path to it — in `FIREBASE_SERVICE_ACCOUNT`.
    */
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
+  /** The older single-variable form: the JSON itself, or a path to the file. */
   FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
   /**
    * Play Integrity: a service account allowed to call `decodeIntegrityToken`
-   * for the app (the JSON itself, or a path to it). Absent means tokens the
-   * app sends are recorded as unverifiable — nothing is decoded.
+   * for the app. Absent means tokens the app sends are recorded as
+   * unverifiable — nothing is decoded.
    */
+  PLAY_INTEGRITY_PROJECT_ID: z.string().optional(),
+  PLAY_INTEGRITY_CLIENT_EMAIL: z.string().optional(),
+  PLAY_INTEGRITY_PRIVATE_KEY: z.string().optional(),
+  /** The older single-variable form: the JSON itself, or a path to the file. */
   PLAY_INTEGRITY_SERVICE_ACCOUNT: z.string().optional(),
   /** The Cloud project linked in Play Console. Wins over `integrity.playIntegrity.cloudProjectNumber`. */
   PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER: z.coerce.number().int().positive().optional(),

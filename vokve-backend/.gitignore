@@ -1,5 +1,19 @@
 node_modules
 dist
-.env
 *.log
-secrets
+
+# Secrets. Every key this server holds lives in the environment, so `.env` is
+# the one file that must never be committed — `.env.example` carries the
+# names and no values, and is the only one allowed through.
+.env
+.env.*
+!.env.example
+
+# The Firebase and Play Integrity service-account JSONs. The keys themselves
+# are read from the environment now (see config/serviceAccount.ts); these
+# files stay as the local copy a developer downloaded them as, and are
+# ignored wherever they end up — a private key named after the project is the
+# easiest thing in this repo to commit by accident.
+secrets/
+*service-account*.json
+*firebase-adminsdk*.json

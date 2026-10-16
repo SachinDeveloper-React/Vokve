@@ -1,4 +1,4 @@
-import { env } from '../config/env.js';
+import { hasServiceAccount } from '../config/serviceAccount.js';
 import { logger } from './logger.js';
 
 export interface PushMessage {
@@ -52,7 +52,7 @@ export function isPushConfigured(): boolean {
  */
 export async function configurePushFromEnv(): Promise<boolean> {
   // Nothing configured: do not even load the SDK.
-  if (!env.FIREBASE_SERVICE_ACCOUNT) return false;
+  if (!hasServiceAccount('FIREBASE')) return false;
   try {
     const { createFcmTransport } = await import('./fcm.js');
     const fcm = await createFcmTransport();

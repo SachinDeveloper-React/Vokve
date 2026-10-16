@@ -14,6 +14,16 @@ npm run dev                   # http://localhost:3000/v1
 
 Transactions need a replica set — the compose file initialises `rs0`. Atlas is already one; for Atlas set `MONGODB_URI` to the SRV string and drop the `replicaSet`/`directConnection` params.
 
+## Secrets
+
+**Every key this server holds comes from the environment.** There is no credential file the code reads at boot and no secret in the repo — `.env` locally, the hosting panel's environment in a deployment, and `.env.example` is the list of names with no values in it. `config/env.ts` validates them all once at startup, so a missing or malformed one fails the process there rather than surfacing as a confusing error an hour later.
+
+Google service accounts are the awkward case, because Google hands them over as a JSON file. Their three useful fields go in as three variables — for push, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` (and the `PLAY_INTEGRITY_*` trio for integrity verdicts). The private key is a PEM: keep it on one line in double quotes with its newlines written `\n`, exactly as the JSON has it, which is also the only form a dashboard can store. `config/serviceAccount.ts` puts the newlines back on the way out, and refuses a half-filled set by name instead of quietly leaving push switched off.
+
+The downloaded JSON stays in `secrets/`, which is gitignored (as is anything named `*service-account*.json`, wherever it lands) — it is the copy to re-read the values from, not something the server loads. The single-variable forms, `FIREBASE_SERVICE_ACCOUNT` / `PLAY_INTEGRITY_SERVICE_ACCOUNT` holding either the whole JSON or a path to it, still work for a deployment already set up that way; the three keys win when both are present.
+
+Nothing secret has ever been committed — `.env` and `secrets/` are ignored in both this repo and the app's. If a key does leak, rotating it is the fix, not deleting the commit: generate a new private key in Firebase (Project settings → Service accounts) and a new app password for SMTP, then update the environment.
+
 ## OTP: where the code goes
 
 - **Sign-up code → email** (`otp.signupChannel = 'email'` in `app_config`) while there is no SMS provider. The phone is asked for later, only once SMS can deliver.
@@ -90,7 +100,7 @@ The app counts with react-native-step-tracker-pro and sends one **signed snapsho
 3. The rollup scores the day (`src/modules/activity/layers.ts`, L0–L6) into `activity_daily` and `fraud_flags`, and updates the trust score. Nothing is minted while `app_config` `coins.steps.enabled` is off.
 4. The app reads everything back from here: `GET /activity/config` (how its tracker is set up and when it syncs — ⚙ `activity.tracker`, `activity.sync`), `/activity/today`, `/weekly`, `/day`, `/range`, and `GET /activity/sources?date=` — how the day was matched across phones and Health Connect apps (`report.service.ts`).
 
-Play Integrity needs `PLAY_INTEGRITY_SERVICE_ACCOUNT` and the Cloud project number (`PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER`, or `integrity.playIntegrity.cloudProjectNumber` in `app_config`); without them no verdict is asked for. Set `integrity.android.signingCertSha256` to the release certificate's SHA-256 before production so a re-signed APK's key is not attested.
+Play Integrity needs a service account (`PLAY_INTEGRITY_PROJECT_ID`, `PLAY_INTEGRITY_CLIENT_EMAIL`, `PLAY_INTEGRITY_PRIVATE_KEY`) and the Cloud project number (`PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER`, or `integrity.playIntegrity.cloudProjectNumber` in `app_config`); without them no verdict is asked for. Set `integrity.android.signingCertSha256` to the release certificate's SHA-256 before production so a re-signed APK's key is not attested.
 
 ## Everything the app shows is served
 
@@ -370,7 +380,7 @@ should knock rather than every release.
 
 ## Notifications and push
 
-`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once `FIREBASE_SERVICE_ACCOUNT` is set (the service-account JSON, or a path to it — see `.env.example`; locally it lives in the gitignored `secrets/`); without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. Two kinds go out: an ordinary message, which carries `android.notification.channelId: 'vokve.default'` — the id the app creates at launch and names in `firebase.json`, so do not change it on one side alone — and a **silent** data-only message (`{ silent: true }`), which carries no notification block at all so the OS shows nothing and hands it to the app's background handler instead (RULES A28). The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.
+`modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once the service account is in the environment — `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, see `.env.example`; without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. Two kinds go out: an ordinary message, which carries `android.notification.channelId: 'vokve.default'` — the id the app creates at launch and names in `firebase.json`, so do not change it on one side alone — and a **silent** data-only message (`{ silent: true }`), which carries no notification block at all so the OS shows nothing and hands it to the app's background handler instead (RULES A28). The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.
 
 ## Tests
 
