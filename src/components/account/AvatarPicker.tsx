@@ -13,6 +13,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { ActionSheet } from '../disclosure/ActionSheet';
 import { useToast } from '../feedback/Toast';
 import { Pressable } from '../form/Pressable';
+import { Icon } from '../media/Icon';
 import { Avatar, type AvatarSize } from '../media/Avatar';
 
 interface Props {
@@ -172,11 +173,9 @@ export const AvatarPicker = memo(
                   },
                 ]}
               >
-                <Camera
-                  size={moderateScale(13)}
-                  color={colors.primaryForeground}
-                  strokeWidth={2.4}
-                />
+                {/* Through the wrapper like every other icon, so the one
+                    table in `media/Icon` decides every glyph's ink. */}
+                <Icon as={Camera} size={13} color="primaryForeground" strokeWidth={2.4} />
               </View>
             )}
           </View>

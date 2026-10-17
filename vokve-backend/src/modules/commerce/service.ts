@@ -1627,7 +1627,7 @@ export async function cancelOrder(userId: string, id: string, deviceId?: string)
  * refuses leaves the order cancelled with the payment still marked paid,
  * which is what support looks for.
  */
-async function releaseOrder(id: string, userId: string, actor: 'user' | 'system', reason: string, deviceId?: string): Promise<{ order: Order; balance: number; already: boolean }> {
+async function releaseOrder(id: string, userId: string, actor: 'user' | 'system' | 'admin', reason: string, deviceId?: string): Promise<{ order: Order; balance: number; already: boolean }> {
   const result = await withTransaction(async session => {
     const order = await OrderModel.findOne({ _id: id, userId }).session(session);
     if (!order) throw Errors.notFound('That order');
@@ -1667,7 +1667,12 @@ async function releaseOrder(id: string, userId: string, actor: 'user' | 'system'
     order.status = 'cancelled';
     order.events.push({ from, to: 'cancelled', actor, at: new Date() });
     await order.save({ session });
-    await AuditLogModel.create([{ actorType: actor, actorId: actor === 'user' ? userId : 'scheduler', deviceId, action: 'order.cancelled', subjectType: 'order', subjectId: order._id, before: { status: from }, after: { status: 'cancelled', reason } }], { session });
+    await AuditLogModel.create([{
+      actorType: actor,
+      actorId: actor === 'user' ? userId : actor === 'admin' ? reason.split('|')[0] : 'scheduler',
+      deviceId, action: 'order.cancelled', subjectType: 'order', subjectId: order._id,
+      before: { status: from }, after: { status: 'cancelled', reason },
+    }], { session });
     return { row: order.toObject() as unknown as OrderRow, balance: toCoins(balanceMc), already: false, paidId: order.payment.status === 'paid' ? order.payment.providerPaymentId : null };
   });
 
@@ -1681,6 +1686,34 @@ async function releaseOrder(id: string, userId: string, actor: 'user' | 'system'
     }
   }
   return { order: toOrder(result.row, await commerceConfig()), balance: result.balance, already: result.already };
+}
+
+/**
+ * The same undo, asked for by an operator rather than by the member (RULES
+ * R10 — support's side of it).
+ *
+ * Deliberately the same function: coins back, stock back, the coupon back to
+ * the pool, the gateway refunded, and the member told. A second cancel path
+ * written for the operator's surface is how the two drift until one of them
+ * forgets the stock.
+ */
+export async function cancelOrderAsOperator(
+  orderId: string,
+  userId: string,
+  actor: string,
+  reason: string,
+): Promise<{ order: Order; balance: number; already: boolean }> {
+  const result = await releaseOrder(orderId, userId, 'admin', `${actor}|${reason}`);
+  if (!result.already) {
+    await notifyOrder({ userId, delivery: result.order.delivery }, {
+      title: 'Order cancelled',
+      message: result.order.coinsUsed > 0
+        ? `${result.order.coinsUsed} coins are back in your wallet${result.order.payment.status === 'refunded' ? ', and the payment is being refunded' : ''}.`
+        : result.order.payment.status === 'refunded' ? 'The payment is being refunded.' : 'Nothing was charged.',
+      dedupeKey: `order-cancelled:${orderId}`,
+    });
+  }
+  return result;
 }
 
 /**

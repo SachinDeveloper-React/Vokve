@@ -295,6 +295,379 @@ curl -s "$A/admin/health/fleet?days=7" -H "$K" | jq '.topErrors[] | {users, occu
 
 **Reading the raw fields.** `service.looksDead` with a `recoveryCount` climbing and `batteryOptimizationEnabled: true` on an `aggressiveOem` is the commonest cause of "my steps stopped" — the fix is on the phone, in the OEM's battery settings, and the app has a screen for it. `healthConnect.canRead: false` after it was granted means the member revoked it in Settings. `sync.status: 'failed'` with a `queued` that never falls means the days are on the phone and not here — check `stepSync.uploadedAt` and RULES A28. And `health.stale: true` means this install has not said anything for a day and a half, which is itself the finding.
 
+## The dashboard's own numbers
+
+Everything above answers a question about one member or one install. Two reads
+answer the questions that are about the product — is it growing, is it being
+used, and what has it cost:
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# one window, every figure taken at the same instant
+curl -s "$A/admin/analytics/overview?days=30" -H "$K" | jq '{window, members: .members | {total, new, newPrevious, emailVerified}, installs: .installs | {active, signedIn, pushable}}'
+curl -s "$A/admin/analytics/overview?days=30" -H "$K" | jq '{engagement: .engagement | {dau, wau, mau, stickiness, events, sessions}, activity: .activity | {steps, verifiedSteps, verifiedShare, avgStepsPerMemberDay}}'
+curl -s "$A/admin/analytics/overview?days=30" -H "$K" | jq '.economy, .integrity'
+curl -s "$A/admin/analytics/overview?days=30" -H "$K" | jq '.engagement.topScreens[0:5], .activity.byDay[-7:]'
+
+# the newest accounts, name and date only
+curl -s "$A/admin/analytics/signups?limit=8" -H "$K" | jq '.data[] | {name, email, signedUpAt}'
+```
+
+One call rather than eight because a dashboard that loads eight endpoints shows
+eight clocks, and the first thing anybody does with two of those is wonder
+which is right. Three things about the figures are worth knowing before anyone
+argues with them:
+
+**Every figure says where it came from.** `engagement.dau/wau/mau` are distinct
+accounts whose phones made a request — the device heartbeat (RULES DV1), which
+every account writes. `engagement.events/sessions/byDay/topScreens` come from
+the trail, which is dropped on arrival for an account with usage analytics off
+(RULES P7). They are deliberately not added together, and `trailMembers` is
+there so the two can be read against each other.
+
+**A day is the operator's own day.** Everything bucketed by date uses the zone
+in `X-Vokve-Timezone` (default ⚙ `locale.timezone`), and the window it covers
+is named in `window`.
+
+**The standing position is not a window figure.** `economy.coins.balance`,
+`pending`, `held` and `lifetimeEarned` are what the balances and the escrow
+hold right now, whatever `days` says; `earned`, `spent` and `bySource` are the
+ledger's rows inside the window.
+
+`members.newPrevious` is the same length of window immediately before it, so a
+dashboard can show a trend rather than guess at one. `activity.verifiedShare`
+is the same number the shadow report is judged on — see `/admin/activity/shadow`
+below for the decision it belongs to.
+
+These reads are aggregations over `users`, `devices`, `events`,
+`activity_daily`, `coin_ledger`, `orders` and `fraud_flags`. At a few hundred
+thousand members the trail aggregation is the one to watch: `events` is indexed
+for one member's trail and for one event name across accounts, and a window
+sweep over every row is neither.
+
+## Turning the step pipeline’s knobs
+
+Everything that decides what happens to a member’s steps was already config —
+what the phone is told to count, when it must have reported by, what the
+layers refuse, what a verified day is worth, what each trust tier lets
+through. None of it was reachable without a database client, which made it a
+deploy-time decision wearing config’s clothes. Two routes fix that:
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# what is in force, beside what the code ships, and every key that differs
+curl -s $A/admin/config/steps -H "$K" | jq '{overrides, updatedBy, updatedAt}'
+curl -s $A/admin/config/steps -H "$K" | jq '.effective.activity | {maxAgeDays, syncNudge, verifiedMinScore}'
+
+# change two of them (any subset; dotted paths are written, not whole sections)
+curl -s -X PUT $A/admin/config/steps -H "$K" -H 'Content-Type: application/json' \
+  -d '{"patch":{"activity":{"maxAgeDays":10,"syncNudge":{"silentAfterHours":12}}},"note":"tighter window"}' | jq '.overrides'
+
+# and put one back to the code's default
+curl -s -X PUT $A/admin/config/steps -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reset":["activity.maxAgeDays"]}' | jq '.overrides'
+```
+
+Three things make this safe to expose, and they are the reason the surface is
+shaped this way rather than as a general "write any config key":
+
+**A patch is checked before it is written.** `validate()` in
+`config/remote.ts` runs on *read*, so a bad document would not fail the write
+that caused it — it would fail every `getConfig()` in the process, for every
+member, until somebody worked out which key did it. The patch is merged onto
+the live config in memory, validated there, and only then persisted. A refusal
+carries the validator’s own sentence, which is what an operator needs to read:
+
+```
+{"error":{"code":"VALIDATION_FAILED","details":{"config":"coins.sourceCaps.steps (900) exceeds coins.dailyCap (300)"}}}
+```
+
+**Only the keys it owns exist.** The schema is a closed list with `.strict()`
+at every level over `activity`, `coins.steps`/`sourceCaps.steps`/`dailyCap`,
+`trust.stepCaps`/`holdHours`/`tiers`/`shadow` and `telemetry`. A typo is a 422
+rather than a stray key that silently does nothing — `deepMerge` would happily
+have added it.
+
+**Stored is not overridden.** The seed writes a copy of every config section
+on a fresh database (`$setOnInsert`), so most of what is in `app_config` is a
+default sitting in a document. `overrides` lists only where the stored value
+and the code have parted, which also catches the case nobody would otherwise
+notice: *a default the code has since changed, pinned by a copy an older seed
+wrote.*
+
+## One member’s own settings, and what we tell them
+
+The config above is everybody’s. This is the half that is one member’s — the
+goal they set, the ceiling their tier puts on a day, when each of their phones
+last reported, what they have agreed to hear — and the two things support
+actually has to *do*.
+
+```sh
+# everything at once: goal (with the suggestion and the range), ceiling,
+# phones, reachability, preferences, quiet-hours state right now
+curl -s $A/admin/users/<userId>/config -H "$K" | jq '{account, steps: .steps | {goal, ceiling, coins, upload}, notifications}'
+curl -s $A/admin/users/<userId>/config -H "$K" | jq '.steps.installs[] | {label, signedIn, stepSync, push, permissions}'
+
+# the little of it an operator may change
+curl -s -X PUT $A/admin/users/<userId>/config -H "$K" -H 'Content-Type: application/json' \
+  -d '{"dailyStepGoal":8000,"timezone":"Asia/Kolkata","note":"asked on chat"}' | jq '.steps.goal'
+
+# "stop sending me this" — off only (see below)
+curl -s -X PUT $A/admin/users/<userId>/config -H "$K" -H 'Content-Type: application/json' \
+  -d '{"silence":["activity"],"quietHours":{"enabled":true,"start":"23:00","end":"07:30"}}' | jq '.notifications.preferences'
+
+# their notification centre, with what became of each push
+curl -s "$A/admin/users/<userId>/notifications?limit=25" -H "$K" | jq '.data[] | {createdAt, topic, title, pushedAt, pushDeferredUntil, read}'
+
+# tell them something, through the same path every job uses
+curl -s -X POST $A/admin/users/<userId>/notifications -H "$K" -H 'Content-Type: application/json' \
+  -d '{"topic":"steps","title":"About your steps","message":"The sync on your phone is fixed.","note":"ticket 412"}' | jq
+# → {"id":"ntf_…","status":"created","push":"sent"}   or "category_off", "deferred", "no_device", "no_provider"
+
+# the hourly job's silent "sync now" push, sent to this member's phones at once
+curl -s -X POST $A/admin/users/<userId>/sync-nudge -H "$K" -H 'Content-Type: application/json' \
+  -d '{"remind":false}' | jq '{pushed, results}'
+```
+
+**What may be written here is deliberately narrow.** The step goal and the
+timezone, because both are states a member can get into and not out of (a goal
+saved on a phone that then broke; a zone set on a flight) and both are visible
+to them afterwards. And **a notification switch may be turned off, never on**:
+"stop sending me this" is a support request, "start sending them this" is
+consent, and consent is not an operator’s to give — the member turns it back
+on in the app, where they can see what they are agreeing to. There is no shape
+in the API for turning one on. Everything else about the account stays
+read-only, as the rest of the operator surface is.
+
+An operator cannot talk past a switch either: `POST …/notifications` goes
+through `notify()` like every job, so a member who has silenced that category
+gets the feed row and no push, and the answer says `category_off` rather than
+pretending. `sync-nudge` skips the job’s cooldown on purpose — an operator
+pressing it has a member on the phone — but still stamps `nudgedAt`, so the
+hourly job does not immediately push the same install again.
+
+Both routes write an audit row (`member.config`, `member.notify`,
+`member.sync_nudge`, `config.steps`) with the operator’s note on it.
+
+## The rest of one member: steps, coins, badges, orders
+
+Four reads that were only ever answerable to the member themselves — and all
+four are things support is asked about:
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# what they have walked, day by day, with what judged each day
+curl -s "$A/admin/users/<userId>/steps?days=30" -H "$K" | jq '{window, goal, totals, streak}'
+curl -s "$A/admin/users/<userId>/steps?days=30" -H "$K" | jq '.data[] | {localDay, steps, verifiedSteps, stepsCredited, verified, goalHit, plausibility, hardRejects}'
+curl -s "$A/admin/users/<userId>/steps?from=2026-10-01&to=2026-10-07" -H "$K" | jq '.totals'
+
+# the wallet, the escrow, the daily ceilings, the totals by source
+curl -s $A/admin/users/<userId>/wallet -H "$K" | jq '{balance, totals, bySource}'
+curl -s $A/admin/users/<userId>/wallet -H "$K" | jq '.holds[], .dailyCaps[0]'
+
+# and the rows behind it — append-only, so these *are* the arithmetic
+curl -s "$A/admin/users/<userId>/ledger?limit=50" -H "$K" | jq '.data[] | {createdAt, title, source, amount, referenceType, actor}'
+curl -s "$A/admin/users/<userId>/ledger?direction=out&source=purchase" -H "$K" | jq '.data'
+
+# the whole badge shelf with their own unlocks on it, and the challenges that paid
+curl -s $A/admin/users/<userId>/achievements -H "$K" | jq '{summary, locked: [.badges[] | select(.unlocked == false) | .title]}'
+curl -s $A/admin/users/<userId>/achievements -H "$K" | jq '.challenges[] | {title, period, progress, goal, rewardCoins, granted, status}'
+
+# what they bought, and one order in full
+curl -s "$A/admin/users/<userId>/orders?status=delivered" -H "$K" | jq '{totals, data: [.data[] | {number, status, payable, coinsUsed, placedAt}]}'
+curl -s $A/admin/orders/<orderId> -H "$K" | jq '{number, status, money, payment, items, address, events}'
+```
+
+Three things worth knowing before the figures are argued with. **`steps` is
+keyed by the member's own local day** and the goal it is measured against is
+the one *they* set, not the default — `goalHit` would otherwise be a different
+question from the one their app answers. **`stepsCredited` is the high-water
+mark** (RULES A4): steps already paid or held for that day, which is why
+re-scoring a day never pays twice. And **`granted` on a challenge is what was
+actually paid**, which is less than `rewardCoins` where the daily ceiling bit
+and zero while step-derived rewards wait for `coins.steps.enabled` — that is
+what `status: "unpaid"` means there.
+
+The order figures are the till's, as the order was placed (RULES R11): paise
+for money, coins for coins, and the address is the snapshot, so a member who
+has moved still sees where it went.
+
+## Freezing an account, and correcting what it was paid
+
+The two things an operator may *change* about an account, kept apart from the
+reads so nothing on a reading screen can write by accident. Both need a
+reason; both write an audit row.
+
+```sh
+# frozen stops it spending and leaves everything else alone; a legal hold
+# keeps it out of the deletion job's way
+curl -s -X PUT $A/admin/users/<userId>/status -H "$K" -H 'Content-Type: application/json' \
+  -d '{"frozen":true,"reason":"chargeback dispute"}' | jq
+
+# a correction to what they were paid — positive credits, negative claws back
+curl -s -X POST $A/admin/users/<userId>/coins -H "$K" -H 'Content-Type: application/json' \
+  -d '{"amount":250,"title":"Goodwill credit","reason":"ticket 412 — order arrived broken"}' | jq
+curl -s -X POST $A/admin/users/<userId>/coins -H "$K" -H 'Content-Type: application/json' \
+  -d '{"amount":-100,"title":"Correction","reason":"fraud confirmed on 2026-10-14"}' | jq
+
+# every operator action on the account, newest first — and the member's own
+curl -s "$A/admin/users/<userId>/audit?limit=20" -H "$K" | jq '.data[] | {at, action, actorType, actorId, after}'
+```
+
+**An adjustment is a new row, never an edit.** The ledger is append-only
+(RULES E2), so a clawback reads in the member's own wallet as a line they can
+see rather than as coins that quietly vanished — and this is the tool the
+fraud queue points at, since confirming a flag voids only what a day was
+*holding* and coins already released can be answered no other way. A credit
+goes through `credit()` with the daily ceiling waived, because a correction is
+not earnings. A clawback is **refused rather than clamped** when the balance
+will not cover it: a balance that cannot go below zero would otherwise turn
+"take 500 back" into "take whatever is left", silently. Either way the
+operator is named on the row (`actor`), and 10,000 coins in one go is the
+ceiling on what this surface will decide.
+
+**`GET /admin/users`** grew the filters a list is actually narrowed by:
+`tier`, `platform` (accounts with a live install on it), `status` — `frozen`,
+`unverified`, `deleting`, `deleted` — `sort` (`newest`, `oldest`, `name`,
+`trust`) and `offset`, with `total` beside the page so it can say what it is a
+page of.
+
+## Doing something about an order (RULES R10, R11)
+
+Three verbs and a book. The book is every order rather than one member's,
+because "what needs packing" and "what is stuck unpaid" are questions about
+the shop:
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# the order book, with the shop's mixed economy as a filter
+curl -s "$A/admin/orders?status=placed" -H "$K" | jq '{total, byStatus, totals}'
+curl -s "$A/admin/orders?paidWith=coins" -H "$K" | jq '.data[] | {number, coinsUsed, payable, inCoins}'
+
+# forwards only, and never out of a finished state
+curl -s -X PUT $A/admin/orders/<orderId>/status -H "$K" -H 'Content-Type: application/json' \
+  -d '{"status":"shipped","trackingRef":"BLR-99812"}' | jq
+
+# the member's own cancel, asked for by an operator: coins, stock, coupon, gateway
+curl -s -X POST $A/admin/orders/<orderId>/cancel -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reason":"wrong size"}' | jq
+
+# and the narrow verb for an order that has already happened
+curl -s -X POST $A/admin/orders/<orderId>/refund -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reason":"arrived broken"}' | jq   # add "amount" in paise for a part refund
+
+# the typo case: the order's own address snapshot, while the parcel is still here
+curl -s -X PUT $A/admin/orders/<orderId>/address -H "$K" -H 'Content-Type: application/json' \
+  -d '{"line1":"14 MG Road, Flat 3","reason":"member read it out wrong"}' | jq
+```
+
+**A cancel is not a refund.** Cancelling goes through the same `releaseOrder`
+the member's own cancel and the unpaid-order sweep use — the coins, the stock,
+the coupon and the gateway refund cannot be remembered by one caller and
+forgotten by another. Refunding is for an order that has happened: the money
+and the coins go back and **the stock does not**, because it is in somebody's
+house. A gateway that refuses a refund leaves the order `refunded` with the
+payment still reading `paid`, exactly as the member's cancel does: that
+mismatch is what support looks for, and hiding it would be worse.
+
+**The address is patched on the order, not in the address book.** An order
+carries a snapshot (RULES R4); fixing the book would change where the *next*
+order goes and leave this one on its way to the wrong flat. Allowed up to
+`confirmed` — past that the label is printed, and changing the record would
+make it lie.
+
+### An order paid in coins has no money side
+
+`paidWith` is computed once, server-side, and is on both the list and the
+detail read, so nothing downstream has to guess:
+
+- **`coins`** — `inCoins` is set, which the till does only when *every* line
+  is a coins-only item. Then the coin figures **are** the price (goods,
+  discount, and delivery in coins too) and `payable` is 0. The paise on the
+  row are the conversion, not a bill anybody was sent, **so no rupee figure
+  should ever be shown for one of these.**
+- **`money`** — no coins were spent.
+- **`mixed`** — coins covered the shop's share and money the rest, split per
+  line as `items[].coinsUsed` / `items[].moneyPaid`.
+
+An item's own `paymentMode` decides which of the three an order can be, and
+`null` follows ⚙ `commerce.paymentMode` — so a coins-only reward sits on the
+same shelf as a money-only product.
+
+**One bug worth knowing about, fixed here:** `order.coinsUsed` is written by
+`checkout` as **whole coins** (`q.coinsApplied`), not milli-coins. Every admin
+read was passing it through `toCoins()`, so a 300-coin order read as `0.3` —
+and the fixtures that tested it were written in milli-coins, which made the
+two agree with each other instead of with the till. Coins on an order are
+coins; `coinsValue` beside them is paise.
+
+## The shelf, and what may buy it
+
+```sh
+# the catalogue as the operator needs it: retired rows, stock, and the mode in force
+curl -s "$A/admin/shop/items?state=any&limit=50" -H "$K" | jq '{total, shop, data: [.data[] | {id, title, price, coinPrice, paymentMode, effectivePaymentMode, stock, active}]}'
+curl -s "$A/admin/shop/items?paymentMode=coins" -H "$K" | jq '.data[].title'
+
+# list something, or rewrite it — idempotent on the slug
+curl -s -X POST $A/admin/shop/items -H "$K" -H 'Content-Type: application/json' \
+  -d '{"id":"reward-band","title":"Reward Band","price":5000,"category":"gym","paymentMode":"coins","onHand":25}' | jq '.created, .item.coinPrice'
+
+# the one field somebody came to change
+curl -s -X PUT $A/admin/shop/items/reward-band -H "$K" -H 'Content-Type: application/json' -d '{"price":4000}' | jq '.item.price'
+
+# off the shelf, and back on — never a delete
+curl -s -X DELETE $A/admin/shop/items/reward-band -H "$K" -H 'Content-Type: application/json' -d '{"note":"out of season"}' | jq '.item.active'
+
+# stock, the other half of an order going wrong
+curl -s -X PUT $A/admin/shop/items/reward-band/stock -H "$K" -H 'Content-Type: application/json' \
+  -d '{"onHand":12,"reason":"counted after the fair"}' | jq
+```
+
+`price` is paise and `coinPrice` is the same figure rounded **up** to whole
+coins — up, because a coins-only order has no money to make up a shortfall.
+Retiring is `active: false`: the item leaves the member's shelf and every
+order that holds it stays readable, because an order carries its own snapshot
+of what was bought.
+
+## A badge by hand, and telling a segment
+
+```sh
+# unlocks one badge, through the same path the rules use — idempotent
+curl -s -X POST $A/admin/users/<userId>/achievements -H "$K" -H 'Content-Type: application/json' \
+  -d '{"achievementId":"steps-10k","reason":"goodwill after the outage"}' | jq
+
+# how many a segment is, before anything is sent
+curl -s "$A/admin/notifications/preview?platform=android&notSeenForDays=30" -H "$K" | jq
+
+# and the send, which wants that count back
+curl -s -X POST $A/admin/notifications/broadcast -H "$K" -H 'Content-Type: application/json' -d '{
+  "segment": {"platform":"android"},
+  "topic": "system",
+  "title": "Scheduled maintenance",
+  "message": "Vokve will be briefly unavailable tonight at 2am.",
+  "expected": 412, "confirm": true, "reason": "planned downtime"
+}' | jq
+```
+
+The badge goes through `unlockAchievement`, so it pays what the badge is worth
+where ⚙ `coins.achievements.enabled` is on, tells the member, and granting one
+they already hold does nothing. `via` records `admin:<actor>`, which is the
+difference between a badge the rules gave and one support did. **A badge is
+never taken back** — that is the rule, not a missing endpoint.
+
+The broadcast is the one admin verb that cannot be undone, so it is built to
+be hard to do by accident: the count comes from `preview` and goes back with
+the send, and a segment that has moved by more than a tenth is **refused**
+(`SEGMENT_MOVED`) rather than sent to. `confirm: true` and a reason are
+required, 5,000 recipients is the ceiling on one call, and every message goes
+through `notify()` — so a member who switched that category off gets the feed
+row and no push, and the answer says how many that was. One send carries one
+dedupe key, so pressing it twice cannot write two rows in anybody's feed.
+
 ## Fake steps, and who looks at them
 
 The layers have been scoring every day since the first snapshot (RULES A14–A25, `modules/activity/layers.ts`). What the server refuses outright, on evidence that needs no judgement call: an emulator, a forged attestation chain, an unlocked bootloader, a failed Play verdict, a key seen on another account, half the count flagged by the tracker's own checks, two in five motion windows non-walk, **a minute above 240 steps**, **a day above 120,000**, and **a day with no minutes, no motion and no allowed source behind more than 2,000 steps**. What costs score instead: a total the minutes cannot explain, motion sampling asked for and not delivered, a denylisted or hand-typed source, a pedometer ratio outside 0.7–1.3, round or identical totals, night steps.

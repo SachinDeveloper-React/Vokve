@@ -19,6 +19,28 @@ export type IconColor = Extract<
   | 'gold'
 >;
 
+/**
+ * Which ink each colour token draws an icon in.
+ *
+ * The names are the text tokens callers already reach for, but an icon is not
+ * text: a 2px stroke lays down a fraction of the ink a letterform does, so the
+ * same grey that reads as "secondary" on a caption reads as "disabled" on a
+ * glyph. The three text tokens therefore land on the two icon tokens — which
+ * is why darkening every quiet icon in the app is this table and nothing else.
+ * A caller that wants an exact colour still passes `tint`.
+ */
+const INK: Record<IconColor, keyof ThemeColors> = {
+  text: 'icon',
+  textSecondary: 'iconMuted',
+  textTertiary: 'iconMuted',
+  primary: 'primary',
+  success: 'success',
+  warning: 'warning',
+  destructive: 'destructive',
+  primaryForeground: 'primaryForeground',
+  gold: 'gold',
+};
+
 const SIZES: Record<IconSize, number> = {
   xs: moderateScale(14),
   sm: moderateScale(16),
@@ -56,11 +78,12 @@ export const Icon = memo(
     fill,
   }: Props) => {
     const { colors } = useTheme();
+    const ink = colors[INK[color]];
 
     return (
       <Component
         size={typeof size === 'number' ? size : SIZES[size]}
-        color={tint ?? colors[color]}
+        color={tint ?? (typeof ink === 'string' ? ink : colors.icon)}
         strokeWidth={strokeWidth}
         fill={fill ?? 'none'}
       />

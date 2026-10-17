@@ -3,6 +3,7 @@ import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Plus, Trash2 } from 'lucide-react-native';
 import { AddressCard } from '../../components/address/AddressCard';
+import { Icon } from '../../components/media/Icon';
 import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { useToast } from '../../components/feedback/Toast';
 import { HistoryHeader } from '../../components/history/HistoryHeader';
@@ -231,7 +232,7 @@ export const AddressesScreen = () => {
               label="Add another address"
               variant="secondary"
               fullWidth
-              icon={<Plus size={18} color={colors.text} />}
+              icon={<Icon as={Plus} size={18} />}
               onPress={addAddress}
             />
           </>

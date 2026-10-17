@@ -12,7 +12,7 @@ import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
 import { cancelHydrationReminders } from '../services/notifications';
 import { registerForPush, unregisterFromPush } from '../services/push';
-import { stopStepsForSignOut } from '../services/steps';
+import { stopStepsForSignOut, stopStepsWhenSignedOut } from '../services/steps';
 import { clearServerReads } from '../hooks/useServerRead';
 import { useAccountStore } from './accountStore';
 import { useAddressesStore } from './addressesStore';
@@ -178,6 +178,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     if (!tokens) {
       set({ status: 'signed_out', user: null, isSubmitting: false });
+      // A service outlives the app that started it, so a phone signed out
+      // before this fix shipped — or by anything that cleared the tokens
+      // without going through `endSession` — can still be counting. Asking
+      // costs one native call on a launch that has nothing else to do.
+      await stopStepsWhenSignedOut().catch(() => {});
       return;
     }
 
@@ -207,14 +212,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         apiError.kind === 'forbidden' ||
         apiError.kind === 'not_found';
       if (rejected) {
-        await secureStorage.clearTokens();
-        set({
-          status: 'signed_out',
-          user: null,
-          error: null,
-          isSubmitting: false,
-          notice: noticeForRejection(apiError),
-        });
+        // The same ending as the button: tokens gone, counting stopped,
+        // caches emptied. Before this it only cleared the tokens, which left
+        // the service counting for an account the phone is no longer in.
+        await endSession(noticeForRejection(apiError));
+        set({ isSubmitting: false });
         return;
       }
       set({
@@ -528,11 +530,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // push token goes first, while the session can still say whose it was.
     try {
       await unregisterFromPush();
-      // The alarms this phone is holding are this account's reminders. The
-      // scheduler would clear them anyway when the plan goes, but not before
-      // the next tick — and an app killed in between would go on waking the
-      // next person on this phone at seven.
-      await cancelHydrationReminders();
       await authApi.signOut();
     } catch (error) {
       logger.warn(
@@ -541,22 +538,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error,
       );
     }
-    // Nobody is left to count for. Never throws: counting that would not
-    // stop is not a reason to keep someone signed in.
-    await stopStepsForSignOut();
-    await secureStorage.clearTokens();
-    // The caches are this user's: the next sign-in hydrates its own, but
-    // until it does the wallet and feed must not show the last user's.
-    resetUserCaches();
-    set({
-      status: 'signed_out',
-      user: null,
-      pendingVerification: null,
-      pendingReset: null,
-      stepUpToken: null,
-      error: null,
-      notice: null,
-    });
+    await endSession(null);
   },
 
   clearError: () => {
@@ -628,12 +610,16 @@ function resetUserCaches(): void {
 // When a refresh fails mid-session the API layer cannot import this store
 // without creating a cycle, so it calls back through this handler instead.
 setOnSessionExpired(() => {
-  useAuthStore.setState({
-    status: 'signed_out',
-    user: null,
-    pendingVerification: null,
-    stepUpToken: null,
-    notice: 'Your session has expired. Please sign in again.',
+  // Every request in flight can land here at once, and the ending is
+  // asynchronous: without this guard the second one re-runs it while the
+  // first is still stopping the service.
+  if (useAuthStore.getState().status === 'signed_out') {
+    return;
+  }
+  // Nothing awaits this: the handler is called from the API layer's error
+  // path, which has its own error to throw.
+  endSession('Your session has expired. Please sign in again.').catch(error => {
+    logger.warn('authStore', 'Ending an expired session did not finish', error);
   });
 });
 
@@ -663,6 +649,54 @@ async function registerOrExplain(tokens: AuthTokens): Promise<true | ApiError> {
 }
 
 /** What the sign-in screen should say after a restore the server refused. */
+/**
+ * Everything that has to happen when a session ends, whoever ended it.
+ *
+ * There are three ways out — the user pressing Sign out, the server
+ * rejecting the stored session on launch, and a refresh failing
+ * mid-session — and they used to end it three different ways. Only the
+ * first stopped counting, so an automatic sign-out left the foreground
+ * service running: the app showed the sign-in screen while the notification
+ * went on counting steps for nobody, and the next person to sign in
+ * inherited the last one's cached wallet and feed until the fetches landed.
+ *
+ * So the ending is one function, and every path calls it. Local work only:
+ * the server is told by whoever can still talk to it (see `signOut`), and on
+ * the automatic paths every request is already being refused.
+ */
+async function endSession(notice: string | null): Promise<void> {
+  // The state goes first, and synchronously. Every request in flight can
+  // land on the expiry handler at once, and a guard that waited for the work
+  // below would let all of them through — three sign-outs racing to stop one
+  // service. It is also what the user should see straight away: the sign-in
+  // screen, rather than a held screen while a foreground service is asked to
+  // stop.
+  useAuthStore.setState({
+    status: 'signed_out',
+    user: null,
+    pendingVerification: null,
+    pendingReset: null,
+    stepUpToken: null,
+    error: null,
+    notice,
+  });
+  // Nothing may use this session again, whatever happens below.
+  await secureStorage.clearTokens();
+  // Nobody is left to count for, and a notification that says otherwise is
+  // untrue. Never throws: counting that would not stop is not a reason to
+  // keep somebody signed in.
+  await stopStepsForSignOut().catch(error => {
+    logger.warn('authStore', 'Could not stop counting while ending the session', error);
+  });
+  // The alarms this phone holds are the account's own reminders. Local, so
+  // this works on the automatic paths too — and an app left holding them
+  // would go on waking the next person on this phone at seven.
+  await cancelHydrationReminders().catch(() => {});
+  // The caches are this user's: the next sign-in hydrates its own, but until
+  // it does the wallet and the feed must not show the last user's.
+  resetUserCaches();
+}
+
 function noticeForRejection(error: ApiError): string {
   if (error.code === 'TOO_MANY_DEVICES') {
     return error.message;

@@ -77,7 +77,7 @@ const SERVER_CONFIG = {
     healthConnectIgnoreManualEntries: true,
     wearableTrust: 'catalog' as const,
     wearableAllowlist: ['com.google.android.apps.fitness'],
-    gapRecovery: 'split' as const,
+    gapRecovery: 'drop' as const,
     historyRetentionDays: 400,
     motionWindowRetention: 864,
     fraudDetection: { enabled: true, mode: 'flag' as const },
@@ -202,7 +202,7 @@ describe('a step session', () => {
         wearableTrust: 'catalog',
         // Google Fit relays a watch: used whenever it counted more.
         wearableAllowlist: ['com.google.android.apps.fitness'],
-        gapRecovery: 'split',
+        gapRecovery: 'drop',
         fraudDetection: { enabled: true, mode: 'flag' },
         privacyPolicyUrl: 'https://vokve.app/privacy',
       }),

@@ -2792,7 +2792,7 @@ const MOCK_ACTIVITY_CONFIG = {
     healthConnectIgnoreManualEntries: true,
     wearableTrust: 'catalog',
     wearableAllowlist: ['com.google.android.apps.fitness'],
-    gapRecovery: 'split',
+    gapRecovery: 'drop',
     historyRetentionDays: 400,
     motionWindowRetention: 864,
     fraudDetection: { enabled: true, mode: 'flag' },

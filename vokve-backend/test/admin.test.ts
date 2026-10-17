@@ -165,7 +165,7 @@ describe('admin: one member in full (RULES P16)', () => {
     });
     await OrderModel.create({
       _id: 'ord_test', number: 'VKV1', userId: session.userId, status: 'placed',
-      subtotal: 100_000, total: 100_000, payable: 70_000, coinsUsed: 300_000, coinsValue: 30_000,
+      subtotal: 100_000, total: 100_000, payable: 70_000, coinsUsed: 300, coinsValue: 30_000,
       addressSnapshot: { name: 'Asha Verma', line1: '12 MG Road', city: 'Bengaluru', state: 'Karnataka', postalCode: '560001' },
     });
 

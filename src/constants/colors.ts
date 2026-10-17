@@ -5,6 +5,18 @@ export interface ThemeColors {
   textSecondary: string;
   textTertiary: string;
   textQuaternary: string;
+  /**
+   * Icon ink, which is not text ink.
+   *
+   * A glyph drawn with a 2px stroke puts a fraction of the ink on screen that
+   * a letterform of the same colour does, so an icon at a caption's grey
+   * reads as switched off rather than as secondary. These two carry the icon
+   * scale instead: `icon` for anything a user is meant to read or press, and
+   * `iconMuted` for the quieter ones — a chevron, a row's leading glyph —
+   * which sits a long way above the text greys it used to borrow.
+   */
+  icon: string;
+  iconMuted: string;
   card: string;
   cardForeground: string;
   popover: string;
@@ -88,6 +100,10 @@ export const lightColors: ThemeColors = {
   textSecondary: 'rgba(71, 85, 105, 1)',
   textTertiary: 'rgba(148, 163, 184, 1)',
   textQuaternary: 'rgba(203, 213, 225, 1)',
+  icon: 'rgba(15, 23, 42, 1)',
+  // Slate 600. The quiet icons used to take `textTertiary` (slate 400), which
+  // at a 2px stroke is barely there on white.
+  iconMuted: 'rgba(71, 85, 105, 1)',
   card: 'rgba(255, 255, 255, 1)',
   cardForeground: 'rgba(15, 23, 42, 1)',
   popover: 'rgba(255, 255, 255, 1)',
@@ -167,6 +183,10 @@ export const darkColors: ThemeColors = {
   textSecondary: 'rgba(230, 237, 243, 0.68)',
   textTertiary: 'rgba(230, 237, 243, 0.42)',
   textQuaternary: 'rgba(230, 237, 243, 0.22)',
+  icon: 'rgba(230, 237, 243, 1)',
+  // The same reasoning the other way up: 0.42 of near-white on this
+  // background is a glyph that disappears, so the quiet icons sit at 0.72.
+  iconMuted: 'rgba(230, 237, 243, 0.72)',
   card: 'rgba(21, 27, 35, 1)',
   cardForeground: 'rgba(230, 237, 243, 1)',
   popover: 'rgba(26, 33, 43, 1)',

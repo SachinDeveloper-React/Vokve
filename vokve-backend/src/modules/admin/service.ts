@@ -32,30 +32,86 @@ const iso = (date: Date | null | undefined): string | null => date?.toISOString(
 
 // ─── Finding the account ───────────────────────────────────────────────────
 
+export interface FindUsersQuery {
+  q: string;
+  limit: number;
+  offset: number;
+  tier?: string;
+  platform?: 'ios' | 'android';
+  /** A state support asks for by name rather than by field. */
+  status?: 'any' | 'frozen' | 'deleted' | 'unverified' | 'deleting';
+  sort: 'newest' | 'oldest' | 'name' | 'trust';
+}
+
 /**
  * By id, email, phone or part of a name — whatever the person on the other
  * end of a support conversation actually gave. Newest accounts first, since
  * "the member who just signed up" is the most common thing being looked for.
+ *
+ * The filters are the ones a list is actually narrowed by: a trust tier, a
+ * platform, and the four states that are asked for by name — frozen, deleted,
+ * unverified, and deleting. `total` is the count the filters match, so a page
+ * can say what it is a page of.
  */
-export async function findUsers(q: string, limit: number) {
-  const trimmed = q.trim();
-  const filter = trimmed
-    ? {
-        $or: [
-          { _id: trimmed },
-          { email: new RegExp(escapeRegExp(trimmed), 'i') },
-          { phone: new RegExp(escapeRegExp(trimmed), 'i') },
-          { name: new RegExp(escapeRegExp(trimmed), 'i') },
-        ],
-      }
-    : {};
-  const users = await UserModel.find(filter)
-    .select({ email: 1, phone: 1, name: 1, trust: 1, createdAt: 1, emailVerifiedAt: 1, phoneVerifiedAt: 1, deletedAt: 1 })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean();
+export async function findUsers(query: FindUsersQuery) {
+  const trimmed = query.q.trim();
+  const filter: Record<string, unknown> = {};
+  if (trimmed) {
+    filter.$or = [
+      { _id: trimmed },
+      { email: new RegExp(escapeRegExp(trimmed), 'i') },
+      { phone: new RegExp(escapeRegExp(trimmed), 'i') },
+      { name: new RegExp(escapeRegExp(trimmed), 'i') },
+    ];
+  }
+  if (query.tier) filter['trust.tier'] = query.tier;
+  switch (query.status) {
+    case 'frozen':
+      filter['flags.frozen'] = true;
+      break;
+    case 'deleted':
+      filter.deletedAt = { $ne: null };
+      break;
+    case 'deleting':
+      filter['deletion.scheduledAt'] = { $ne: null };
+      filter.deletedAt = null;
+      break;
+    case 'unverified':
+      // Either half unproven: the phone is the one that usually is, since
+      // there is no SMS provider yet (D-31).
+      filter.$and = [{ $or: [{ emailVerifiedAt: null }, { phoneVerifiedAt: null }] }];
+      break;
+    default:
+      break;
+  }
+  if (query.platform) {
+    // A platform belongs to an install, not to an account, so this reads as
+    // "accounts with a live install on that platform". It ANDs with the
+    // search above rather than replacing it.
+    const ids = await DeviceModel.distinct('userId', { platform: query.platform, revokedAt: null });
+    filter._id = { $in: ids };
+  }
 
-  const devices = await DeviceModel.aggregate<{
+  const order: Record<string, 1 | -1> =
+    query.sort === 'oldest'
+      ? { createdAt: 1 }
+      : query.sort === 'name'
+        ? { name: 1, createdAt: -1 }
+        : query.sort === 'trust'
+          ? { 'trust.score': 1, createdAt: -1 }
+          : { createdAt: -1 };
+
+  const [users, total] = await Promise.all([
+    UserModel.find(filter)
+      .select({ email: 1, phone: 1, name: 1, trust: 1, createdAt: 1, emailVerifiedAt: 1, phoneVerifiedAt: 1, deletedAt: 1, flags: 1, deletion: 1, country: 1 })
+      .sort(order)
+      .skip(query.offset)
+      .limit(query.limit)
+      .lean(),
+    UserModel.countDocuments(filter),
+  ]);
+
+  const devices = users.length === 0 ? [] : await DeviceModel.aggregate<{
     _id: string; lastSeenAt: Date; devices: number; installedAt: Date; platform: string; appVersion: string;
   }>([
     { $match: { userId: { $in: users.map(u => u._id) }, revokedAt: null } },
@@ -86,6 +142,10 @@ export async function findUsers(q: string, limit: number) {
         emailVerified: Boolean(user.emailVerifiedAt),
         phoneVerified: Boolean(user.phoneVerifiedAt),
         deleted: Boolean(user.deletedAt),
+        frozen: user.flags?.frozen ?? false,
+        legalHold: user.flags?.legalHold ?? false,
+        deletionScheduledAt: iso(user.deletion?.scheduledAt),
+        country: user.country ?? null,
         /** When the account was created — the sign-up, not the install. */
         createdAt: iso(user.createdAt),
         /** When this account first registered a phone: the install (RULES P16). */
@@ -97,6 +157,9 @@ export async function findUsers(q: string, limit: number) {
         lastSeenAt: iso(d?.lastSeenAt),
       };
     }),
+    total,
+    offset: query.offset,
+    limit: query.limit,
     nextCursor: null,
   };
 }
@@ -279,7 +342,12 @@ export async function userOverview(userId: string) {
       count: orderTotals?.orders ?? 0,
       /** Paise, as the orders were placed (RULES R11). */
       payable: orderTotals?.payable ?? 0,
-      coinsUsed: toCoins(orderTotals?.coinsUsed ?? 0),
+      /**
+       * Coins, not milli-coins: `checkout` writes `q.coinsApplied` — whole
+       * coins — and the member's own order screen reads the same field. A
+       * `toCoins()` here (as this once had) turned a 300-coin order into 0.3.
+       */
+      coinsUsed: orderTotals?.coinsUsed ?? 0,
       lastAt: iso(orderTotals?.lastAt),
     },
     counts: {

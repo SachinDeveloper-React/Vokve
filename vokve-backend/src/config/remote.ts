@@ -11,7 +11,14 @@ import { CONFIG_DEFAULTS, type AppConfig } from './defaults.js';
 const TTL_MS = 30_000;
 let cached: { at: number; value: AppConfig } | null = null;
 
-function deepMerge<T>(base: T, patch: unknown): T {
+/**
+ * Exported for the admin config writer, which has to know what a patch
+ * *would* produce before it writes it: `validate()` runs on read, so an
+ * invalid document would not fail the write that caused it — it would fail
+ * every `getConfig()` in the process, for every member, until somebody
+ * worked out which key did it.
+ */
+export function deepMerge<T>(base: T, patch: unknown): T {
   if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
     return (patch === undefined ? base : patch) as T;
   }
@@ -38,6 +45,14 @@ export async function getConfig(): Promise<AppConfig> {
 
 export function invalidateConfig(): void {
   cached = null;
+}
+
+/**
+ * Would this config be accepted on the next read? Throws the same error
+ * `getConfig()` would, so a write can be refused with it instead.
+ */
+export function assertConfigValid(config: AppConfig): void {
+  validate(config);
 }
 
 /**

@@ -58,7 +58,7 @@ const FALLBACK_CONFIG: ActivityConfig = {
     healthConnectIgnoreManualEntries: true,
     wearableTrust: 'catalog',
     wearableAllowlist: ['com.google.android.apps.fitness'],
-    gapRecovery: 'split',
+    gapRecovery: 'drop',
     historyRetentionDays: 400,
     motionWindowRetention: 864,
     fraudDetection: { enabled: true, mode: 'flag' },
@@ -475,6 +475,37 @@ export async function stopStepsForSignOut(): Promise<void> {
   }
   // The other phones were this account's; the next sign-in learns its own.
   await clearOtherDevicesSteps();
+}
+
+/**
+ * Stops a counter left running with nobody signed in.
+ *
+ * The repair path. A phone signed out by the server rather than by its owner
+ * used to keep the service alive — the app showed the sign-in screen while
+ * the notification went on counting — and a phone already in that state
+ * stays in it until something asks the service to stop, because the service
+ * outlives the app that started it. So a launch with no session asks.
+ *
+ * Deliberately **not** `stopStepsForSignOut`: that stamps `signedOutAt`, and
+ * a launch is not a sign-out. Moving that stamp forward would make a
+ * sign-in the next morning resume a day it should have started over (D-56).
+ */
+export async function stopStepsWhenSignedOut(): Promise<void> {
+  startWhenReady = false;
+  endStepSession();
+  if (!isSupported()) {
+    return;
+  }
+  try {
+    const state = await StepTracker.getTrackingState();
+    if (state !== 'running' && state !== 'paused') {
+      return;
+    }
+    logger.warn('steps', 'Counting was still on with nobody signed in; stopping it');
+    await StepTracker.stopTracking();
+  } catch (error) {
+    logger.warn('steps', 'Could not stop counting for a signed-out phone', error);
+  }
 }
 
 /**

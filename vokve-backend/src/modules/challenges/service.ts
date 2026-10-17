@@ -915,7 +915,7 @@ export async function evaluateChallenges(userId: string, localDay: IsoDate, time
  * is a category, not a literal), so the daily ceiling applies and a replay
  * pays nothing.
  */
-async function unlockAchievement(
+export async function unlockAchievement(
   userId: string,
   achievementId: string,
   via: string,
