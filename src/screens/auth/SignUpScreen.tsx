@@ -114,10 +114,10 @@ export const SignUpScreen = () => {
   const { control, handleSubmit, setError } = useForm<SignUpValues>({
     resolver: zodResolver(signUpSchema),
     defaultValues: {
-      email: 'sachin@snva.com',
+      email: '',
       phone: { ...EMPTY_PHONE, country: DEFAULT_COUNTRY_CODE },
-      password: 'Sachu_@#8700',
-      confirmPassword: 'Sachu_@#8700',
+      password: '',
+      confirmPassword: '',
       dateOfBirth: '',
       gender: null,
       acceptedTerms: false,

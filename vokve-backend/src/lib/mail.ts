@@ -27,6 +27,14 @@ function getTransporter(): Transporter {
     port: env.SMTP_PORT,
     secure: env.SMTP_PORT === 465,
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
+    // Bounded on purpose. This runs inside a request — a serverless one in
+    // production — and nodemailer's defaults (2 minutes to connect, 10 on the
+    // socket) outlive the function itself: a silent SMTP host would take the
+    // whole request down with a platform timeout instead of the 503 the app
+    // knows how to show.
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 12_000,
   });
   return transporter;
 }

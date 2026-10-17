@@ -2,6 +2,7 @@ import React from 'react';
 import {
   useController,
   type Control,
+  type FieldError,
   type FieldPath,
   type FieldValues,
 } from 'react-hook-form';
@@ -128,6 +129,22 @@ export function FormMeasureField<
   );
 }
 
+/**
+ * The message on a phone field, whichever half of the value carries it.
+ *
+ * The controller sits on the object, but nothing reports on the object: the
+ * schema fails on `phone.number`, and so does the server — "That phone number
+ * is already registered." react-hook-form nests both under the object, so the
+ * error arriving here has no `message` of its own, and reading only that threw
+ * the message away and left the user with a form nothing was wrong with.
+ */
+function phoneErrorMessage(error: FieldError | undefined): string | undefined {
+  const parts = error as
+    | (FieldError & Partial<Record<keyof PhoneValue, FieldError>>)
+    | undefined;
+  return parts?.message ?? parts?.number?.message ?? parts?.country?.message;
+}
+
 export function FormPhoneInput<
   TValues extends FieldValues,
   TName extends FieldPath<TValues>,
@@ -146,7 +163,7 @@ export function FormPhoneInput<
       onBlur={field.onBlur}
       // The country half of the value cannot be empty, so only the number can
       // fail — which is why the message reads as one field's, not two.
-      error={fieldState.error?.message}
+      error={phoneErrorMessage(fieldState.error)}
       {...props}
     />
   );

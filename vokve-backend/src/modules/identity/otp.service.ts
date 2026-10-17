@@ -51,6 +51,23 @@ export async function createChallenge(input: CreateChallenge): Promise<Verificat
 
   const id = newId('vrf');
   const code = generateOtp(otp.length);
+  const isDecoy = input.decoy ?? input.previous?.decoy ?? false;
+
+  // Sent first, stored second. A failed send throws from here with nothing
+  // written, which is what a code that never left should cost: no row
+  // against `maxSendsPerDay` — a handful of SMTP refusals used to spend an
+  // address's whole daily allowance and then answer 429 for a day — and, on
+  // a resend, the code already in the user's hands stays valid instead of
+  // being retired in favour of one that never arrived.
+  //
+  // A decoy is written without a send by design: it has to be
+  // indistinguishable from a real challenge (RULES O9).
+  if (!isDecoy) {
+    await deliver(input.channel, input.target, code, input.purpose);
+  }
+
+  // Dated from the send, not from the attempt before it: the clock the client
+  // counts down is the one that started when the code went out.
   const now = Date.now();
   await OtpChallengeModel.create({
     _id: id,
@@ -65,15 +82,10 @@ export async function createChallenge(input: CreateChallenge): Promise<Verificat
     payload: input.payload ?? null,
     deviceId: input.deviceId,
     ip: input.ip,
-    decoy: input.decoy ?? input.previous?.decoy ?? false,
+    decoy: isDecoy,
   });
   if (input.previous) {
     await OtpChallengeModel.updateOne({ _id: input.previous._id }, { $set: { consumedAt: new Date() } });
-  }
-
-  const isDecoy = input.decoy ?? input.previous?.decoy ?? false;
-  if (!isDecoy) {
-    await deliver(input.channel, input.target, code, input.purpose);
   }
 
   const challenge = verificationChallengeSchema.parse({
@@ -115,7 +127,16 @@ async function deliver(channel: 'sms' | 'email', target: string, code: string, p
     try {
       await sendOtpEmail(target, code, purpose as OtpEmailPurpose, Math.round(otp.ttlSeconds / 60));
     } catch (error) {
-      logger.error({ err: error, purpose }, 'mail.failed');
+      // The provider's own answer, flattened onto the log line. `err.code`
+      // alone would not do: the logger redacts `*.code` to keep OTP codes out
+      // of the log, and that wildcard takes the SMTP code with it — which is
+      // the one field that says whether mail is refused (535 bad login, 553
+      // wrong From) or simply unreachable (ETIMEDOUT).
+      const smtp = error as { code?: string; responseCode?: number; command?: string; response?: string };
+      logger.error({
+        err: error, purpose,
+        smtpCode: smtp.code, smtpStatus: smtp.responseCode, smtpCommand: smtp.command, smtpResponse: smtp.response,
+      }, 'mail.failed');
       throw new ApiError(503, 'EMAIL_UNAVAILABLE', 'We could not send the email right now. Please try again in a moment.');
     }
     return;

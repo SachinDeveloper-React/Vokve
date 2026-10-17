@@ -27,7 +27,7 @@ export interface PhoneValue {
 
 export const EMPTY_PHONE: PhoneValue = {
   country: DEFAULT_COUNTRY_CODE,
-  number: '8700707668',
+  number: '',
 };
 
 /** Renders a phone value the way it is stored on the server. */

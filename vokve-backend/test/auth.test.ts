@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { AppConfigModel } from '../src/modules/platform/models.js';
+import { OtpChallengeModel } from '../src/modules/identity/models.js';
 import { invalidateConfig } from '../src/config/remote.js';
 import { env } from '../src/config/env.js';
 import { setMailTransport } from '../src/lib/mail.js';
@@ -70,6 +71,55 @@ describe('auth: phone OTP → session → email OTP', () => {
     expect(sent[0].to).toBe('sms@example.com');
     expect(sent[0].subject).toMatch(/Verify your email/);
     expect(sent[0].text).toContain(verify.body.nextVerification.devCode);
+
+    setMailTransport(null);
+    Object.assign(env, { SMTP_HOST: undefined, SMTP_USER: undefined, SMTP_PASS: undefined, MAIL_FROM: undefined });
+  });
+
+  it('a code that could not be sent costs nothing: no row, no spent allowance, no retired resend', async () => {
+    // A refusal the way a real provider gives it — Gmail on a login it does
+    // not recognise, which is what a wrong SMTP_HOST looks like from here.
+    let failing = true;
+    const sent: Array<{ to: string }> = [];
+    setMailTransport({
+      sendMail: async (m: { to: string }) => {
+        if (failing) {
+          throw Object.assign(new Error('Invalid login'), {
+            code: 'EAUTH', responseCode: 535, command: 'AUTH PLAIN',
+            response: '535-5.7.8 Username and Password not accepted',
+          });
+        }
+        sent.push(m);
+        return {};
+      },
+    } as never);
+    Object.assign(env, { SMTP_HOST: 'smtp.test', SMTP_USER: 'u', SMTP_PASS: 'p', MAIL_FROM: 'VOKVE <no-reply@test>' });
+    // No cooldown, so the resend below is about delivery rather than patience.
+    await AppConfigModel.updateOne({ _id: 'otp' }, { $set: { value: { resendCooldownSeconds: 0 } } }, { upsert: true });
+    invalidateConfig();
+
+    const body = { email: 'nomail@example.com', phone: '+919876511111', password: 'walk1000steps', dateOfBirth: '1994-03-21', gender: 'male' };
+    const refused = await request(app).post('/v1/auth/sign-up').set(baseHeaders).send(body);
+    expect(refused.status).toBe(503);
+    expect(refused.body.error.code).toBe('EMAIL_UNAVAILABLE');
+    // The address keeps its whole daily allowance (`maxSendsPerDay`): the
+    // attempt that failed left no challenge to count.
+    expect(await OtpChallengeModel.countDocuments({ target: body.email })).toBe(0);
+
+    failing = false;
+    const signUp = await request(app).post('/v1/auth/sign-up').set(baseHeaders).send(body);
+    expect(signUp.status).toBe(200);
+    expect(sent).toHaveLength(1);
+
+    // A resend whose mail fails must leave the code the user already has
+    // alive — retiring it would strand them with no way forward but the form.
+    failing = true;
+    const resend = await request(app).post('/v1/auth/resend-otp').set(baseHeaders)
+      .send({ verificationId: signUp.body.verificationId });
+    expect(resend.status).toBe(503);
+    const verify = await request(app).post('/v1/auth/verify-otp').set(baseHeaders)
+      .send({ verificationId: signUp.body.verificationId, code: signUp.body.devCode });
+    expect(verify.status).toBe(200);
 
     setMailTransport(null);
     Object.assign(env, { SMTP_HOST: undefined, SMTP_USER: undefined, SMTP_PASS: undefined, MAIL_FROM: undefined });

@@ -187,7 +187,10 @@ describe('admin: one member’s own config and messages', () => {
     expect(sent.status).toBe(201);
     expect(sent.body.status).toBe('created');
     // No FCM in tests and no token on the install: the row is written anyway.
-    expect(['no_provider', 'no_device', 'not_permitted', 'skipped']).toContain(sent.body.push);
+    // `deferred` belongs in the list too — run this suite between 22:00 and
+    // 07:00 in the member's timezone and quiet hours answer first, which is
+    // the one thing this assertion must not depend on.
+    expect(['no_provider', 'no_device', 'not_permitted', 'skipped', 'deferred']).toContain(sent.body.push);
 
     const mine = await request(app).get('/v1/notifications').set(authed(session));
     expect(mine.body.data[0]).toMatchObject({ title: 'About your steps', topic: 'steps', read: false });

@@ -45,9 +45,15 @@ describe('describeOtpError', () => {
 });
 
 describe('describeAuthError', () => {
-  test('a 422 with field errors points at the fields', () => {
-    const notice = describeAuthError(error('validation', 'VALIDATION_FAILED', 'Check.', { email: 'Taken.' }), 'Could not sign up');
-    expect(notice.title).toBe('Check the highlighted fields');
+  test('a 422 reads out what the server refused, field by field', () => {
+    const notice = describeAuthError(
+      error('validation', 'VALIDATION_FAILED', 'Check.', { email: 'Taken.', 'phone.number': 'Also taken.' }),
+      'Could not sign up',
+    );
+    // Not the server's own "Check." — that names nothing, and a nested path
+    // like `phone.number` is one the form cannot always highlight.
+    expect(notice.title).toBe('Could not sign up');
+    expect(notice.message).toBe('Taken.\nAlso taken.');
   });
 
   test('known refusals get a specific title, unknown ones the fallback', () => {

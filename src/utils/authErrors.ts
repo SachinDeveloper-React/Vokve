@@ -62,13 +62,19 @@ function formatWait(seconds: number): string {
 }
 
 /**
- * How a failed sign-in or sign-up reads. Field-level problems are handed to
- * the form separately (see `fieldErrors` on the error); this is the banner
- * above it, which for a 422 only needs to point at the fields.
+ * How a failed sign-in or sign-up reads. Field-level problems are also handed
+ * to the form (see `fieldErrors` on the error); this is the banner above it.
+ *
+ * A 422's own `message` is only "Check the highlighted fields." — the reason
+ * lives in its details, one sentence per field. The banner repeats those
+ * verbatim rather than pointing at the form: the user is already reading it,
+ * and a banner that describes nothing is how "That phone number is already
+ * registered." turned into an unexplained refusal.
  */
 export function describeAuthError(error: ApiError, fallbackTitle: string): ErrorNotice {
-  if (error.kind === 'validation' && Object.keys(error.fieldErrors).length > 0) {
-    return { title: 'Check the highlighted fields', message: error.message };
+  const refused = error.kind === 'validation' ? Object.values(error.fieldErrors) : [];
+  if (refused.length > 0) {
+    return { title: fallbackTitle, message: refused.join('\n') };
   }
   if (error.code === 'TOO_MANY_DEVICES') {
     return { title: 'Too many devices', message: error.message };

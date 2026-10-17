@@ -5,6 +5,7 @@
   "scripts": {
     "android": "react-native run-android",
     "android-release": "cd android && ./gradlew clean && ./gradlew bundleRelease",
+    "android-release-apk": "npm run android -- --mode='release'",
     "ios": "react-native run-ios",
     "ios:install": "cd ios && pod install && cd ..",
     "lint": "eslint .",

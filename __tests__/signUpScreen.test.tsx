@@ -280,6 +280,28 @@ describe('sign-up screen', () => {
     });
   });
 
+  test("the server's 'that number is taken' reaches the user", async () => {
+    signUp.mockImplementation(async () => {
+      useAuthStore.setState({
+        error: new ApiError('validation', 'Check the highlighted fields.', 422, {
+          'phone.number': 'That phone number is already registered.',
+        }),
+      });
+      return false;
+    });
+    const tree = await render();
+
+    await fillValidForm(tree);
+    await press(tree, 'Create Account');
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+    // Twice: under the field it was refused on, and in the banner above the
+    // form. The server reports this one on `phone.number`, which the phone
+    // control nests, and it used to show up in neither place.
+    const text = textOf(tree, RNText);
+    expect(text.split('That phone number is already registered.').length - 1).toBe(2);
+  });
+
   test('a different country changes the dial code that is sent', async () => {
     const tree = await render();
 
