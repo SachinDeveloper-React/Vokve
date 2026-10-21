@@ -50,13 +50,62 @@ const hcApp = (packageName: string, appName: string, steps: number, hourlySteps:
 describe('counting from sign-in (D-56): the part of a day that counts', () => {
   const signedIn = (from: string, to: string | null = null) => ({ from: new Date(from), to: to ? new Date(to) : null });
 
-  it('is the whole day where no periods were kept, before the first one, and inside one', () => {
+  it('is the whole day inside one period, and where an install kept neither periods nor a date', () => {
     expect(countingWindow(undefined, DAY, ZONE)).toBeNull();
     expect(countingWindow([], DAY, ZONE)).toBeNull();
-    // Evidence older than the rule stays as it was.
-    expect(countingWindow([signedIn('2026-10-03T10:00:00+05:30')], DAY, ZONE)).toBeNull();
     expect(countingWindow([signedIn('2026-09-20T10:00:00+05:30')], DAY, ZONE)).toBeNull();
     expect(countingWindow([signedIn('2026-09-20T10:00:00+05:30', '2026-10-05T10:00:00+05:30')], DAY, ZONE)).toBeNull();
+  });
+
+  /**
+   * Counting starts at the sign-in and nothing before it counts: a phone
+   * signed into for the first time today holds a week of its own sensor's
+   * and Health Connect's steps, and none of it was walked for this account
+   * here. Without this a fresh install claimed `maxAgeDays` of history on
+   * its first sync.
+   */
+  it('counts nothing on a day that ends before the install was ever signed into', () => {
+    expect(countingWindow([signedIn('2026-10-03T10:00:00+05:30')], DAY, ZONE)).toEqual([]);
+    // The sign-in during the day still gives that day its tail.
+    expect(countingWindow([signedIn('2026-10-01T23:30:00+05:30')], DAY, ZONE)).toEqual([
+      [at(DAY, '23:30'), at('2026-10-02', '00:00')],
+    ]);
+  });
+
+  /**
+   * Registering and recording the first sign-in are two writes, and an
+   * upload can land between them. Before this, the gap read as "no periods
+   * kept" — the whole day — and a phone installed late in the evening was
+   * credited everything its Health Connect held for that day, then cut to
+   * nothing as soon as the period landed.
+   */
+  it('falls back to the install day on a phone whose first period has not been written yet', () => {
+    const installed = (iso: string) => new Date(iso);
+    // Registered at noon on the day being judged: only noon onwards counts.
+    expect(countingWindow(undefined, DAY, ZONE, installed('2026-10-01T12:00:00+05:30'))).toEqual([
+      [at(DAY, '12:00'), at('2026-10-02', '00:00')],
+    ]);
+    expect(countingWindow([], DAY, ZONE, installed('2026-10-01T12:00:00+05:30'))).toEqual([
+      [at(DAY, '12:00'), at('2026-10-02', '00:00')],
+    ]);
+    // A day the phone was not registered for yet counts nothing at all.
+    expect(countingWindow([], DAY, ZONE, installed('2026-10-03T09:00:00+05:30'))).toEqual([]);
+    // Days after the install day are whole, exactly as before.
+    expect(countingWindow([], DAY, ZONE, installed('2026-09-20T09:00:00+05:30'))).toBeNull();
+    // Registered on the stroke of midnight: the whole day is still the whole day.
+    expect(countingWindow([], DAY, ZONE, installed('2026-10-01T00:00:00+05:30'))).toBeNull();
+    // A row from before `firstSeenAt` was kept is left as it was.
+    expect(countingWindow([], DAY, ZONE, null)).toBeNull();
+  });
+
+  it('is judged by the periods alone once an install has any, install date or not', () => {
+    const installed = new Date('2026-10-01T12:00:00+05:30');
+    // The period is what counts, not the later install date beside it.
+    expect(countingWindow([signedIn('2026-10-01T18:00:00+05:30')], DAY, ZONE, installed)).toEqual([
+      [at(DAY, '18:00'), at('2026-10-02', '00:00')],
+    ]);
+    // A day before the first period counts nothing, install date or not.
+    expect(countingWindow([signedIn('2026-10-03T10:00:00+05:30')], DAY, ZONE, installed)).toEqual([]);
   });
 
   it('is the signed-in time on a day with a sign-in or a sign-out, and nothing on a day with neither', () => {
@@ -162,6 +211,50 @@ describe('counting from sign-in (D-56): the day', () => {
     await DeviceModel.updateOne({ _id: session.deviceId }, { $set: { counting: [{ from: new Date(from), to: null }] } });
     return { session, key: await attested(session) };
   }
+
+  /** A phone registered at `from` whose first period has not been written yet. */
+  async function registeredAt(from: number) {
+    const session = await signUpAndRegister({ countingFrom: 'registration' });
+    await DeviceModel.updateOne(
+      { _id: session.deviceId },
+      { $set: { firstSeenAt: new Date(from) }, $unset: { counting: 1 } },
+    );
+    return { session, key: await attested(session) };
+  }
+
+  /**
+   * The regression behind a real day that showed 11,963 steps and was 0 the
+   * next morning: the upload landed in the gap between the phone
+   * registering and its first sign-in being recorded, so the day was judged
+   * as though all of it were the account's, then re-judged against the
+   * period once it existed. The install date closes the gap, so the first
+   * answer is the one the day keeps.
+   */
+  it('gives a phone with no period yet the same day it will have once the period lands', async () => {
+    const day = addDays(today(), -1);
+    const { session, key } = await registeredAt(at(day, '12:00'));
+    const walked = () => {
+      const payload = snapshotPayload({ date: day, nonce: 'n', deviceSteps: 7000, walkingMinutes: 0 });
+      payload.minutes = [...walk(day, '09:00', 100, 50), ...walk(day, '15:00', 40, 50)];
+      return payload;
+    };
+
+    // Registered at noon, so the morning's 5,000 are not the account's.
+    const first = await send(session, key, walked());
+    expect(first.day.steps).toBe(2000);
+
+    // The sign-in is recorded where registration put it, and a later
+    // snapshot of the same day re-scores to the very same figure.
+    await DeviceModel.updateOne(
+      { _id: session.deviceId },
+      { $set: { counting: [{ from: new Date(at(day, '12:00')), to: null }] } },
+    );
+    const payload = walked();
+    payload.minutes = [...payload.minutes, ...walk(day, '16:00', 10, 50)];
+    payload.deviceSteps = 7500;
+    const second = await send(session, key, payload);
+    expect(second.day.steps).toBe(2500);
+  });
 
   it('a walk before signing in on the phone does not count, one after does — and the sources page says why', async () => {
     const day = addDays(today(), -1);

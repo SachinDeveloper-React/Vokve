@@ -1,9 +1,9 @@
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { spacing, useTheme } from '../../theme';
-import type { ShopCategory } from '../../types/models';
+import type { ShopCategory, ShopCategorySummary } from '../../types/models';
 import { Card } from '../ui/Card';
-import { ALL_FILTER, DEALS_FILTER, SHOP_CATEGORIES } from './categories';
+import { ALL_FILTER, DEALS_FILTER, shopCategoriesOf } from './categories';
 import { ShopCategoryChip } from './ShopCategoryChip';
 
 /**
@@ -12,11 +12,15 @@ import { ShopCategoryChip } from './ShopCategoryChip';
  */
 export type ShopFilter = ShopCategory | 'all' | 'deals';
 
-const FILTERS = [ALL_FILTER, ...SHOP_CATEGORIES, DEALS_FILTER] as const;
-
 interface Props {
   value: ShopFilter;
   onChange: (value: ShopFilter) => void;
+  /**
+   * The shelves the server is carrying (`GET /shop/categories`). They are
+   * rows an operator writes, so the row is drawn from them; without them
+   * yet, the four the shop opened with.
+   */
+  categories?: readonly ShopCategorySummary[] | null;
 }
 
 /**
@@ -27,8 +31,12 @@ interface Props {
  * middle of the word. Scrolling keeps every label whole and leaves room for a
  * seventh chip without a redesign.
  */
-export const ShopCategoryFilter = memo(({ value, onChange }: Props) => {
+export const ShopCategoryFilter = memo(({ value, onChange, categories }: Props) => {
   const { colors } = useTheme();
+  const filters = useMemo(
+    () => [ALL_FILTER, ...shopCategoriesOf(categories), DEALS_FILTER],
+    [categories],
+  );
 
   return (
     <Card radius="xl" padding="md">
@@ -37,7 +45,7 @@ export const ShopCategoryFilter = memo(({ value, onChange }: Props) => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
       >
-        {FILTERS.map(filter => (
+        {filters.map(filter => (
           <ShopCategoryChip
             key={filter.value}
             value={filter.value}

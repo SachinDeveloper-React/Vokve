@@ -1153,7 +1153,10 @@ export const mockChallengeApi: ChallengeApi = {
       },
       reward: {
         coins: seed.rewardCoins,
-        caption,
+        // The same gate the server applies (D-87): the figure stands, and
+        // whether it is paid today is said rather than assumed.
+        caption: seed.rewardPaid ? caption : 'Coins for this challenge start soon',
+        paid: seed.rewardPaid,
         badge: seed.rewardsBadge
           ? achievementSchema.parse(
               seedAchievements.find(a => a.metric === seed.metric) ??
@@ -3888,8 +3891,17 @@ export const mockShopApi: ShopApi = {
   },
   async categories() {
     await delay();
-    return (['clothing', 'gym', 'sports', 'accessories'] as const).map(
-      category => {
+    // The four the shop opened with, as the server describes them: a label
+    // and a glyph per shelf, since the real shelves are rows an operator
+    // writes and the app draws whatever it is sent.
+    const shelves = [
+      { category: 'clothing', label: 'Clothes', icon: 'shirt' },
+      { category: 'gym', label: 'Gym', icon: 'dumbbell' },
+      { category: 'sports', label: 'Sports', icon: 'trophy' },
+      { category: 'accessories', label: 'Accessories', icon: 'watch' },
+    ] as const;
+    return shelves.map(
+      ({ category, label, icon }, index) => {
         const mine = shopItems.filter(item => item.category === category);
         const subcategories: { name: string; count: number }[] = [];
         for (const item of mine) {
@@ -3900,6 +3912,9 @@ export const mockShopApi: ShopApi = {
         }
         return {
           category,
+          label,
+          icon,
+          sort: index + 1,
           count: mine.length,
           inStock: mine.filter(item => (mockStock.get(item.id) ?? 0) > 0)
             .length,

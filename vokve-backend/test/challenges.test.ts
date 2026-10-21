@@ -41,6 +41,76 @@ async function board(session: Session, date?: string) {
 
 const byId = <T extends { id: string }>(rows: T[]) => Object.fromEntries(rows.map(r => [r.id, r]));
 
+/**
+ * A promise the economy will keep, or nothing (D-87).
+ *
+ * `rewardCoins` was read straight off the definition by every screen while
+ * the payment asked ⚙ `coins.steps.enabled` first, so a board could print
+ * "200 coins" over a completion that was then stored `unpaid`. `rewardPaid`
+ * is the payment's own answer, carried to the screen that makes the promise.
+ */
+describe('challenges: what the coins are actually worth today (D-87)', () => {
+  async function fullBoard(session: Session) {
+    const res = await request(app).get('/v1/challenges').set(authed(session));
+    expect(res.status).toBe(200);
+    return byId(res.body as { id: string; rewardCoins: number; rewardPaid: boolean }[]);
+  }
+
+  it('promises nothing for a step-derived challenge while step coins are off, and pays a workouts one', async () => {
+    const session = await signUpAndRegister();
+    const rows = await fullBoard(session);
+
+    // Measured in steps, and the economy that pays for steps is switched off.
+    expect(rows['ch-10k-steps']).toMatchObject({ rewardCoins: 200, rewardPaid: false });
+    expect(rows['ch-burn-500']).toMatchObject({ rewardCoins: 150, rewardPaid: false });
+    expect(rows['ch-7-day-consistency'].rewardPaid).toBe(false);
+    // Workouts are counted on the phone and paid for already.
+    expect(rows['ch-weekend-warrior']).toMatchObject({ rewardCoins: 200, rewardPaid: true });
+  });
+
+  it('turns every one of them into a real promise the moment step coins are on', async () => {
+    const session = await signUpAndRegister();
+    await stepCoinsOn();
+    const rows = await fullBoard(session);
+
+    expect(rows['ch-10k-steps']).toMatchObject({ rewardCoins: 200, rewardPaid: true });
+    expect(rows['ch-burn-500'].rewardPaid).toBe(true);
+    expect(rows['ch-weekend-warrior'].rewardPaid).toBe(true);
+  });
+
+  it('says so on the detail page and in its rules, rather than printing the figure alone', async () => {
+    const session = await signUpAndRegister();
+    const off = await request(app).get('/v1/challenges/ch-10k-steps').set(authed(session));
+    expect(off.body.challenge.rewardPaid).toBe(false);
+    expect(off.body.reward).toMatchObject({ coins: 200, paid: false });
+    // The caption still says *when* finishing earns; `paid` says whether it
+    // earns today. The rules sheet is the one that has to word both.
+    expect(off.body.reward.caption).toBe("Finish today's goal to earn");
+    expect(off.body.rules.find((rule: { id: string }) => rule.id === 'reward').text).toContain('once coins');
+
+    await stepCoinsOn();
+    const on = await request(app).get('/v1/challenges/ch-10k-steps').set(authed(session));
+    expect(on.body.reward).toMatchObject({ coins: 200, paid: true });
+    expect(on.body.rules.find((rule: { id: string }) => rule.id === 'reward').text).not.toContain('once coins');
+  });
+
+  it('agrees with what the completion is actually stored as', async () => {
+    const session = await signUpAndRegister();
+    await day(session, today(), { steps: 12_000, verifiedSteps: 12_000, verified: true });
+
+    // The board says it pays nothing; the completion it earns is `unpaid`.
+    const rows = await fullBoard(session);
+    expect(rows['ch-10k-steps'].rewardPaid).toBe(false);
+
+    await request(app).get('/v1/challenges').set(authed(session));
+    const completion = await ChallengeCompletionModel.findOne({ userId: session.userId, challengeId: 'ch-10k-steps' }).lean();
+    if (completion) {
+      expect(completion.status).toBe('unpaid');
+      expect(completion.granted ?? 0).toBe(0);
+    }
+  });
+});
+
 describe('challenges: periods (RULES C6)', () => {
   it('runs a day, a Monday-to-Sunday week, and a calendar month', () => {
     expect(periodOf('daily', '2026-10-02')).toEqual({ start: '2026-10-02', end: '2026-10-02' });
@@ -137,19 +207,26 @@ describe('challenges: completion (RULES C3, C4, D-46)', () => {
   it('pays a workout challenge whatever step coins are doing', async () => {
     const session = await signUpAndRegister();
     await ChallengeDefinitionModel.updateOne({ _id: 'ch-weekend-warrior' }, { $set: { startsOn: null } });
-    const workout = (id: string, minutesAgo: number) => ({
-      id, title: 'Push Day', startedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
-      completedAt: new Date(Date.now() - (minutesAgo - 45) * 60_000).toISOString(),
+    // Both workouts inside one local day, and the board read for that same
+    // day. "N minutes ago" put them either side of midnight in the small
+    // hours, and on a Monday that is also either side of the challenge's
+    // week — so the completion landed in one week and the board counted
+    // another, and the test failed for anyone running it after midnight.
+    const anchor = localDayOf(new Date(Date.now() - 2 * 3_600_000), ZONE);
+    const onAnchor = (time: string) => Date.parse(`${anchor}T${time}:00+05:30`);
+    const workout = (id: string, startTime: string) => ({
+      id, title: 'Push Day', startedAt: new Date(onAnchor(startTime)).toISOString(),
+      completedAt: new Date(onAnchor(startTime) + 45 * 60_000).toISOString(),
       exercises: [{ id: 'we-1', exercise: { id: 'bench', name: 'Barbell Bench Press', muscleGroup: 'chest', equipment: 'barbell', isTimed: false, imageUrl: null },
         sets: [{ id: 's1', reps: 8, weightKg: 60, rpe: null, durationSeconds: null, completed: true }], restSeconds: 90, notes: null }],
       totalVolumeKg: 0, caloriesBurned: 0,
     });
-    await request(app).post('/v1/workouts').set({ ...authed(session), 'idempotency-key': 'w1' }).send(workout('wk-1', 120));
-    await request(app).post('/v1/workouts').set({ ...authed(session), 'idempotency-key': 'w2' }).send(workout('wk-2', 60));
+    await request(app).post('/v1/workouts').set({ ...authed(session), 'idempotency-key': 'w1' }).send(workout('wk-1', '00:00'));
+    await request(app).post('/v1/workouts').set({ ...authed(session), 'idempotency-key': 'w2' }).send(workout('wk-2', '00:30'));
 
     const completion = await ChallengeCompletionModel.findOne({ userId: session.userId, challengeId: 'ch-weekend-warrior' }).lean();
     expect(completion).toMatchObject({ status: 'paid', granted: 200, progress: 2 });
-    expect(byId(await board(session))['ch-weekend-warrior']).toMatchObject({ progress: 2, completedAt: expect.any(String) });
+    expect(byId(await board(session, anchor))['ch-weekend-warrior']).toMatchObject({ progress: 2, completedAt: expect.any(String) });
   });
 
   it('counts goal days for a consistency challenge from the streak', async () => {

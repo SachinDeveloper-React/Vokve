@@ -283,7 +283,11 @@ describe('AnalyticsScreen', () => {
     mockActivityApi.range.mockImplementation(
       async (query: ActivityRangeQuery) => ({
         ...range(query),
-        points: range(query).points.map(point => ({ ...point, steps: 0 })),
+        points: range(query).points.map(point => ({
+          ...point,
+          steps: 0,
+          verifiedSteps: 0,
+        })),
       }),
     );
 

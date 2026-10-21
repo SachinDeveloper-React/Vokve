@@ -1,3 +1,4 @@
+import type { AppConfig } from '../../config/defaults.js';
 import { getConfig } from '../../config/remote.js';
 import {
   achievementDetailSchema,
@@ -145,6 +146,26 @@ function progressCache(userId: string) {
   };
 }
 
+/**
+ * Whether a challenge's coins are actually paid today — and the one place
+ * that question is answered (D-46, D-87, RULES E8).
+ *
+ * The same test the payment makes, so the promise and the payment cannot
+ * disagree. Step-derived coins wait for ⚙ `coins.steps.enabled`: a
+ * challenge measured in steps, minutes, calories or days pays nothing yet,
+ * while one measured in workouts pays now. This was a single `const` inside
+ * the completion loop, and every screen read `rewardCoins` straight off the
+ * definition instead — which is how twelve completions came to be stored
+ * `unpaid`, worth 1,400 promised coins and nothing granted, under boards
+ * that each said "200 coins".
+ */
+export function challengePays(
+  def: Pick<DefinitionRow, 'metric' | 'rewardCoins'>,
+  config: AppConfig,
+): boolean {
+  return def.rewardCoins > 0 && (def.metric === 'workouts' || config.coins.steps.enabled);
+}
+
 // ─── Reads ─────────────────────────────────────────────────────────────────
 
 /**
@@ -181,6 +202,7 @@ export async function getChallenges(userId: string, date: IsoDate): Promise<Chal
         goal: def.goal,
         progress: await progress(def.metric, period),
         rewardCoins: def.rewardCoins,
+        rewardPaid: challengePays(def, config),
         rewardsBadge: Boolean(def.rewardsBadge),
         startsAt: null,
         endsOn: period.end,
@@ -200,6 +222,7 @@ export async function getChallenges(userId: string, date: IsoDate): Promise<Chal
       goal: def.goal,
       progress: 0,
       rewardCoins: def.rewardCoins,
+      rewardPaid: challengePays(def, config),
       rewardsBadge: Boolean(def.rewardsBadge),
       startsAt: def.startsOn,
       endsOn: null,
@@ -367,7 +390,7 @@ const STANDINGS_ORDER = { total: -1 as const, _id: 1 as const };
  * enforces, and a copy of them in the app goes stale the first time an owner
  * rebalances a reward (D-32).
  */
-function rulesOf(def: DefinitionRow, period: DetailPeriod, stepGoal: number): ChallengeRule[] {
+function rulesOf(def: DefinitionRow, period: DetailPeriod, stepGoal: number, pays: boolean): ChallengeRule[] {
   const cadence = CADENCE_WORD[def.cadence];
   const goalLine =
     def.metric === 'days'
@@ -377,9 +400,11 @@ function rulesOf(def: DefinitionRow, period: DetailPeriod, stepGoal: number): Ch
         : `Reach ${units(def.goal, def.metric)} in the day`;
 
   const reward =
-    def.rewardCoins > 0
+    def.rewardCoins > 0 && pays
       ? `${completionCaption(def, period)} ${fmt(def.rewardCoins)} coins${def.rewardsBadge ? ' and a badge for your shelf' : ''}`
-      : `${completionCaption(def, period)} a badge for your shelf`;
+      : def.rewardCoins > 0
+        ? `${fmt(def.rewardCoins)} coins once coins for this challenge start${def.rewardsBadge ? ', and a badge for your shelf now' : ''}`
+        : `${completionCaption(def, period)} a badge for your shelf`;
 
   return [
     { id: 'goal', icon: 'goal', text: goalLine, tone: 'default' },
@@ -445,6 +470,8 @@ export async function getChallengeDetail(
 
   const today = localDayOf(now, timeZone);
   const upcoming = Boolean(def.startsOn && def.startsOn > date);
+  /** Whether finishing it actually pays, asked once for the whole answer. */
+  const pays = challengePays(def, config);
   // An upcoming challenge is shown for the period it opens in: the week the
   // user is looking at has nothing of it to show, and a ring counting their
   // current steps towards a challenge that has not started would be a lie.
@@ -522,6 +549,7 @@ export async function getChallengeDetail(
     goal: def.goal,
     progress,
     rewardCoins: def.rewardCoins,
+    rewardPaid: pays,
     rewardsBadge: Boolean(def.rewardsBadge),
     startsAt: upcoming ? def.startsOn : null,
     endsOn: upcoming ? null : period.end,
@@ -540,8 +568,17 @@ export async function getChallengeDetail(
       endsAt: localMidnightUtc(addDays(period.end, 1), timeZone).toISOString(),
     },
     focus,
-    reward: { coins: def.rewardCoins, caption: completionCaption(def, period), badge },
-    rules: rulesOf(def, period, stepGoal),
+    reward: {
+      coins: def.rewardCoins,
+      // `caption` stays what it was — *when* finishing earns — and `paid`
+      // carries the other fact, *whether* it earns today. Two facts, so the
+      // screen can say both; folding the second into the caption threw the
+      // first away.
+      caption: completionCaption(def, period),
+      paid: pays,
+      badge,
+    },
+    rules: rulesOf(def, period, stepGoal, pays),
     joined,
     finished,
     ranked: counts[0]?.ranked ?? 0,
@@ -840,7 +877,7 @@ export async function evaluateChallenges(userId: string, localDay: IsoDate, time
     if (reached < def.goal) continue;
 
     const id = `${userId}:${def._id}:${period.start}`;
-    const payable = def.rewardCoins > 0 && (def.metric === 'workouts' || config.coins.steps.enabled);
+    const payable = challengePays(def, config);
     try {
       await ChallengeCompletionModel.create({
         _id: id,

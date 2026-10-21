@@ -79,7 +79,12 @@ describe('commerce: catalogue, config and addresses', () => {
     expect(deals.body.data.every((i: { isDeal: boolean }) => i.isDeal)).toBe(true);
     const featured = await request(app).get('/v1/shop/items').query({ featured: 'true' }).set(authed(session));
     expect(featured.body.data.length).toBeGreaterThan(3);
-    expect((await request(app).get('/v1/shop/items').query({ category: 'lifestyle' }).set(authed(session))).status).toBe(422);
+    // A shelf that does not exist is an empty shelf, not a 422: the shelves
+    // are rows an operator writes, so a link to one that has since been
+    // deleted should show nothing rather than an error.
+    const unknown = await request(app).get('/v1/shop/items').query({ category: 'lifestyle' }).set(authed(session));
+    expect(unknown.status).toBe(200);
+    expect(unknown.body.data).toEqual([]);
 
     // Price filters are paise and inclusive; nothing unrated passes a rating floor.
     const under = await request(app).get('/v1/shop/items').query({ maxPrice: 30000, limit: 100 }).set(authed(session));

@@ -75,7 +75,14 @@ export const ChallengeRewardCard = memo(
           <VStack flex={1} gap="xxs">
             <AppText variant="h3">Challenge Reward</AppText>
             <AppText variant="micro" color="textSecondary" numberOfLines={2}>
-              {completed ? 'Already earned this period' : reward.caption}
+              {/* Two facts from the server: `caption` is when finishing
+                  earns, `paid` is whether it earns today (D-87). A figure
+                  with neither said is the promise nobody kept. */}
+              {!reward.paid && reward.coins > 0
+                ? 'Coins for this challenge start soon'
+                : completed
+                  ? 'Already earned this period'
+                  : reward.caption}
             </AppText>
             <AppText variant="h1" style={{ color: colors.brandAccent }}>
               {`${formatCoins(reward.coins)} coins`}

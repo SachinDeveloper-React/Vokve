@@ -1,4 +1,9 @@
-export { SHOP_CATEGORIES, ALL_FILTER, DEALS_FILTER } from './categories';
+export {
+  SHOP_CATEGORIES,
+  ALL_FILTER,
+  DEALS_FILTER,
+  shopCategoriesOf,
+} from './categories';
 export type { ShopCategoryPresentation, CategoryTint } from './categories';
 export { ShopHeader } from './ShopHeader';
 export { ShopCoinsBanner } from './ShopCoinsBanner';

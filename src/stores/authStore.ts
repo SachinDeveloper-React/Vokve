@@ -12,7 +12,11 @@ import { secureStorage } from '../services/secureStorage';
 import { registerDevice } from '../services/device';
 import { cancelHydrationReminders } from '../services/notifications';
 import { registerForPush, unregisterFromPush } from '../services/push';
-import { stopStepsForSignOut, stopStepsWhenSignedOut } from '../services/steps';
+import {
+  flushStepsForSignOut,
+  stopStepsForSignOut,
+  stopStepsWhenSignedOut,
+} from '../services/steps';
 import { clearServerReads } from '../hooks/useServerRead';
 import { useAccountStore } from './accountStore';
 import { useAddressesStore } from './addressesStore';
@@ -526,6 +530,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // send it: afterwards the tokens are gone and the batch would be refused.
     track('sign_out');
     await flushEvents();
+    // And what they walked, for the same reason and a worse consequence
+    // (D-56): counting stops here, so the stretch between the last sync and
+    // now is the account's and nothing else will ever send it. Signing in on
+    // another phone would otherwise show a day with this phone's tail
+    // missing. Bounded inside, so a slow network cannot hold the user here —
+    // and caught out here, because no failure to send steps is a reason to
+    // refuse somebody the sign-out they asked for.
+    await flushStepsForSignOut().catch(error => {
+      logger.warn('authStore', 'Could not send this phone’s steps on sign-out', error);
+    });
     // Tell the server if we can, but never block the user from leaving. The
     // push token goes first, while the session can still say whose it was.
     try {

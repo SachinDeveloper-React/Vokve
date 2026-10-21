@@ -25,23 +25,48 @@ const HOUR_MS = 3_600_000;
 
 /**
  * The part of `day` — local to `timezone` — the account counted on the
- * install, or null when the whole day counts: an install that never kept
- * periods (registered before they were), a day before its first period
- * (evidence older than the rule, left as it was), or a day one period
- * covers end to end. A day no period touches is an empty window: the
- * account was not signed in on that phone.
+ * install, or null when the whole day counts: a day one period covers end
+ * to end, or an install that never kept periods and has no `installedAt`
+ * either. A day no period touches is an empty window: the account was not
+ * signed in on that phone, so none of it is theirs.
+ *
+ * **Counting starts at the sign-in, and nothing before it ever counts.** A
+ * day that ends before the install's first period is an empty window, not a
+ * whole one: a phone signed into today for the first time holds whatever
+ * its sensor and Health Connect have had all week, and none of that was
+ * walked for this account on this phone. This is what stops a fresh install
+ * claiming `maxAgeDays` of history on its first sync.
+ *
+ * `installedAt` is the install's `firstSeenAt`, and it stands in for the
+ * period an install with **none** has not had written yet. Registering and
+ * recording the first sign-in are two writes, and an upload can land
+ * between them: with nothing to go on, "no periods kept" reads as the whole
+ * day, so that upload is handed a day the member walked before Vokve was
+ * ever on the phone — and loses it again the moment the period appears, the
+ * figure shown and then taken away. A phone cannot have counted for the
+ * account before it registered, so the install day is cut there.
+ *
+ * An install row with neither a period nor a `firstSeenAt` is from before
+ * either was kept, and is the one thing left as it was.
  */
 export function countingWindow(
   periods: CountingPeriod[] | null | undefined,
   day: string,
   timezone: string,
+  installedAt?: Date | null,
 ): CountingWindow | null {
-  if (!periods || periods.length === 0) return null;
   const zone = isValidTimeZone(timezone) ? timezone : 'UTC';
   const start = localMidnightUtc(day, zone).getTime();
   const end = localMidnightUtc(addDays(day, 1), zone).getTime();
-  if (end <= Math.min(...periods.map(period => period.from.getTime()))) return null;
 
+  if (!periods || periods.length === 0) {
+    // No period written. The install's own age is all there is to go on; a
+    // row from before `firstSeenAt` was kept has not even that, and is
+    // left exactly as it was.
+    const floor = installedAt?.getTime();
+    if (floor === undefined || !Number.isFinite(floor) || floor <= start) return null;
+    return floor >= end ? [] : [[floor, end]];
+  }
   const clipped = periods
     .map((period): [number, number] => [
       Math.max(period.from.getTime(), start),

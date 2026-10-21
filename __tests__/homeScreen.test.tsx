@@ -178,7 +178,13 @@ describe('HomeScreen', () => {
       useHydrationStore.setState({
         // 1.2 L already, all of it in the last few minutes.
         day: waterDay(
-          [{ id: 'fast', ml: 1200, at: new Date(Date.now() - 300_000).toISOString() }],
+          [
+            {
+              id: 'fast',
+              ml: 1200,
+              at: new Date(Date.now() - 300_000).toISOString(),
+            },
+          ],
           todayIso(),
         ),
         syncedAt: new Date().toISOString(),
@@ -232,7 +238,7 @@ describe('HomeScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('StepTracking');
   });
 
-  test('the step cards show the server’s figures, not the phone’s own count', async () => {
+  test('the step cards show the verified part of the server’s day, not the phone’s own count', async () => {
     useStepsStore.setState({
       supported: true,
       trackingState: 'running',
@@ -266,13 +272,74 @@ describe('HomeScreen', () => {
 
     const text = textOf(await render(), RNText);
 
-    expect(text).toContain('4,321');
+    // 4,000 of today's 4,321 passed the server's checks, so 4,000 is the
+    // figure, and the distance, the minutes and the calories are cut to the
+    // same share — 4,321 steps' walking is not what was verified.
+    expect(text).toContain('4,000');
+    expect(text).not.toContain('4,321');
     expect(text).not.toContain('9,999');
-    expect(text).toContain('3.1 km');
-    expect(text).toContain('37 min');
-    expect(text).toContain('180 kcal');
+    expect(text).toContain('2.9 km');
+    expect(text).toContain('34 min');
+    expect(text).toContain('167 kcal');
+    // Yesterday was verified end to end, so the chart shows all of it.
     expect(text).toContain('8,765');
     expect(text).not.toContain('Start counting your steps');
+  });
+
+  test('a day the server verified none of shows no steps, not the count it refused', async () => {
+    useStepsStore.setState({
+      supported: true,
+      trackingState: 'running',
+      today: mockSnapshot({ state: 'running', steps: 11_199 }),
+      serverWeek: [
+        {
+          date: todayIso(),
+          steps: 11_199,
+          verifiedSteps: 0,
+          distanceKm: 8.4,
+          activeMinutes: 96,
+          caloriesBurned: 420,
+          workoutsCompleted: 0,
+          source: 'device',
+          verified: false,
+        },
+      ],
+    });
+
+    const text = textOf(await render(), RNText);
+
+    // Not even a few steps at a time: the live tail is cut by the share the
+    // server verified, which on a held day is none of it.
+    expect(text).not.toContain('11,199');
+    expect(text).not.toContain('8.4 km');
+    expect(text).toContain('0 / 10,000');
+  });
+
+  test('the figure climbs with the walk, from the server\u2019s number up', async () => {
+    const today = todayIso();
+    useStepsStore.setState({
+      supported: true,
+      trackingState: 'running',
+      // The server took 3,000 from this phone and verified all of it; the
+      // phone has counted 20 more since.
+      synced: { [today]: { steps: 3000, recoveredSteps: 0, suspectSteps: 0, at: Date.now() } },
+      today: mockSnapshot({ state: 'running', steps: 3020 }),
+      serverWeek: [
+        {
+          date: today,
+          steps: 3000,
+          verifiedSteps: 3000,
+          distanceKm: 2.1,
+          activeMinutes: 25,
+          caloriesBurned: 120,
+          workoutsCompleted: 0,
+          source: 'device',
+          verified: true,
+        },
+      ],
+    });
+
+    expect(textOf(await render(), RNText)).toContain('3,020');
   });
 
   test('a phone without step counting gets no prompt to turn it on', async () => {

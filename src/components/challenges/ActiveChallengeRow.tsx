@@ -51,11 +51,20 @@ export const ActiveChallengeRow = memo(({ challenge, onPress }: Props) => {
   const completed = challenge.completedAt !== null;
   const status = completed ? `Completed ✓ · ${progress}` : progress;
 
-  const label = `${challenge.title}. ${status}. ${
-    completed ? 'Paid' : 'Pays'
-  } ${challenge.rewardCoins} coins${
-    challenge.rewardsBadge ? ' and a special badge' : ''
-  }`;
+  // What finishing is worth, said only where it is true: coins for a
+  // step-derived challenge wait for the server's economy to be switched on
+  // (D-87), and a row that prints the figure anyway is a promise nobody
+  // keeps. The badge is unlocked either way, so it is still worth saying.
+  const badgeLine = challenge.rewardsBadge ? ' and a special badge' : '';
+  const worth =
+    challenge.rewardCoins > 0 && challenge.rewardPaid
+      ? `${completed ? 'Paid' : 'Pays'} ${challenge.rewardCoins} coins${badgeLine}`
+      : challenge.rewardCoins > 0
+        ? `${challenge.rewardCoins} coins once coins start${badgeLine}`
+        : badgeLine
+          ? `Pays${badgeLine}`
+          : '';
+  const label = `${challenge.title}. ${status}.${worth ? ` ${worth}` : ''}`;
 
   const press = useCallback(
     () => onPress?.(challenge.id),
@@ -108,12 +117,18 @@ export const ActiveChallengeRow = memo(({ challenge, onPress }: Props) => {
         py="sm"
         style={[styles.reward, { backgroundColor: withAlpha(foreground, 0.1) }]}
       >
-        <CoinAmount
-          amount={challenge.rewardCoins}
-          size="sm"
-          tint={darkColors.gold}
-          withUnit
-        />
+        {challenge.rewardPaid ? (
+          <CoinAmount
+            amount={challenge.rewardCoins}
+            size="sm"
+            tint={darkColors.gold}
+            withUnit
+          />
+        ) : (
+          <AppText variant="miniMicro" numberOfLines={1} style={{ color: foreground }}>
+            {challenge.rewardCoins > 0 ? 'Coins start soon' : 'Badge'}
+          </AppText>
+        )}
         {challenge.rewardsBadge ? (
           <AppText
             variant="miniMicro"

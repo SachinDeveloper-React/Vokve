@@ -1,7 +1,57 @@
 import { Schema, model } from 'mongoose';
-import { orderStatusSchema, shopBadgeSchema, shopCategorySchema } from '../../contracts/index.js';
+import { orderStatusSchema, shopBadgeSchema } from '../../contracts/index.js';
 
 export const ORDER_STATUSES = orderStatusSchema.options;
+
+/**
+ * The shelves themselves (RULES R9), and the subcategories filed under each.
+ *
+ * They were a zod enum until an operator needed a fifth one: four names in
+ * a contract meant adding a shelf was a code change and an app release.
+ * Now a shelf is a row, `_id` is the slug an item's `category` holds, and
+ * the app is told the label and the icon to draw it with — so a shelf added
+ * this afternoon appears on a phone installed last month.
+ *
+ * Subcategories live in an array on the shelf rather than a collection of
+ * their own: an item files itself under one by *name*, there are a handful
+ * per shelf, and every read of them is a read of the shelf anyway. Renaming
+ * one is therefore two writes — this array, and the items that hold it.
+ */
+const shopCategoryDocument = new Schema(
+  {
+    /** The slug, and the value every item's `category` carries. Fixed once created. */
+    _id: { type: String, required: true },
+    /** What a member reads: "Clothes" over `clothing`. */
+    name: { type: String, required: true },
+    description: { type: String, default: '' },
+    /**
+     * The glyph the app draws it with. Checked where it is written
+     * (`shopCategoryIconSchema`) rather than by an enum here, because the
+     * app already falls back to a plain tile for a key it does not know —
+     * a stricter rule at this layer would only turn that into a 500.
+     */
+    icon: { type: String, default: 'category' },
+    /** Smallest first, in the filter row and the tile grid. */
+    sort: { type: Number, default: 0 },
+    /** Off the shelf: the app is not told about it, and nothing new may be filed under it. */
+    active: { type: Boolean, default: true },
+    subcategories: {
+      type: [
+        {
+          _id: false,
+          /** The exact string the items carry. */
+          name: { type: String, required: true },
+          sort: { type: Number, default: 0 },
+          active: { type: Boolean, default: true },
+        },
+      ],
+      default: [],
+    },
+  },
+  { timestamps: true, collection: 'shop_categories' },
+);
+shopCategoryDocument.index({ active: 1, sort: 1 });
+export const ShopCategoryModel = model('ShopCategory', shopCategoryDocument);
 
 /** The catalogue (ARCHITECTURE §6 commerce). `_id` is the slug the client already keys on. */
 const shopItemSchema = new Schema(
@@ -12,7 +62,14 @@ const shopItemSchema = new Schema(
     /** Selling price and, when discounted, the list price it is struck against — both paise (RULES R11). */
     price: { type: Number, required: true, min: 1 },
     mrp: { type: Number, default: null },
-    category: { type: String, enum: shopCategorySchema.options, required: true },
+    /**
+     * What it costs when coins pay all of it, where somebody set that
+     * figure. Null is not missing: it means the price in coins, rounded up
+     * at ⚙ `commerce.coinValuePaise` — the till's own arithmetic.
+     */
+    coinPrice: { type: Number, default: null, min: 0 },
+    /** The shelf's slug: a row in `shop_categories`, validated on the way in rather than by an enum here. */
+    category: { type: String, required: true },
     emoji: { type: String, default: '🎁' },
     imageUrl: { type: String, default: null },
     badge: { type: String, enum: [...shopBadgeSchema.options, null], default: null },

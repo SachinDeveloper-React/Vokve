@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { useTheme } from '../../theme';
 import type {
   ShopCategory,
@@ -7,7 +7,7 @@ import type {
 } from '../../types/models';
 import { Grid } from '../layout/Grid';
 import { VStack } from '../layout/Stack';
-import { SHOP_CATEGORIES } from './categories';
+import { shopCategoriesOf } from './categories';
 import { ShopCategoryTile } from './ShopCategoryTile';
 import { ShopSectionHeader } from './ShopSectionHeader';
 
@@ -24,15 +24,20 @@ interface Props {
 }
 
 /**
- * The four category tiles, with a live count on each.
+ * The category tiles, with a live count on each.
  *
  * Two columns on a phone, four on anything wider. Four across a 375pt screen
  * leaves each tile under 60pt inside, which breaks "Accessories" in the
  * middle of the word.
+ *
+ * The shelves themselves come from the summaries: they are rows an operator
+ * writes, so one added in the panel appears here without a release. Before
+ * the first fetch the four the shop opened with stand in.
  */
 export const TopCategoriesGrid = memo(
   ({ items, summaries = null, onPressCategory }: Props) => {
     const { colors } = useTheme();
+    const categories = useMemo(() => shopCategoriesOf(summaries), [summaries]);
     const countOf = (category: ShopCategory) =>
       summaries?.find(summary => summary.category === category)?.count ??
       items.filter(item => item.category === category).length;
@@ -42,7 +47,7 @@ export const TopCategoriesGrid = memo(
         <ShopSectionHeader title="Top Categories" />
 
         <Grid columns={{ compact: 2, medium: 4 }} gap="md">
-          {SHOP_CATEGORIES.map(category => (
+          {categories.map(category => (
             <ShopCategoryTile
               key={category.value}
               category={category.value}

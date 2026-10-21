@@ -139,6 +139,27 @@ const deviceDaySchema = new Schema(
     /** The newest Health Connect record and motion window stored, so a later snapshot adds only what is new. */
     lastRecordModifiedAt: { type: Number, default: 0 },
     lastWindowStartedAt: { type: Number, default: 0 },
+    /**
+     * An operator's override (D-88): this phone's day is not counted at all.
+     *
+     * The scoring already picks one phone per minute and drops the rest
+     * (D-53), which is right for a walk two phones both saw. This is for the
+     * case arithmetic cannot settle — a phone that was in somebody else's
+     * pocket, a watch left on a treadmill — where a human has to say which
+     * install the day belongs to. Absent on every day nobody has touched,
+     * and lifted by setting it back, so the decision is never one-way.
+     */
+    rejected: {
+      type: new Schema(
+        {
+          at: { type: Date, required: true },
+          by: { type: String, required: true },
+          note: { type: String, default: null },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true, collection: 'device_days' },
 );

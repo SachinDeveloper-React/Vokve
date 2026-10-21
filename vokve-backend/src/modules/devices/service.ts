@@ -86,17 +86,26 @@ export async function registerDevice(userId: string, body: RegisterDeviceBody, r
       deviceId: device._id, after: { accounts: shared + 1 } });
   }
 
-  // Bind the session that made this call to the device (RULES DV7). A
-  // session meeting this install for the first time is a sign-in here, and
-  // so is a new install: counting starts now (D-56). A launch restoring a
-  // session finds it bound already, and counting carries on as it was.
-  const before = refreshTokenHash
-    ? await RefreshTokenModel.findOneAndUpdate({ tokenHash: refreshTokenHash }, { $set: { deviceId: device._id } }).lean()
-    : null;
-  const inserted = device.firstSeenAt?.getTime() === now.getTime();
-  if (inserted || (before && before.deviceId !== device._id)) {
-    await startCounting(userId, device._id, now, body.profile.app.version);
+  // Bind the session that made this call to the device (RULES DV7).
+  if (refreshTokenHash) {
+    await RefreshTokenModel.updateOne({ tokenHash: refreshTokenHash }, { $set: { deviceId: device._id } });
   }
+
+  // Registering is an authenticated call, so the account is signed in on
+  // this install by definition: counting is open from now (D-56).
+  // `startCounting` only pushes where no period is open, so a launch
+  // restoring a session carries on with the one it has rather than starting
+  // a second.
+  //
+  // Unconditional, where this used to ask whether the row had just been
+  // inserted or the session had just met the install. Either test missing
+  // left the install with no period at all until its next sign-in, and
+  // `countingWindow` reads "no periods" as "the whole day counts" — so an
+  // upload arriving in that gap was credited a day walked before Vokve was
+  // on the phone, and lost it again the moment the period landed. The floor
+  // in `activity/counting.ts` is the other half of that fix; this is the
+  // half that stops the gap existing.
+  await startCounting(userId, device._id, now, body.profile.app.version);
 
   const min = config.app.minVersion[body.platform];
   return {

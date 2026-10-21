@@ -483,17 +483,43 @@ export const coinTransactionSchema = z.object({
 export type CoinTransaction = z.infer<typeof coinTransactionSchema>;
 
 /**
- * The four shelves of the shop (RULES R9): what you wear, what you train
- * with, what you play with, and the small things that go with any of them.
- * A closed enum — a new shelf ships behind a client release.
+ * The shelf a thing sits on (RULES R9) — its slug.
+ *
+ * A string, not a closed enum. Shelves are rows in `shop_categories` that an
+ * operator writes in the panel, so a build that has never heard of one still
+ * parses every list holding it and draws it with the label and icon the
+ * server sends. The four the shop opened with — what you wear, what you
+ * train with, what you play with, and the small things that go with any of
+ * them — are now simply the first four rows.
  */
-export const shopCategorySchema = z.enum([
-  'clothing',
-  'gym',
-  'sports',
-  'accessories',
-]);
+export const shopCategorySchema = z.string().trim().min(1).max(40);
 export type ShopCategory = z.infer<typeof shopCategorySchema>;
+
+/**
+ * The glyph a shelf is drawn with, as the operator picked it.
+ *
+ * Closed, because each key is an icon the app ships; a key this build does
+ * not know falls back to the plain `category` tile rather than failing the
+ * shelf — which is the whole point of the fallback, since the panel can
+ * add a shelf to a phone that is already installed.
+ */
+export const shopCategoryIconSchema = z
+  .enum([
+    'shirt',
+    'dumbbell',
+    'trophy',
+    'watch',
+    'shoe',
+    'bottle',
+    'bag',
+    'headphones',
+    'heart',
+    'gift',
+    'tag',
+    'category',
+  ])
+  .catch('category');
+export type ShopCategoryIcon = z.infer<typeof shopCategoryIconSchema>;
 
 /** How a catalogue list may be ordered. `popular` is the default everywhere. */
 export const shopSortSchema = z.enum([
@@ -639,8 +665,10 @@ export const shopItemSchema = z.object({
   coinsMin: z.number().int().nonnegative().default(0),
   /**
    * What one unit costs in coins alone: the price at ⚙
-   * `commerce.coinValuePaise` a coin, rounded up. The price a coins-only
-   * shop shows.
+   * `commerce.coinValuePaise` a coin, rounded up — or the figure an
+   * operator typed on the item, where they typed one, so a reward can cost
+   * a round 2,000 coins rather than whatever its rupee price divides into.
+   * The price a coins-only shop shows and a coins-only order charges.
    */
   coinPrice: z.number().int().nonnegative().default(0),
   /**
@@ -695,6 +723,16 @@ export type ShopItem = z.infer<typeof shopItemSchema>;
 /** `GET /shop/categories`: what each shelf holds, for tiles and filters. */
 export const shopCategorySummarySchema = z.object({
   category: shopCategorySchema,
+  /**
+   * What a member reads on the chip and the tile — "Clothes", not
+   * `clothing`. The server's, because the shelf itself is the server's: a
+   * label hardcoded in the app could not name a shelf added after release.
+   */
+  label: z.string().min(1).max(40).default(''),
+  /** The glyph it is drawn with; unknown keys fall back to `category`. */
+  icon: shopCategoryIconSchema.default('category'),
+  /** Where it sits in the row and the grid, smallest first. */
+  sort: z.number().int().default(0),
   /** Every active item on the shelf. */
   count: z.number().int().nonnegative(),
   /** Of those, the ones that can be redeemed right now. */
@@ -1256,6 +1294,14 @@ export const challengeSchema = z.object({
   /** How far the user has got. Zero for one that has not opened yet. */
   progress: z.number().nonnegative().default(0),
   rewardCoins: z.number().int().nonnegative(),
+  /**
+   * Whether those coins are actually paid today (D-46, D-87). Step coins
+   * wait for the server's `coins.steps.enabled`, so a challenge measured in
+   * steps, minutes, calories or days is worth nothing yet while one
+   * measured in workouts pays now. Defaults to *not* paid: an answer that
+   * does not say must never be drawn as a promise.
+   */
+  rewardPaid: z.boolean().default(false),
   /** Some challenges pay a badge on top of the coins. */
   rewardsBadge: z.boolean().default(false),
   /**
@@ -1415,6 +1461,8 @@ export const challengeDetailSchema = z.object({
     coins: z.number().int().nonnegative(),
     /** "Complete all 7 days to earn". */
     caption: z.string(),
+    /** Whether `coins` are paid today — see `challengeSchema.rewardPaid`. */
+    paid: z.boolean().default(false),
     /** The badge a completion unlocks, with the caller's own state of it. */
     badge: achievementSchema.nullable().default(null),
   }),

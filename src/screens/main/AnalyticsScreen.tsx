@@ -22,7 +22,7 @@ import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import type { ActivityRangeQuery } from '../../services/api/contracts';
 import { useCurrentUser } from '../../stores/authStore';
 import { useDailyStepGoal } from '../../stores/settingsStore';
-import { useTodayActivity } from '../../stores/stepsStore';
+import { useTodaySteps, verifiedActivityOf } from '../../stores/stepsStore';
 import { useStreakStore, useStreakSummary } from '../../stores/streakStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { ActivityRangePoint } from '../../types/models';
@@ -133,9 +133,11 @@ export const AnalyticsScreen = () => {
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
 
   const isToday = date === todayIso();
-  const day = useActivityDay(date).data;
+  // Every step figure on this screen is the verified part of the server's
+  // day, never the whole count a phone sent (see `verifiedActivityOf`).
+  const day = verifiedActivityOf(useActivityDay(date).data);
   const previous = useActivityDay(addDays(date, -1)).data;
-  const today = useTodayActivity();
+  const today = useTodaySteps();
 
   // The week always — its best day and its trend have cards of their own,
   // whatever the range shows — and the chart's own period.
@@ -148,7 +150,7 @@ export const AnalyticsScreen = () => {
     () =>
       (week?.points ?? []).map(point => ({
         day: formatWeekdayShort(point.start),
-        steps: point.steps,
+        steps: point.verifiedSteps,
       })),
     [week],
   );
@@ -160,7 +162,7 @@ export const AnalyticsScreen = () => {
   }>(() => {
     const drawn = (chart?.points ?? []).map((point, index) => ({
       label: labelFor(range, point, index),
-      steps: point.steps,
+      steps: point.verifiedSteps,
     }));
     const isCurrent = (from: IsoDate) =>
       from === queryFor(range, todayIso()).from;
@@ -251,13 +253,13 @@ export const AnalyticsScreen = () => {
         />
 
         <StepsSummaryCard
-          steps={day?.steps ?? 0}
+          steps={day.steps}
           goal={goal}
-          previousSteps={previous?.steps ?? null}
+          previousSteps={previous ? verifiedActivityOf(previous).steps : null}
           comparedWith={isToday ? 'yesterday' : 'the day before'}
-          caloriesBurned={day?.caloriesBurned ?? 0}
-          distanceKm={day?.distanceKm ?? 0}
-          activeMinutes={day?.activeMinutes ?? 0}
+          caloriesBurned={day.caloriesBurned}
+          distanceKm={day.distanceKm}
+          activeMinutes={day.activeMinutes}
           onPressReport={notImplemented}
         />
 
@@ -305,7 +307,7 @@ export const AnalyticsScreen = () => {
 
         <WeeklyTrendCard data={weekSteps} />
 
-        <AnalyticsCheerCard name={user?.name} steps={today.steps} goal={goal} />
+        <AnalyticsCheerCard name={user?.name} steps={today.shown} goal={goal} />
       </ScrollView>
 
       <CalendarSheet

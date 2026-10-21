@@ -289,29 +289,201 @@ export const useStepPrompt = (): StepPromptVariant | null =>
     return backgroundRiskOf(state) === 'stopped' ? 'attention' : null;
   });
 
-export interface TodayActivity {
+/**
+ * How much of a day's count stood up to the server's checks:
+ *
+ * - `pending` — the server has not answered for the day yet;
+ * - `verified` — every step it counted is verified, a day with none included;
+ * - `partly` — part of the count is verified and part of it is not;
+ * - `held` — the day counted steps and the server verified none of them.
+ */
+export type VerifiedState = 'pending' | 'verified' | 'partly' | 'held';
+
+export interface VerifiedActivity {
+  /** Steps that passed every check — the only step figure a screen shows. */
   steps: number;
+  /** Everything the day counted, verified or not. */
+  counted: number;
+  /** `counted` less `steps`: counted on a phone, and not verified. */
+  unverified: number;
+  /** Distance, calories and active minutes, cut to the verified share. */
   distanceKm: number;
   caloriesBurned: number;
   activeMinutes: number;
+  state: VerifiedState;
+}
+
+const NOTHING_COUNTED: VerifiedActivity = {
+  steps: 0,
+  counted: 0,
+  unverified: 0,
+  distanceKm: 0,
+  caloriesBurned: 0,
+  activeMinutes: 0,
+  state: 'pending',
+};
+
+/**
+ * A day cut to the steps the server verified — the real ones.
+ *
+ * A phone's counter, and the notification its service draws from it, carry
+ * everything the phone saw: a watch's steps read out of Health Connect, and
+ * the steps the counter handed over in one go when an OEM task killer let
+ * the service back (`recoveredSteps`, and the untimed steps with them). The
+ * server judges every day it is sent (BACKEND §7.5) and answers with both
+ * figures — `steps`, what a phone showed, and `verifiedSteps`, what stood
+ * up. Only the second is shown, so no screen promises a count the coins,
+ * the streak and the leaderboard will not pay on.
+ *
+ * Distance, calories and active minutes are the server's too and are worked
+ * out from the whole day, so the same share comes off them: 8,569 verified
+ * steps out of 11,199 must not carry 11,199 steps' distance.
+ */
+export function verifiedActivityOf(
+  day: DailyActivity | null | undefined,
+): VerifiedActivity {
+  if (!day) {
+    return NOTHING_COUNTED;
+  }
+  const counted = Math.max(0, Math.round(day.steps));
+  // Never above the day's own count, whatever arrived: a verified figure
+  // larger than the day it belongs to is a server the app cannot reconcile,
+  // and the smaller of the two is the safe way to be wrong about steps.
+  const steps = Math.min(counted, Math.max(0, Math.round(day.verifiedSteps)));
+  const share = counted > 0 ? steps / counted : 1;
+  return {
+    steps,
+    counted,
+    unverified: counted - steps,
+    distanceKm: day.distanceKm * share,
+    caloriesBurned: day.caloriesBurned * share,
+    activeMinutes: Math.round(day.activeMinutes * share),
+    state:
+      counted === 0
+        ? 'verified'
+        : steps === 0
+        ? 'held'
+        : steps < counted
+        ? 'partly'
+        : 'verified',
+  };
 }
 
 /**
- * Today's figures for the dashboard, the analytics summary and nutrition —
- * the server's, never worked out on the phone. Zero until the server has
- * answered for today.
+ * One day's verified steps on their own — for a chart, where a day the
+ * server has not answered for yet is a bar of zero rather than a gap. Takes
+ * a stored day or a range point, both of which carry the two figures.
  */
-export const useTodayActivity = (): TodayActivity => {
+export const verifiedStepsOf = (
+  day: Pick<DailyActivity, 'steps' | 'verifiedSteps'> | null | undefined,
+): number =>
+  day
+    ? Math.min(
+        Math.max(0, Math.round(day.steps)),
+        Math.max(0, Math.round(day.verifiedSteps)),
+      )
+    : 0;
+
+/**
+ * Today, cut to what the server verified. `pending` with everything at zero
+ * until the server has answered for today.
+ */
+export const useVerifiedToday = (): VerifiedActivity => {
   const today = useServerToday();
-  return useMemo(
-    () => ({
-      steps: today?.steps ?? 0,
-      distanceKm: today?.distanceKm ?? 0,
-      caloriesBurned: today?.caloriesBurned ?? 0,
-      activeMinutes: today?.activeMinutes ?? 0,
-    }),
-    [today],
-  );
+  return useMemo(() => verifiedActivityOf(today), [today]);
+};
+
+/**
+ * What this phone has counted today beyond what it last got the server to
+ * accept, less the part of it the phone already doubts.
+ *
+ * Zero when a sync is up to date, when the only snapshot is from an earlier
+ * day, and when the phone's count has gone *backwards* against the mark — a
+ * counter reset, or a day starting over at a sign-in — which the next sync
+ * settles rather than this. The other phones' steps are left out: they are
+ * already inside the server's figure this is added to, and counting them
+ * here would show them twice.
+ *
+ * The tracker's own integrity checks run live, so by the time a shaken or
+ * in-vehicle minute reaches this it is already counted in the snapshot's
+ * `suspectSteps` (the tracker runs in `flag` mode, which reports them and
+ * removes nothing). Taking the ones that arrived since the last sync off the
+ * tail is what stops the dashboard counting a minute it can already see the
+ * server will refuse: a minute walked and flagged in the same breath adds to
+ * both figures, so the number **stalls** rather than climbing and then being
+ * taken back.
+ *
+ * Under `exclude` the tracker has already removed them from its own count,
+ * and subtracting again would discount them twice — so the mode is checked
+ * rather than assumed. It is one switch away in the operator's config.
+ */
+export function liveTailOf(
+  state: Pick<StepsState, 'today' | 'synced' | 'activityConfig'>,
+): number {
+  const today = todayIso();
+  if (!state.today || state.today.date !== today) {
+    return 0;
+  }
+  const mark = state.synced[today];
+  const phone = state.today.steps - (state.today.otherDevicesSteps ?? 0);
+  const counted = phone - (mark?.steps ?? 0);
+  // What the phone has flagged since the server last took a figure from it.
+  const flagged =
+    (state.activityConfig?.tracker.fraudDetection.mode ?? 'flag') === 'flag'
+      ? Math.max(0, state.today.suspectSteps - (mark?.suspectSteps ?? 0))
+      : 0;
+  return Math.max(0, Math.round(counted - flagged));
+}
+
+export interface TodaySteps extends VerifiedActivity {
+  /** The verified figure plus this phone's live tail — what a screen shows. */
+  shown: number;
+  /** This phone's steps since its last accepted sync. */
+  live: number;
+}
+
+/**
+ * Today's steps for the dashboard: what the server verified, plus what this
+ * phone has counted since its last accepted sync.
+ *
+ * The verified figure on its own only moves when a sync lands — every few
+ * minutes at best, and not at all while the app is closed — so the number
+ * stood still through a walk and then jumped. The tail is this phone's own
+ * count past what it last sent: live, small, and judged on the next sync,
+ * which is what makes the figure climb with the walk (3,000 → 3,002 →
+ * 3,006) instead of sitting and leaping.
+ *
+ * The tail is cut by the share of today the server has been verifying, for
+ * the reason this whole figure exists: on a day it has verified *none* of,
+ * an unjudged tail would put the refused count back on the dashboard a few
+ * steps at a time — which is the number that disagreed with the
+ * notification in the first place. So a held day does not climb; it waits
+ * for a sync to say the day is worth something. A day the server has not
+ * answered for at all does not climb either, and a day it has answered for
+ * with nothing counted yet is an ordinary morning, where the tail stands.
+ *
+ * Only the step count carries it. Distance, calories and active minutes
+ * stay the server's verified figures: they are its arithmetic over the
+ * whole day, and a tail's worth of distance guessed here would not match
+ * what the next sync replaces it with.
+ *
+ * The share and the tail's own flagged steps overlap a little — the share
+ * already knows the server drops what the phone flagged — so a flagged step
+ * is discounted about three per cent twice. Both corrections pull the same
+ * way, which is downwards, so the figure is never above what the day will
+ * stand up; a tenth of a step is not worth a second arithmetic path to
+ * avoid it.
+ */
+export const useTodaySteps = (): TodaySteps => {
+  const verified = useVerifiedToday();
+  const counted = useStepsStore(liveTailOf);
+  return useMemo(() => {
+    const share =
+      verified.counted > 0 ? verified.steps / verified.counted : 1;
+    const live =
+      verified.state === 'pending' ? 0 : Math.round(counted * share);
+    return { ...verified, live, shown: verified.steps + live };
+  }, [counted, verified]);
 };
 
 /**

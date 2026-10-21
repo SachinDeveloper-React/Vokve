@@ -46,9 +46,11 @@ jest.mock('../src/services/secureStorage', () => ({ secureStorage: mockSecureSto
 // reach variables whose names begin with `mock`, which is why they do.
 const mockStopSteps = jest.fn().mockResolvedValue(undefined);
 const mockStopWhenSignedOut = jest.fn().mockResolvedValue(undefined);
+const mockFlushSteps = jest.fn().mockResolvedValue(undefined);
 jest.mock('../src/services/steps', () => ({
   stopStepsForSignOut: mockStopSteps,
   stopStepsWhenSignedOut: mockStopWhenSignedOut,
+  flushStepsForSignOut: mockFlushSteps,
 }));
 
 const mockCancelReminders = jest.fn().mockResolvedValue(undefined);
@@ -97,6 +99,47 @@ describe('every ending stops the counter', () => {
     expect(mockCancelReminders).toHaveBeenCalledTimes(1);
     expect(mockSecureStorage.clearTokens).toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({ status: 'signed_out', user: null, notice: null });
+  });
+
+  /**
+   * Counting stops at the sign-out (D-56), so the stretch since the last
+   * sync is the account's and nothing else will ever send it. It has to go
+   * up while the tokens still work — afterwards the only way out is this
+   * same account signing back in on this same phone, and if they sign in on
+   * another one the day shown there is missing this phone's tail for good.
+   */
+  test('sends what this phone walked before the tokens are cleared', async () => {
+    const order: string[] = [];
+    mockFlushSteps.mockImplementationOnce(async () => {
+      order.push('flush');
+    });
+    mockSecureStorage.clearTokens.mockImplementationOnce(async () => {
+      order.push('clearTokens');
+    });
+
+    await useAuthStore.getState().signOut();
+
+    expect(mockFlushSteps).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['flush', 'clearTokens']);
+  });
+
+  test('a sync that will not finish still lets the user leave', async () => {
+    mockFlushSteps.mockRejectedValueOnce(new Error('no network'));
+
+    await expect(useAuthStore.getState().signOut()).resolves.toBeUndefined();
+
+    expect(mockSecureStorage.clearTokens).toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({ status: 'signed_out' });
+  });
+
+  test('an ending the user did not ask for has no tokens to send with, so it does not try', async () => {
+    // A refresh that failed mid-session: the tokens are already dead, so
+    // there is nothing a sync could use and nothing to wait for.
+    mockExpiry.handler?.();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(mockStopSteps).toHaveBeenCalledTimes(1);
+    expect(mockFlushSteps).not.toHaveBeenCalled();
   });
 
   test('a session the server rejects at launch', async () => {

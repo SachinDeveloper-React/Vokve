@@ -29,7 +29,8 @@ import {
 import {
   useServerWeek,
   useStepPrompt,
-  useTodayActivity,
+  useTodaySteps,
+  verifiedStepsOf,
 } from '../../stores/stepsStore';
 import { addDays, formatWeekdayShort, todayIso } from '../../utils/date';
 import { MotivationCard } from '../../components';
@@ -53,7 +54,7 @@ export const HomeScreen = () => {
   // `add`: the dashboard is the other place a drink is logged from, and a
   // check that lived on the water screen would be one this card walked past.
   const water = useLogWater();
-  const today = useTodayActivity();
+  const today = useTodaySteps();
   const serverWeek = useServerWeek();
   const stepPrompt = useStepPrompt();
   const [refreshing, setRefreshing] = useState(false);
@@ -65,10 +66,15 @@ export const HomeScreen = () => {
     useHydrationStore.getState().refreshIfStale,
   );
 
-  // Every figure on the step cards is the server's. The last seven days,
-  // today last; a day the server has not answered for yet reads as zero.
+  // Every figure on the step cards is the server's, and only the part of it
+  // the server verified (see `verifiedActivityOf`) — the chart cannot hold a
+  // day's whole count while the card above it shows the verified part. The
+  // last seven days, today last; a day the server has not answered for yet
+  // reads as zero.
   const week = useMemo(() => {
-    const byDate = new Map(serverWeek.map(day => [day.date, day.steps]));
+    const byDate = new Map(
+      serverWeek.map(day => [day.date, verifiedStepsOf(day)]),
+    );
     const end = todayIso();
     return Array.from({ length: 7 }, (_, index) => {
       const date = addDays(end, index - 6);
@@ -174,7 +180,7 @@ export const HomeScreen = () => {
         ) : null}
 
         <StepGoalCard
-          steps={today.steps}
+          steps={today.shown}
           goal={stepGoal}
           onEditGoal={onEditGoal}
         />

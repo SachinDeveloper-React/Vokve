@@ -15,14 +15,90 @@ import { analyticsOverview, recentSignups } from './analytics.service.js';
 import { broadcastBody, previewBroadcast, segmentSchema, sendBroadcast } from './broadcast.service.js';
 import {
   catalogueQuery,
+  deleteItem,
   getCatalogueItem,
   itemBody,
+  itemInsight,
   itemPatch,
   listCatalogue,
   patchItem,
   retireItem,
   saveItem,
 } from './catalogue.service.js';
+import {
+  createExercise,
+  createTemplate,
+  deleteExercise,
+  deleteTemplate,
+  exerciseBody,
+  exercisePatch,
+  listTraining,
+  templateBody,
+  templatePatch,
+  updateExercise,
+  updateTemplate,
+} from './training.service.js';
+import {
+  achievementBody,
+  achievementPatch,
+  challengeBody,
+  challengePatch,
+  createAchievement,
+  createChallenge,
+  deleteAchievement,
+  deleteChallenge,
+  getAchievement,
+  getChallenge,
+  listAchievements,
+  listChallenges,
+  setChallengeActive,
+  updateAchievement,
+  updateChallenge,
+} from './gamification.service.js';
+import {
+  categoryBody,
+  categoryDeleteBody,
+  categoryPatch,
+  createCategory,
+  createSubcategory,
+  deleteCategory,
+  deleteSubcategory,
+  listCategories,
+  recategoriseBody,
+  recategoriseItems,
+  renameSubcategory,
+  subcategoryBody,
+  subcategoryCreateBody,
+  subcategoryDeleteBody,
+  subcategoryPatchBody,
+  updateCategory,
+  updateSubcategory,
+} from './categories.service.js';
+import {
+  couponBody,
+  couponPatch,
+  couponQuery,
+  deleteCoupon,
+  getCoupon,
+  listCoupons,
+  patchCoupon,
+  saveCoupon,
+  setCouponActive,
+} from './coupons.service.js';
+import {
+  basketLineBody,
+  basketNoteBody,
+  basketQuery,
+  clearBasket,
+  clearBasketCoupon,
+  demand,
+  demandQuery,
+  getBasket,
+  listBaskets,
+  removeBasketLine,
+  removeWishlistEntry,
+} from './baskets.service.js';
+import { deleteReview, deleteReviewBody, listReviews, reviewQuery } from './reviews.service.js';
 import {
   adjustBody,
   adjustMemberCoins,
@@ -58,7 +134,47 @@ import {
   ordersQuery,
   stepsQuery,
 } from './profile.service.js';
-import { setStepsConfig, setStepsConfigBody, stepsConfig } from './config.service.js';
+import {
+  appConfig,
+  setAppConfig,
+  setAppConfigBody,
+  setStepsConfig,
+  setStepsConfigBody,
+  stepsConfig,
+} from './config.service.js';
+import {
+  broadcastHistory,
+  deleteNotification,
+  deleteNotificationBody,
+  listNotifications,
+  notificationQuery,
+  retractBody,
+  retractBroadcast,
+} from './notifications.service.js';
+import {
+  deleteTicket,
+  deleteTicketBody,
+  getTicket,
+  listTickets,
+  replyBody,
+  replyToTicket,
+  setTicketStatus,
+  ticketQuery,
+  ticketStatusBody,
+} from './support.service.js';
+import {
+  deleteFaq,
+  deleteGuideSection,
+  faqBody,
+  faqPatch,
+  faqQuery,
+  guideBody,
+  listFaqs,
+  listGuide,
+  patchFaq,
+  saveFaq,
+  saveGuideSection,
+} from './faq.service.js';
 import {
   memberConfig,
   memberConfigBody,
@@ -72,6 +188,8 @@ import {
 } from './member.service.js';
 import { fleetHealth, userProblems } from './problems.service.js';
 import { shadowReport } from './shadow.service.js';
+import { rejectionBody, setDayRejections } from './rejection.service.js';
+import { stepsTimeline, timelineQuery } from './timeline.service.js';
 import {
   activity,
   activitySummary,
@@ -307,6 +425,39 @@ adminUsersRouter.get('/admin/users/:userId/steps', validate('query', stepsQuery)
   res.json(await memberSteps(String(req.params.userId), req.query as unknown as z.infer<typeof stepsQuery>));
 });
 
+/**
+ * One day minute by minute: every phone that claimed each minute, which one
+ * the day took it from, and what was dropped because another phone claimed
+ * the same minute (D-53). The answer to "the phone says 11,000 and the day
+ * says 8,000" at the grain the decision is actually made.
+ *
+ * `?overlapsOnly=true` returns only the minutes more than one phone
+ * claimed — the ones worth looking at when a member has several installs.
+ */
+adminUsersRouter.get('/admin/users/:userId/steps/timeline', validate('query', timelineQuery), async (req, res) => {
+  res.json(await stepsTimeline(String(req.params.userId), req.query as unknown as z.infer<typeof timelineQuery>));
+});
+
+/**
+ * Which of a day's phones it is allowed to count (D-88). The per-minute pick
+ * settles a walk two phones both saw; this is for the case arithmetic
+ * cannot settle — whose leg the phone was on. The body carries the exact
+ * set to reject, so `[]` lifts every rejection, and the day is re-scored
+ * before the call answers.
+ */
+adminUsersRouter.put(
+  '/admin/users/:userId/days/:date/devices/rejected',
+  async (req, res, next) => {
+    const parsed = rescoreParams.safeParse({ date: req.params.date });
+    if (!parsed.success) return next(Errors.notFound('That day'));
+    next();
+  },
+  validate('body', rejectionBody),
+  async (req, res) => {
+    res.json(await setDayRejections(req.ctx.adminActor!, String(req.params.userId), String(req.params.date), req.body));
+  },
+);
+
 /** The wallet, the escrow, the daily ceilings, and the totals by source. */
 adminUsersRouter.get('/admin/users/:userId/wallet', async (req, res) => {
   res.json(await memberWallet(String(req.params.userId)));
@@ -444,6 +595,353 @@ adminUsersRouter.put('/admin/shop/items/:itemId/stock', validate('body', stockBo
   res.json(await setStock(req.ctx.adminActor!, String(req.params.itemId), req.body));
 });
 
+/**
+ * One product in full: what it has sold, who is waiting for it, what
+ * members said about it, and who changed it last. Four collections an
+ * operator would otherwise join by hand.
+ */
+adminUsersRouter.get('/admin/shop/items/:itemId/insight', async (req, res) => {
+  res.json(await itemInsight(String(req.params.itemId)));
+});
+
+/**
+ * Deletes it outright — a slug typed wrong, a draft listed by accident.
+ *
+ * Its own path, not the `DELETE` above, because the two are different acts
+ * and only one of them is reversible. An item any order holds is refused:
+ * that is a retire, and the refusal says so. Basket lines, saves and
+ * reviews pointing at the row are tidied up with it.
+ */
+adminUsersRouter.delete(
+  '/admin/shop/items/:itemId/permanent',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteItem(req.ctx.adminActor!, String(req.params.itemId), req.body.note));
+  },
+);
+
+// ─── Shelves, and the subcategories under them (RULES R9) ──────────────────
+
+/**
+ * What each shelf is carrying — stock, sales, and what people want that is
+ * not an order yet — with every subcategory under it.
+ *
+ * The shelves are rows now, not a zod enum: the app is told each one's
+ * label and icon, so one added here appears on a phone that is already
+ * installed.
+ */
+adminUsersRouter.get('/admin/shop/categories', async (_req, res) => {
+  res.json(await listCategories());
+});
+
+/** Adds a shelf. The slug is derived from the name unless one is given. */
+adminUsersRouter.post('/admin/shop/categories', validate('body', categoryBody), async (req, res) => {
+  res.status(201).json(await createCategory(req.ctx.adminActor!, req.body));
+});
+
+/**
+ * The two bulk writes, and why they are declared before `/:slug`.
+ *
+ * Express matches in the order routes are registered, so `/:slug` would
+ * swallow `/subcategory` and `/move` — a rename would arrive as "update the
+ * shelf called subcategory". These two stay above it.
+ */
+
+/**
+ * Renames a subcategory across the items that hold it, or merges two by
+ * renaming one to the other's name. `to: null` leaves them unfiled.
+ */
+adminUsersRouter.put('/admin/shop/categories/subcategory', validate('body', subcategoryBody), async (req, res) => {
+  res.json(await renameSubcategory(req.ctx.adminActor!, req.body));
+});
+
+/** Moves a handful of items onto another shelf, in one write and one audit row. */
+adminUsersRouter.post('/admin/shop/categories/move', validate('body', recategoriseBody), async (req, res) => {
+  res.json(await recategoriseItems(req.ctx.adminActor!, req.body));
+});
+
+/** Renames a shelf, re-orders it, or takes it off the app. Never re-keys it: items carry the slug. */
+adminUsersRouter.put('/admin/shop/categories/:slug', validate('body', categoryPatch), async (req, res) => {
+  res.json(await updateCategory(req.ctx.adminActor!, String(req.params.slug), req.body));
+});
+
+/**
+ * Deletes a shelf. `moveTo` is where its items go and is required while any
+ * item is still on it — an item on a shelf that does not exist is an item
+ * no filter finds.
+ */
+adminUsersRouter.delete('/admin/shop/categories/:slug', validate('body', categoryDeleteBody), async (req, res) => {
+  res.json(await deleteCategory(req.ctx.adminActor!, String(req.params.slug), req.body));
+});
+
+/** Adds a subcategory to a shelf — the second dropdown on the item form. */
+adminUsersRouter.post(
+  '/admin/shop/categories/:slug/subcategories',
+  validate('body', subcategoryCreateBody),
+  async (req, res) => {
+    res.status(201).json(await createSubcategory(req.ctx.adminActor!, String(req.params.slug), req.body));
+  },
+);
+
+/** Renames one across every item that holds it; an existing name merges the two. */
+adminUsersRouter.put(
+  '/admin/shop/categories/:slug/subcategories/:name',
+  validate('body', subcategoryPatchBody),
+  async (req, res) => {
+    res.json(
+      await updateSubcategory(req.ctx.adminActor!, String(req.params.slug), decodeURIComponent(String(req.params.name)), req.body),
+    );
+  },
+);
+
+/** Removes one. `reassignTo` files its items under a neighbour; null leaves them unfiled. */
+adminUsersRouter.delete(
+  '/admin/shop/categories/:slug/subcategories/:name',
+  validate('body', subcategoryDeleteBody),
+  async (req, res) => {
+    res.json(
+      await deleteSubcategory(req.ctx.adminActor!, String(req.params.slug), decodeURIComponent(String(req.params.name)), req.body),
+    );
+  },
+);
+
+// ─── Challenges and badges (RULES C1–C7) ───────────────────────────────────
+
+/**
+ * Every challenge, with what it has actually paid: completions, members,
+ * coins granted, and the ones the economy has not paid because the daily
+ * ceiling or ⚙ `coins.achievements.enabled` held them (D-46).
+ */
+adminUsersRouter.get('/admin/challenges', async (_req, res) => {
+  res.json(await listChallenges());
+});
+
+adminUsersRouter.post('/admin/challenges', validate('body', challengeBody), async (req, res) => {
+  res.status(201).json(await createChallenge(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.get('/admin/challenges/:challengeId', async (req, res) => {
+  res.json(await getChallenge(String(req.params.challengeId)));
+});
+
+adminUsersRouter.put('/admin/challenges/:challengeId', validate('body', challengePatch), async (req, res) => {
+  res.json(await updateChallenge(req.ctx.adminActor!, String(req.params.challengeId), req.body));
+});
+
+/**
+ * Takes it off every member's board — never a delete, so the completions
+ * that paid somebody's coins stay readable. `{ "active": true }` puts it
+ * back.
+ */
+adminUsersRouter.delete(
+  '/admin/challenges/:challengeId',
+  validate('body', z.object({ active: z.boolean().default(false), note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await setChallengeActive(req.ctx.adminActor!, String(req.params.challengeId), req.body.active, req.body.note));
+  },
+);
+
+/** Deletes it outright — refused the moment anybody has finished it. */
+adminUsersRouter.delete(
+  '/admin/challenges/:challengeId/permanent',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteChallenge(req.ctx.adminActor!, String(req.params.challengeId), req.body.note));
+  },
+);
+
+/** Every badge, who holds it, and what pays it out. */
+adminUsersRouter.get('/admin/achievements', async (_req, res) => {
+  res.json(await listAchievements());
+});
+
+adminUsersRouter.post('/admin/achievements', validate('body', achievementBody), async (req, res) => {
+  res.status(201).json(await createAchievement(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.get('/admin/achievements/:achievementId', async (req, res) => {
+  res.json(await getAchievement(String(req.params.achievementId)));
+});
+
+adminUsersRouter.put('/admin/achievements/:achievementId', validate('body', achievementPatch), async (req, res) => {
+  res.json(await updateAchievement(req.ctx.adminActor!, String(req.params.achievementId), req.body));
+});
+
+/**
+ * Deletes a badge: refused while anybody holds it (C7 — a badge is never
+ * taken back) and while a challenge still awards it.
+ */
+adminUsersRouter.delete(
+  '/admin/achievements/:achievementId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteAchievement(req.ctx.adminActor!, String(req.params.achievementId), req.body.note));
+  },
+);
+
+// ─── The gym: exercises and the templates built from them ──────────────────
+
+/**
+ * Every exercise and every template, with what uses each: the templates an
+ * exercise is in, the sets members have logged of it, and the ids a
+ * template names that no exercise answers to.
+ */
+adminUsersRouter.get('/admin/training', async (_req, res) => {
+  res.json(await listTraining());
+});
+
+adminUsersRouter.post('/admin/training/exercises', validate('body', exerciseBody), async (req, res) => {
+  res.status(201).json(await createExercise(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.put('/admin/training/exercises/:exerciseId', validate('body', exercisePatch), async (req, res) => {
+  res.json(await updateExercise(req.ctx.adminActor!, String(req.params.exerciseId), req.body));
+});
+
+/** Refused while a template names it — the app drops a template with a hole in it. */
+adminUsersRouter.delete(
+  '/admin/training/exercises/:exerciseId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteExercise(req.ctx.adminActor!, String(req.params.exerciseId), req.body.note));
+  },
+);
+
+adminUsersRouter.post('/admin/training/templates', validate('body', templateBody), async (req, res) => {
+  res.status(201).json(await createTemplate(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.put('/admin/training/templates/:templateId', validate('body', templatePatch), async (req, res) => {
+  res.json(await updateTemplate(req.ctx.adminActor!, String(req.params.templateId), req.body));
+});
+
+/** A workout started from one keeps its own copy, so the row can simply go. */
+adminUsersRouter.delete(
+  '/admin/training/templates/:templateId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteTemplate(req.ctx.adminActor!, String(req.params.templateId), req.body.note));
+  },
+);
+
+// ─── Coupons (RULES R16) ───────────────────────────────────────────────────
+
+/** Every coupon, with what it has actually given away. */
+adminUsersRouter.get('/admin/shop/coupons', validate('query', couponQuery), async (req, res) => {
+  res.json(await listCoupons(req.query as unknown as z.infer<typeof couponQuery>));
+});
+
+/** One coupon, with who claimed it and the orders that hold it. */
+adminUsersRouter.get('/admin/shop/coupons/:code', async (req, res) => {
+  res.json(await getCoupon(String(req.params.code)));
+});
+
+/** Creates a coupon, or rewrites the one with that code. Idempotent on the code. */
+adminUsersRouter.post('/admin/shop/coupons', validate('body', couponBody), async (req, res) => {
+  const result = await saveCoupon(req.ctx.adminActor!, req.body);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+/** A patch, for the one field somebody came to change. */
+adminUsersRouter.put('/admin/shop/coupons/:code', validate('body', couponPatch), async (req, res) => {
+  res.json(await patchCoupon(req.ctx.adminActor!, String(req.params.code), req.body));
+});
+
+/**
+ * Switches it off, or back on — the ordinary way to end a campaign. The
+ * till tests `active` first, so this stops it applying everywhere at once.
+ */
+adminUsersRouter.put(
+  '/admin/shop/coupons/:code/active',
+  validate('body', z.object({ active: z.boolean(), note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await setCouponActive(req.ctx.adminActor!, String(req.params.code), req.body.active, req.body.note));
+  },
+);
+
+/**
+ * Deletes a coupon nothing ever used. One that has been redeemed is
+ * refused — an order holds its own snapshot of it and the usage rows are
+ * what the per-member limit is counted from.
+ */
+adminUsersRouter.delete(
+  '/admin/shop/coupons/:code',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteCoupon(req.ctx.adminActor!, String(req.params.code), req.body.note));
+  },
+);
+
+// ─── Baskets and saved items (RULES R14) ───────────────────────────────────
+
+/**
+ * Every basket with something in it, dearest or most recent first.
+ *
+ * `blocked` is the column to act on: lines a checkout would refuse because
+ * the item was retired, deleted or ran out under them. The value is at
+ * today's prices, because a basket holds references rather than snapshots.
+ */
+adminUsersRouter.get('/admin/shop/baskets', validate('query', basketQuery), async (req, res) => {
+  res.json(await listBaskets(req.query as unknown as z.infer<typeof basketQuery>));
+});
+
+/**
+ * What people want against what is on the shelf: saves and basket units
+ * beside stock. Sorted by the wanting, which is the point — sales figures
+ * can only ever show what was in stock.
+ */
+adminUsersRouter.get('/admin/shop/demand', validate('query', demandQuery), async (req, res) => {
+  res.json(await demand(req.query as unknown as z.infer<typeof demandQuery>));
+});
+
+/** One member's basket and saved items — as stored, and as they see them. */
+adminUsersRouter.get('/admin/users/:userId/basket', async (req, res) => {
+  res.json(await getBasket(String(req.params.userId)));
+});
+
+/** Takes one line out, through the member's own cart path. */
+adminUsersRouter.delete('/admin/users/:userId/basket/lines', validate('body', basketLineBody), async (req, res) => {
+  res.json(await removeBasketLine(req.ctx.adminActor!, String(req.params.userId), req.body));
+});
+
+/** Takes the coupon off, for a basket stuck behind a campaign that has ended. */
+adminUsersRouter.delete('/admin/users/:userId/basket/coupon', validate('body', basketNoteBody), async (req, res) => {
+  res.json(await clearBasketCoupon(req.ctx.adminActor!, String(req.params.userId), req.body.reason));
+});
+
+/** Empties it, coupon and all. */
+adminUsersRouter.delete('/admin/users/:userId/basket', validate('body', basketNoteBody), async (req, res) => {
+  res.json(await clearBasket(req.ctx.adminActor!, String(req.params.userId), req.body.reason));
+});
+
+/** Unsaves an item for somebody. */
+adminUsersRouter.delete(
+  '/admin/users/:userId/wishlist/:itemId',
+  validate('body', basketNoteBody),
+  async (req, res) => {
+    res.json(
+      await removeWishlistEntry(
+        req.ctx.adminActor!,
+        String(req.params.userId),
+        String(req.params.itemId),
+        req.body.reason,
+      ),
+    );
+  },
+);
+
+// ─── Reviews (RULES R15) ───────────────────────────────────────────────────
+
+/** Every review, worst first if asked — which is the sort this exists for. */
+adminUsersRouter.get('/admin/shop/reviews', validate('query', reviewQuery), async (req, res) => {
+  res.json(await listReviews(req.query as unknown as z.infer<typeof reviewQuery>));
+});
+
+/** Takes one down and recounts the item's rating, which every list reads. */
+adminUsersRouter.delete('/admin/shop/reviews/:reviewId', validate('body', deleteReviewBody), async (req, res) => {
+  res.json(await deleteReview(req.ctx.adminActor!, String(req.params.reviewId), req.body.reason));
+});
+
 // ─── Badges by hand, and telling more than one member ──────────────────────
 
 /**
@@ -562,6 +1060,161 @@ adminUsersRouter.post('/admin/releases', validate('body', releaseBody), async (r
  * what makes an update mandatory; it is refused if it would leave members
  * with no build to update to.
  */
+// ─── The notification system (ARCHITECTURE §5.7) ───────────────────────────
+
+/**
+ * What the app has actually told everybody, and what became of it: the feed
+ * row always, the push only where consent allowed it, and `read` after.
+ *
+ * Nothing here sends anything — `POST /admin/notifications/broadcast` above
+ * is the one send, and `notify()` is the only path to a push.
+ */
+adminUsersRouter.get('/admin/notifications', validate('query', notificationQuery), async (req, res) => {
+  res.json(await listNotifications(req.query as unknown as z.infer<typeof notificationQuery>));
+});
+
+/**
+ * Every broadcast, from the audit log, joined to what is left in the feeds:
+ * the tally the send reported, beside the open rate it could not know.
+ */
+adminUsersRouter.get(
+  '/admin/notifications/broadcasts',
+  validate('query', z.object({ limit: z.coerce.number().int().min(1).max(100).default(25) })),
+  async (req, res) => {
+    res.json(await broadcastHistory(Number(req.query.limit ?? 25)));
+  },
+);
+
+/**
+ * Takes back as much of a broadcast as can be taken back: the rows nobody
+ * has opened, which also cancels any push quiet hours were still holding.
+ * What was already read is left alone, and the answer says how much.
+ */
+adminUsersRouter.post(
+  '/admin/notifications/broadcasts/:dedupeKey/retract',
+  validate('body', retractBody),
+  async (req, res) => {
+    res.json(await retractBroadcast(req.ctx.adminActor!, String(req.params.dedupeKey), req.body.reason));
+  },
+);
+
+/** One row out of one feed — which also cancels a push still being held. */
+adminUsersRouter.delete('/admin/notifications/:id', validate('body', deleteNotificationBody), async (req, res) => {
+  res.json(await deleteNotification(req.ctx.adminActor!, String(req.params.id), req.body.reason));
+});
+
+// ─── The support system (RULES P12) ────────────────────────────────────────
+
+/**
+ * The queue, ordered by who has been waiting longest for *us* — which is
+ * computed from the thread's last message rather than stored, so it cannot
+ * disagree with what the thread says.
+ */
+adminUsersRouter.get('/admin/support/tickets', validate('query', ticketQuery), async (req, res) => {
+  res.json(await listTickets(req.query as unknown as z.infer<typeof ticketQuery>));
+});
+
+/** One ticket, its whole thread, the phone it was opened from, and their others. */
+adminUsersRouter.get('/admin/support/tickets/:ticketId', async (req, res) => {
+  res.json(await getTicket(String(req.params.ticketId)));
+});
+
+/**
+ * Answers them, as support — and tells them, through `notify()`, so their
+ * own consent decides the push. `status` moves in the same write, because
+ * "reply and resolve" is one action.
+ */
+adminUsersRouter.post('/admin/support/tickets/:ticketId/replies', validate('body', replyBody), async (req, res) => {
+  res.status(201).json(await replyToTicket(req.ctx.adminActor!, String(req.params.ticketId), req.body));
+});
+
+/** Moves its state without saying anything in the thread. */
+adminUsersRouter.put('/admin/support/tickets/:ticketId/status', validate('body', ticketStatusBody), async (req, res) => {
+  res.json(await setTicketStatus(req.ctx.adminActor!, String(req.params.ticketId), req.body));
+});
+
+/**
+ * Deletes a ticket that should never have been one — spam, a duplicate.
+ * Refused once support has replied: that would take away the member's copy
+ * of what we told them. Closing is how a conversation ends.
+ */
+adminUsersRouter.delete('/admin/support/tickets/:ticketId', validate('body', deleteTicketBody), async (req, res) => {
+  res.json(await deleteTicket(req.ctx.adminActor!, String(req.params.ticketId), req.body.reason));
+});
+
+// ─── The help centre's own content (RULES P12) ──────────────────────────────
+
+/** The articles, with the shelves they are filed under and the empty ones. */
+adminUsersRouter.get('/admin/support/faqs', validate('query', faqQuery), async (req, res) => {
+  res.json(await listFaqs(req.query as unknown as z.infer<typeof faqQuery>));
+});
+
+/** Writes an article, creating it where the id is new. Idempotent on the id. */
+adminUsersRouter.post('/admin/support/faqs', validate('body', faqBody), async (req, res) => {
+  const result = await saveFaq(req.ctx.adminActor!, req.body);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+/** A patch, for the one field somebody came to change — usually `active`. */
+adminUsersRouter.put('/admin/support/faqs/:faqId', validate('body', faqPatch), async (req, res) => {
+  res.json(await patchFaq(req.ctx.adminActor!, String(req.params.faqId), req.body));
+});
+
+/**
+ * A real delete, unlike a shop item's: nothing holds a snapshot of an
+ * article. Hiding it (`active: false`) is the other option, and the right
+ * one for an answer that is wrong today and right next week.
+ */
+adminUsersRouter.delete(
+  '/admin/support/faqs/:faqId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteFaq(req.ctx.adminActor!, String(req.params.faqId), req.body.note));
+  },
+);
+
+/** The app guide, chapter by chapter, with the icons and tints the app can draw. */
+adminUsersRouter.get('/admin/support/guide', async (_req, res) => {
+  res.json(await listGuide());
+});
+
+adminUsersRouter.post('/admin/support/guide', validate('body', guideBody), async (req, res) => {
+  const result = await saveGuideSection(req.ctx.adminActor!, req.body);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+adminUsersRouter.delete(
+  '/admin/support/guide/:sectionId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteGuideSection(req.ctx.adminActor!, String(req.params.sectionId), req.body.note));
+  },
+);
+
+// ─── The whole config, key by key ──────────────────────────────────────────
+
+/**
+ * Every section of `CONFIG_DEFAULTS`: what is in force, what the code
+ * ships, and where the two have parted. The step pipeline's own knobs have
+ * their own curated page (`/admin/config/steps`) and are marked as such
+ * here rather than hidden.
+ */
+adminUsersRouter.get('/admin/config', async (_req, res) => {
+  res.json(await appConfig());
+});
+
+/**
+ * Writes any config key by its dotted path, or puts one back.
+ *
+ * A path that does not exist is a 422 rather than a stray key, a value of
+ * the wrong kind is refused against the shape of the defaults, and the
+ * merged config goes through the same cross-field validator every read runs
+ * before anything is written.
+ */
+adminUsersRouter.put('/admin/config', validate('body', setAppConfigBody), async (req, res) => {
+  res.json(await setAppConfig(req.ctx.adminActor!, req.body));
+});
+
 adminUsersRouter.put('/admin/app/update-policy', validate('body', updatePolicyBody), async (req, res) => {
   res.json(await setUpdatePolicy(req.ctx.adminActor!, req.body));
 });

@@ -91,6 +91,7 @@ const answer = (overrides: Partial<ChallengeDetail> = {}): ChallengeDetail =>
     reward: {
       coins: 500,
       caption: 'Finish the week to earn',
+      paid: true,
       badge: {
         id: 'a-step-master',
         value: 70_000,
@@ -270,6 +271,25 @@ describe('ChallengeDetailScreen', () => {
     expect(text).toContain('Finish the week to earn');
     expect(text).toContain('500 coins');
     expect(text).toContain('Step Master');
+  });
+
+  /**
+   * The figure is the server's either way; what changes is whether the
+   * screen presents it as a promise (D-87). A reward the server has not
+   * said is payable defaults to not payable, so an older server cannot make
+   * this screen promise coins by omission.
+   */
+  test('says the coins have not started rather than promising them', async () => {
+    challengeApi.detail.mockResolvedValue(
+      answer({ reward: { ...answer().reward, paid: false } }),
+    );
+
+    const text = allText(await render());
+
+    expect(text).toContain('Coins for this challenge start soon');
+    expect(text).not.toContain('Finish the week to earn');
+    // Still shown, because it is still what the challenge is worth.
+    expect(text).toContain('500 coins');
   });
 
   test('the rules are the server’s words, verbatim', async () => {

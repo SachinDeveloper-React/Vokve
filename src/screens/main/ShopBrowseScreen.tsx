@@ -100,7 +100,9 @@ export const ShopBrowseScreen = () => {
   );
   const catalogue = useCatalogue(query);
 
-  const presentation = category ? presentationOf(category) : null;
+  // The shelf's own label and glyph, as the server sent them: a page
+  // opened on a shelf added last week has a title either way.
+  const presentation = category ? presentationOf(category, summaries) : null;
   const title =
     route.params?.title ??
     (deals ? "Today's deals" : presentation?.label ?? 'All rewards');

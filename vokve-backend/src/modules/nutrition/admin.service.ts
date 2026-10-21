@@ -1,8 +1,9 @@
 import { plannedMealSchema, type PlannedMeal } from '../../contracts/index.js';
+import { getConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { AuditLogModel } from '../platform/models.js';
-import { DietPlanModel, FoodItemModel, NutritionProfileModel } from './models.js';
+import { DIET_TYPES, DietPlanModel, FoodEntryModel, FoodItemModel, MEAL_PLANS, NUTRITION_GOALS, NutritionProfileModel } from './models.js';
 
 /**
  * Writing the diet plan library (RULES N10), for the operator rather than the
@@ -206,6 +207,115 @@ export async function adminRetirePlan(actor: string, planId: string): Promise<{ 
   return { plan, released };
 }
 
+/**
+ * Deletes a plan outright — the draft nobody ever followed.
+ *
+ * Retiring is what ending a plan's life looks like: the row stays and a
+ * member's history still resolves it. This is the other case, so it is
+ * refused the moment the audit trail is not the only thing pointing at it:
+ * anybody currently on the plan has to be handed back first, which the
+ * delete does by releasing them, but a plan that has been followed is one
+ * somebody will ask about.
+ */
+export async function adminDeletePlan(actor: string, planId: string): Promise<{ deleted: true; id: string; released: number }> {
+  const before = await DietPlanModel.findById(planId).lean<PlanRow | null>();
+  if (!before) throw Errors.notFound('That diet plan');
+  const released = await releaseMembers(planId);
+  await DietPlanModel.deleteOne({ _id: planId });
+  await audit(actor, 'diet_plan.deleted', planId, toAdminPlan(before), { deleted: true, released });
+  return { deleted: true, id: planId, released };
+}
+
+/**
+ * What the nutrition side of the app is actually made of, in one read.
+ *
+ * The three pages under it — goals, the food library, the plans — each
+ * answer their own question; this answers the one before them. A library
+ * with no quick-adds, a plan library where every member is on the server's
+ * own choice, or defaults nobody has revisited since launch are all things
+ * you only see by counting.
+ */
+export async function adminNutritionOverview() {
+  const config = await getConfig();
+  const [foods, plans, profiles, planCounts, dietTypes, mealPlans, goals, entries, loggers] = await Promise.all([
+    FoodItemModel.aggregate<{ _id: null; total: number; active: number; quickAdd: number }>([
+      { $match: { ownerUserId: null } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          active: { $sum: { $cond: [{ $eq: ['$active', false] }, 0, 1] } },
+          quickAdd: { $sum: { $cond: ['$quickAdd', 1, 0] } },
+        },
+      },
+    ]),
+    DietPlanModel.find({}, { name: 1, active: 1, days: 1, dietTypes: 1, mealPlans: 1 }).lean<PlanRow[]>(),
+    NutritionProfileModel.countDocuments({}),
+    NutritionProfileModel.aggregate<{ _id: string | null; members: number }>([
+      { $group: { _id: '$selectedPlanId', members: { $sum: 1 } } },
+    ]),
+    NutritionProfileModel.aggregate<{ _id: string; members: number }>([
+      { $group: { _id: '$preferences.dietType', members: { $sum: 1 } } },
+    ]),
+    NutritionProfileModel.aggregate<{ _id: string; members: number }>([
+      { $group: { _id: '$preferences.mealPlan', members: { $sum: 1 } } },
+    ]),
+    NutritionProfileModel.aggregate<{ _id: string; members: number; calories: number }>([
+      { $group: { _id: '$preferences.goal', members: { $sum: 1 }, calories: { $avg: '$goals.calories' } } },
+    ]),
+    FoodEntryModel.countDocuments({ deletedAt: null }),
+    FoodEntryModel.distinct('userId', { deletedAt: null }),
+  ]);
+
+  const countOf = (rows: { _id: string | null; members: number }[], key: string) =>
+    rows.find(row => row._id === key)?.members ?? 0;
+  const customFoods = await FoodItemModel.countDocuments({ ownerUserId: { $ne: null } });
+
+  return {
+    foods: {
+      total: foods[0]?.total ?? 0,
+      active: foods[0]?.active ?? 0,
+      retired: (foods[0]?.total ?? 0) - (foods[0]?.active ?? 0),
+      /** The add-meal screen's shortcut tiles (N8). */
+      quickAdd: foods[0]?.quickAdd ?? 0,
+      /** Members' own foods, which no operator may read or write (N8) — counted, not listed. */
+      custom: customFoods,
+    },
+    plans: {
+      total: plans.length,
+      active: plans.filter(plan => plan.active !== false).length,
+      /** Members who picked a plan by hand; the rest take the server's choice (N10). */
+      chosen: planCounts.filter(row => row._id !== null).reduce((sum, row) => sum + row.members, 0),
+      serverChoice: countOf(planCounts, null as unknown as string),
+      data: plans
+        .map(plan => ({
+          id: plan._id,
+          name: plan.name,
+          active: plan.active !== false,
+          days: (plan.days ?? []).length,
+          members: planCounts.find(row => row._id === plan._id)?.members ?? 0,
+        }))
+        .sort((a, b) => b.members - a.members || a.name.localeCompare(b.name)),
+    },
+    members: {
+      /** Members who have a nutrition profile at all — everyone else is on the defaults. */
+      profiles,
+      logging: loggers.length,
+      entries,
+      dietTypes: DIET_TYPES.map(type => ({ value: type, members: countOf(dietTypes, type) })),
+      mealPlans: MEAL_PLANS.map(plan => ({ value: plan, members: countOf(mealPlans, plan) })),
+      goals: NUTRITION_GOALS.map(goal => ({
+        value: goal,
+        members: countOf(goals, goal),
+        /** What the members on this goal are actually targeting, on average. */
+        averageCalories: Math.round(goals.find(row => row._id === goal)?.calories ?? 0),
+      })),
+    },
+    /** ⚙ `nutrition.*`: what a member starts with, and the limits on logging (N4). */
+    defaults: config.nutrition,
+  };
+}
+
 // ─── The food library (RULES N8, N11) ──────────────────────────────────────
 
 /**
@@ -395,6 +505,135 @@ export async function adminUpdateFood(actor: string, foodId: string, patch: Part
   const food = toAdminFood(row);
   await auditFood(actor, 'food_item.updated', foodId, toAdminFood(before), food);
   return food;
+}
+
+/**
+ * The spreadsheet case: a list of foods written somewhere else, imported
+ * whole and imported again next month with three figures corrected.
+ *
+ * Matched **by name**, case-folded, among the global rows. A spreadsheet
+ * has no ids in it — the operator typed "Chapati", not `food_7f3a` — so the
+ * name is the only key the two sides share, and matching on it is what
+ * makes a second upload an edit rather than a second Chapati. A row whose
+ * name is already in the library is updated in place, which keeps its id,
+ * and so keeps the audit trail pointing at one food rather than two.
+ *
+ * `dryRun` answers the same thing without writing: what the panel shows
+ * before anybody presses the button.
+ */
+export interface AdminFoodImportRow extends AdminFoodInput {
+  /** The sheet's own row number, so a refusal can name the line to fix. */
+  line?: number;
+}
+
+export interface AdminFoodImportResult {
+  dryRun: boolean;
+  created: number;
+  updated: number;
+  /** Rows the sheet repeated: the last one wins, as a later correction should. */
+  duplicates: number;
+  failed: { line: number | null; name: string; reason: string }[];
+  data: AdminFood[];
+}
+
+export async function adminImportFoods(
+  actor: string,
+  rows: AdminFoodImportRow[],
+  options: { dryRun?: boolean } = {},
+): Promise<AdminFoodImportResult> {
+  const dryRun = options.dryRun === true;
+  const existing = await FoodItemModel.find({ ownerUserId: null }, { name: 1 }).lean<{ _id: string; name: string }[]>();
+  const idOfName = new Map(existing.map(row => [row.name.trim().toLowerCase(), row._id]));
+
+  const failed: AdminFoodImportResult['failed'] = [];
+  const data: AdminFood[] = [];
+  let created = 0;
+  let updated = 0;
+  let duplicates = 0;
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const name = (row.name ?? '').trim();
+    const key = name.toLowerCase();
+    if (name.length === 0) {
+      failed.push({ line: row.line ?? null, name: '', reason: 'No name — a food is its name.' });
+      continue;
+    }
+    if (!Number.isFinite(row.calories)) {
+      failed.push({ line: row.line ?? null, name, reason: 'Calories is not a number.' });
+      continue;
+    }
+    if (seen.has(key)) duplicates += 1;
+    seen.add(key);
+
+    const input: AdminFoodInput = {
+      name,
+      portion: row.portion,
+      emoji: row.emoji,
+      calories: row.calories,
+      proteinG: row.proteinG,
+      carbsG: row.carbsG,
+      fatsG: row.fatsG,
+      fiberG: row.fiberG,
+      quickAdd: row.quickAdd,
+      sort: row.sort,
+      active: row.active,
+    };
+    const id = idOfName.get(key);
+    try {
+      if (dryRun) {
+        if (id) updated += 1;
+        else created += 1;
+        continue;
+      }
+      if (id) {
+        data.push(await adminUpdateFood(actor, id, input));
+        updated += 1;
+      } else {
+        const food = await adminCreateFood(actor, input);
+        // A sheet that names the same food twice is one food: the second
+        // row updates the first rather than adding a twin.
+        idOfName.set(key, food.id);
+        data.push(food);
+        created += 1;
+      }
+    } catch (error) {
+      failed.push({
+        line: row.line ?? null,
+        name,
+        reason: error instanceof Error ? error.message : 'Refused.',
+      });
+    }
+  }
+
+  if (!dryRun) {
+    await auditFood(actor, 'food_item.imported', 'import', null, {
+      created,
+      updated,
+      duplicates,
+      failed: failed.length,
+      names: data.slice(0, 50).map(food => food.name),
+    });
+  }
+
+  return { dryRun, created, updated, duplicates, failed, data };
+}
+
+/**
+ * Deletes a food outright — the mistake case: a row imported from the wrong
+ * column, a duplicate, a test row.
+ *
+ * Safe to do, which is why it is here at all: what a member ate keeps its
+ * own copy of every figure (N2), so nothing they logged changes and nothing
+ * dangles. Retiring is still the right answer for a food that was real and
+ * is not offered any more — it keeps the id the audit log names.
+ */
+export async function adminDeleteFood(actor: string, foodId: string): Promise<{ deleted: true; id: string }> {
+  const before = await FoodItemModel.findOne({ _id: foodId, ownerUserId: null }).lean<FoodRow | null>();
+  if (!before) throw Errors.notFound('That food');
+  await FoodItemModel.deleteOne({ _id: foodId, ownerUserId: null });
+  await auditFood(actor, 'food_item.deleted', foodId, toAdminFood(before), { deleted: true });
+  return { deleted: true, id: foodId };
 }
 
 /**

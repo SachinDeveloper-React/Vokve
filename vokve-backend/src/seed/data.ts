@@ -56,6 +56,51 @@ export const APP_RELEASES = [
  */
 const listed = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000);
 
+/**
+ * The shelves the shop opened with (RULES R9), and the subcategories the
+ * items below are filed under.
+ *
+ * A row per shelf rather than the zod enum this used to be: an operator
+ * adds a shelf in the panel and the app is told its label and icon, so the
+ * seed owns these four and nothing else. A re-seed puts back a label
+ * somebody renamed — these are the shop's own four — but it never touches
+ * a shelf that was added after it.
+ */
+export const SHOP_CATEGORIES = [
+  {
+    _id: 'clothing',
+    name: 'Clothes',
+    description: 'What you train in.',
+    icon: 'shirt',
+    sort: 1,
+    subcategories: ['T-shirts', 'Tops', 'Hoodies', 'Bottoms', 'Headwear', 'Socks'],
+  },
+  {
+    _id: 'gym',
+    name: 'Gym',
+    description: 'What you train with.',
+    icon: 'dumbbell',
+    sort: 2,
+    subcategories: ['Mats', 'Weights', 'Bands', 'Cardio', 'Support', 'Recovery'],
+  },
+  {
+    _id: 'sports',
+    name: 'Sports',
+    description: 'What you play with.',
+    icon: 'trophy',
+    sort: 3,
+    subcategories: ['Running', 'Cricket', 'Football', 'Badminton', 'Tennis', 'Swimming'],
+  },
+  {
+    _id: 'accessories',
+    name: 'Accessories',
+    description: 'The small things that go with any of them.',
+    icon: 'watch',
+    sort: 4,
+    subcategories: ['Bottles', 'Bags', 'Towels', 'Wearables'],
+  },
+] as const;
+
 export const SHOP_ITEMS = [
   // ── Clothing ─────────────────────────────────────────────────────────────
   { _id: 'tee', title: 'VOKVE Training Tee', description: 'Breathable training tee with the wordmark across the chest. Sizes S–XXL.', price: 79900, mrp: 119900, category: 'clothing', subcategory: 'T-shirts', emoji: '👕', badge: 'bestseller', isDeal: false, featured: true, tags: ['tshirt', 't-shirt', 'top', 'gym wear'], sizes: ['S', 'M', 'L', 'XL', 'XXL'], popularity: 320, listedAt: listed(120), sort: 1 },

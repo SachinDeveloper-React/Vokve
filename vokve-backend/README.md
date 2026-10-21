@@ -217,7 +217,125 @@ curl -s -X PUT $A/admin/diet-plans/<id> -H "$K" -H 'Content-Type: application/js
 # retire it: out of the library, and everyone who chose it falls back to the
 # server's own choice (`released` says how many). `{"active": true}` puts it back.
 curl -s -X DELETE $A/admin/diet-plans/<id> -H "$K" | jq '{released, active: .plan.active}'
+
+# delete it outright — the draft nobody followed. Its own path, because
+# retiring and deleting are different acts and only one is reversible.
+curl -s -X DELETE $A/admin/diet-plans/<id>/permanent -H "$K" | jq '{deleted, released}'
 ```
+
+### A spreadsheet of foods
+
+The food library is the other half of the same job, and it usually arrives as
+a sheet somebody keeps elsewhere. `POST /admin/foods/import` takes the rows as
+JSON — the panel reads the `.xlsx` or `.csv` and sends them, so this API stays
+JSON end to end and a script can drive the same import.
+
+```sh
+# what it would do, without writing anything
+curl -s -X POST $A/admin/foods/import -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "dryRun": true, "rows": [
+        { "line": 2, "name": "Chapati", "portion": "1 piece (40 g)", "calories": 104, "proteinG": 3, "carbsG": 20, "fatsG": 1 },
+        { "line": 3, "name": "Banana",  "portion": "1 medium",       "calories": 105, "proteinG": 1, "carbsG": 27, "fatsG": 0 }
+      ]}' | jq '{created, updated, duplicates, failed}'
+# → {"created":1,"updated":1,"duplicates":0,"failed":[]}
+
+# and for real
+curl -s -X POST $A/admin/foods/import -H "$K" -H 'Content-Type: application/json' -d @foods.json | jq '{created, updated}'
+
+# a row imported from the wrong column goes outright: a logged meal keeps its
+# own copy of every figure (N2), so nothing anybody ate changes.
+curl -s -X DELETE $A/admin/foods/<id>/permanent -H "$K" | jq '{deleted}'
+```
+
+Rows are matched **by name**, case-folded, among the global rows. A sheet has
+no ids in it — somebody typed "Chapati", not `food_7f3a` — so the name is the
+only key the two sides share, and matching on it is what makes a second upload
+an edit rather than a second Chapati. `line` is the sheet's own row number and
+comes back on anything refused, so a message names the line to fix.
+
+`GET /admin/nutrition/overview` is the read above all of it: how much library
+there is, how many quick-add tiles, which plans members are actually on, and
+what ⚙ `nutrition.*` gives somebody who has set nothing.
+
+## Challenges and badges (RULES C1–C7)
+
+Both were seed data until an operator needed to run a weekend challenge:
+changing what one pays, opening it, or adding a badge meant editing
+`seed/data.ts` and deploying. Both are rows the app reads live now.
+
+```sh
+# every challenge, with what it has actually paid
+curl -s "$A/admin/challenges" -H "$K" | jq '{totals, data: [.data[] | {id, title, goal, rewardCoins, state, completions}]}'
+
+# one that opens on Saturday — the id is written from the title
+curl -s -X POST $A/admin/challenges -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "title": "12K Steps Weekend", "metric": "steps", "cadence": "daily", "goal": 12000,
+        "rewardCoins": 250, "rewardsBadge": true, "badgeId": "a-10k-steps",
+        "startsOn": "2026-11-07", "endsOn": "2026-11-09" }' | jq '.challenge | {id, state}'
+
+curl -s -X PUT $A/admin/challenges/ch-12k-steps-weekend -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "goal": 14000 }' | jq '.challenge | {goal}'
+
+# off every board; the completions that paid somebody stay readable
+curl -s -X DELETE $A/admin/challenges/ch-12k-steps-weekend -H "$K" -H 'Content-Type: application/json' -d '{}' | jq '.challenge.active'
+# and outright, which is refused the moment anybody has finished it
+curl -s -X DELETE $A/admin/challenges/ch-draft/permanent -H "$K" -H 'Content-Type: application/json' -d '{}' | jq '{deleted}'
+
+# the badge shelf: who holds each one, and what pays it
+curl -s "$A/admin/achievements" -H "$K" | jq '{totals, data: [.data[] | {id, label, rule, members, awardedBy: [.awardedBy[].title], unreachable}]}'
+curl -s -X POST $A/admin/achievements -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "label": "12K Steps", "value": 12000, "metric": "steps", "rule": "best_day_steps", "rewardCoins": 120 }' | jq '.achievement.id'
+```
+
+Three rules the writes hold to, and each exists because of what points at a
+row rather than because of the row itself:
+
+- **A challenge anybody has finished is retired, never deleted.** A completion
+  row is what paid their coins (C4) and the ledger entry beside it names the
+  challenge; deleting the definition would leave both pointing at nothing.
+- **A badge somebody holds is never deleted** (C7 — unlocked once, never taken
+  back), and never while a challenge still awards it: the next completion
+  would pay out a badge that is not there. The list marks the opposite problem
+  too — `unreachable`, a badge with no rule and no challenge, which nothing
+  can ever unlock.
+- **Coins here are held by the same switches as everywhere else.** A reward is
+  recorded and paid when ⚙ `coins.achievements.enabled` allows it (D-46), so
+  `completions.unpaid` on a challenge is usually the switch or the daily
+  ceiling rather than the challenge.
+
+## The gym: exercises, and the templates built from them
+
+```sh
+# everything, with what uses what
+curl -s "$A/admin/training" -H "$K" | jq '{totals, templates: [.templates[] | {id, title, exercises: [.exercises[].name], missing}]}'
+
+# an exercise — the id is written from the name
+curl -s -X POST $A/admin/training/exercises -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "name": "Landmine Press", "muscleGroup": "shoulders", "equipment": "barbell" }' | jq '.exercises[-1]'
+
+# a workout built on it. `exerciseIds` is the order they are done in, and
+# `muscleGroups` follows the exercises unless it is named.
+curl -s -X POST $A/admin/training/templates -H "$K" -H 'Content-Type: application/json' \
+  -d '{ "title": "Shoulder Day", "estimatedMinutes": 40, "exerciseIds": ["landmine-press"] }' | jq '.templates[-1] | {id, muscleGroups}'
+
+curl -s -X DELETE $A/admin/training/templates/shoulder-day -H "$K" -H 'Content-Type: application/json' -d '{}' | jq '{deleted}'
+curl -s -X DELETE $A/admin/training/exercises/landmine-press -H "$K" -H 'Content-Type: application/json' -d '{}' | jq '{deleted}'
+```
+
+The relationship to watch is a template's exercises. The app's template
+contract carries **whole exercises**, not ids, so a template naming an
+exercise that is not there is one the phone *drops* — silently, from the
+member's point of view. Hence two rules:
+
+- a template is checked against the exercise list on the way in (422 naming
+  the ids nothing answers to), and
+- an exercise a template uses is not deleted; the refusal names the
+  templates to take it out of first. `missing` on a template read is the
+  same problem found after the fact, in a row somebody wrote by hand.
+
+A finished workout is a member's own record and is never touched here: it
+carries its own copy of every exercise and set, so correcting a name or a
+muscle group fixes the catalogue from now on and leaves the history alone.
 
 ## What a member did, and what their phone allows
 
@@ -633,6 +751,211 @@ Retiring is `active: false`: the item leaves the member's shelf and every
 order that holds it stays readable, because an order carries its own snapshot
 of what was bought.
 
+### One product in full, and the two ways to end one
+
+```sh
+# the four questions that are not on the item: sales, who is waiting for it,
+# what members wrote, and who changed it last
+curl -s "$A/admin/shop/items/tee/insight" -H "$K" | jq '{sales, wanted, orders: (.orders | length), reviews: {average, count}, trail: (.trail | length)}'
+
+# deleting it outright — its own path, because the two acts are different
+curl -s -X DELETE $A/admin/shop/items/draft-tee/permanent -H "$K" -H 'Content-Type: application/json' \
+  -d '{"note":"listed by accident"}' | jq
+# → {"deleted":true,"id":"draft-tee","basketsTidied":1,"savesRemoved":1,"reviewsRemoved":1}
+```
+
+`DELETE /admin/shop/items/:id` **retires**; `DELETE …/:id/permanent` deletes.
+Separate paths on purpose: only one of them is reversible, and the choice
+between them is not a flag somebody should be able to miss.
+
+The permanent one is for the mistake case — a slug typed wrong, a draft
+listed by accident, a duplicate. **An item any order holds is refused**
+(422), and the refusal says to retire it instead. Not because the order
+would break — an order carries its own snapshot (RULES R11) — but because
+deleting the row breaks the link from the order *back* to the product, which
+is what support follows when somebody asks what they received. What it does
+clean up is everything that points at the row and would otherwise dangle:
+stock, basket lines, saves and reviews.
+
+## Shelves, and the subcategories under them (RULES R9)
+
+```sh
+# what each shelf is carrying, with every subcategory under it
+curl -s "$A/admin/shop/categories" -H "$K" | jq '{icons, totals, data: [.data[] | {category, name, icon, items, stockValue, unitsSold, wanted, subcategories: [.subcategories[].name]}]}'
+
+# a new shelf — the slug is written from the name unless one is given
+curl -s -X POST $A/admin/shop/categories -H "$K" -H 'Content-Type: application/json' \
+  -d '{"name":"Yoga & Pilates","icon":"heart"}' | jq '{slug, created}'
+# → {"slug":"yoga-pilates","created":true}
+
+# rename it, re-order it, or take it off the app. Never re-key it.
+curl -s -X PUT $A/admin/shop/categories/yoga-pilates -H "$K" -H 'Content-Type: application/json' \
+  -d '{"name":"Yoga","sort":2}' | jq '.data[] | select(.category=="yoga-pilates") | {name, sort}'
+
+# delete it — `moveTo` is required while anything is still on it
+curl -s -X DELETE $A/admin/shop/categories/yoga-pilates -H "$K" -H 'Content-Type: application/json' \
+  -d '{"moveTo":"gym"}' | jq '{deleted, moved, movedTo}'
+
+# the subcategories: add one, rename it across its items, remove it
+curl -s -X POST $A/admin/shop/categories/clothing/subcategories -H "$K" -H 'Content-Type: application/json' \
+  -d '{"name":"Tees"}' | jq '.created'
+curl -s -X PUT $A/admin/shop/categories/clothing/subcategories/T-shirts -H "$K" -H 'Content-Type: application/json' \
+  -d '{"name":"Tees"}' | jq '{moved, mergedWith}'
+curl -s -X DELETE $A/admin/shop/categories/clothing/subcategories/Tees -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reassignTo":"Hoodies"}' | jq '{deleted, moved, reassignedTo}'
+
+# the two bulk writes, declared above `/:slug` so it cannot swallow them
+curl -s -X PUT $A/admin/shop/categories/subcategory -H "$K" -H 'Content-Type: application/json' \
+  -d '{"category":"clothing","from":"T-Shirts","to":"T-shirts"}' | jq '{moved, mergedWith}'
+curl -s -X POST $A/admin/shop/categories/move -H "$K" -H 'Content-Type: application/json' \
+  -d '{"ids":["cap","socks"],"category":"accessories","subcategory":"Bags"}' | jq '{moved, missing}'
+```
+
+The shelves were a zod enum until an operator needed a fifth one. They are
+rows in `shop_categories` now, and `GET /shop/categories` sends the app each
+shelf's **label** and **icon** beside its counts — so a shelf added this
+afternoon draws itself on a phone installed last month, and
+`shopCategorySchema` is a slug rather than four names.
+
+The two halves of "category" are still not the same kind of thing, and the
+difference decides what each write is careful about:
+
+- **A shelf is a row keyed by its slug**, which is what every item's
+  `category`, every filter link and every saved search carries. So the name
+  and the icon change freely and the slug never does, and deleting a shelf
+  has to say which shelf its items move to (they arrive unfiled — the
+  subcategory they were under belonged to the shelf they left). Retiring one
+  (`active: false`) takes it off the app and leaves every item where it is.
+- **A subcategory is a name on the item.** The shelf lists them so the panel
+  can offer a dropdown rather than a text box — which is what stops
+  "T-Shirts" sitting beside "T-shirts" — but the item carries the string, so
+  a rename is a write across every item that holds it, and renaming one onto
+  a name the shelf already has is how two are merged.
+
+An item write is refused (422) when its shelf does not exist, or when its
+subcategory is not one of that shelf's: the dropdowns are a convenience, and
+this API is also called by hand.
+
+A database that predates the collection is not a migration to remember: the
+first read builds a shelf for every category the items are already carrying,
+and adds any subcategory typed onto an item that its shelf does not list.
+
+Neither touches a basket or an order: a basket keys on the item's slug, and an
+order carries its own snapshot.
+
+## Coupons (RULES R16)
+
+```sh
+# every coupon, with what it has actually given away
+curl -s "$A/admin/shop/coupons?state=live" -H "$K" | jq '{totals, data: [.data[] | {code, kind, value, state, redemptions, remaining, given, deletable}]}'
+
+# one of them, with who claimed it and the orders that hold it
+curl -s "$A/admin/shop/coupons/WELCOME10" -H "$K" | jq '{coupon, usage: (.usage | length), orders: (.orders | length)}'
+
+# write one — idempotent on the code, which is stored upper-case
+curl -s -X POST $A/admin/shop/coupons -H "$K" -H 'Content-Type: application/json' -d '{
+  "code":"summer20","title":"20% off, up to ₹300","kind":"percent","value":20,
+  "maxDiscount":30000,"minSubtotal":99900,"perUserLimit":2,"maxRedemptions":500
+}' | jq '.created, .coupon.state'
+
+# end a campaign: the till tests `active` first, so this stops it everywhere at once
+curl -s -X PUT $A/admin/shop/coupons/SUMMER20/active -H "$K" -H 'Content-Type: application/json' \
+  -d '{"active":false,"note":"campaign over"}' | jq '.coupon.state'
+
+# and delete one that never ran
+curl -s -X DELETE $A/admin/shop/coupons/SUMMER20 -H "$K" -H 'Content-Type: application/json' -d '{}' | jq
+```
+
+`state` is the till's own verdict, in the order `checkCoupon` tests things:
+`inactive`, then `scheduled`, then `expired`, then `exhausted`, then `live`.
+Which matters because an operator told "expired" would go and change a date
+that would not help — a switched-off coupon reads `inactive`.
+
+Three rules zod cannot state on its own, because each needs two fields, are
+enforced on write and refused with the field named:
+
+- a `percent` coupon over 100%;
+- a `maxDiscount` on a `flat` one — the till applies it as well, so ₹200 off
+  with a ₹50 cap is ₹50 off, which is a campaign nobody meant to run. A patch
+  that switches `percent` → `flat` clears the stale cap rather than refusing;
+- a window that closes before it opens, or a `maxRedemptions` already below
+  what has been claimed (it would read as `exhausted` the moment it saved).
+
+`redemptions` is the till's counter, not an operator's: checkout `$inc`s it
+under a conditional write and a cancel gives it back, which is what holds the
+ceiling when two orders race. Nothing here sets it. **Deleting is only for a
+coupon nothing ever used** — one that has been redeemed is refused, because an
+order holds its own `{code, title, discount}` snapshot and the usage rows are
+what the per-member limit is counted from. The one tidy-up a delete does do is
+clearing the code off any basket still holding it.
+
+## Baskets and saved items (RULES R14)
+
+```sh
+# every basket with something in it, dearest first
+curl -s "$A/admin/shop/baskets?sort=value" -H "$K" | jq '{totals, data: [.data[] | {member: .member.email, lines, units, value, blocked, offShelf, couponCode, stale, orderedSince}]}'
+curl -s "$A/admin/shop/baskets?state=blocked" -H "$K" | jq '.data[].member.email'
+
+# one member's, as stored and as they see it
+curl -s "$A/admin/users/<userId>/basket" -H "$K" | jq '{basket, quote: {subtotal, coupon, payable}, wishlist: (.wishlist | length)}'
+
+# take one line out, the coupon off, or the lot — a reason is required on each
+curl -s -X DELETE $A/admin/users/<userId>/basket/lines -H "$K" -H 'Content-Type: application/json' \
+  -d '{"itemId":"tee","size":"M","color":"Black","reason":"out of stock for a month"}' | jq '.basket.lines | length'
+curl -s -X DELETE $A/admin/users/<userId>/basket/coupon -H "$K" -H 'Content-Type: application/json' -d '{"reason":"campaign ended"}' | jq
+curl -s -X DELETE $A/admin/users/<userId>/basket -H "$K" -H 'Content-Type: application/json' -d '{"reason":"member asked on the phone"}' | jq
+curl -s -X DELETE $A/admin/users/<userId>/wishlist/tee -H "$K" -H 'Content-Type: application/json' -d '{"reason":"duplicate"}' | jq
+
+# and what people want, against what is on the shelf
+curl -s "$A/admin/shop/demand?state=out_of_stock" -H "$K" | jq '[.data[] | {itemId, saved, inBaskets, units, onHand, short}]'
+```
+
+Every figure is at **today's** prices. A basket holds references, not
+snapshots (RULES R14) — a price that changes while something sits in one is
+the new price at checkout — so none of this is what the member saw when they
+filled it.
+
+**Two kinds of stuck, and only one of them lasts.** `getCart` drops a line
+whose item is off the shelf and writes the drop back, so it clears itself the
+next time the member opens their basket — and the admin read, which calls
+`getCart` to quote the basket as they see it, clears it too. That is
+`offShelf`: worth seeing, because it is what they meant to buy, but not a
+repair. A line whose item is merely **out of stock** is kept and refused at
+checkout with nothing on their screen to say which line is the problem. That
+is `blocked`, and it is the one to act on.
+
+`orderedSince` keeps the chasing honest: a basket whose owner went on to buy
+something else is a shortlist, not an abandonment. And `demand` is the one
+report sales figures cannot give — they can only ever show what was in stock.
+
+The three cart writes go through the member's own `removeCartLine`,
+`clearCart` and `removeCoupon`, so a basket an operator touched is left in
+exactly the shape the app would have left it in.
+
+## Reviews (RULES R15)
+
+```sh
+# worst first, which is the queue this exists for
+curl -s "$A/admin/shop/reviews?sort=lowest&rating=1" -H "$K" | jq '{summary, data: [.data[] | {id, rating, body, verified, stillHoldsAnOrder, item: .item.id}]}'
+
+# and take one down, which recounts the item
+curl -s -X DELETE $A/admin/shop/reviews/rev_123 -H "$K" -H 'Content-Type: application/json' -d '{"reason":"abuse"}' | jq
+# → {"deleted":true,"itemId":"tee","rating":{"average":5,"count":1}}
+```
+
+Deleting goes through commerce's own `recomputeItemRating`: `ratingAverage`
+and `ratingCount` are denormalised onto the item so no list ever joins
+`reviews`, and those are the figures every shop screen and every sort reads —
+a delete that skipped the recount would leave a rating with nothing behind it.
+The member can write another one; the unique index is on the pair, not on the
+history.
+
+`verified` is **not** re-decided here. It was set at write time from the
+member's orders and is deliberately never revisited, so a review written after
+buying stays a buyer's review even if the order was later refunded;
+`stillHoldsAnOrder` is the live question beside it, for whoever is judging the
+review.
+
 ## A badge by hand, and telling a segment
 
 ```sh
@@ -667,6 +990,188 @@ required, 5,000 recipients is the ceiling on one call, and every message goes
 through `notify()` — so a member who switched that category off gets the feed
 row and no push, and the answer says how many that was. One send carries one
 dedupe key, so pressing it twice cannot write two rows in anybody's feed.
+
+### Reading the feed back, and taking a send back
+
+```sh
+# every notification in the window, with what became of it
+curl -s "$A/admin/notifications?days=7&state=unread" -H "$K" | jq '{total, totals, byTopic}'
+curl -s "$A/admin/notifications?q=asha@example.com" -H "$K" | jq '[.data[] | {topic, title, read, pushedAt, pushDeferredUntil}]'
+
+# every broadcast, with the open rate the send could not know
+curl -s "$A/admin/notifications/broadcasts" -H "$K" | jq '[.data[] | {title, sent, live, retractable}]'
+
+# take back what can be taken back
+curl -s -X POST "$A/admin/notifications/broadcasts/admin_broadcast:1792298779209/retract" -H "$K" \
+  -H 'Content-Type: application/json' -d '{"reason":"the maintenance was called off","confirm":true}' | jq
+# → {"retracted":true,"removed":5,"leftBecauseRead":1,"alreadyPushed":0}
+
+# or one row out of one feed — which also cancels a push still being held
+curl -s -X DELETE $A/admin/notifications/ntf_123 -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reason":"sent to the wrong segment"}' | jq
+```
+
+Three figures are worth knowing apart, because they are three different
+things and only one of them is a failure:
+
+- **read** is the only honest measure of a message nobody was pushed;
+- **deferred** is a push quiet hours still hold — the one state with
+  something left to happen in it, and the one thing deleting a row cancels;
+- **notPushed** is a feed row with no push at all: the category was switched
+  off, or no phone on the account could have shown one. That is consent
+  working, not a delivery problem.
+
+**A retraction is honest about its limits.** It deletes the rows nobody has
+opened — which cancels any pending push with them — and leaves the ones
+already read, because removing a message from a feed after somebody has read
+it makes the member who asks about it look mistaken, and a push that has rung
+cannot be unrung. Both counts come back.
+
+The broadcast history is read from the audit log (`notifications.broadcast`)
+joined to the notifications still carrying that send's `dedupeKey`: the audit
+row is what was sent, the live rows are what became of it. No second
+collection, and nothing to keep in step.
+
+## Support, from the other side (RULES P12)
+
+```sh
+# the queue, ordered by who has been waiting longest for *us*
+curl -s "$A/admin/support/tickets?waiting=us" -H "$K" | jq '{totals, byCategory, data: [.data[] | {reference, subject, status, waitingHours, lastFrom}]}'
+curl -s "$A/admin/support/tickets?q=VK-7F3K" -H "$K" | jq '.data[0]'
+
+# one ticket: the thread, the phone it was opened from, and their others
+curl -s $A/admin/support/tickets/tkt_123 -H "$K" | jq '{ticket, member, otherTickets}'
+
+# answer them — and set the state in the same write
+curl -s -X POST $A/admin/support/tickets/tkt_123/replies -H "$K" -H 'Content-Type: application/json' \
+  -d '{"message":"Your steps were held for review and have now been credited.","status":"resolved"}' | jq '.ticket.status, .notified'
+
+# move it without saying anything in the thread
+curl -s -X PUT $A/admin/support/tickets/tkt_123/status -H "$K" -H 'Content-Type: application/json' \
+  -d '{"status":"in_progress","note":"picked up"}' | jq '.ticket.status'
+
+# and delete spam — refused once support has replied
+curl -s -X DELETE $A/admin/support/tickets/tkt_spam -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reason":"spam","confirm":true}' | jq
+```
+
+The member's half of this was already built — they open a ticket, the phone's
+own details ride along, they reply, they read the thread — and nobody could
+answer them. Three things shape the half that was missing:
+
+- **The queue is "who is waiting", not "what is open".** A ticket whose last
+  message is the member's is ours; one where we answered last is waiting on
+  them. `waitingOnUs` is computed from the thread rather than stored, so it
+  cannot drift from what the thread says — which is also why that filter and
+  the `waiting` sort are applied to the newest 500 rows the other filters
+  matched, rather than in the database.
+- **A reply tells them**, through `notify()`, so their own switches decide
+  whether a push follows the feed row — and the answer says which it was
+  (`"notified": {"status":"created","push":"category_off"}`). Answering an
+  `open` ticket also moves it to `in_progress`, because leaving it open would
+  have the queue claiming nobody has looked.
+- **Closing is the end.** The member's own reply route refuses a closed
+  ticket (`TICKET_CLOSED`) and tells them to open a new one, so a reply from
+  here is refused on a closed ticket too rather than quietly reopening a
+  conversation they cannot take part in.
+
+**Deleting is for a row that should never have been a ticket** — spam, a
+duplicate. One support has replied to is refused (422): that would take away
+the member's own copy of what we told them, and closing it keeps the thread
+where they can still read it.
+
+## The help centre's own content (RULES P12)
+
+```sh
+# articles, with the shelves they are filed under and the empty ones
+curl -s "$A/admin/support/faqs?state=any" -H "$K" | jq '{totals, byCategory, data: [.data[] | {id, category, question, active}]}'
+
+# write one — members read it at once, with no release
+curl -s -X POST $A/admin/support/faqs -H "$K" -H 'Content-Type: application/json' -d '{
+  "id":"how-coins-expire","category":"coins","question":"Do my coins expire?",
+  "answer":"Coins expire 180 days after they are earned. The oldest are always spent first.",
+  "tags":["expiry","validity"],"sort":1
+}' | jq '.created, .article.active'
+
+# hide it, or delete it
+curl -s -X PUT $A/admin/support/faqs/how-coins-expire -H "$K" -H 'Content-Type: application/json' -d '{"active":false}' | jq '.article.active'
+curl -s -X DELETE $A/admin/support/faqs/how-coins-expire -H "$K" -H 'Content-Type: application/json' -d '{}' | jq
+
+# the app guide, chapter by chapter
+curl -s $A/admin/support/guide -H "$K" | jq '{icons, tints, totals}'
+curl -s -X POST $A/admin/support/guide -H "$K" -H 'Content-Type: application/json' -d '{
+  "id":"first-steps","title":"Your first walk","summary":"Where the steps come from.",
+  "icon":"guide","tint":"success",
+  "steps":[{"title":"Allow activity access","body":"VOKVE counts with the phone own step sensor."}]
+}' | jq '.created, .totals'
+```
+
+Both collections exist for one stated reason — *"so support can answer a wave
+of the same question by writing one row, without waiting for an app
+release"* — and the row could not be written. Two things that are not obvious
+from the schema:
+
+- **The app validates what it is given.** A guide chapter's `icon` and `tint`
+  are parsed against the contract on read, so a name the app cannot draw does
+  not leave a blank tile: it makes the *whole guide* fail to parse on the
+  member's phone. Both are closed lists here for exactly that reason, and a
+  chapter with no steps is refused as a heading pretending to be a chapter.
+- **These really can be deleted.** Nothing holds a snapshot of an article —
+  no order, no ticket, no basket points at one — so unlike a shop item there
+  is nothing to break. `active: false` is for the one being drafted or
+  withdrawn for a fortnight, and `emptyCategories` names the shelves with
+  nothing active on them, because a help-page row (⚙ `support.topics`) that
+  opens an empty list is a tile leading nowhere.
+
+## Every other config key
+
+```sh
+# every section: what is in force, what the code ships, and where they parted
+curl -s $A/admin/config -H "$K" | jq '{totals, sections: [.sections[] | {section, overrides: (.overrides | length), alsoOnStepsPage}]}'
+
+# write one key by its dotted path
+curl -s -X PUT $A/admin/config -H "$K" -H 'Content-Type: application/json' \
+  -d '{"set":{"commerce.shippingFeePaise":9900,"support.hours":null},"note":"courier rates went up"}' | jq '.totals'
+
+# and put it back to what the code ships
+curl -s -X PUT $A/admin/config -H "$K" -H 'Content-Type: application/json' \
+  -d '{"reset":["commerce.shippingFeePaise"]}' | jq '.totals'
+```
+
+`/admin/config/steps` above is the step pipeline's own surface: a curated,
+hand-written schema, field by field, because those are the knobs most often
+turned. This is the rest of the file — commerce, hydration, the streak, the
+health ranges, nutrition, the leaderboard, challenges, OTP, devices,
+integrity, the account's grace periods, the help centre's copy, the locale —
+and writing a second hand-made schema for all of it would be a copy of the
+defaults that drifts from them the first time somebody adds a key.
+
+So a patch here is **validated against the shape of the defaults**, which
+cannot drift because it *is* the defaults:
+
+- a path that does not exist in `CONFIG_DEFAULTS` is refused, so a typo is a
+  422 rather than a stray key `deepMerge` would happily add
+  (`"commerce.shippingFeePiase": "There is no such config key."`);
+- a value whose *kind* differs from the default's is refused — `"9900"` for a
+  number, `1` for a boolean, an object where a list lives;
+- inside a list of objects, a key the default's own elements do not have is
+  refused, which is what keeps ⚙ `support.topics` honest — an unknown key
+  there is a blank tile on a member's help page;
+- `null` is allowed only where it means something: a key the code already
+  ships as null, or one of the seven in `NULLABLE` (no phone on the help
+  page, no tracking link on an order). Those are the `| null` annotations in
+  `defaults.ts`, which are types and therefore gone by the time this runs;
+- and then the merged config goes through `assertConfigValid` — the same
+  cross-field validator every read runs — before anything is written, so the
+  ladder rules still hold and the operator gets the sentence
+  (`"hydration: 99999–8000 ml is not a range a drink can be in"`).
+
+Writes are `$set` on dotted paths so two operators turning two knobs do not
+overwrite each other, `reset` is `$unset` (the code's default, not the
+previous value), and the cache is invalidated at once — a member's next
+request reads the new value. `app.minVersion` is **refused** here and points
+at the Releases surface, which checks that the store actually has a build to
+send members to (`NO_BUILD_TO_UPDATE_TO`) — that check is the point of it.
 
 ## Fake steps, and who looks at them
 

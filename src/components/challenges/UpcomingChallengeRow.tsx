@@ -73,7 +73,13 @@ export const UpcomingChallengeRow = memo(({
     ? formatStartLabel(challenge.startsAt, relativeTo)
     : '';
 
-  const label = `${challenge.title}. ${challenge.description}. ${starts}. Pays ${challenge.rewardCoins} coins`;
+  const label = `${challenge.title}. ${challenge.description}. ${starts}. ${
+    challenge.rewardPaid
+      ? `Pays ${challenge.rewardCoins} coins`
+      : challenge.rewardCoins > 0
+        ? `${challenge.rewardCoins} coins once coins start`
+        : 'Pays a badge'
+  }`;
 
   const press = useCallback(
     () => onPress?.(challenge.id),
@@ -112,7 +118,13 @@ export const UpcomingChallengeRow = memo(({
           </AppText>
         </HStack>
 
-        <CoinAmount amount={challenge.rewardCoins} size="sm" withUnit />
+        {challenge.rewardPaid ? (
+          <CoinAmount amount={challenge.rewardCoins} size="sm" withUnit />
+        ) : (
+          <AppText variant="miniMicro" color="textSecondary" numberOfLines={1}>
+            {challenge.rewardCoins > 0 ? 'Coins start soon' : 'Badge'}
+          </AppText>
+        )}
       </VStack>
     </HStack>
   );

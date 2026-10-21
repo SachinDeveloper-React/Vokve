@@ -94,10 +94,27 @@ export interface StepProfile {
 }
 
 /**
+ * What the counting notification says. No step count, by choice: the
+ * tracker's own figure is everything this phone saw — a watch's steps out
+ * of Health Connect, and the steps the counter handed over in one go after
+ * an OEM task killer let the service back — while every screen shows only
+ * the part the server verified (`verifiedActivityOf`). An ongoing
+ * notification quoting the larger number is a second, louder answer to
+ * "how many steps today?", and it is the one the user cannot refresh.
+ *
+ * To put the live count back, make the title `'{steps} steps so far'` — the
+ * tracker fills the token — and say in the text that the app verifies them.
+ */
+const NOTIFICATION_COPY = {
+  notificationTitle: 'Counting your steps',
+  notificationText: 'Vokve is counting, even with the app closed.',
+} as const;
+
+/**
  * The tracker's config: the server's set-up (Health Connect read for a
  * watch and written with this phone's own steps, checks that flag and
- * remove nothing, `split` recovery, as it stands by default), and the
- * user's own body and goal.
+ * remove nothing, `split` recovery, as it stands by default), the
+ * notification's words, and the user's own body and goal.
  */
 function trackerConfig(
   profile: StepProfile,
@@ -105,6 +122,7 @@ function trackerConfig(
 ): StepTrackerConfig {
   const config: StepTrackerConfig = {
     ...server,
+    ...NOTIFICATION_COPY,
     healthConnectReadTypes: [...server.healthConnectReadTypes],
     // A set-up kept from before the server sent one has none.
     wearableAllowlist: [...(server.wearableAllowlist ?? [])],
@@ -501,10 +519,17 @@ export async function stopStepsWhenSignedOut(): Promise<void> {
     if (state !== 'running' && state !== 'paused') {
       return;
     }
-    logger.warn('steps', 'Counting was still on with nobody signed in; stopping it');
+    logger.warn(
+      'steps',
+      'Counting was still on with nobody signed in; stopping it',
+    );
     await StepTracker.stopTracking();
   } catch (error) {
-    logger.warn('steps', 'Could not stop counting for a signed-out phone', error);
+    logger.warn(
+      'steps',
+      'Could not stop counting for a signed-out phone',
+      error,
+    );
   }
 }
 
@@ -951,6 +976,41 @@ export async function improveBackgroundCounting(): Promise<
   return opened;
 }
 
+/** How long sign-out waits for this phone's days to reach the server. */
+const SIGN_OUT_FLUSH_MS = 8000;
+
+/**
+ * Everything this phone has counted, sent while the session can still send
+ * it — the last thing a sign-out does before the tokens go.
+ *
+ * Counting stops at the sign-out and starts again at the next sign-in
+ * (D-56), so the tail of today between the last sync and the sign-out is
+ * the account's and will never be sent by anything else: after this the
+ * tokens are gone, and the queue only moves again if *this* account signs
+ * back in on *this* phone. Sign in on another phone instead and the day
+ * shown there would be missing that tail for good.
+ *
+ * Bounded, and it never throws. Leaving must not wait on a slow network,
+ * and a sync that could not finish is not a reason to keep somebody signed
+ * in — what does not get out stays queued for the next sign-in here.
+ */
+export async function flushStepsForSignOut(
+  timeoutMs = SIGN_OUT_FLUSH_MS,
+): Promise<void> {
+  if (!syncOwner()) {
+    return;
+  }
+  scheduleSync(daysToCatchUp(), { force: true });
+  await Promise.race([
+    flush().catch(error => {
+      logger.warn('steps', 'Sign-out sync did not finish', error);
+    }),
+    new Promise<void>(resolve => {
+      setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+}
+
 /**
  * Today and yesterday, now, whatever was sent last — then the server's week
  * again, so whatever asked sees the server's answer.
@@ -971,7 +1031,11 @@ export async function syncStepsNow(): Promise<void> {
  * that is no longer theirs — and `session` means the app was already
  * running and its own session sent the days instead.
  */
-export type BackgroundSyncOutcome = 'sent' | 'session' | 'no_owner' | 'signed_out';
+export type BackgroundSyncOutcome =
+  | 'sent'
+  | 'session'
+  | 'no_owner'
+  | 'signed_out';
 
 /**
  * Sends what this phone has not sent, with no session and no screen: the
@@ -1130,7 +1194,8 @@ async function runFlush(): Promise<void> {
   // A session that ends mid-flush abandons the rest of it. The headless pass
   // has no session to end, so it runs until its own owner is cleared.
   const id = session?.id;
-  const live = () => (id === undefined ? backgroundOwner === owner : isLive(id));
+  const live = () =>
+    id === undefined ? backgroundOwner === owner : isLive(id);
   pruneBookkeeping();
   const dates = [...steps().queue];
   if (dates.length === 0) {
@@ -1290,10 +1355,7 @@ function same(
 }
 
 /** The day the server refused, and what it was refused with. */
-function recordRefused(
-  date: string,
-  figures: Omit<SyncedDayMark, 'at'>,
-): void {
+function recordRefused(date: string, figures: Omit<SyncedDayMark, 'at'>): void {
   useStepsStore.setState(state => ({
     refused: { ...state.refused, [date]: { ...figures, at: Date.now() } },
   }));

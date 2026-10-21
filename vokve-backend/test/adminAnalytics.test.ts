@@ -20,7 +20,9 @@ describe('admin: the dashboard numbers', () => {
   });
 
   it('counts the members, the installs and the window they were asked about', async () => {
-    const session = await signUpAndRegister();
+    // One account, to count: the figures below are all about its existence
+    // rather than about anything it did, so the session itself is not needed.
+    await signUpAndRegister();
 
     const res = await request(app).get('/v1/admin/analytics/overview').query({ days: 7 }).set(ADMIN);
     expect(res.status).toBe(200);

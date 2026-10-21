@@ -23,7 +23,6 @@ import {
   reorderResultSchema,
   reviewPageSchema,
   reviewSchema,
-  shopCategorySchema,
   shopCategorySummarySchema,
   shopConfigSchema,
   shopItemSchema,
@@ -58,6 +57,7 @@ import {
   AddressModel, CartModel, CouponModel, CouponUsageModel, DeliveryPreferencesModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel,
   WishlistModel,
 } from './models.js';
+import { ensureShelves } from './shelves.js';
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -136,9 +136,25 @@ function sharesForMode(mode: PaymentMode, cfg: CommerceConfig): { min: number; m
   return { min: cfg.coinShareMin, max: cfg.coinShareMax };
 }
 
-/** The most coins that may go towards `paise` worth of goods bought this way. */
-function coinsCapFor(paise: number, mode: PaymentMode, cfg: CommerceConfig): number {
-  if (mode === 'coins') return coinsFor(paise, cfg);
+/**
+ * What one unit of an item costs when coins pay all of it.
+ *
+ * The item's own figure where an operator set one — a reward meant to cost
+ * a round 2,000 coins — and the price in coins otherwise. Every coins-only
+ * sum below goes through here rather than through `coinsFor(price)`, which
+ * is what makes the figure on the card the figure the till charges.
+ */
+function coinPriceOf(item: { price: number; coinPrice?: number | null }, cfg: CommerceConfig): number {
+  return item.coinPrice ?? coinsFor(item.price, cfg);
+}
+
+/**
+ * The most coins that may go towards `paise` worth of goods bought this
+ * way. `whenAll` is what those goods cost in coins where coins pay all of
+ * them — the item's own coin price, which only a coins-only line has.
+ */
+function coinsCapFor(paise: number, mode: PaymentMode, cfg: CommerceConfig, whenAll?: number): number {
+  if (mode === 'coins') return whenAll ?? coinsFor(paise, cfg);
   if (mode === 'money') return 0;
   return Math.floor((paise * sharesForMode(mode, cfg).max) / cfg.coinValuePaise);
 }
@@ -147,8 +163,8 @@ function coinsCapFor(paise: number, mode: PaymentMode, cfg: CommerceConfig): num
  * The least coins `paise` worth of goods must take this way. Rounded down
  * like the cap, so a fixed split (floor = cap) is one figure.
  */
-function coinsFloorFor(paise: number, mode: PaymentMode, cfg: CommerceConfig): number {
-  if (mode === 'coins') return coinsFor(paise, cfg);
+function coinsFloorFor(paise: number, mode: PaymentMode, cfg: CommerceConfig, whenAll?: number): number {
+  if (mode === 'coins') return whenAll ?? coinsFor(paise, cfg);
   if (mode === 'money') return 0;
   return Math.min(coinsCapFor(paise, mode, cfg), Math.floor((paise * sharesForMode(mode, cfg).min) / cfg.coinValuePaise));
 }
@@ -220,6 +236,8 @@ function settleMoney(goods: number[], coinsValue: number[]): number[] {
 type ItemRow = {
   _id: string; title: string; description: string; price: number; mrp: number | null; category: string; emoji: string; badge: string | null;
   isDeal: boolean; featured: boolean; subcategory: string | null; tags: string[]; sizes: string[]; popularity: number; listedAt: Date; sort: number;
+  /** What coins alone buy it for, where an operator set that; null is the price in coins. */
+  coinPrice?: number | null;
   /** `coins` / `money` / `mixed`, or null to follow the shop (RULES R11). */
   paymentMode?: string | null;
   ratingAverage?: number; ratingCount?: number;
@@ -232,7 +250,8 @@ function toItem(row: ItemRow, onHand: number, cfg: CommerceConfig): ShopItem {
   const mode = modeOf(row, cfg);
   return shopItemSchema.parse({
     id: row._id, title: row.title, description: row.description, price: row.price, mrp: row.mrp ?? null, currency: cfg.currency,
-    coinsMax: coinsCapFor(row.price, mode, cfg), coinsMin: coinsFloorFor(row.price, mode, cfg), coinPrice: coinsFor(row.price, cfg),
+    coinsMax: coinsCapFor(row.price, mode, cfg, coinPriceOf(row, cfg)), coinsMin: coinsFloorFor(row.price, mode, cfg, coinPriceOf(row, cfg)),
+    coinPrice: coinPriceOf(row, cfg),
     paymentMode: mode, category: row.category,
     emoji: row.emoji, badge: row.badge, isDeal: row.isDeal, inStock: onHand > 0,
     featured: row.featured, subcategory: row.subcategory, tags: row.tags ?? [], sizes: row.sizes ?? [],
@@ -331,29 +350,42 @@ export async function listItems(query: CatalogueQuery = {}): Promise<{ data: Sho
   return { data: page, nextCursor: end < items.length ? cursorFor(end) : null, total: items.length };
 }
 
-/** What each shelf holds, for the home tiles and a category page's chips. */
+/**
+ * What each shelf holds, for the home tiles and a category page's chips.
+ *
+ * The shelves are rows an operator writes, so this carries each one's label
+ * and icon as well as its counts: the app draws a shelf it has never heard
+ * of rather than needing a release to learn its name. A retired shelf is
+ * left out altogether — it is off the app, not merely empty.
+ */
 export async function listCategories(): Promise<ShopCategorySummary[]> {
-  const [rows, stock] = await Promise.all([
+  const [shelves, rows, stock] = await Promise.all([
+    ensureShelves(),
     ShopItemModel.find({ active: true }, { category: 1, subcategory: 1, sort: 1 }).sort({ sort: 1 }).lean(),
     ShopInventoryModel.find({}, { onHand: 1 }).lean(),
   ]);
   const onHand = new Map(stock.map(s => [s._id, s.onHand]));
-  return shopCategorySchema.options.map(category => {
-    const mine = rows.filter(r => r.category === category);
-    const subcategories: { name: string; count: number }[] = [];
-    for (const row of mine) {
-      if (!row.subcategory) continue;
-      const found = subcategories.find(sc => sc.name === row.subcategory);
-      if (found) found.count += 1;
-      else subcategories.push({ name: row.subcategory, count: 1 });
-    }
-    return shopCategorySummarySchema.parse({
-      category,
-      count: mine.length,
-      inStock: mine.filter(r => (onHand.get(r._id) ?? 0) > 0).length,
-      subcategories,
+  return shelves
+    .filter(shelf => shelf.active)
+    .map(shelf => {
+      const mine = rows.filter(r => r.category === shelf._id);
+      // The shelf's own order, and only the names it still lists: a
+      // subcategory an operator deleted is off the chips even while an
+      // item somewhere is being tidied up.
+      const subcategories = shelf.subcategories
+        .filter(sub => sub.active)
+        .map(sub => ({ name: sub.name, count: mine.filter(r => r.subcategory === sub.name).length }))
+        .filter(sub => sub.count > 0);
+      return shopCategorySummarySchema.parse({
+        category: shelf._id,
+        label: shelf.name,
+        icon: shelf.icon,
+        sort: shelf.sort,
+        count: mine.length,
+        inStock: mine.filter(r => (onHand.get(r._id) ?? 0) > 0).length,
+        subcategories,
+      });
     });
-  });
 }
 
 export async function getItem(id: string): Promise<ShopItem> {
@@ -577,6 +609,18 @@ async function summarise(itemId: string): Promise<{ average: number; count: numb
   return { average: count === 0 ? 0 : Math.round((sum / count) * 10) / 10, count, histogram };
 }
 
+/**
+ * The same recount, for a caller outside this module.
+ *
+ * The operator's panel can delete somebody else's review (a review that is
+ * abuse, or an obvious mistake), and the denormalised figures on the item
+ * are what every list and every sort reads (RULES R15) — so a delete that
+ * did not recount would leave a four-star average with nothing behind it.
+ */
+export async function recomputeItemRating(itemId: string): Promise<void> {
+  await recomputeRating(itemId);
+}
+
 /** Writes the summary onto the item, so lists and sorts never touch `reviews` (RULES R15). */
 async function recomputeRating(itemId: string): Promise<void> {
   const { average, count } = await summarise(itemId);
@@ -784,20 +828,27 @@ function buildQuote(lines: PricedLine[], balance: number, coins: CoinsRequest, c
   }));
   // Delivery is paid in coins only where there is no money side at all.
   const allCoins = perLine.length > 0 && perLine.every(l => l.mode === 'coins');
+  // What each line costs in coins where coins pay all of it: the item's own
+  // coin price, less the coins the coupon took off that line. A coins-only
+  // line in a basket that also holds money lines is still charged the
+  // figure its card showed, which `coinsFor(goods)` would quietly round off.
+  const lineCoinPrice = lines.map((l, index) =>
+    Math.max(0, l.item.coinPrice * l.quantity - Math.floor(offPerLine[index] / cfg.coinValuePaise)),
+  );
 
   let floor: number;
   let cap: number;
   let inCoins: Quote['inCoins'] = null;
   if (allCoins) {
-    const goodsCoins = lines.reduce((sum, l) => sum + coinsFor(l.item.price, cfg) * l.quantity, 0);
+    const goodsCoins = lines.reduce((sum, l) => sum + l.item.coinPrice * l.quantity, 0);
     const discountCoins = Math.min(goodsCoins, Math.floor(couponOff / cfg.coinValuePaise));
     const shippingCoins = coinsFor(shipping, cfg);
     const totalCoins = goodsCoins - discountCoins + shippingCoins;
     inCoins = { goods: goodsCoins, discount: discountCoins, shipping: shippingCoins, total: totalCoins };
     floor = cap = totalCoins;
   } else {
-    cap = perLine.reduce((sum, l) => sum + coinsCapFor(l.goods, l.mode, cfg), 0);
-    floor = perLine.reduce((sum, l) => sum + coinsFloorFor(l.goods, l.mode, cfg), 0);
+    cap = perLine.reduce((sum, l, index) => sum + coinsCapFor(l.goods, l.mode, cfg, lineCoinPrice[index]), 0);
+    floor = perLine.reduce((sum, l, index) => sum + coinsFloorFor(l.goods, l.mode, cfg, lineCoinPrice[index]), 0);
     // Never take more coins than the bill is worth: a big coupon can leave
     // a coins-only line's rounded-up price above what is still owed.
     cap = Math.min(cap, Math.ceil(total / cfg.coinValuePaise));
@@ -816,14 +867,14 @@ function buildQuote(lines: PricedLine[], balance: number, coins: CoinsRequest, c
   // money.
   const lineCoinsUsed = allCoins
     ? (() => {
-        const goodsCoins = lines.map(l => coinsFor(l.item.price, cfg) * l.quantity);
+        const goodsCoins = lines.map(l => l.item.coinPrice * l.quantity);
         const off = apportion(inCoins!.discount, goodsCoins);
         return goodsCoins.map((amount, index) => amount - off[index]);
       })()
     : spreadCoins(
         coinsApplied,
-        perLine.map(l => coinsFloorFor(l.goods, l.mode, cfg)),
-        perLine.map(l => coinsCapFor(l.goods, l.mode, cfg)),
+        perLine.map((l, index) => coinsFloorFor(l.goods, l.mode, cfg, lineCoinPrice[index])),
+        perLine.map((l, index) => coinsCapFor(l.goods, l.mode, cfg, lineCoinPrice[index])),
       );
   const lineCoinsValue = lineCoinsUsed.map(used => used * cfg.coinValuePaise);
   const lineMoney = allCoins
@@ -836,7 +887,7 @@ function buildQuote(lines: PricedLine[], balance: number, coins: CoinsRequest, c
     lines: lines.map((l, index) => ({
       itemId: l.item.id, title: l.item.title, emoji: l.item.emoji, image: l.item.images[0] ?? null, quantity: l.quantity, size: l.size, color: l.color,
       price: l.item.price, mrp: l.item.mrp, lineTotal: l.item.price * l.quantity,
-      coinPrice: coinsFor(l.item.price, cfg), lineCoins: coinsFor(l.item.price, cfg) * l.quantity,
+      coinPrice: l.item.coinPrice, lineCoins: l.item.coinPrice * l.quantity,
       coinsUsed: lineCoinsUsed[index], coinsValue: lineCoinsValue[index], moneyPaid: lineMoney[index],
       paymentMode: modeOf(l.item, cfg), inStock: l.onHand >= l.quantity,
     })),
@@ -1503,7 +1554,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
       // keeps the split it was charged at (RULES R11) rather than leaving
       // support to divide a total between three products later.
       items: priced.map((l, index) => ({
-        itemId: l.item.id, title: l.item.title, emoji: l.item.emoji, image: l.item.images[0] ?? null, coinPrice: coinsFor(l.item.price, cfg),
+        itemId: l.item.id, title: l.item.title, emoji: l.item.emoji, image: l.item.images[0] ?? null, coinPrice: l.item.coinPrice,
         quantity: l.quantity, size: l.size, color: l.color, price: l.item.price, mrp: l.item.mrp,
         coinsUsed: q.lines[index].coinsUsed, coinsValue: q.lines[index].coinsValue, moneyPaid: q.lines[index].moneyPaid,
       })),

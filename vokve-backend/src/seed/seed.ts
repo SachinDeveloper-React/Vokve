@@ -3,7 +3,7 @@ import { logger } from '../lib/logger.js';
 import { SupportFaqModel, SupportGuideSectionModel } from '../modules/account/models.js';
 import { AppReleaseModel } from '../modules/devices/models.js';
 import { AppConfigModel } from '../modules/platform/models.js';
-import { CouponModel, ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
+import { CouponModel, ShopCategoryModel, ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
 import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.js';
 import { AchievementDefinitionModel, ChallengeDefinitionModel } from '../modules/challenges/models.js';
 import { ContentTipModel } from '../modules/content/models.js';
@@ -11,7 +11,7 @@ import { DietPlanModel, FoodItemModel } from '../modules/nutrition/models.js';
 import { addDays, localDayOf } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 import {
-  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLANS, EXERCISES, FOOD_ITEMS, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
+  ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLANS, EXERCISES, FOOD_ITEMS, SHOP_CATEGORIES, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
   SUPPORT_FAQS, SUPPORT_GUIDE_SECTIONS, WORKOUT_TEMPLATES,
 } from './data.js';
 
@@ -48,6 +48,24 @@ export async function seed(now = new Date()): Promise<void> {
   // `popularity`, which is what selling has added to the starting figure.
   // The product-page details are set in full every time, so a detail
   // taken out of the seed is taken off the page too.
+  // The shelves before the items on them: an item write checks its shelf
+  // exists, and a re-seed should not depend on the bootstrap having run.
+  // Only these four, and only the fields the seed owns — a shelf an
+  // operator added, and a subcategory they added to one of these, are
+  // theirs and are left alone.
+  await Promise.all(SHOP_CATEGORIES.map(async category => {
+    const { subcategories, ...shelf } = category;
+    await ShopCategoryModel.updateOne({ _id: shelf._id }, { $set: shelf }, { upsert: true });
+    const row = await ShopCategoryModel.findById(shelf._id, { subcategories: 1 }).lean();
+    const listed = new Set((row?.subcategories ?? []).map(sub => sub.name));
+    const extra = subcategories.filter(name => !listed.has(name));
+    if (extra.length > 0) {
+      await ShopCategoryModel.updateOne(
+        { _id: shelf._id },
+        { $push: { subcategories: { $each: extra.map((name, index) => ({ name, sort: listed.size + index, active: true })) } } },
+      );
+    }
+  }));
   await Promise.all(SHOP_ITEMS.map(({ popularity, ...i }) => {
     const details = { ribbon: null, colors: [], highlights: [], features: [], specs: [], ...SHOP_ITEM_DETAILS[i._id] };
     // `paymentMode: null` first, so dropping an item's own mode from the seed puts it back on the shop's.

@@ -397,3 +397,331 @@ export async function setStepsConfig(actor: string, body: SetStepsConfigBody): P
 
   return stepsConfig();
 }
+
+// ─── The whole config, key by key ──────────────────────────────────────────
+
+/**
+ * Every other knob in `CONFIG_DEFAULTS`, as something an operator can turn.
+ *
+ * The surface above is the step pipeline's own, curated and schema'd field
+ * by field because those twenty-odd knobs are the ones most often turned.
+ * This is the rest of the file: commerce, hydration, the streak, the health
+ * ranges, nutrition, the leaderboard, challenges, OTP, devices, integrity,
+ * the account's grace periods, the help centre's own copy and the locale.
+ * Writing a second hand-made zod schema for all of that would be a copy of
+ * the defaults that drifts from them the first time somebody adds a key.
+ *
+ * So the patch is **validated against the shape of the defaults** instead,
+ * which cannot drift because it *is* the defaults:
+ *
+ *   - a path that does not exist in `CONFIG_DEFAULTS` is refused, so a typo
+ *     is a 422 rather than a stray key `deepMerge` would happily add;
+ *   - a value whose kind differs from the default's is refused — a string
+ *     where a number lives, an object where an array does;
+ *   - inside an array of objects, a key the default's own elements do not
+ *     have is refused, which is what keeps `support.topics` honest;
+ *   - and then the merged config goes through `assertConfigValid`, the same
+ *     cross-field validator every read runs, so the ladder rules still hold.
+ *
+ * A `null` default is the one case the shape cannot speak for — `support.phone`
+ * and `commerce.trackingUrlTemplate` are `string | null` with null shipped —
+ * so those accept a primitive or null and lean on `assertConfigValid`.
+ */
+
+/** Paths another surface owns, with somewhere to send the operator instead. */
+const MANAGED_ELSEWHERE: { prefix: string; by: string; why: string }[] = [
+  {
+    prefix: 'app.minVersion',
+    by: 'Releases',
+    why: 'raising the minimum is refused there when the store has no build to send members to (NO_BUILD_TO_UPDATE_TO), and that check is the point of it',
+  },
+];
+
+const kindOf = (value: unknown): string =>
+  value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+
+/**
+ * Keys that may be set to null although the code ships a value in them.
+ *
+ * Nullability is a *type* in `defaults.ts` (`'…' as string | null`) and types
+ * are gone by the time this runs, so the shape of the default cannot say
+ * whether null belongs — a key already shipping `null` is obvious, one
+ * shipping a sentence is not. This list mirrors those annotations, and each
+ * entry is a field whose null means something: no phone on the help page, no
+ * tracking link on an order, no stated delivery estimate.
+ *
+ * Getting it wrong is safe in the strict direction only: a missing entry
+ * refuses a legitimate clear (and says "that key holds a string"), while a
+ * wrong entry would let a null reach a screen that reads it. So it is a list
+ * rather than "allow null everywhere".
+ */
+const NULLABLE = [
+  'commerce.deliveryEstimate',
+  'commerce.returnPolicy',
+  'commerce.deliveryNotice',
+  'commerce.returnsNote',
+  'commerce.trackingUrlTemplate',
+  'support.phone',
+  'support.hours',
+];
+
+/**
+ * Whether `value` could stand where `shipped` does.
+ *
+ * Shape, not range: the bounds are `assertConfigValid`'s business and it
+ * speaks in whole sentences about them. This is the check that stops
+ * `coins.dailyCap` becoming the string `"300"` — which would pass every
+ * cross-field rule by comparing as a string and then quietly break
+ * arithmetic three modules away.
+ */
+function assertShape(path: string, value: unknown, shipped: unknown): void {
+  const refuse = (why: string): never => {
+    throw Errors.validation({ [path]: why });
+  };
+
+  if (shipped === null) {
+    // Already null in the code: the default cannot say which primitive
+    // belongs there, so anything scalar is allowed and the cross-field
+    // validator has the last word.
+    if (value !== null && (typeof value === 'object' || typeof value === 'undefined')) {
+      refuse('That key holds a single value or null.');
+    }
+    return;
+  }
+
+  if (value === null) {
+    if (!NULLABLE.includes(path)) {
+      refuse(`That key always holds a value — null would leave nothing for the app to read. It currently holds ${JSON.stringify(shipped)}.`);
+    }
+    return;
+  }
+
+  const want = kindOf(shipped);
+  const got = kindOf(value);
+  if (want !== got) {
+    refuse(`That key holds ${want === 'array' ? 'a list' : `a ${want}`}, and this is ${got === 'null' ? 'null' : `a ${got}`}.`);
+  }
+
+  if (want === 'number' && !Number.isFinite(value as number)) refuse('That is not a number.');
+
+  if (want === 'array') {
+    const sample = (shipped as unknown[])[0];
+    if (sample === undefined) return;
+    const sampleKind = kindOf(sample);
+    for (const [index, entry] of (value as unknown[]).entries()) {
+      if (kindOf(entry) !== sampleKind) {
+        refuse(`Item ${index + 1} is ${kindOf(entry)}, and this list holds ${sampleKind === 'object' ? 'objects' : `${sampleKind}s`}.`);
+      }
+      if (sampleKind === 'object') {
+        const allowed = Object.keys(sample as Record<string, unknown>);
+        for (const key of Object.keys(entry as Record<string, unknown>)) {
+          if (!allowed.includes(key)) {
+            refuse(`Item ${index + 1} has a key the app does not read: '${key}'. The keys are ${allowed.join(', ')}.`);
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if (want === 'object') {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      const childShipped = (shipped as Record<string, unknown>)[key];
+      if (childShipped === undefined) {
+        refuse(`There is no '${key}' under ${path}. The keys are ${Object.keys(shipped as Record<string, unknown>).join(', ')}.`);
+      }
+      assertShape(`${path}.${key}`, child, childShipped);
+    }
+  }
+}
+
+export const appConfigSectionNames = Object.keys(CONFIG_DEFAULTS as Record<string, unknown>);
+
+export const setAppConfigBody = z
+  .object({
+    /**
+     * Dotted path → new value. A flat map rather than a nested patch: the
+     * thing an operator does is change one key, and the path is what the
+     * refusals, the audit row and the reset list all speak in anyway.
+     */
+    set: z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z0-9_]+)*$/).max(120), z.unknown()).optional(),
+    /** Dotted paths to put back to the code's default. */
+    reset: z.array(z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z0-9_]+)*$/).max(120)).max(50).optional(),
+    note: z.string().trim().max(300).optional(),
+  })
+  .strict()
+  .refine(
+    body => Object.keys(body.set ?? {}).length > 0 || (body.reset ?? []).length > 0,
+    'Change something',
+  );
+export type SetAppConfigBody = z.infer<typeof setAppConfigBody>;
+
+export interface AppConfigSectionView {
+  section: string;
+  /** What the server is using right now. */
+  effective: unknown;
+  /** The same section as the code ships it. */
+  defaults: unknown;
+  /** Where the two have parted, key by key. */
+  overrides: { path: string; value: unknown; default: unknown }[];
+  /** Keys in this section another page owns, and which page. */
+  managedElsewhere: { prefix: string; by: string; why: string }[];
+  /** True for the sections the curated Steps config page also covers. */
+  alsoOnStepsPage: boolean;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * Every path that may hold null, for a panel to say "empty for none" on.
+ *
+ * The explicit list plus every path the code already ships as null — which
+ * is the same rule `assertShape` applies, stated once so a form cannot
+ * disagree with the validator about which boxes can be emptied.
+ */
+function nullablePaths(): string[] {
+  const out = new Set(NULLABLE);
+  for (const [path, value] of Object.entries(flatten(CONFIG_DEFAULTS))) {
+    if (path !== '' && value === null) out.add(path);
+  }
+  return [...out].sort();
+}
+
+/** Every section, with what has been changed in it and by whom. */
+export async function appConfig(): Promise<{
+  sections: AppConfigSectionView[];
+  nullable: string[];
+  totals: { sections: number; overrides: number; changed: number };
+}> {
+  const [config, docs] = await Promise.all([getConfig(), AppConfigModel.find().lean()]);
+  const docOf = new Map(docs.map(doc => [String(doc._id), doc]));
+
+  const sections = appConfigSectionNames.map(section => {
+    const doc = docOf.get(section);
+    const overrides: AppConfigSectionView['overrides'] = [];
+    for (const [path, value] of Object.entries(flatten(doc?.value ?? {}))) {
+      if (path === '') continue;
+      const full = `${section}.${path}`;
+      const fallback = at(CONFIG_DEFAULTS, full);
+      // Stored is not overridden: the seed writes a whole copy of every
+      // section on a fresh database, so most of `app_config` is the default
+      // sitting in a document. Only a parting is worth showing — which also
+      // catches a default the code has since changed, pinned by an old seed.
+      if (JSON.stringify(value) === JSON.stringify(fallback)) continue;
+      overrides.push({ path: full, value, default: fallback });
+    }
+    return {
+      section,
+      effective: (config as unknown as Record<string, unknown>)[section],
+      defaults: (CONFIG_DEFAULTS as unknown as Record<string, unknown>)[section],
+      overrides,
+      managedElsewhere: MANAGED_ELSEWHERE.filter(entry => entry.prefix.split('.')[0] === section),
+      alsoOnStepsPage: (SECTIONS as readonly string[]).includes(section),
+      updatedBy: (doc as { updatedBy?: string } | undefined)?.updatedBy ?? null,
+      updatedAt: (doc as { updatedAt?: Date } | undefined)?.updatedAt?.toISOString() ?? null,
+    };
+  });
+
+  return {
+    sections,
+    /** Keys whose null means something: no phone on the help page, no tracking link. */
+    nullable: nullablePaths(),
+    totals: {
+      sections: sections.length,
+      overrides: sections.reduce((sum, section) => sum + section.overrides.length, 0),
+      changed: sections.filter(section => section.overrides.length > 0).length,
+    },
+  };
+}
+
+/**
+ * Writes any config key, or puts one back.
+ *
+ * Same order and same safety as the steps surface: reset first so a path in
+ * both means the patch wins, merge in memory, validate the whole thing, and
+ * only then write — on dotted paths, so two operators turning two knobs do
+ * not overwrite each other, and `$unset` for a reset, which restores the
+ * code's default rather than whatever the value was before.
+ */
+export async function setAppConfig(actor: string, body: SetAppConfigBody) {
+  const before = await getConfig();
+  const set = body.set ?? {};
+  const reset = body.reset ?? [];
+
+  for (const path of [...Object.keys(set), ...reset]) {
+    if (at(CONFIG_DEFAULTS, path) === undefined) {
+      throw Errors.validation({
+        [path]: `There is no such config key. Paths look like 'commerce.shippingFeePaise'; the sections are ${appConfigSectionNames.join(', ')}.`,
+      });
+    }
+    const owner = MANAGED_ELSEWHERE.find(entry => path === entry.prefix || path.startsWith(`${entry.prefix}.`));
+    if (owner) {
+      throw Errors.validation({ [path]: `That one belongs to the ${owner.by} page — ${owner.why}.` });
+    }
+  }
+  for (const [path, value] of Object.entries(set)) {
+    assertShape(path, value, at(CONFIG_DEFAULTS, path));
+  }
+
+  const preview = structuredClone(before) as AppConfig;
+  const write = (target: Record<string, unknown>, path: string, value: unknown) => {
+    const keys = path.split('.');
+    const leaf = keys.pop()!;
+    const parent = keys.reduce<Record<string, unknown>>((node, key) => node[key] as Record<string, unknown>, target);
+    parent[leaf] = value;
+  };
+  for (const path of reset) write(preview as unknown as Record<string, unknown>, path, at(CONFIG_DEFAULTS, path));
+  for (const [path, value] of Object.entries(set)) write(preview as unknown as Record<string, unknown>, path, value);
+
+  try {
+    assertConfigValid(preview);
+  } catch (error) {
+    // The validator speaks in whole sentences — "hydration.maxMl (400) is
+    // below hydration.minMl (500)" — which is what the operator needs to
+    // read, so it is handed back rather than swallowed.
+    throw Errors.validation({ config: error instanceof Error ? error.message : 'That config would not be accepted.' });
+  }
+
+  const bySection = new Map<string, { set: Record<string, unknown>; unset: Record<string, ''> }>();
+  const edit = (section: string) => {
+    const existing = bySection.get(section) ?? { set: {}, unset: {} };
+    bySection.set(section, existing);
+    return existing;
+  };
+  for (const [path, value] of Object.entries(set)) {
+    const [section, ...rest] = path.split('.');
+    edit(section!).set[`value.${rest.join('.')}`] = value;
+  }
+  for (const path of reset) {
+    const [section, ...rest] = path.split('.');
+    edit(section!).unset[`value.${rest.join('.')}`] = '';
+  }
+
+  for (const [section, ops] of bySection) {
+    await AppConfigModel.updateOne(
+      { _id: section },
+      {
+        $set: { ...ops.set, updatedBy: actor },
+        ...(Object.keys(ops.unset).length > 0 ? { $unset: ops.unset } : {}),
+      },
+      { upsert: true },
+    );
+  }
+  invalidateConfig();
+
+  await AuditLogModel.create({
+    actorType: 'admin',
+    actorId: actor,
+    action: 'config.app',
+    subjectType: 'app_config',
+    subjectId: [...bySection.keys()].join(','),
+    before: Object.fromEntries([...Object.keys(set), ...reset].map(path => [path, at(before, path)])),
+    after: {
+      ...Object.fromEntries(Object.entries(set).map(([path]) => [path, at(preview, path)])),
+      reset,
+      note: body.note ?? null,
+    },
+  });
+
+  return appConfig();
+}

@@ -63,8 +63,13 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
   ]);
   if (deviceDays.length === 0) return { day: await getDay(userId, localDay), coinsHeld: 0, releaseAfter: null, streakEarned: false };
 
+  // An operator's override (D-88): a phone whose day was rejected by hand is
+  // not evidence any more. Refusing every phone of a day is refused where
+  // the rejection is written, so this always leaves at least one.
+  const scoring = deviceDays.filter(row => !row.rejected);
+
   const devices = await DeviceModel.find(
-    { _id: { $in: deviceDays.map(d => d.deviceId) } },
+    { _id: { $in: scoring.map(d => d.deviceId) } },
     { installId: 1, vendorId: 1, firstSeenAt: 1, 'attestation.keyId': 1 },
   ).lean();
   // Whether this server asks for a Play verdict at all: only then is a day
@@ -73,7 +78,7 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
   const byId = new Map(devices.map(d => [d._id, d]));
 
   const inputs: DeviceInput[] = await Promise.all(
-    deviceDays.map(async row => {
+    scoring.map(async row => {
       const device = byId.get(row.deviceId);
       const proof = row.proof as DeviceProof;
       // The same install, vendor id or Keystore key on other accounts (A18).

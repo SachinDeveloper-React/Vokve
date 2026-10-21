@@ -41,8 +41,8 @@ const SUBTITLE: Record<PaymentMode, string> = {
 };
 
 /**
- * The shop's front: a search field, the featured shelf, the four category
- * tiles, the deals card — each a door to a page that pages from the server.
+ * The shop's front: a search field, the featured shelf, the category tiles,
+ * the deals card — each a door to a page that pages from the server.
  *
  * A `ScrollView` of sections rather than a recycling list: only the shelf
  * scrolls, sideways, and it holds the featured rows of a catalogue the
@@ -51,7 +51,8 @@ const SUBTITLE: Record<PaymentMode, string> = {
  *
  * The filter row narrows the shelf in place, for a user browsing here; the
  * tiles lower down open the category's own page, for one who wants all of
- * it. Both are the same four categories, drawn twice.
+ * it. Both are the same shelves — whatever the server is carrying — drawn
+ * twice.
  */
 export const ShopScreen = () => {
   const styles = useThemedStyles(makeStyles);
@@ -170,7 +171,11 @@ export const ShopScreen = () => {
         <EmailVerificationBanner reason="place orders" />
         <ShopCoinsBanner balance={balance} onPressBestRewards={onOpenAll} />
 
-        <ShopCategoryFilter value={filter} onChange={setFilter} />
+        <ShopCategoryFilter
+          value={filter}
+          onChange={setFilter}
+          categories={categories}
+        />
 
         {catalogueSyncedAt === null ? (
           <LoadState

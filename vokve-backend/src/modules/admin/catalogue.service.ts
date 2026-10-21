@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
-import { shopBadgeSchema, shopCategorySchema } from '../../contracts/index.js';
-import { OrderModel, ShopInventoryModel, ShopItemModel } from '../commerce/models.js';
+import { shopBadgeSchema } from '../../contracts/index.js';
+import { CartModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel, WishlistModel } from '../commerce/models.js';
+import { UserModel } from '../identity/models.js';
 import { AuditLogModel } from '../platform/models.js';
+import { assertShelf } from './categories.service.js';
 
 /**
  * The shelf itself (RULES R1, R11).
@@ -44,7 +46,15 @@ export const itemBody = z
     price: z.number().int().min(1).max(100_000_000),
     /** The struck-through list price, where there is one. */
     mrp: z.number().int().min(0).max(100_000_000).nullable().optional(),
-    category: shopCategorySchema,
+    /**
+     * What it costs when coins pay all of it. Null is not missing — it is
+     * "whatever the price divides into at ⚙ `commerce.coinValuePaise`",
+     * which is what the till would have charged anyway. A figure here is
+     * for the reward that should cost a round 2,000 coins.
+     */
+    coinPrice: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    /** A shelf's slug — a row in `shop_categories`, checked before the write. */
+    category: z.string().trim().min(1).max(40),
     subcategory: z.string().trim().max(60).nullable().optional(),
     /**
      * How this item may be bought: coins only, money only, or both at the
@@ -80,7 +90,7 @@ export type ItemPatch = z.infer<typeof itemPatch>;
 
 export const catalogueQuery = z.object({
   q: z.string().max(120).default(''),
-  category: shopCategorySchema.optional(),
+  category: z.string().trim().min(1).max(40).optional(),
   paymentMode: z.enum(['coins', 'money', 'mixed', 'shop']).optional(),
   /** The shelf as a member sees it, or everything including what is retired. */
   state: z.enum(['any', 'active', 'retired', 'out_of_stock', 'low_stock']).default('any'),
@@ -152,8 +162,10 @@ export async function listCatalogue(query: CatalogueQuery) {
       /** Paise. */
       price: row.price,
       mrp: row.mrp ?? null,
-      /** What it costs when coins pay all of it, rounded up as the till does. */
-      coinPrice: Math.ceil(row.price / config.commerce.coinValuePaise),
+      /** What it costs when coins pay all of it: the operator's figure, or the price rounded up as the till does. */
+      coinPrice: row.coinPrice ?? Math.ceil(row.price / config.commerce.coinValuePaise),
+      /** Whether that figure was typed, so the panel can say "set" rather than quietly showing arithmetic. */
+      coinPriceSet: row.coinPrice != null,
       category: row.category,
       subcategory: row.subcategory ?? null,
       paymentMode: mode,
@@ -217,6 +229,10 @@ export async function getCatalogueItem(id: string) {
 /** Writes an item, creating it where the slug is new. Idempotent on the slug. */
 export async function saveItem(actor: string, body: ItemBody) {
   const { id, note, onHand, lowStockAt, ...fields } = body;
+  // A shelf that does not exist would file the item where no filter looks,
+  // and the panel's dropdowns are a convenience, not a guarantee: this
+  // route is also called by hand.
+  await assertShelf(fields.category, fields.subcategory ?? null);
   const before = await ShopItemModel.findById(id).lean();
 
   await ShopItemModel.updateOne(
@@ -255,9 +271,25 @@ export async function patchItem(actor: string, id: string, body: ItemPatch) {
   const before = await ShopItemModel.findById(id).lean();
   if (!before) throw Errors.notFound('That item');
   const { note, onHand, lowStockAt, ...fields } = body;
+  // Either half of the shelf may be in the patch alone, so the one that is
+  // not is read off the item: moving to a shelf without saying which
+  // subcategory must not check the old shelf's name against the new shelf.
+  if (fields.category !== undefined || fields.subcategory !== undefined) {
+    await assertShelf(
+      fields.category ?? before.category,
+      fields.subcategory !== undefined ? fields.subcategory : fields.category !== undefined ? null : before.subcategory,
+    );
+  }
+
+  // Moving an item to another shelf without naming a subcategory unfiles
+  // it: the name it was filed under belongs to the shelf it is leaving.
+  const unfiling =
+    fields.category !== undefined && fields.subcategory === undefined && fields.category !== before.category
+      ? { subcategory: null }
+      : {};
 
   if (Object.keys(fields).length > 0) {
-    await ShopItemModel.updateOne({ _id: id }, { $set: fields });
+    await ShopItemModel.updateOne({ _id: id }, { $set: { ...fields, ...unfiling } });
   }
   if (onHand !== undefined || lowStockAt !== undefined) {
     await ShopInventoryModel.updateOne(
@@ -292,4 +324,200 @@ export async function retireItem(actor: string, id: string, active: boolean, not
     before: { active: before.active ?? true }, after: { active, note: note ?? null },
   });
   return getCatalogueItem(id);
+}
+
+// ─── One product, in full ──────────────────────────────────────────────────
+
+/** An order that happened: a cancelled one is not a sale (RULES R10). */
+const SOLD_STATUSES = ['placed', 'confirmed', 'shipped', 'delivered'];
+
+/**
+ * Everything about one item that is not on the item.
+ *
+ * The row itself answers "what is it and what does it cost"; a product page
+ * worth opening answers the four questions after that — has it sold, who is
+ * waiting for it, what are people saying about it, and who changed it last.
+ * All four live in other collections, so they are one read rather than four
+ * pages an operator has to join by hand.
+ */
+export async function itemInsight(id: string) {
+  const { shop, item } = await getCatalogueItem(id);
+
+  const [sales, recent, reviews, spread, baskets, saves, trail] = await Promise.all([
+    OrderModel.aggregate<{ _id: null; orders: number; units: number; goods: number; coinsUsed: number; moneyPaid: number }>([
+      { $match: { 'items.itemId': id, status: { $in: SOLD_STATUSES } } },
+      { $unwind: '$items' },
+      { $match: { 'items.itemId': id } },
+      {
+        $group: {
+          _id: null,
+          orders: { $sum: 1 },
+          units: { $sum: '$items.quantity' },
+          goods: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          coinsUsed: { $sum: { $ifNull: ['$items.coinsUsed', 0] } },
+          moneyPaid: { $sum: { $ifNull: ['$items.moneyPaid', 0] } },
+        },
+      },
+    ]),
+    OrderModel.find({ 'items.itemId': id }, { number: 1, userId: 1, status: 1, items: 1, total: 1, placedAt: 1 })
+      .sort({ placedAt: -1 })
+      .limit(20)
+      .lean(),
+    ReviewModel.find({ itemId: id }).sort({ createdAt: -1 }).limit(20).lean(),
+    ReviewModel.aggregate<{ _id: number; reviews: number }>([
+      { $match: { itemId: id } },
+      { $group: { _id: '$rating', reviews: { $sum: 1 } } },
+    ]),
+    CartModel.aggregate<{ _id: null; baskets: number; units: number }>([
+      { $match: { 'lines.itemId': id } },
+      { $unwind: '$lines' },
+      { $match: { 'lines.itemId': id } },
+      { $group: { _id: null, baskets: { $addToSet: '$_id' }, units: { $sum: '$lines.quantity' } } },
+      { $project: { baskets: { $size: '$baskets' }, units: 1 } },
+    ]),
+    WishlistModel.countDocuments({ itemId: id }),
+    AuditLogModel.find({ subjectType: 'shop_item', subjectId: id }).sort({ createdAt: -1 }).limit(20).lean(),
+  ]);
+
+  const memberIds = [...new Set([...recent.map(order => order.userId), ...reviews.map(review => review.userId)])];
+  const members = await UserModel.find({ _id: { $in: memberIds } }, { name: 1, email: 1 }).lean();
+  const memberOf = new Map(members.map(member => [member._id, member]));
+  const named = (userId: string) => ({
+    id: userId,
+    name: memberOf.get(userId)?.name ?? '',
+    email: memberOf.get(userId)?.email ?? null,
+  });
+
+  const sale = sales[0];
+  const held = baskets[0];
+
+  return {
+    shop,
+    item,
+    /** Sales, excluding cancelled and refunded orders. */
+    sales: {
+      orders: sale?.orders ?? 0,
+      units: sale?.units ?? 0,
+      /** Paise of goods at the price each order charged — not today's price. */
+      goods: sale?.goods ?? 0,
+      /** Whole coins, and paise of money, as the till split each line (RULES R11). */
+      coinsUsed: sale?.coinsUsed ?? 0,
+      moneyPaid: sale?.moneyPaid ?? 0,
+    },
+    /** Who wants it and has not bought it: the restock argument. */
+    wanted: {
+      baskets: held?.baskets ?? 0,
+      basketUnits: held?.units ?? 0,
+      wishlists: saves,
+      /** Wanted by more people than there are units on the shelf. */
+      short: Math.max(0, (held?.units ?? 0) + saves - item.stock.onHand),
+    },
+    orders: recent.map(order => {
+      const line = order.items.find(entry => entry.itemId === id);
+      return {
+        id: order._id,
+        number: order.number,
+        member: named(order.userId),
+        status: order.status,
+        quantity: line?.quantity ?? 0,
+        /** What this line was charged, as the till split it. */
+        price: line?.price ?? 0,
+        coinsUsed: line?.coinsUsed ?? 0,
+        moneyPaid: line?.moneyPaid ?? 0,
+        size: line?.size ?? null,
+        color: line?.color ?? null,
+        placedAt: iso(order.placedAt),
+      };
+    }),
+    reviews: {
+      /** The denormalised figures on the item are the ones every list reads. */
+      average: item.rating.average,
+      count: item.rating.count,
+      histogram: [1, 2, 3, 4, 5].map(rating => ({ rating, reviews: spread.find(row => row._id === rating)?.reviews ?? 0 })),
+      data: reviews.map(review => ({
+        id: review._id,
+        member: named(review.userId),
+        authorName: review.authorName,
+        rating: review.rating,
+        title: review.title ?? null,
+        body: review.body,
+        verified: review.verified ?? false,
+        createdAt: iso((review as { createdAt?: Date }).createdAt),
+      })),
+    },
+    /** Who changed this item, and to what. */
+    trail: trail.map(row => ({
+      id: String(row._id),
+      action: row.action,
+      actorId: row.actorId ?? null,
+      before: row.before ?? null,
+      after: row.after ?? null,
+      at: iso((row as { createdAt?: Date }).createdAt),
+    })),
+  };
+}
+
+/**
+ * Deletes an item outright — the mistake case, and only that.
+ *
+ * Retiring is what ending a product's life looks like (`retireItem`): the
+ * row stays, every order that holds it stays readable, and a basket line
+ * pointing at it still resolves. This is for the other thing entirely — a
+ * slug typed wrong, a draft listed by accident, a duplicate — where leaving
+ * a retired row behind would be leaving litter on the shelf.
+ *
+ * So the one rule it enforces is the one that matters: **an item any order
+ * holds is never deleted.** An order carries its own snapshot of what was
+ * bought (RULES R11), so deleting the row would not corrupt the order — but
+ * it would break every link from the order back to the product, which is
+ * what support follows when somebody asks what they received. That is a
+ * retire, and the refusal says so.
+ *
+ * What it does clean up is everything that points at the row and would
+ * otherwise dangle: stock, basket lines, saves and reviews. A basket line
+ * pointing at a row that has gone is a line the member can neither see nor
+ * remove.
+ */
+export async function deleteItem(actor: string, id: string, note?: string) {
+  const before = await ShopItemModel.findById(id).lean();
+  if (!before) throw Errors.notFound('That item');
+
+  const orders = await OrderModel.countDocuments({ 'items.itemId': id });
+  if (orders > 0) {
+    throw Errors.validation({
+      id: `${orders} ${orders === 1 ? 'order holds' : 'orders hold'} this item, so deleting it would break the link from those orders back to the product. Retire it instead: that takes it off the member's shelf and leaves their history intact.`,
+    });
+  }
+
+  const [baskets, saves, reviews] = await Promise.all([
+    CartModel.updateMany({ 'lines.itemId': id }, { $pull: { lines: { itemId: id } } }),
+    WishlistModel.deleteMany({ itemId: id }),
+    ReviewModel.deleteMany({ itemId: id }),
+  ]);
+  await ShopInventoryModel.deleteOne({ _id: id });
+  await ShopItemModel.deleteOne({ _id: id });
+
+  await AuditLogModel.create({
+    actorType: 'admin',
+    actorId: actor,
+    action: 'shop.item_deleted',
+    subjectType: 'shop_item',
+    subjectId: id,
+    before: { title: before.title, price: before.price, category: before.category, active: before.active ?? true },
+    after: {
+      deleted: true,
+      basketsTidied: baskets.modifiedCount ?? 0,
+      savesRemoved: saves.deletedCount ?? 0,
+      reviewsRemoved: reviews.deletedCount ?? 0,
+      note: note ?? null,
+    },
+  });
+
+  return {
+    deleted: true,
+    id,
+    basketsTidied: baskets.modifiedCount ?? 0,
+    savesRemoved: saves.deletedCount ?? 0,
+    reviewsRemoved: reviews.deletedCount ?? 0,
+  };
 }

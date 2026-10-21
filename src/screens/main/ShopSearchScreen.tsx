@@ -12,7 +12,7 @@ import { ChevronLeft, History, Search, X } from 'lucide-react-native';
 import { Pressable } from '../../components/form/Pressable';
 import { HStack, VStack } from '../../components/layout/Stack';
 import { Icon } from '../../components/media/Icon';
-import { SHOP_CATEGORIES } from '../../components/shop/categories';
+import { shopCategoriesOf } from '../../components/shop/categories';
 import { ShopCategoryChip } from '../../components/shop/ShopCategoryChip';
 import { ShopItemCard } from '../../components/shop/ShopItemCard';
 import { AppText } from '../../components/ui/AppText';
@@ -26,6 +26,7 @@ import {
   useRecentShopSearches,
   useShopSearchStore,
 } from '../../stores/shopSearchStore';
+import { useShopCategories } from '../../stores/shopStore';
 import {
   radius,
   typography,
@@ -92,6 +93,11 @@ export const ShopSearchScreen = () => {
   const recent = useRecentShopSearches();
   const remember = useShopSearchStore(s => s.remember);
   const forget = useShopSearchStore(s => s.forget);
+
+  // The shelves the server is carrying: the chips are the shop's shelves,
+  // and those are rows an operator writes rather than a list shipped here.
+  const summaries = useShopCategories();
+  const categories = useMemo(() => shopCategoriesOf(summaries), [summaries]);
 
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
@@ -214,7 +220,7 @@ export const ShopSearchScreen = () => {
         </HStack>
 
         <HStack align="center" gap="xs" wrap style={styles.chips}>
-          {SHOP_CATEGORIES.map(entry => (
+          {categories.map(entry => (
             <ShopCategoryChip
               key={entry.value}
               value={entry.value}
@@ -238,6 +244,7 @@ export const ShopSearchScreen = () => {
     ),
     [
       catalogue.total,
+      categories,
       category,
       clearText,
       colors,
