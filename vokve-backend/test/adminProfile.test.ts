@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
+import { ActivityDailyModel, StepUploadModel } from '../src/modules/activity/models.js';
 import { OrderModel } from '../src/modules/commerce/models.js';
 import { UserAchievementModel } from '../src/modules/challenges/models.js';
 import { credit } from '../src/modules/economy/service.js';
@@ -340,5 +341,217 @@ describe('admin: finding the account', () => {
 
     const watch = await request(app).get('/v1/admin/users').query({ tier: 'watch' }).set(ADMIN);
     expect(watch.body.total).toBe(0);
+  });
+});
+
+/**
+ * A day as the rollup leaves it when a watch answered for it: the phone
+ * counted its own steps, Samsung Health wrote more, and the scoring took the
+ * watch. Written straight in, because the question under test is what the
+ * admin read makes of a *stored* decision — the scoring's own is covered by
+ * `fraud.test.ts` and `ingest.test.ts`.
+ */
+async function scoredDay(
+  userId: string,
+  deviceId: string,
+  localDay: string,
+  options: {
+    steps: number;
+    phoneSteps: number;
+    /** The source that answered, or none at all: then the phone's own count did. */
+    winner?: { packageName: string; appName: string; steps: number; kind?: string; isWearable?: boolean; status?: string };
+    /** Another app that wrote the day and was not believed. */
+    also?: { packageName: string; appName: string; steps: number; status?: string };
+  },
+) {
+  const sources = [
+    ...(options.winner
+      ? [{
+          packageName: options.winner.packageName,
+          appName: options.winner.appName,
+          kind: options.winner.kind ?? 'watch',
+          isWearable: options.winner.isWearable ?? true,
+          isPlatform: false,
+          steps: options.winner.steps,
+          manualSteps: 0,
+          unknownMethodSteps: 0,
+          countable: options.winner.steps,
+          ratioToPhone: options.phoneSteps > 0 ? options.winner.steps / options.phoneSteps : null,
+          standing: 'allowed',
+          status: options.winner.status ?? 'used',
+        }]
+      : []),
+    ...(options.also
+      ? [{
+          packageName: options.also.packageName,
+          appName: options.also.appName,
+          kind: 'app',
+          isWearable: false,
+          isPlatform: false,
+          steps: options.also.steps,
+          manualSteps: 0,
+          unknownMethodSteps: 0,
+          countable: options.also.steps,
+          ratioToPhone: null,
+          standing: 'unknown',
+          status: options.also.status ?? 'unverified',
+        }]
+      : []),
+  ];
+  await ActivityDailyModel.updateOne(
+    { _id: `${userId}:${localDay}` },
+    {
+      $setOnInsert: { _id: `${userId}:${localDay}`, userId, localDay },
+      $set: {
+        steps: options.steps,
+        verifiedSteps: options.steps,
+        pedometerSteps: options.phoneSteps,
+        verified: true,
+        source: options.winner ? 'health_connect' : 'device',
+        deviceCount: 1,
+        scoredAt: new Date(),
+        breakdown: {
+          bestDeviceId: deviceId,
+          union: { phones: options.phoneSteps, verified: options.phoneSteps, added: false },
+          devices: [{
+            deviceId,
+            phone: { counted: options.phoneSteps, recovered: 0, flagged: 0, clean: options.phoneSteps },
+            candidate: options.steps,
+            source: options.winner ? 'health_connect' : 'device',
+            winner: options.winner?.packageName ?? null,
+            shown: { steps: options.steps, packageName: options.winner?.packageName ?? null },
+            verified: true,
+            verifiedSteps: options.steps,
+            displaySteps: options.steps,
+            plausibility: 90,
+            layers: {},
+            hard: [],
+            sources,
+            sourcesStatus: 'read',
+            signedAt: Date.now(),
+            proof: { key: null, play: null },
+          }],
+        },
+      },
+    },
+    { upsert: true },
+  );
+}
+
+describe('admin: which source a member’s steps came from (D-51)', () => {
+  it('names the source each day’s figure came from, and what the other apps wrote beside it', async () => {
+    const session = await signUpAndRegister();
+    await scoredDay(session.userId, session.deviceId, today(), {
+      steps: 9000,
+      phoneSteps: 4000,
+      winner: { packageName: 'com.sec.android.app.shealth', appName: 'Samsung Health', steps: 9000 },
+      also: { packageName: 'com.fake.steps', appName: 'Step Booster', steps: 40_000 },
+    });
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps`).query({ days: 7 }).set(ADMIN);
+    expect(res.status).toBe(200);
+    const day = res.body.data[0];
+    expect(day.source).toBe('health_connect');
+    expect(day.sourceApp).toMatchObject({
+      key: 'com.sec.android.app.shealth',
+      appName: 'Samsung Health',
+      isWearable: true,
+      answered: true,
+      status: 'used',
+    });
+    // The answering source first, then by what each wrote; the phone's own
+    // counter is a source like any other and carries its own count.
+    expect(day.sources.map((source: { key: string }) => source.key)).toEqual([
+      'com.sec.android.app.shealth',
+      'com.fake.steps',
+      'phone',
+    ]);
+    expect(day.sources.find((source: { key: string }) => source.key === 'phone')).toMatchObject({
+      appName: 'Phone step counter',
+      steps: 4000,
+      answered: false,
+    });
+    expect(day.sources.find((source: { key: string }) => source.key === 'com.fake.steps')).toMatchObject({
+      status: 'unverified',
+      steps: 40_000,
+      answered: false,
+    });
+    expect(day.devices[0]).toMatchObject({
+      name: 'Google Pixel 8',
+      source: 'health_connect',
+      winner: 'com.sec.android.app.shealth',
+      sourcesStatus: 'read',
+    });
+  });
+
+  it('totals the window by source: what answered, and what only wrote', async () => {
+    const session = await signUpAndRegister();
+    await scoredDay(session.userId, session.deviceId, today(), {
+      steps: 9000,
+      phoneSteps: 4000,
+      winner: { packageName: 'com.sec.android.app.shealth', appName: 'Samsung Health', steps: 9000 },
+    });
+    // The watch wrote this day too and was not believed, so the phone answered.
+    await scoredDay(session.userId, session.deviceId, dayAgo(1), {
+      steps: 5000,
+      phoneSteps: 5000,
+      also: { packageName: 'com.sec.android.app.shealth', appName: 'Samsung Health', steps: 60_000, status: 'not_counted' },
+    });
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps`).query({ days: 7 }).set(ADMIN);
+    const bySource = res.body.bySource as Record<string, unknown>[];
+    expect(bySource.map(row => row.key)).toEqual(['com.sec.android.app.shealth', 'phone']);
+    expect(bySource[0]).toMatchObject({
+      appName: 'Samsung Health',
+      // Only the day it answered for pays; the day it was refused does not.
+      steps: 9000,
+      daysAnswered: 1,
+      days: 2,
+      wrote: 69_000,
+      lastDay: today(),
+      lastStatus: 'used',
+    });
+    expect(bySource[1]).toMatchObject({ key: 'phone', steps: 5000, daysAnswered: 1, days: 2, wrote: 9000 });
+  });
+
+  it('says what the last steps came from, and when the phone sent them', async () => {
+    const session = await signUpAndRegister();
+    await scoredDay(session.userId, session.deviceId, dayAgo(1), { steps: 7000, phoneSteps: 7000 });
+    // Today is a row with no steps in it — the last *steps* are yesterday's.
+    await scoredDay(session.userId, session.deviceId, today(), { steps: 0, phoneSteps: 0 });
+    await StepUploadModel.create({
+      _id: `upl_${session.deviceId}_${dayAgo(1)}`,
+      userId: session.userId,
+      deviceId: session.deviceId,
+      localDay: dayAgo(1),
+      payloadSha256: 'sha-last-steps',
+      keyId: 'key_1',
+      signedAt: new Date(),
+      appVersion: '1.4.0',
+      receivedAt: new Date(),
+    });
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps`).query({ days: 7 }).set(ADMIN);
+    expect(res.body.last).toMatchObject({
+      localDay: dayAgo(1),
+      steps: 7000,
+      source: 'device',
+      deviceName: 'Google Pixel 8',
+      appVersion: '1.4.0',
+    });
+    expect(res.body.last.app).toMatchObject({ key: 'phone', appName: 'Phone step counter', answered: true });
+    expect(res.body.last.syncedAt).not.toBeNull();
+  });
+
+  it('invents nothing for a day that was never scored', async () => {
+    const session = await signUpAndRegister();
+    await walk(session, 6000);
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps`).query({ days: 7 }).set(ADMIN);
+    // The dev route writes a day without a breakdown; nothing then claims to
+    // know where it came from.
+    expect(res.body.data[0]).toMatchObject({ steps: 6000, sourceApp: null, sources: [], phonesAdded: false });
+    expect(res.body.bySource).toEqual([]);
+    expect(res.body.last).toMatchObject({ localDay: today(), app: null });
   });
 });

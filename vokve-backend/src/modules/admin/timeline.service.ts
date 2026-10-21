@@ -2,7 +2,14 @@ import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { isValidTimeZone, localMidnightUtc } from '../../lib/dates.js';
 import { Errors } from '../../lib/errors.js';
-import { DeviceDayModel } from '../activity/models.js';
+import {
+  attributeDay,
+  PHONE_SOURCE_KEY,
+  PHONE_SOURCE_NAME,
+  type DaySource,
+  type StoredBreakdown,
+} from '../activity/attribution.js';
+import { ActivityDailyModel, DeviceDayModel } from '../activity/models.js';
 import { DeviceModel } from '../devices/models.js';
 import { UserModel } from '../identity/models.js';
 
@@ -23,6 +30,12 @@ import { UserModel } from '../identity/models.js';
  * stored `minuteSteps`, which is what the scoring itself reads. A day
  * stored before minutes were kept has none, and says so rather than
  * answering zero.
+ *
+ * The same day also answers the other half of the question — *which source*,
+ * not just which phone. Minutes are the handset's own counter and nothing
+ * else: an app that writes to Health Connect is a day's worth of records, not
+ * minutes, so what it can be placed against is its own hours (`sourceHours`),
+ * which is why the two live side by side rather than merged into one row.
  */
 
 export const timelineQuery = z.object({
@@ -189,9 +202,12 @@ export async function stepsTimeline(userId: string, query: TimelineQuery) {
   const config = await getConfig();
   const zone = user.timezone && isValidTimeZone(user.timezone) ? user.timezone : config.locale.timezone;
 
-  const [allDays, devices] = await Promise.all([
+  const [allDays, devices, scoredDay] = await Promise.all([
     DeviceDayModel.find({ userId, localDay: query.date }).lean(),
     DeviceModel.find({ userId }, { info: 1, counting: 1, firstSeenAt: 1 }).lean(),
+    // The day as it was scored: which source answered for it, and what each
+    // app wrote. The minutes below are the evidence; this is the verdict.
+    ActivityDailyModel.findById(`${userId}:${query.date}`).lean(),
   ]);
 
   const nameOf = new Map(
@@ -302,10 +318,106 @@ export async function stepsTimeline(userId: string, query: TimelineQuery) {
     };
   });
 
+  const breakdown = scoredDay?.breakdown as StoredBreakdown | undefined;
+  const attribution = attributeDay(breakdown, (scoredDay?.source as string | null) ?? null);
+  const storedOf = new Map((breakdown?.devices ?? []).map(device => [device.deviceId, device]));
+
+  /**
+   * Each source's own twenty-four hours.
+   *
+   * The phone counter's hours are the minutes above — the union the day is
+   * actually decided from, so the strip and the rows cannot disagree. An
+   * app's are the hours its own tracker computed, taken as the **largest**
+   * any phone reported rather than added: two phones on one account read the
+   * same Health Connect records, and adding them would count one walk twice.
+   * A source whose tracker computed none is carried with `hourly: null`
+   * rather than as a row of zeroes, because "not known" and "none" are
+   * different answers to "when did they walk".
+   */
+  const hoursOfSource = new Map<string, number[] | null>([[PHONE_SOURCE_KEY, hours.map(hour => hour.steps)]]);
+  for (const day of deviceDays) {
+    const evidence = day.evidence as { sources?: { packageName: string; hourlySteps?: number[] | null }[] };
+    for (const source of evidence?.sources ?? []) {
+      const own = source.hourlySteps;
+      const kept = hoursOfSource.get(source.packageName) ?? null;
+      if (!own || own.length !== 24) {
+        if (!hoursOfSource.has(source.packageName)) hoursOfSource.set(source.packageName, null);
+        continue;
+      }
+      hoursOfSource.set(source.packageName, kept ? kept.map((steps, hour) => Math.max(steps, own[hour])) : [...own]);
+    }
+  }
+
+  // A day with minutes but no score yet has no stored sources at all; its
+  // steps still came from the handsets' own counters, and saying so is more
+  // use than an empty panel.
+  const stored: DaySource[] =
+    attribution.sources.length > 0 || counted === 0
+      ? attribution.sources
+      : [
+          {
+            key: PHONE_SOURCE_KEY,
+            appName: PHONE_SOURCE_NAME,
+            kind: 'self',
+            isWearable: false,
+            isPlatform: false,
+            steps: counted,
+            countable: counted,
+            manualSteps: 0,
+            status: 'phone',
+            answered: true,
+            shown: false,
+            deviceIds: deviceDays.map(day => day.deviceId),
+          },
+        ];
+
+  const sources: (DaySource & { hourly: number[] | null })[] = stored.map(source => ({
+    ...source,
+    hourly: hoursOfSource.get(source.key) ?? null,
+  }));
+
+  const sourceHours = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    /** What the minutes gave the hour — the phones' own counters. */
+    steps: hours[hour]?.steps ?? 0,
+    bySource: sources
+      .filter(source => (source.hourly?.[hour] ?? 0) > 0)
+      .map(source => ({
+        key: source.key,
+        appName: source.appName,
+        answered: source.answered,
+        steps: source.hourly?.[hour] ?? 0,
+      }))
+      .sort((a, b) => b.steps - a.steps),
+  }));
+
   return {
     userId,
     localDay: query.date,
     timezone: zone,
+    /**
+     * The day as it was scored, and the source its figure came from. Null
+     * when nothing has been scored for the day, which is not the same as a
+     * day with no minutes: a phone can send a day the scoring then refused.
+     */
+    scored: scoredDay
+      ? {
+          steps: scoredDay.steps ?? 0,
+          verifiedSteps: scoredDay.verifiedSteps ?? 0,
+          verified: scoredDay.verified ?? false,
+          /** `device` or `health_connect`, as the day stored it. */
+          source: attribution.source,
+          /** The app or counter the day's figure came from. */
+          answeredBy: attribution.answeredBy,
+          /** Several phones' minutes added up to the day (D-53). */
+          phonesAdded: attribution.phonesAdded,
+          scoredAt: (scoredDay.scoredAt as Date | undefined)?.toISOString() ?? null,
+        }
+      : null,
+    /** Every source any phone saw this day, the answering one first, with its own hours. */
+    sources,
+    /** The same sources hour by hour, so "when did these steps come from where" is one read. */
+    sourceHours,
     /** What the minutes add up to — the day's own total is scored separately. */
     totals: {
       steps: counted,
@@ -320,11 +432,32 @@ export async function stepsTimeline(userId: string, query: TimelineQuery) {
       const evidence = day.evidence as { deviceSteps?: number; minuteSteps?: unknown[] };
       const tally = perDevice.get(day.deviceId);
       const device = devices.find(row => row._id === day.deviceId);
+      const decided = storedOf.get(day.deviceId);
       return {
         deviceId: day.deviceId,
         name: nameOf.get(day.deviceId) ?? 'Phone',
         /** Everything this phone's own sensor counted for the day. */
         deviceSteps: evidence?.deviceSteps ?? 0,
+        /** Whether this phone's own counter answered for it, or a Health Connect app did. */
+        source: decided?.source ?? null,
+        /** The Health Connect source that answered for this phone, by package name. */
+        winnerApp: decided?.winner ?? null,
+        /** What the phone displayed, and the other app it came from when it was not its own count. */
+        shownApp: decided?.shown?.packageName ?? null,
+        shownSteps: decided?.shown?.steps ?? null,
+        /** Whether Health Connect was read at all, and why not when it was not. */
+        sourcesStatus: decided?.sourcesStatus ?? null,
+        /** Every app this phone saw, and what became of each (A14–A15). */
+        sources: (decided?.sources ?? []).map(source => ({
+          packageName: source.packageName,
+          appName: source.appName || source.packageName,
+          kind: source.kind,
+          isWearable: source.isWearable,
+          steps: source.steps,
+          countable: source.countable,
+          manualSteps: source.manualSteps,
+          status: source.status,
+        })),
         /** Of that, what the minutes gave it and what another phone took. */
         countedSteps: tally?.counted ?? 0,
         rejectedSteps: tally?.rejected ?? 0,

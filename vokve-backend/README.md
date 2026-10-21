@@ -582,6 +582,15 @@ curl -s "$A/admin/users/<userId>/steps?days=30" -H "$K" | jq '{window, goal, tot
 curl -s "$A/admin/users/<userId>/steps?days=30" -H "$K" | jq '.data[] | {localDay, steps, verifiedSteps, stepsCredited, verified, goalHit, plausibility, hardRejects}'
 curl -s "$A/admin/users/<userId>/steps?from=2026-10-01&to=2026-10-07" -H "$K" | jq '.totals'
 
+# where those steps came from: the window by source, the last steps and what answered for them,
+# and per day the source the figure came from with every other app that wrote one (D-51)
+curl -s "$A/admin/users/<userId>/steps?days=30" -H "$K" | jq '{bySource, last}'
+curl -s "$A/admin/users/<userId>/steps?days=30" -H "$K" | jq '.data[] | {localDay, steps, source, answered: .sourceApp.appName, sources: [.sources[] | {appName, steps, status, answered}]}'
+
+# and one day in depth: which phone each minute went to, which source answered, and each source's own hours
+curl -s "$A/admin/users/<userId>/steps/timeline?date=2026-10-21" -H "$K" | jq '{scored, totals, sources: [.sources[] | {appName, steps, status, answered}]}'
+curl -s "$A/admin/users/<userId>/steps/timeline?date=2026-10-21" -H "$K" | jq '[.sourceHours[] | select(.bySource != []) | {hour, steps, bySource}]'
+
 # the wallet, the escrow, the daily ceilings, the totals by source
 curl -s $A/admin/users/<userId>/wallet -H "$K" | jq '{balance, totals, bySource}'
 curl -s $A/admin/users/<userId>/wallet -H "$K" | jq '.holds[], .dailyCaps[0]'

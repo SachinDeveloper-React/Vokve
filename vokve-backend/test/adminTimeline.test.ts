@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { addDays, localDayOf } from '../src/lib/dates.js';
-import { DeviceDayModel } from '../src/modules/activity/models.js';
+import { ActivityDailyModel, DeviceDayModel } from '../src/modules/activity/models.js';
 import { app, signUpAndRegister, type Session } from './helpers.js';
 
 /**
@@ -82,6 +82,7 @@ async function deviceDay(
   deviceId: string,
   localDay: string,
   minuteSteps: [number, number, number][],
+  sources: Record<string, unknown>[] = [],
 ) {
   await DeviceDayModel.create({
     _id: `${deviceId}:${localDay}`,
@@ -90,9 +91,93 @@ async function deviceDay(
     localDay,
     uploadId: `upl-${deviceId}`,
     signedAt: new Date(),
-    evidence: evidenceFor(localDay, minuteSteps),
+    evidence: { ...evidenceFor(localDay, minuteSteps), sources },
     proof: { key: { attested: true, failure: null, verifiedBootState: 'verified', deviceLocked: true } },
   });
+}
+
+/** A Health Connect source as a device-day keeps it, with its own hours. */
+function watchSource(options: { steps: number; hour: number; packageName?: string; appName?: string }) {
+  const hourlySteps = Array.from({ length: 24 }, (_, hour) => (hour === options.hour ? options.steps : 0));
+  return {
+    packageName: options.packageName ?? 'com.sec.android.app.shealth',
+    appName: options.appName ?? 'Samsung Health',
+    kind: 'watch',
+    steps: options.steps,
+    distance: 0,
+    manualSteps: 0,
+    unknownMethodSteps: 0,
+    isWearable: true,
+    trustedWearable: true,
+    isPlatform: false,
+    distanceSource: null,
+    hourlySteps,
+  };
+}
+
+/**
+ * The day's verdict as the rollup leaves it: which phone it took, and which
+ * Health Connect source answered on that phone.
+ */
+async function scoredBy(
+  session: Session,
+  deviceId: string,
+  localDay: string,
+  options: {
+    steps: number;
+    phoneSteps: number;
+    winner?: Record<string, unknown>;
+    /** Sources the day saw and did not believe — shown, never paid (A14). */
+    refused?: Record<string, unknown>[];
+  },
+) {
+  await ActivityDailyModel.updateOne(
+    { _id: `${session.userId}:${localDay}` },
+    {
+      $setOnInsert: { _id: `${session.userId}:${localDay}`, userId: session.userId, localDay },
+      $set: {
+        steps: options.steps,
+        verifiedSteps: options.steps,
+        verified: true,
+        source: options.winner ? 'health_connect' : 'device',
+        scoredAt: new Date(),
+        breakdown: {
+          bestDeviceId: deviceId,
+          union: { phones: options.phoneSteps, verified: options.phoneSteps, added: false },
+          devices: [{
+            deviceId,
+            phone: { counted: options.phoneSteps, recovered: 0, flagged: 0, clean: options.phoneSteps },
+            candidate: options.steps,
+            source: options.winner ? 'health_connect' : 'device',
+            winner: options.winner?.packageName ?? null,
+            shown: { steps: options.steps, packageName: options.winner?.packageName ?? null },
+            verified: true,
+            verifiedSteps: options.steps,
+            displaySteps: options.steps,
+            plausibility: 90,
+            layers: {},
+            hard: [],
+            sources: [
+              ...(options.winner
+                ? [{ ...options.winner, countable: options.winner.steps, ratioToPhone: null, standing: 'allowed', status: 'used' }]
+                : []),
+              ...(options.refused ?? []).map(source => ({
+                ...source,
+                countable: source.steps,
+                ratioToPhone: null,
+                standing: 'unknown',
+                status: 'unverified',
+              })),
+            ],
+            sourcesStatus: 'read',
+            signedAt: Date.now(),
+            proof: { key: null, play: null },
+          }],
+        },
+      },
+    },
+    { upsert: true },
+  );
 }
 
 describe('one member’s day, minute by minute (D-53)', () => {
@@ -333,5 +418,84 @@ describe('one member’s day, minute by minute (D-53)', () => {
 
     const missing = await request(app).get(`/v1/admin/users/usr_nobody/steps/timeline?date=${today()}`).set(ADMIN);
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('the same day, source by source (D-51)', () => {
+  it('names the source the day was taken from, and gives each source its own hours', async () => {
+    const day = addDays(today(), -1);
+    const session = await signUpAndRegister();
+    // The phone counted 600 in the morning; the watch wrote 2,000 in the
+    // evening and the scoring took the watch.
+    const watch = watchSource({ steps: 2000, hour: 19 });
+    await deviceDay(session, 'dev_a', day, minutes(day, '09:00', 6, 100), [watch]);
+    await scoredBy(session, 'dev_a', day, { steps: 2000, phoneSteps: 600, winner: watch });
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps/timeline?date=${day}`).set(ADMIN);
+    expect(res.status).toBe(200);
+
+    expect(res.body.scored).toMatchObject({ steps: 2000, source: 'health_connect', phonesAdded: false });
+    expect(res.body.scored.answeredBy).toMatchObject({ appName: 'Samsung Health', answered: true, steps: 2000 });
+
+    // The answering source first; the phone's counter is a source too, and
+    // its hours are the minutes the timeline itself decided.
+    expect(res.body.sources.map((source: { key: string }) => source.key)).toEqual([
+      'com.sec.android.app.shealth',
+      'phone',
+    ]);
+    const phone = res.body.sources.find((source: { key: string }) => source.key === 'phone');
+    expect(phone).toMatchObject({ appName: 'Phone step counter', steps: 600, answered: false });
+    expect(phone.hourly[9]).toBe(600);
+    expect(res.body.sources[0].hourly[19]).toBe(2000);
+
+    // Hour by hour, the two sources stay apart: the walk the phone timed at
+    // nine, the watch's own evening, and nothing invented in between.
+    const nine = res.body.sourceHours[9];
+    expect(nine).toMatchObject({ steps: 600 });
+    expect(nine.bySource).toEqual([{ key: 'phone', appName: 'Phone step counter', answered: false, steps: 600 }]);
+    expect(res.body.sourceHours[19].bySource).toEqual([
+      { key: 'com.sec.android.app.shealth', appName: 'Samsung Health', answered: true, steps: 2000 },
+    ]);
+    expect(res.body.sourceHours[3].bySource).toEqual([]);
+
+    // And per phone: which source answered on it, and every app it saw.
+    const device = res.body.devices[0];
+    expect(device).toMatchObject({ source: 'health_connect', winnerApp: 'com.sec.android.app.shealth', sourcesStatus: 'read' });
+    expect(device.sources[0]).toMatchObject({ appName: 'Samsung Health', steps: 2000, status: 'used' });
+  });
+
+  it('carries a source whose tracker computed no hours rather than placing it at midnight', async () => {
+    const day = addDays(today(), -1);
+    const session = await signUpAndRegister();
+    const booster = {
+      ...watchSource({ steps: 3000, hour: 0, packageName: 'com.fake.steps', appName: 'Step Booster' }),
+      hourlySteps: null,
+    };
+    await deviceDay(session, 'dev_a', day, minutes(day, '09:00', 6, 100), [booster]);
+    await scoredBy(session, 'dev_a', day, { steps: 600, phoneSteps: 600, refused: [booster] });
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps/timeline?date=${day}`).set(ADMIN);
+    // The phone answered for the day; the app wrote 3,000 and was placed nowhere.
+    expect(res.body.sources.find((source: { key: string }) => source.key === 'phone')).toMatchObject({
+      answered: true,
+      hourly: expect.any(Array),
+    });
+    const refused = res.body.sources.find((source: { key: string }) => source.key === 'com.fake.steps');
+    expect(refused).toMatchObject({ appName: 'Step Booster', steps: 3000, hourly: null });
+    // `null` hours are not zero hours: it is in no hour of the day at all.
+    expect(res.body.sourceHours.flatMap((hour: { bySource: { key: string }[] }) => hour.bySource.map(s => s.key)))
+      .not.toContain('com.fake.steps');
+  });
+
+  it('answers a day nothing has scored with the phones’ own minutes', async () => {
+    const day = addDays(today(), -1);
+    const session = await signUpAndRegister();
+    await deviceDay(session, 'dev_a', day, minutes(day, '07:00', 4, 250));
+
+    const res = await request(app).get(`/v1/admin/users/${session.userId}/steps/timeline?date=${day}`).set(ADMIN);
+    expect(res.body.scored).toBeNull();
+    expect(res.body.sources).toHaveLength(1);
+    expect(res.body.sources[0]).toMatchObject({ key: 'phone', steps: 1000, answered: true });
+    expect(res.body.sourceHours[7].bySource[0]).toMatchObject({ key: 'phone', steps: 1000 });
   });
 });

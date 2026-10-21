@@ -3,9 +3,11 @@ import { getConfig } from '../../config/remote.js';
 import { toCoins } from '../../lib/coins.js';
 import { addDays, localDayOf } from '../../lib/dates.js';
 import { Errors } from '../../lib/errors.js';
-import { ActivityDailyModel } from '../activity/models.js';
+import { attributeDay, type DaySource, type StoredBreakdown } from '../activity/attribution.js';
+import { ActivityDailyModel, StepUploadModel } from '../activity/models.js';
 import { AchievementDefinitionModel, ChallengeCompletionModel, ChallengeDefinitionModel, UserAchievementModel } from '../challenges/models.js';
 import { OrderModel } from '../commerce/models.js';
+import { DeviceModel } from '../devices/models.js';
 import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel } from '../economy/models.js';
 import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { streakFigures } from '../streak/service.js';
@@ -54,50 +56,179 @@ export async function memberSteps(userId: string, query: StepsQuery) {
   const to = query.to ?? today;
   const from = query.from ?? addDays(to, -(query.days - 1));
 
-  const [settings, days, streak] = await Promise.all([
+  const [settings, days, streak, devices] = await Promise.all([
     UserSettingsModel.findById(userId, { dailyStepGoal: 1 }).lean(),
     ActivityDailyModel.find({ userId, localDay: { $gte: from, $lte: to } }).sort({ localDay: -1 }).lean(),
     // The streak is counted from `streak_days`, not stored as a number, so
     // this is the same arithmetic the member's own screen shows.
     streakFigures(userId, timezone).catch(() => null),
+    // Only for names: a row that says `dev_8f21…` makes an operator look the
+    // phone up somewhere else before they can read the day.
+    DeviceModel.find({ userId }, { info: 1 }).lean(),
   ]);
   const goal = settings?.dailyStepGoal ?? 10_000;
+  const nameOf = new Map(
+    devices.map(device => [
+      device._id,
+      [device.info?.brand, device.info?.model].filter(Boolean).join(' ').trim() || 'Phone',
+    ]),
+  );
 
-  const rows = days.map(day => ({
-    localDay: day.localDay,
-    steps: day.steps ?? 0,
-    verifiedSteps: day.verifiedSteps ?? 0,
-    pedometerSteps: day.pedometerSteps ?? null,
-    distanceKm: Math.round((day.distanceKm ?? 0) * 100) / 100,
-    activeMinutes: day.activeMinutes ?? 0,
-    /** Walking calories and workout calories are two figures; the day is both. */
-    calories: Math.round((day.stepCalories ?? 0) + (day.caloriesBurned ?? 0)),
-    workouts: day.workoutsCompleted ?? 0,
-    source: day.source ?? null,
-    verified: day.verified ?? false,
-    plausibility: day.plausibility ?? null,
-    layers: day.layers ?? null,
-    flags: day.flags ?? [],
-    hardRejects: day.hardRejects ?? [],
-    deviceCount: day.deviceCount ?? 0,
-    /** Steps already paid or held for this day — the high-water mark (RULES A4). */
-    stepsCredited: day.stepsCredited ?? 0,
-    goalHit: (day.steps ?? 0) >= goal,
-    scoredAt: iso(day.scoredAt),
-    /** Which phone counted what, as the decision was made. Null on unscored days. */
-    devices: ((day.breakdown as { devices?: Record<string, unknown>[] } | undefined)?.devices ?? []).map(device => ({
-      deviceId: device.deviceId,
-      source: device.source,
-      candidate: device.candidate,
-      verified: device.verified,
-      verifiedSteps: device.verifiedSteps,
-      plausibility: device.plausibility,
-    })),
-  }));
+  const rows = days.map(day => {
+    const breakdown = day.breakdown as StoredBreakdown | undefined;
+    // Which source the day's figure came from, and every source any phone saw
+    // that day — the decision as it was made, not a re-run (D-51).
+    const attribution = attributeDay(breakdown, day.source ?? null);
+    return {
+      localDay: day.localDay,
+      steps: day.steps ?? 0,
+      verifiedSteps: day.verifiedSteps ?? 0,
+      pedometerSteps: day.pedometerSteps ?? null,
+      distanceKm: Math.round((day.distanceKm ?? 0) * 100) / 100,
+      activeMinutes: day.activeMinutes ?? 0,
+      /** Walking calories and workout calories are two figures; the day is both. */
+      calories: Math.round((day.stepCalories ?? 0) + (day.caloriesBurned ?? 0)),
+      workouts: day.workoutsCompleted ?? 0,
+      /** `device` or `health_connect`: whether the phone's own counter answered. */
+      source: day.source ?? null,
+      /** The app or counter the day's own figure came from; null on an unscored day. */
+      sourceApp: attribution.answeredBy,
+      /** Every source any phone saw that day, the answering one first. */
+      sources: attribution.sources,
+      /** Several phones' minutes added up to the day, so their own counters are its source (D-53). */
+      phonesAdded: attribution.phonesAdded,
+      bestDeviceId: attribution.bestDeviceId,
+      verified: day.verified ?? false,
+      plausibility: day.plausibility ?? null,
+      layers: day.layers ?? null,
+      flags: day.flags ?? [],
+      hardRejects: day.hardRejects ?? [],
+      deviceCount: day.deviceCount ?? 0,
+      /** Steps already paid or held for this day — the high-water mark (RULES A4). */
+      stepsCredited: day.stepsCredited ?? 0,
+      goalHit: (day.steps ?? 0) >= goal,
+      scoredAt: iso(day.scoredAt),
+      /** Which phone counted what, and from which app, as the decision was made. */
+      devices: (breakdown?.devices ?? []).map(device => ({
+        deviceId: device.deviceId,
+        name: nameOf.get(device.deviceId) ?? 'Phone',
+        source: device.source,
+        candidate: device.candidate,
+        verified: device.verified,
+        verifiedSteps: device.verifiedSteps,
+        plausibility: device.plausibility,
+        /** The Health Connect source that answered for this phone, if any. */
+        winner: device.winner ?? null,
+        /** What the phone displayed, and the other app it came from when it was not its own count. */
+        shownSteps: device.shown?.steps ?? null,
+        shownApp: device.shown?.packageName ?? null,
+        /** Whether Health Connect was read at all, and why not when it was not. */
+        sourcesStatus: device.sourcesStatus ?? null,
+        sources: (device.sources ?? []).map(source => ({
+          packageName: source.packageName,
+          appName: source.appName || source.packageName,
+          kind: source.kind,
+          isWearable: source.isWearable,
+          steps: source.steps,
+          countable: source.countable,
+          manualSteps: source.manualSteps,
+          status: source.status,
+        })),
+      })),
+    };
+  });
 
   const steps = rows.reduce((sum, row) => sum + row.steps, 0);
   const verifiedSteps = rows.reduce((sum, row) => sum + row.verifiedSteps, 0);
   const round = (n: number) => Math.round(n * 1000) / 1000;
+
+  /**
+   * Where the window's steps came from, source by source.
+   *
+   * A day's own figure is credited to the one source that answered for it —
+   * never split, because the scoring never splits it — and what the other
+   * sources wrote that day is carried beside it as `wrote`. So a watch that
+   * recorded every day but was only believed on three of them reads as three
+   * days answered and fourteen days written, which is the shape of the
+   * complaint support actually gets.
+   */
+  const bySource = new Map<
+    string,
+    {
+      key: string;
+      appName: string;
+      kind: string;
+      isWearable: boolean;
+      isPlatform: boolean;
+      steps: number;
+      verifiedSteps: number;
+      wrote: number;
+      days: number;
+      daysAnswered: number;
+      lastDay: string | null;
+      lastStatus: DaySource['status'];
+    }
+  >();
+  for (const row of rows) {
+    for (const source of row.sources) {
+      const seen = bySource.get(source.key) ?? {
+        key: source.key,
+        appName: source.appName,
+        kind: source.kind,
+        isWearable: source.isWearable,
+        isPlatform: source.isPlatform,
+        steps: 0,
+        verifiedSteps: 0,
+        wrote: 0,
+        days: 0,
+        daysAnswered: 0,
+        lastDay: null,
+        lastStatus: source.status,
+      };
+      seen.wrote += source.steps;
+      seen.days += 1;
+      if (source.answered) {
+        seen.steps += row.steps;
+        seen.verifiedSteps += row.verifiedSteps;
+        seen.daysAnswered += 1;
+      }
+      // Rows are newest first, so the first sighting is the latest one.
+      if (seen.lastDay === null) {
+        seen.lastDay = row.localDay;
+        seen.lastStatus = source.status;
+      }
+      bySource.set(source.key, seen);
+    }
+  }
+
+  // The last steps this member has, and what they came from — the second half
+  // of "my steps are missing", asked about today rather than the window.
+  const latest = rows.find(row => row.steps > 0) ?? null;
+  const lastUpload = latest
+    ? await StepUploadModel.findOne({ userId, localDay: latest.localDay })
+        .select({ deviceId: 1, receivedAt: 1, appVersion: 1 })
+        .sort({ receivedAt: -1 })
+        .lean()
+    : null;
+  const last = latest
+    ? {
+        localDay: latest.localDay,
+        steps: latest.steps,
+        verifiedSteps: latest.verifiedSteps,
+        verified: latest.verified,
+        /** `device` or `health_connect`, as the day stored it. */
+        source: latest.source,
+        /** The app or counter the figure came from. */
+        app: latest.sourceApp,
+        phonesAdded: latest.phonesAdded,
+        deviceId: latest.bestDeviceId,
+        deviceName: latest.bestDeviceId ? nameOf.get(latest.bestDeviceId) ?? 'Phone' : null,
+        scoredAt: latest.scoredAt,
+        /** When the phone last sent this day, which is not when it was walked. */
+        syncedAt: iso(lastUpload?.receivedAt),
+        appVersion: lastUpload?.appVersion ?? null,
+      }
+    : null;
 
   return {
     window: { from, to, days: rows.length, timezone },
@@ -120,6 +251,10 @@ export async function memberSteps(userId: string, query: StepsQuery) {
       averageSteps: rows.length > 0 ? Math.round(steps / rows.length) : 0,
     },
     streak,
+    /** Which source the window's steps came from, most steps first. */
+    bySource: [...bySource.values()].sort((a, b) => b.steps - a.steps || b.wrote - a.wrote),
+    /** The newest day with steps, and where it came from. */
+    last,
     /** Oldest first, for a chart. */
     byDay: [...rows].reverse(),
     data: rows,

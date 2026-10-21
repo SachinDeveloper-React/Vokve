@@ -12,7 +12,7 @@ import { ApiError } from '../../lib/errors.js';
 import { DeviceModel } from '../devices/models.js';
 import { FraudFlagModel } from '../integrity/models.js';
 import { playIntegrityProjectNumber } from '../integrity/service.js';
-import type { DeviceProof } from './rollup.service.js';
+import type { PhonesAdded, StoredBreakdown, StoredDevice } from './attribution.js';
 import type { LayerName, SourceDecision } from './layers.js';
 import { ActivityDailyModel, ActivitySampleModel, StepUploadModel } from './models.js';
 import { toDaily } from './service.js';
@@ -148,37 +148,6 @@ export async function getRange(userId: string, from: string, to: string, granula
 }
 
 // ─── Sources ────────────────────────────────────────────────────────────────
-
-/** One device's part of `activity_daily.breakdown`, as `rollup.service.ts` writes it. */
-interface StoredDevice {
-  deviceId: string;
-  phone: { counted: number; recovered: number; flagged: number; clean: number };
-  candidate: number;
-  source: 'device' | 'health_connect';
-  winner: string | null;
-  /** What the phone showed, and which other app it came from; absent on days scored before D-51. */
-  shown?: { steps: number; packageName: string | null };
-  verified: boolean;
-  verifiedSteps: number;
-  displaySteps: number;
-  plausibility: number;
-  layers: Record<LayerName, number | null>;
-  hard: string[];
-  sources: SourceDecision[];
-  sourcesStatus: string;
-  signedAt: number;
-  proof: DeviceProof;
-  /** The day cut to the time the account was signed in on the phone (D-56); absent when it was not cut. */
-  counting?: { window: [number, number][]; leftOut: number } | null;
-}
-
-/** `activity_daily.breakdown.union`: the phones added minute by minute (D-53); absent before it. */
-interface PhonesAdded {
-  phones: number;
-  verified: number;
-  /** The union is what the day shows: more than any one phone answered. */
-  added: boolean;
-}
 
 const LAYER_NAMES: Record<LayerName, string> = {
   L0: 'Device integrity',
@@ -375,7 +344,7 @@ export async function getSourcesReport(userId: string, date: string, currentDevi
   const config = await getConfig();
   const ratio = { hard: config.activity.thresholds.pedometerRatio.hard };
   const row = await ActivityDailyModel.findById(`${userId}:${date}`).lean();
-  const breakdown = row?.breakdown as { bestDeviceId: string; devices: StoredDevice[]; union?: PhonesAdded } | undefined;
+  const breakdown = row?.breakdown as StoredBreakdown | undefined;
   const stored = breakdown?.devices ?? [];
 
   const [deviceDocs, uploads, samples, flags] = await Promise.all([
