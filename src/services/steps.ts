@@ -79,6 +79,11 @@ const FALLBACK_CONFIG: ActivityConfig = {
 const TICK_MS = 60_000;
 /** Snapshots taken for one day before giving up until the next flush. */
 const MAX_SEND_ATTEMPTS = 3;
+/**
+ * How long a day the server refused is left alone before the same figures
+ * are offered once more. See `shouldSend`.
+ */
+const REFUSAL_HOLDS_MS = 20 * 3_600_000;
 
 /** The server's set-up, or the fallback until it has answered once. */
 const activityConfig = (): ActivityConfig =>
@@ -94,20 +99,26 @@ export interface StepProfile {
 }
 
 /**
- * What the counting notification says. No step count, by choice: the
- * tracker's own figure is everything this phone saw — a watch's steps out
- * of Health Connect, and the steps the counter handed over in one go after
- * an OEM task killer let the service back — while every screen shows only
- * the part the server verified (`verifiedActivityOf`). An ongoing
- * notification quoting the larger number is a second, louder answer to
- * "how many steps today?", and it is the one the user cannot refresh.
+ * What the counting notification says. The tracker fills the tokens itself
+ * and redraws as the count moves, so the row is a live one: the figure is
+ * there without opening the app, which is the whole point of a counter that
+ * runs with the app closed.
  *
- * To put the live count back, make the title `'{steps} steps so far'` — the
- * tracker fills the token — and say in the text that the app verifies them.
+ * The figure is this phone's own — everything the tracker saw, a watch's
+ * steps out of Health Connect included, and the batch the counter hands
+ * over in one go after an OEM task killer lets the service back — while
+ * every screen in the app shows only the part the server verified
+ * (`verifiedActivityOf`). So the notification can read higher than the home
+ * screen, and the text says why rather than leaving it as two numbers that
+ * disagree.
+ *
+ * The goal and the percentage are already on the row: the tracker sets the
+ * sub-text to the goal and the progress bar to the percentage, so neither
+ * is repeated here.
  */
 const NOTIFICATION_COPY = {
-  notificationTitle: 'Counting your steps',
-  notificationText: 'Vokve is counting, even with the app closed.',
+  notificationTitle: '{steps} steps so far',
+  notificationText: '{distance} {unit} · {calories} kcal · verified when Vokve syncs',
 } as const;
 
 /**
@@ -280,8 +291,17 @@ async function catchUp(
   } catch (error) {
     // Until the last account's days are gone, nothing on this phone is shown
     // or sent as this user's (see `runFlush`); the next foreground retries.
+    // Said out loud rather than only logged: `runFlush` returns in silence
+    // while this is true, so a phone stuck here would otherwise look exactly
+    // like a phone with nothing to send — on the sync card, and in the health
+    // report the operator reads (`sync_failing`).
     logger.warn('steps', "Could not clear the last account's steps", error);
-    useStepsStore.setState({ today: null });
+    useStepsStore.setState({
+      today: null,
+      syncStatus: 'failed',
+      syncError:
+        'This phone is still clearing the last account. Trying again soon.',
+    });
     return;
   }
   if (!isLive(id)) return;
@@ -664,8 +684,22 @@ function listen(id: number): void {
       logger.warn('steps', `Tracker reported ${code}: ${message}`);
     }),
     AppState.addEventListener('change', next => {
-      if (next === 'active' && isLive(id)) {
+      if (!isLive(id)) {
+        return;
+      }
+      if (next === 'active') {
         catchUp(id);
+        return;
+      }
+      // Leaving the foreground is the last moment this session is certain it
+      // can send: the periodic sync below asks for an active app, and the
+      // process may not live to see another trigger. So the tail of the walk
+      // between the last sync and the member putting the phone down goes
+      // now, gap or no gap. Without this it waited for the next foreground,
+      // which on the phones where this matters is the next time the member
+      // remembers the app exists.
+      if (next === 'background') {
+        scheduleSync([todayIso()], { force: true });
       }
     }),
     // Back online with days waiting.
@@ -1091,7 +1125,8 @@ export async function syncStepsInBackground(): Promise<BackgroundSyncOutcome> {
 }
 
 /**
- * What Android's daily worker runs (RULES A28d) — the same sync the push
+ * What Android's scheduled runs do — the nightly one that closes the day
+ * (RULES A28e) and the daily net under it (A28d). The same sync the push
  * asks for, through the same code, so a day that arrives this way is
  * indistinguishable from one that arrived by push.
  *
@@ -1311,10 +1346,21 @@ async function syncDay(date: string): Promise<SyncOutcome> {
  */
 function shouldSend(date: string, figures: Omit<SyncedDayMark, 'at'>): boolean {
   const state = steps();
-  // Already refused with exactly these numbers: the server said no for a
-  // reason that has not changed, and the window will offer this day again
-  // on every foreground until it ages out.
-  if (same(state.refused[date], figures)) {
+  // Already refused with exactly these numbers, and refused recently: the
+  // server said no for a reason that has not changed, and the window offers
+  // this day again on every pass until it ages out.
+  //
+  // The hold lapses after a day, though, because a refusal is not always
+  // permanent — the server's window may have been widened since (⚙
+  // `activity.maxAgeDays`), the phone's clock may have been wrong, the
+  // signing key may have been replaced. One try a day for a day of real
+  // walking is cheap; never trying again is how a day is lost for good.
+  const refusal = state.refused[date];
+  if (
+    refusal &&
+    same(refusal, figures) &&
+    Date.now() - refusal.at < REFUSAL_HOLDS_MS
+  ) {
     return false;
   }
   const mark = state.synced[date];
@@ -1423,7 +1469,17 @@ async function sendDay(
       if (apiError.code === 'NONCE_INVALID') {
         continue;
       }
-      if (apiError.code === 'ATTESTATION_REQUIRED' && !reattested) {
+      // A key the server has never seen, and a key it has seen but cannot
+      // verify this payload against, are the same accident from here: this
+      // install's key and the server's copy of it have parted ways, and
+      // attesting again is what mends both. Once per day sent — the same
+      // refusal on a freshly attested key is something else, and that one
+      // the server means.
+      if (
+        (apiError.code === 'ATTESTATION_REQUIRED' ||
+          apiError.code === 'SNAPSHOT_SIGNATURE_INVALID') &&
+        !reattested
+      ) {
         reattested = true;
         useStepsStore.setState({ attestedDeviceId: null });
         if (await ensureAttested(deviceId)) {

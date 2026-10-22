@@ -58,6 +58,7 @@ jest.mock('@react-native-firebase/messaging', () => ({
   AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2, EPHEMERAL: 3 },
   getMessaging: jest.fn(() => ({})),
   getToken: jest.fn().mockResolvedValue('fcm-test-token'),
+  deleteToken: jest.fn().mockResolvedValue(undefined),
   hasPermission: jest.fn().mockResolvedValue(1),
   requestPermission: jest.fn().mockResolvedValue(1),
   onTokenRefresh: jest.fn(() => jest.fn()),

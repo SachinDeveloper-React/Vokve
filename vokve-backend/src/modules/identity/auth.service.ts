@@ -6,7 +6,7 @@ import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { hashToken, newRefreshToken, signAccessToken, signStepUpToken } from '../../lib/tokens.js';
 import { authResponseSchema, genderSchema, type AuthResponse } from '../../contracts/index.js';
-import { startCounting, stopCounting } from '../devices/service.js';
+import { clearPushToken, startCounting, stopCounting } from '../devices/service.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { AuditLogModel } from '../platform/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from './models.js';
@@ -363,6 +363,12 @@ export async function signOut(userId: string, deviceId?: string) {
   await RefreshTokenModel.updateMany(filter, { $set: { revokedAt: new Date() } });
   // Signed out, the phone stops counting for this account (D-56).
   await stopCounting(userId, deviceId ? { deviceId } : {});
+  // And stops being addressable as it (RULES DV7). The FCM token belongs to
+  // the install: the next account to sign in on this phone is handed the
+  // same string, so a token left on this row is this account's notifications
+  // arriving on somebody else's phone. The app withdraws it too, but over a
+  // network that may not be there.
+  await clearPushToken(userId, deviceId);
   return { ok: true };
 }
 

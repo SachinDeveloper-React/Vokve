@@ -167,8 +167,8 @@ describe('step ingest: signed snapshots (BACKEND §7.3)', () => {
     const damagedRes = await post(session, { ...damaged, snapshot: { ...damaged.snapshot, payloadSha256: 'a'.repeat(64) } });
     expect(damagedRes.body.error.code).toBe('SNAPSHOT_INVALID');
 
-    // A day past the ingest window (⚙ `activity.maxAgeDays`, now a fortnight).
-    const old = await snapshotFor(session, key, { deviceSteps: 2000, date: addDays(today(), -15) });
+    // A day past the ingest window (⚙ `activity.maxAgeDays`, now three weeks).
+    const old = await snapshotFor(session, key, { deviceSteps: 2000, date: addDays(today(), -22) });
     const oldRes = await post(session, old);
     expect(oldRes.status).toBe(422);
     expect(oldRes.body.error.code).toBe('SNAPSHOT_DATE_OUT_OF_RANGE');
@@ -448,7 +448,7 @@ describe('reading steps back: config, ranges and sources', () => {
         gapRecovery: 'split', privacyPolicyUrl: 'https://vokve.app/privacy',
         wearableTrust: 'catalog', wearableAllowlist: ['com.google.android.apps.fitness'],
       },
-      sync: { intervalMinutes: 3, maxAgeDays: 14, include: ['minutes', 'motionWindows', 'healthConnectRecords'] },
+      sync: { intervalMinutes: 3, maxAgeDays: 21, include: ['minutes', 'motionWindows', 'healthConnectRecords'] },
       playIntegrity: { cloudProjectNumber: null },
     });
   });

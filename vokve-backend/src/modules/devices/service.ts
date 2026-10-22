@@ -76,6 +76,10 @@ export async function registerDevice(userId: string, body: RegisterDeviceBody, r
     { upsert: true, new: true },
   ).lean();
 
+  // One FCM token, one install (RULES DV7): a registration carrying one
+  // takes it off every other row.
+  if (body.pushToken) await claimPushToken(body.pushToken, device._id);
+
   // Device sharing (L6): the same install or vendor id on several accounts.
   const shared = await DeviceModel.countDocuments({
     $or: [{ installId: body.installId }, ...(body.vendorId ? [{ vendorId: body.vendorId }] : [])],
@@ -129,6 +133,52 @@ export async function listDevices(userId: string) {
     firstSeenAt: d.firstSeenAt?.toISOString() ?? null,
     lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
   }));
+}
+
+/**
+ * One FCM token, one install (RULES DV7).
+ *
+ * The token FCM mints belongs to the *install*, not to the account signed in
+ * on it: a second account signing in on the same phone is handed the same
+ * string. Rows here are per (user, install), so that left the token on both
+ * of them — and `pushRow` addresses a message to every row the account has a
+ * token on. The account that signed out went on being notified, on a phone
+ * that is no longer theirs, and the first thing it said was "Your steps are
+ * not reaching us" (the sync nudge, A28) about steps somebody else is
+ * walking.
+ *
+ * So the newest claim wins and every other row holding the token gives it
+ * up. The token is cleared rather than only marked invalid: `invalidAt` is
+ * the provider's verdict on a dead string, and this one is alive — it has
+ * simply stopped being this account's way of reaching that phone.
+ *
+ * Called from both paths a token arrives by — registration and the device
+ * heartbeat — because either may be the first to see a token that has
+ * changed hands.
+ */
+export async function claimPushToken(token: string, deviceId: string): Promise<void> {
+  await DeviceModel.updateMany(
+    { 'push.token': token, _id: { $ne: deviceId } },
+    { $set: { 'push.token': null, 'push.invalidAt': new Date() } },
+  );
+}
+
+/**
+ * A sign-out: this account can no longer be pushed on these installs.
+ *
+ * The app withdraws its own token first (`unregisterFromPush`), over a
+ * network that may not be there and from a process the user may kill. This
+ * is the half that cannot fail — and the half that runs when the sign-out
+ * was somebody else's, from another phone.
+ *
+ * One install, or every install of the account when no id is given, which is
+ * what signing out everywhere has to mean.
+ */
+export async function clearPushToken(userId: string, deviceId?: string): Promise<void> {
+  await DeviceModel.updateMany(
+    { userId, ...(deviceId ? { _id: deviceId } : {}), 'push.token': { $type: 'string' } },
+    { $set: { 'push.token': null, 'push.invalidAt': new Date() } },
+  );
 }
 
 /** Periods kept per install: weeks of signing in and out, far past the days still open to sync. */

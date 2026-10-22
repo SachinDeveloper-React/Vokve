@@ -19,8 +19,8 @@ describe('admin: the step pipeline’s knobs', () => {
     await signUpAndRegister();
     const res = await request(app).get('/v1/admin/config/steps').set(ADMIN);
     expect(res.status).toBe(200);
-    expect(res.body.effective.activity.maxAgeDays).toBe(14);
-    expect(res.body.defaults.activity.maxAgeDays).toBe(14);
+    expect(res.body.effective.activity.maxAgeDays).toBe(21);
+    expect(res.body.defaults.activity.maxAgeDays).toBe(21);
     expect(res.body.effective.coins.steps).toMatchObject({ enabled: false, unitSteps: 100, coinsPerUnit: 0.095 });
     expect(res.body.effective.trust.stepCaps.normal).toBe(30_000);
     expect(res.body.overrides).toEqual([]);
@@ -28,7 +28,7 @@ describe('admin: the step pipeline’s knobs', () => {
 
   it('applies a patch, records it as an override, and the phone’s own config read changes with it', async () => {
     const session = await signUpAndRegister();
-    expect((await request(app).get('/v1/activity/config').set(authed(session))).body.sync.maxAgeDays).toBe(14);
+    expect((await request(app).get('/v1/activity/config').set(authed(session))).body.sync.maxAgeDays).toBe(21);
 
     const res = await request(app)
       .put('/v1/admin/config/steps')
@@ -38,8 +38,8 @@ describe('admin: the step pipeline’s knobs', () => {
     expect(res.body.effective.activity.maxAgeDays).toBe(10);
     expect(res.body.overrides).toEqual(
       expect.arrayContaining([
-        { path: 'activity.maxAgeDays', value: 10, default: 14 },
-        { path: 'activity.syncNudge.silentAfterHours', value: 12, default: 20 },
+        { path: 'activity.maxAgeDays', value: 10, default: 21 },
+        { path: 'activity.syncNudge.silentAfterHours', value: 12, default: 8 },
       ]),
     );
 
@@ -89,7 +89,7 @@ describe('admin: the step pipeline’s knobs', () => {
     await request(app).put('/v1/admin/config/steps').set(ADMIN).send({ patch: { activity: { maxAgeDays: 7 } } });
     const reset = await request(app).put('/v1/admin/config/steps').set(ADMIN).send({ reset: ['activity.maxAgeDays'] });
     expect(reset.status).toBe(200);
-    expect(reset.body.effective.activity.maxAgeDays).toBe(14);
+    expect(reset.body.effective.activity.maxAgeDays).toBe(21);
     expect(reset.body.overrides).toEqual([]);
   });
 

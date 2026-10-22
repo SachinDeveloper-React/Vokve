@@ -10,12 +10,14 @@ import { notify } from '../notifications/service.js';
  * The upload floor (RULES A28, BACKEND §9).
  *
  * Steps are counted by a native service that survives the app being closed,
- * but they only ever *leave* the phone from the foreground: the periodic
- * sync asks for an active app, and the other triggers are a foreground
- * transition and a network coming back while the app runs. So an install
- * that is faithfully counting can be completely silent, and every day it
- * stays silent past `activity.maxAgeDays` is a day of real walking the
- * server will refuse for good.
+ * and the phone has its own ways of sending them without being asked — a
+ * foreground, the moment the member leaves the app, the run that closes the
+ * day between 23:30 and 00:20 (A28e) and the daily worker under it (A28d).
+ * Every one of those, though, is something an OEM's battery manager can
+ * take away, and an install that is faithfully counting can go completely
+ * silent while it still thinks it is syncing. Every day it stays silent
+ * past `activity.maxAgeDays` is a day of real walking the server will
+ * refuse for good, so this is the floor: the server noticing, and asking.
  *
  * This job is the server asking. For each install that is signed in, can be
  * pushed, and whose newest accepted snapshot has gone stale, it sends a

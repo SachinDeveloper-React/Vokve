@@ -380,6 +380,33 @@ describe('a step session', () => {
     expect(useStepsStore.getState().queue).toEqual([]);
   });
 
+  test('attests again when the server cannot verify the signature, and the day still goes', async () => {
+    useStepsStore.setState({ ownerId: 'user_a', attestedDeviceId: 'dev_1' });
+    tracker.hasAttestationKey.mockResolvedValue(true);
+    mockActivityApi.ingest
+      .mockRejectedValueOnce(
+        new ApiError(
+          'validation',
+          'That step snapshot could not be verified.',
+          422,
+          null,
+          'SNAPSHOT_SIGNATURE_INVALID',
+        ),
+      )
+      .mockResolvedValueOnce(ingested(500));
+
+    await startStepSession(PROFILE);
+    await settle();
+
+    // This install's key and the server's copy of it had parted ways. That
+    // is mended by attesting, not by throwing the day away.
+    expect(tracker.attestDevice).toHaveBeenCalledTimes(1);
+    expect(useStepsStore.getState().synced[today]).toMatchObject({
+      steps: 500,
+    });
+    expect(useStepsStore.getState().refused[today]).toBeUndefined();
+  });
+
   test('keeps the day queued when the network is down', async () => {
     mockActivityApi.ingestNonce.mockRejectedValue(
       new ApiError(
@@ -436,6 +463,41 @@ describe('a step session', () => {
 
     expect(mockActivityApi.ingest).not.toHaveBeenCalled();
     expect(useStepsStore.getState().queue).toEqual([]);
+  });
+
+  test('leaving the app sends what has been walked since the last sync', async () => {
+    useStepsStore.setState({
+      ownerId: 'user_a',
+      attestedDeviceId: 'dev_1',
+      synced: {
+        [today]: {
+          steps: 500,
+          recoveredSteps: 0,
+          suspectSteps: 0,
+          at: Date.now(),
+        },
+      },
+    });
+    tracker.hasAttestationKey.mockResolvedValue(true);
+
+    await startStepSession(PROFILE);
+    await settle();
+    // Nothing yet: the server already has the 500 it was last sent.
+    expect(mockActivityApi.ingest).not.toHaveBeenCalled();
+
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === today ? 900 : 0),
+    );
+    const [, onChange] = (
+      AppState.addEventListener as jest.Mock
+    ).mock.calls.find(([event]) => event === 'change')!;
+    onChange('background');
+    await settle();
+
+    // Sent, and sent past the gap normally kept between syncs of today: the
+    // next trigger may be hours or days away.
+    expect(mockActivityApi.ingest).toHaveBeenCalledTimes(1);
+    expect(mockActivityApi.ingest.mock.calls[0][0].date).toBe(today);
   });
 
   test('shows the other phones’ steps on top of this phone’s: the server’s day less what this phone sent (D-53)', async () => {
@@ -708,10 +770,9 @@ describe('the headless sync behind the server’s silent push (A28)', () => {
     await syncStepsInBackground();
 
     // Oldest first, and the empty days cost a local read rather than a request.
-    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toEqual([
-      ...walked,
-      today,
-    ]);
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toEqual(
+      [...walked, today],
+    );
     expect(useStepsStore.getState().queue).toEqual([]);
   });
 
@@ -724,10 +785,9 @@ describe('the headless sync behind the server’s silent push (A28)', () => {
 
     await syncStepsInBackground();
 
-    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toEqual([
-      yesterday,
-      today,
-    ]);
+    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toEqual(
+      [yesterday, today],
+    );
     expect(useStepsStore.getState().queue).toEqual([]);
   });
 
@@ -736,22 +796,30 @@ describe('the headless sync behind the server’s silent push (A28)', () => {
     tracker.getStepsForDate.mockImplementation(async (date: string) =>
       day(date, date === stale ? 700 : date === today ? 500 : 0),
     );
-    mockActivityApi.ingest.mockImplementation(async ({ date }: { date: string }) => {
-      if (date === stale) {
-        throw new ApiError('validation', 'That day can no longer be synced.');
-      }
-      return ingested(500);
-    });
+    mockActivityApi.ingest.mockImplementation(
+      async ({ date }: { date: string }) => {
+        if (date === stale) {
+          throw new ApiError('validation', 'That day can no longer be synced.');
+        }
+        return ingested(500);
+      },
+    );
     useStepsStore.setState({ ownerId: PROFILE.userId });
 
     await syncStepsInBackground();
-    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toContain(stale);
-    expect(useStepsStore.getState().refused[stale]).toMatchObject({ steps: 700 });
+    expect(
+      mockActivityApi.ingest.mock.calls.map(call => call[0].date),
+    ).toContain(stale);
+    expect(useStepsStore.getState().refused[stale]).toMatchObject({
+      steps: 700,
+    });
 
     // The window offers it again on every pass; the refusal is what stops it.
     mockActivityApi.ingest.mockClear();
     await syncStepsInBackground();
-    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).not.toContain(stale);
+    expect(
+      mockActivityApi.ingest.mock.calls.map(call => call[0].date),
+    ).not.toContain(stale);
 
     // Unless its count has moved since, which the refusal says nothing about.
     tracker.getStepsForDate.mockImplementation(async (date: string) =>
@@ -759,7 +827,37 @@ describe('the headless sync behind the server’s silent push (A28)', () => {
     );
     mockActivityApi.ingest.mockClear();
     await syncStepsInBackground();
-    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date)).toContain(stale);
+    expect(
+      mockActivityApi.ingest.mock.calls.map(call => call[0].date),
+    ).toContain(stale);
+  });
+
+  test('a day refused yesterday is offered once more today', async () => {
+    const stale = addDays(today, -4);
+    tracker.getStepsForDate.mockImplementation(async (date: string) =>
+      day(date, date === stale ? 700 : date === today ? 500 : 0),
+    );
+    useStepsStore.setState({
+      ownerId: PROFILE.userId,
+      refused: {
+        [stale]: {
+          steps: 700,
+          recoveredSteps: 0,
+          suspectSteps: 0,
+          externalSteps: 0,
+          at: Date.now() - 21 * 3_600_000,
+        },
+      },
+    });
+
+    await syncStepsInBackground();
+
+    // A refusal is not always permanent — the window may have been widened
+    // since, a clock may have been wrong, a key may have been replaced — so
+    // the same numbers get one try a day rather than none ever again.
+    expect(
+      mockActivityApi.ingest.mock.calls.map(call => call[0].date),
+    ).toContain(stale);
   });
 
   test('a phone nobody is signed in on sends nothing', async () => {
@@ -770,7 +868,10 @@ describe('the headless sync behind the server’s silent push (A28)', () => {
   test('a phone whose account has signed out sends nothing', async () => {
     // The days stay for the same account coming back, but there are no
     // tokens left to send them with.
-    useStepsStore.setState({ ownerId: PROFILE.userId, signedOutAt: Date.now() });
+    useStepsStore.setState({
+      ownerId: PROFILE.userId,
+      signedOutAt: Date.now(),
+    });
 
     await expect(syncStepsInBackground()).resolves.toBe('signed_out');
     expect(mockActivityApi.ingest).not.toHaveBeenCalled();
@@ -801,10 +902,9 @@ describe('the headless sync behind the server’s silent push (A28)', () => {
 
     // Both days still went up — the first to finish did not clear the owner
     // the second was sending under.
-    expect(mockActivityApi.ingest.mock.calls.map(call => call[0].date).sort()).toEqual([
-      yesterday,
-      today,
-    ]);
+    expect(
+      mockActivityApi.ingest.mock.calls.map(call => call[0].date).sort(),
+    ).toEqual([yesterday, today]);
     expect(useStepsStore.getState().queue).toEqual([]);
   });
 

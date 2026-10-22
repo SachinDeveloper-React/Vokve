@@ -24,12 +24,15 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     loadReactNative(this)
-    // The daily net under the step upload (RULES A28d). Scheduled from here
-    // rather than from JavaScript on purpose: it has to exist on a phone
-    // whose app is never opened, which is the only phone it is for, and
-    // WorkManager keeps it across reboots and updates by itself. It is
-    // `KEEP`, so a launch never resets the period, and the task it runs is
-    // a no-op when nobody is signed in.
+    // The two scheduled legs under the step upload: the daily net (RULES
+    // A28d) and the run that closes the day between 23:30 and 00:20 in the
+    // phone's own time (A28e). Scheduled from here rather than from
+    // JavaScript on purpose: they have to exist on a phone whose app is
+    // never opened, which is the only phone they are for, and WorkManager
+    // keeps them across reboots and updates by itself. Both are `KEEP`, so
+    // a launch neither resets the period nor moves tonight's slot, and the
+    // task they run is a no-op when nobody is signed in.
     StepSyncWorker.schedule(this)
+    StepSyncWorker.scheduleNightly(this)
   }
 }

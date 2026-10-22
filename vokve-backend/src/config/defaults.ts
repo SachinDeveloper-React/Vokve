@@ -475,25 +475,29 @@ export const CONFIG_DEFAULTS = {
     /**
      * A day older than this, in the phone's own zone, is refused (RULES A8).
      *
-     * Fourteen rather than seven: counting is native and survives the app
-     * being closed for weeks, but nothing uploads while it is closed (the
-     * periodic sync runs only in the foreground), so a seven-day window
-     * threw away a fortnight's real walking from anyone who did not open
-     * the app — a phone in a drawer, a holiday, a member who only shops
-     * monthly. The window is still bounded because stale evidence is
-     * weaker evidence: a day signed two weeks ago cannot be checked
-     * against anything that has happened since. `syncNudge` is the other
-     * half of this — it keeps the ordinary case uploading daily, so the
-     * window is a recovery path rather than the normal one.
+     * Three weeks rather than two: the phone keeps its own history for
+     * over a year, so this window is the only thing that decides what is
+     * still recoverable, and a fortnight was short enough to lose real
+     * walking from the installs that have the most of it to send — one
+     * whose attestation never completed, one whose pushes never landed,
+     * one an OEM had been killing. Those phones are fixed by an app
+     * update or by the member opening the app, and both of those happen on
+     * their own schedule, not ours. The window is still bounded because
+     * stale evidence is weaker evidence: a day signed three weeks ago
+     * cannot be checked against anything that has happened since.
+     * `syncNudge` and the phone's own nightly run are the other half of
+     * this — they keep the ordinary case uploading daily, so the window
+     * stays a recovery path rather than the normal one.
      */
-    maxAgeDays: 14,
+    maxAgeDays: 21,
     /**
      * The upload floor (RULES A28). Steps are counted natively with the app
-     * closed, but they only leave the phone from the foreground — the
-     * periodic sync asks for an active app — so a member who does not open
-     * it earns nothing until they do, and past `maxAgeDays` never will.
-     * Sweatcoin solves this by telling people to open the app every twelve
-     * hours. The server asking is better than the member remembering.
+     * closed, and the phone has triggers of its own — a foreground, the
+     * nightly run that closes the day (A28e) and the daily worker under it
+     * (A28d) — but each of those is something an OEM can kill, and a day
+     * past `maxAgeDays` is gone for good. Sweatcoin solves this by telling
+     * people to open the app every twelve hours. The server asking is
+     * better than the member remembering.
      *
      * A silent data push (`type: 'activity_sync'`) wakes the app's
      * background handler on an install whose newest accepted snapshot is
@@ -509,12 +513,25 @@ export const CONFIG_DEFAULTS = {
      */
     syncNudge: {
       enabled: true,
-      /** Hours since the newest accepted snapshot before the silent push goes. */
-      silentAfterHours: 20,
+      /**
+       * Hours since the newest accepted snapshot before the silent push
+       * goes.
+       *
+       * Eight rather than a day: the phone's own nightly run closes the
+       * day (A28e), so what is left for the push to cover is the hours in
+       * between — a member who walks in the morning has it verified by
+       * midday instead of at midnight, and a day that will be refused for
+       * some other reason is found out while there is still time to fix
+       * it. The cost is bounded three ways: `cooldownHours` per install,
+       * `batch` per tick, and `shouldSend` on the phone, which answers a
+       * push with local reads and no request at all when the server
+       * already has today's figures.
+       */
+      silentAfterHours: 8,
       /** And before the same install is pushed again. */
-      cooldownHours: 8,
+      cooldownHours: 4,
       /** Hours of silence before the member is told, at most once a day. */
-      remindAfterHours: 72,
+      remindAfterHours: 48,
       /**
        * Installs this far behind are left alone: a phone that has not
        * uploaded in a month has stopped being used, and what is still

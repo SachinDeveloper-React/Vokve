@@ -14,6 +14,8 @@ interface Props {
   reminders: HydrationReminder[];
   onToggle: (id: string) => void;
   onPressAdd: (slot: ReminderSlot) => void;
+  /** A chip held down: change that time. */
+  onEdit: (id: string) => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface Props {
  * deleted.
  */
 export const PresetBlockCard = memo(
-  ({ slot, title, tint, reminders, onToggle, onPressAdd }: Props) => {
+  ({ slot, title, tint, reminders, onToggle, onPressAdd, onEdit }: Props) => {
     // One handler for every chip in the block: the add chip reports a null id,
     // which is the only thing that tells the two apart.
     const handleChipPress = useCallback(
@@ -62,6 +64,7 @@ export const PresetBlockCard = memo(
                 enabled={reminder.enabled}
                 tint={tint}
                 onPress={handleChipPress}
+                onLongPress={onEdit}
               />
             ))}
 

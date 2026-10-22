@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { AppReleaseModel } from '../src/modules/devices/models.js';
+import { AppReleaseModel, DeviceModel } from '../src/modules/devices/models.js';
 import { app, authed, signUpAndRegister } from './helpers.js';
 
 describe('devices and versions', () => {
@@ -29,6 +29,37 @@ describe('devices and versions', () => {
     expect(again.status).toBe(200);
     const list = await request(app).get('/v1/me/devices').set(authed(session));
     expect(list.body.data.length).toBeLessThanOrEqual(2);
+  });
+
+  it('a push token belongs to one install: the newest claim takes it off every other row', async () => {
+    // Two accounts on one phone, which is what the bug was: FCM hands the
+    // second account the same token as the first, and a row that keeps it
+    // is the first account still being notified on a phone it signed out of.
+    const first = await signUpAndRegister();
+    const second = await signUpAndRegister();
+
+    const token = 'fcm-one-phone-two-accounts';
+    for (const session of [first, second]) {
+      const patch = await request(app).patch(`/v1/devices/${session.deviceId}`).set(authed(session)).send({ pushToken: token });
+      expect(patch.status).toBe(200);
+    }
+
+    const left = await DeviceModel.findById(first.deviceId).lean();
+    const kept = await DeviceModel.findById(second.deviceId).lean();
+    expect(left?.push?.token ?? null).toBeNull();
+    expect(left?.push?.invalidAt).toBeInstanceOf(Date);
+    expect(kept?.push?.token).toBe(token);
+  });
+
+  it('signing out withdraws the push token even when the app never got to', async () => {
+    const session = await signUpAndRegister();
+    await request(app).patch(`/v1/devices/${session.deviceId}`).set(authed(session)).send({ pushToken: 'fcm-signing-out' });
+
+    const out = await request(app).post('/v1/auth/sign-out').set(authed(session));
+    expect(out.status).toBe(200);
+
+    const device = await DeviceModel.findById(session.deviceId).lean();
+    expect(device?.push?.token ?? null).toBeNull();
   });
 
   it('blocks builds below the minimum version and builds marked blocked', async () => {

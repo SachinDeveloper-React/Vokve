@@ -172,6 +172,33 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
   ReactTestRenderer.act(() => node.props.onPress());
 };
 
+const longPress = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
+  const node = tree.root
+    .findAll(
+      n =>
+        typeof n.props?.accessibilityLabel === 'string' &&
+        (n.props.accessibilityLabel as string).startsWith(prefix),
+    )
+    .find(n => typeof n.props.onLongPress === 'function');
+
+  if (!node) throw new Error(`Nothing labelled "${prefix}…" takes a long press`);
+  ReactTestRenderer.act(() => node.props.onLongPress());
+};
+
+/** Commits a time in whichever picker sheet is open. */
+const submitTime = async (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  time: string,
+) => {
+  const picker = tree.root
+    .findAll(n => typeof n.props?.onSubmit === 'function')
+    .find(n => n.props.visible === true);
+  if (!picker) throw new Error('No open time picker');
+  await ReactTestRenderer.act(async () => {
+    picker.props.onSubmit(time);
+  });
+};
+
 /** The switch, or any control that reports a checked state, by label. */
 const toggle = (
   tree: ReactTestRenderer.ReactTestRenderer,
@@ -268,6 +295,65 @@ describe('HydrationReminderScreen', () => {
 
     expect(allText(tree)).toContain('1 custom time');
     expect(reminders().some(r => r.time === '11:00')).toBe(false);
+  });
+
+  test('holding a preset chip moves that time rather than adding another', async () => {
+    const tree = await render();
+
+    longPress(tree, '08:30 AM, on');
+    // Opened on the time it is for, and saying it will change it rather than
+    // add one — the sheet is the same three columns either way.
+    expect(allText(tree)).toContain('Change the time');
+
+    await submitTime(tree, '09:15');
+
+    expect(reminders().some(r => r.time === '08:30')).toBe(false);
+    const moved = reminders().find(r => r.time === '09:15');
+    // Its block and its switch survive the move: only the time changed.
+    expect(moved).toMatchObject({ slot: 'morning', enabled: true });
+    expect(reminders()).toHaveLength(9);
+    expect(allText(tree)).toContain('09:15 AM');
+  });
+
+  test('holding a custom row changes its time, and so does its menu', async () => {
+    const tree = await render();
+
+    longPress(tree, '11:00 AM, Everyday');
+    await submitTime(tree, '11:45');
+    expect(reminders().some(r => r.time === '11:45')).toBe(true);
+
+    // The kebab carries the same edit, for somebody who never found the hold.
+    press(tree, 'More options for the 11:45 AM reminder');
+    press(tree, 'Change time');
+    await submitTime(tree, '12:15');
+
+    expect(reminders().some(r => r.time === '11:45')).toBe(false);
+    expect(reminders().some(r => r.time === '12:15')).toBe(true);
+    expect(allText(tree)).toContain('2 custom times');
+  });
+
+  test('moving a time onto one its block already has is dropped, not doubled', async () => {
+    const tree = await render();
+
+    longPress(tree, '08:30 AM, on');
+    await submitTime(tree, '10:00');
+
+    // Two chips reading 10:00 AM would both ring, and neither could be told
+    // from the other.
+    expect(reminders().filter(r => r.time === '10:00')).toHaveLength(1);
+    expect(reminders().some(r => r.time === '08:30')).toBe(true);
+  });
+
+  test('a time moved into quiet hours says so, like one added there', async () => {
+    useNotificationSettingsStore.setState({
+      quietHours: { enabled: true, start: '22:00', end: '07:00' },
+    });
+    const tree = await render();
+
+    longPress(tree, '08:30 AM, on');
+    await submitTime(tree, '23:30');
+
+    expect(allText(tree)).toContain('That time is inside your quiet hours');
   });
 
   test('dropping a repeat day changes the plan from Everyday to the days left', async () => {

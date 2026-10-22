@@ -1,6 +1,7 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import {
   AuthorizationStatus,
+  deleteToken,
   getInitialNotification,
   getMessaging,
   getToken,
@@ -156,13 +157,34 @@ export function enablePushNotifications(): Promise<boolean> {
 /**
  * Withdraws the token on sign-out, so the next person on this phone does
  * not receive the last one's pushes. The listener stops with it.
+ *
+ * Two things rather than one, because the first can fail silently.
+ *
+ * **The server is told, whatever this process thinks it registered.**
+ * `registeredToken` is module state: it is null on every launch, and a
+ * launch that restored a session and then failed to send its token once
+ * leaves it null for the rest of the run. The guard that used to be here
+ * read that as "nothing to withdraw" and left the server's row standing —
+ * which is the account that goes on being notified on a phone it has signed
+ * out of, down to the sync nudge about steps somebody else is walking.
+ *
+ * **And the token itself is deleted**, so the string the server may still
+ * hold is dead rather than live: FCM refuses it on the first send, and the
+ * row retires itself (`push.invalidAt`). The next account's `getToken` mints
+ * a fresh one, which is what registration was always going to do. That is
+ * the half that survives a sign-out with no network at all.
  */
 export async function unregisterFromPush(): Promise<void> {
   stopRefreshListener?.();
   stopRefreshListener = null;
-  if (registeredToken !== null) {
-    await sendToken(null);
-    registeredToken = null;
+  await sendToken(null);
+  registeredToken = null;
+  try {
+    await deleteToken(getMessaging());
+  } catch (error) {
+    // Firebase missing on this build, or an emulator without Play services:
+    // the withdrawal above is what mattered, and leaving is not refusable.
+    logger.warn('push', 'Could not delete this phone’s FCM token', error);
   }
 }
 

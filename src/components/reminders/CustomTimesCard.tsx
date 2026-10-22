@@ -17,6 +17,8 @@ interface Props {
   repeatLabel: string;
   onToggle: (id: string) => void;
   onPressMore: (id: string) => void;
+  /** A row held down: change that time. */
+  onEdit: (id: string) => void;
   onPressAdd: () => void;
 }
 
@@ -28,15 +30,22 @@ interface Props {
  * ones above it would be tapped by somebody trying to edit 9:30.
  */
 export const CustomTimesCard = memo(
-  ({ reminders, repeatLabel, onToggle, onPressMore, onPressAdd }: Props) => {
+  ({ reminders, repeatLabel, onToggle, onPressMore, onEdit, onPressAdd }: Props) => {
     const { colors } = useTheme();
 
     return (
       <VStack gap="sm">
         <HStack align="center" justify="between" gap="sm">
-          <AppText variant="h3" numberOfLines={1}>
-            Custom Times
-          </AppText>
+          <VStack flex={1} gap="xxs">
+            <AppText variant="h3" numberOfLines={1}>
+              Custom Times
+            </AppText>
+            {reminders.length > 0 ? (
+              <AppText variant="micro" color="textSecondary" numberOfLines={1}>
+                Hold a time to change it
+              </AppText>
+            ) : null}
+          </VStack>
           <AppText variant="micro" color="textSecondary" numberOfLines={1}>
             {`${reminders.length} custom ${
               reminders.length === 1 ? 'time' : 'times'
@@ -55,6 +64,7 @@ export const CustomTimesCard = memo(
                     repeatLabel={repeatLabel}
                     onToggle={onToggle}
                     onPressMore={onPressMore}
+                    onEdit={onEdit}
                   />
                 </Fragment>
               ))}

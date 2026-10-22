@@ -41,6 +41,12 @@ interface RemindersState {
   toggleReminder: (id: string) => void;
   /** Adds a time to a block. A time already in that block is not duplicated. */
   addReminder: (time: string, slot?: ReminderSlot) => void;
+  /**
+   * Moves one reminder to another time, keeping its block and its switch.
+   * A time its block already holds is not created twice, so the edit is
+   * dropped rather than leaving two chips reading 09:30.
+   */
+  editReminder: (id: string, time: string) => void;
   removeReminder: (id: string) => void;
   setSound: (sound: string) => void;
   setVibration: (value: boolean) => void;
@@ -178,6 +184,33 @@ export const useRemindersStore = create<RemindersState>()(
             return {
               ...plan,
               reminders: [...plan.reminders, entry].sort(byTime),
+            };
+          }),
+
+        editReminder: (id, time) =>
+          edit(plan => {
+            const current = plan.reminders.find(reminder => reminder.id === id);
+            if (!current || current.time === time) {
+              return plan;
+            }
+            // The same time twice in one block is two chips a user cannot
+            // tell apart, and the second would ring with the first.
+            const clash = plan.reminders.some(
+              reminder =>
+                reminder.id !== id &&
+                reminder.time === time &&
+                reminder.slot === current.slot,
+            );
+            if (clash) {
+              return plan;
+            }
+            return {
+              ...plan,
+              reminders: plan.reminders
+                .map(reminder =>
+                  reminder.id === id ? { ...reminder, time } : reminder,
+                )
+                .sort(byTime),
             };
           }),
 

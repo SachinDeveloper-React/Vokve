@@ -14,6 +14,8 @@ interface Props {
   evening: HydrationReminder[];
   onToggle: (id: string) => void;
   onPressAdd: (slot: ReminderSlot) => void;
+  /** A chip held down: change that time. */
+  onEdit: (id: string) => void;
   onPressViewAll: () => void;
 }
 
@@ -25,6 +27,11 @@ interface Props {
  * makes finding that gap an act of arithmetic. Each block keeps its own colour
  * so the eye can tell which part of the day it is looking at without reading
  * the times.
+ *
+ * The subtitle says what a long press does, because a gesture nothing on
+ * screen mentions is a feature only the person who built it knows about —
+ * and the alternative for a user who wants 09:00 instead of 08:00 is
+ * deleting one chip and adding another.
  */
 export const PresetTimesSection = memo(
   ({
@@ -33,6 +40,7 @@ export const PresetTimesSection = memo(
     evening,
     onToggle,
     onPressAdd,
+    onEdit,
     onPressViewAll,
   }: Props) => {
     const { colors } = useTheme();
@@ -45,7 +53,7 @@ export const PresetTimesSection = memo(
               Smart Preset Times
             </AppText>
             <AppText variant="micro" color="textSecondary" numberOfLines={1}>
-              Quick add times based on your routine
+              Tap to switch a time off · hold to change it
             </AppText>
           </VStack>
 
@@ -72,6 +80,7 @@ export const PresetTimesSection = memo(
             reminders={morning}
             onToggle={onToggle}
             onPressAdd={onPressAdd}
+            onEdit={onEdit}
           />
           <PresetBlockCard
             slot="afternoon"
@@ -80,6 +89,7 @@ export const PresetTimesSection = memo(
             reminders={afternoon}
             onToggle={onToggle}
             onPressAdd={onPressAdd}
+            onEdit={onEdit}
           />
           <PresetBlockCard
             slot="evening"
@@ -88,6 +98,7 @@ export const PresetTimesSection = memo(
             reminders={evening}
             onToggle={onToggle}
             onPressAdd={onPressAdd}
+            onEdit={onEdit}
           />
         </HStack>
       </VStack>

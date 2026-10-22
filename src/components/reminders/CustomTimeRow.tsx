@@ -15,6 +15,8 @@ interface Props {
   repeatLabel: string;
   onToggle: (id: string) => void;
   onPressMore: (id: string) => void;
+  /** The row held down: change this time. Also the kebab's first action. */
+  onEdit: (id: string) => void;
 }
 
 /**
@@ -24,9 +26,13 @@ interface Props {
  * with room for a proper control, and the switch is what makes "keep it but
  * silence it" different from the kebab's "delete it" — a distinction the chips
  * are too small to offer and do not need.
+ *
+ * Held down, the row changes its time. The press itself stays unbound: the
+ * two controls on the right are what a tap is for, and a row that also did
+ * something on tap would fire while somebody was reaching for the switch.
  */
 export const CustomTimeRow = memo(
-  ({ reminder, repeatLabel, onToggle, onPressMore }: Props) => {
+  ({ reminder, repeatLabel, onToggle, onPressMore, onEdit }: Props) => {
     const { colors } = useTheme();
     const time = formatTimeOfDay(reminder.time);
 
@@ -38,18 +44,32 @@ export const CustomTimeRow = memo(
       () => onPressMore(reminder.id),
       [onPressMore, reminder.id],
     );
+    const handleEdit = useCallback(
+      () => onEdit(reminder.id),
+      [onEdit, reminder.id],
+    );
 
     return (
       <HStack align="center" gap="md" py="sm">
         <Icon as={Clock} size="sm" color="textSecondary" />
 
-        <AppText variant="bodyStrong" numberOfLines={1}>
-          {time}
-        </AppText>
+        <Pressable
+          onLongPress={handleEdit}
+          feedback="opacity"
+          accessibilityRole="button"
+          accessibilityLabel={`${time}, ${repeatLabel}`}
+          accessibilityHint="Press and hold to change this time"
+        >
+          <HStack align="center" gap="md">
+            <AppText variant="bodyStrong" numberOfLines={1}>
+              {time}
+            </AppText>
 
-        <AppText variant="micro" color="textSecondary" numberOfLines={1}>
-          {repeatLabel}
-        </AppText>
+            <AppText variant="micro" color="textSecondary" numberOfLines={1}>
+              {repeatLabel}
+            </AppText>
+          </HStack>
+        </Pressable>
 
         <HStack flex={1} align="center" justify="end" gap="sm">
           <RNSwitch

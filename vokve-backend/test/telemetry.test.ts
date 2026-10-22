@@ -381,7 +381,7 @@ describe('telemetry: the diagnosis, in words (RULES P18)', () => {
     expect(quiet).toMatchObject({ severity: 'high' });
     expect(quiet.title).toContain('50 hours');
     // The ingest window is what makes it urgent, and it is named.
-    expect(quiet.detail).toContain('14 days');
+    expect(quiet.detail).toContain('21 days');
   });
 
   it('a refused permission is the first thing said, because nothing else can work', async () => {

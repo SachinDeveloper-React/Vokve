@@ -8,7 +8,7 @@ import { Errors } from '../../lib/errors.js';
 import { hashToken } from '../../lib/tokens.js';
 import { attestationBody, issueAttestationChallenge, submitAttestation } from '../integrity/service.js';
 import { AppReleaseModel, DeviceModel } from './models.js';
-import { listDevices, registerDevice, registerDeviceBody, revokeDevice } from './service.js';
+import { claimPushToken, listDevices, registerDevice, registerDeviceBody, revokeDevice } from './service.js';
 import { appUpdate } from './update.service.js';
 
 export const devicesRouter = Router();
@@ -43,6 +43,11 @@ devicesRouter.patch('/devices/:deviceId', requireAuth, validate('body', heartbea
     ? { token: req.body.pushToken, provider: 'fcm', updatedAt: new Date() } : { token: null, invalidAt: new Date() };
   if (req.body.localReminders !== undefined) set.remindersScheduledAt = req.body.localReminders ? new Date() : null;
   const updated = await DeviceModel.updateOne({ _id: String(req.params.deviceId), userId: req.ctx.userId, revokedAt: null }, { $set: set });
+  // The heartbeat is how a token usually arrives, so it is where a token
+  // that has changed hands is usually taken off its old row (RULES DV7).
+  if (updated.matchedCount === 1 && req.body.pushToken) {
+    await claimPushToken(req.body.pushToken, String(req.params.deviceId));
+  }
   res.json({ ok: updated.matchedCount === 1 });
 });
 

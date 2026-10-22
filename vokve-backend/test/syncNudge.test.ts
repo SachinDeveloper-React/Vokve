@@ -90,7 +90,7 @@ describe('the upload floor: installs that count but do not report (RULES A28)', 
     expect(sent).toHaveLength(0);
   });
 
-  it('after three days of silence the member is told too — once, however many phones are quiet', async () => {
+  it('after two days of silence the member is told too — once, however many phones are quiet', async () => {
     const first = await signUpAndRegister();
     await counting(first, 'tok-a', 100);
     // A second install of the same account, just as quiet.

@@ -123,6 +123,7 @@ export const HydrationReminderScreen = () => {
   const setEnabled = useRemindersStore(s => s.setEnabled);
   const toggleReminder = useRemindersStore(s => s.toggleReminder);
   const addReminder = useRemindersStore(s => s.addReminder);
+  const editReminder = useRemindersStore(s => s.editReminder);
   const removeReminder = useRemindersStore(s => s.removeReminder);
   const setVibration = useRemindersStore(s => s.setVibration);
   const toggleRepeatDay = useRemindersStore(s => s.toggleRepeatDay);
@@ -140,36 +141,91 @@ export const HydrationReminderScreen = () => {
     [navigation],
   );
 
-  /** Which block a new time will be added to, and so which sheet is open. */
-  const [pickerSlot, setPickerSlot] = useState<ReminderSlot | null>(null);
+  /**
+   * What the one time sheet is open for: adding a time to a block, or
+   * changing one that is already in the plan.
+   *
+   * One sheet rather than two, because they are the same three columns and
+   * the same commit — only what they open on and what the button says
+   * differ. An edit carries the time it opened on, so the columns start
+   * where the reminder is rather than at 08:00.
+   */
+  const [picker, setPicker] = useState<
+    { mode: 'add'; slot: ReminderSlot } | { mode: 'edit'; id: string; time: string } | null
+  >(null);
   /** The custom time whose kebab was tapped. */
   const [menuId, setMenuId] = useState<string | null>(null);
 
-  const openPicker = useCallback((slot: ReminderSlot) => setPickerSlot(slot), []);
-  const openCustomPicker = useCallback(() => setPickerSlot('custom'), []);
-  const closePicker = useCallback(() => setPickerSlot(null), []);
+  const openPicker = useCallback(
+    (slot: ReminderSlot) => setPicker({ mode: 'add', slot }),
+    [],
+  );
+  const openCustomPicker = useCallback(
+    () => setPicker({ mode: 'add', slot: 'custom' }),
+    [],
+  );
+  const closePicker = useCallback(() => setPicker(null), []);
 
-  const handleAddTime = useCallback(
-    (time: string) => {
-      addReminder(time, pickerSlot ?? 'custom');
-      // Said at the moment it is added, not only on the card above: quiet
-      // hours are on by default and start at 22:00, which is exactly when
-      // somebody first tries this out. A chip that looks live and never
-      // rings is the worst thing this screen can do.
-      if (isQuiet(time, quietHours)) {
-        toast.show({
-          title: 'That time is inside your quiet hours',
-          message: `Nothing is sent between ${quietHours.start} and ${quietHours.end}, so this one will not ring until you change the window.`,
-          tone: 'warning',
-          durationMs: 0,
-          action: { label: 'Quiet hours', onPress: onOpenQuietHours },
-        });
-      }
+  /** Every time in the plan, so an edit can be opened on the one it is for. */
+  const reminders = useRemindersStore(s => s.plan?.reminders);
+
+  /**
+   * A chip or a row held down: the same sheet, opened on that time.
+   *
+   * Looked up here rather than passed up from the component, so the sheet
+   * cannot open on a time an edit has already moved — the id is what the
+   * plan is keyed by, and the time is read from the plan as it stands.
+   */
+  const openEditor = useCallback(
+    (id: string) => {
+      const reminder = reminders?.find(entry => entry.id === id);
+      if (!reminder) return;
+      setPicker({ mode: 'edit', id, time: reminder.time });
     },
-    [addReminder, onOpenQuietHours, pickerSlot, quietHours, toast],
+    [reminders],
+  );
+
+  /**
+   * Said at the moment a time is set, not only on the card above: quiet
+   * hours are on by default and start at 22:00, which is exactly when
+   * somebody first tries this out. A chip that looks live and never rings is
+   * the worst thing this screen can do — and moving a time into the window
+   * is as quiet as adding one there.
+   */
+  const warnIfQuiet = useCallback(
+    (time: string) => {
+      if (!isQuiet(time, quietHours)) return;
+      toast.show({
+        title: 'That time is inside your quiet hours',
+        message: `Nothing is sent between ${quietHours.start} and ${quietHours.end}, so this one will not ring until you change the window.`,
+        tone: 'warning',
+        durationMs: 0,
+        action: { label: 'Quiet hours', onPress: onOpenQuietHours },
+      });
+    },
+    [onOpenQuietHours, quietHours, toast],
+  );
+
+  const handleSubmitTime = useCallback(
+    (time: string) => {
+      if (picker === null) return;
+      if (picker.mode === 'edit') {
+        editReminder(picker.id, time);
+      } else {
+        addReminder(time, picker.slot);
+      }
+      warnIfQuiet(time);
+    },
+    [addReminder, editReminder, picker, warnIfQuiet],
   );
 
   const closeMenu = useCallback(() => setMenuId(null), []);
+  const handleEditFromMenu = useCallback(() => {
+    if (menuId !== null) {
+      openEditor(menuId);
+    }
+    setMenuId(null);
+  }, [menuId, openEditor]);
   const handleRemove = useCallback(() => {
     if (menuId !== null) {
       removeReminder(menuId);
@@ -177,15 +233,22 @@ export const HydrationReminderScreen = () => {
     setMenuId(null);
   }, [menuId, removeReminder]);
 
+  // The kebab carries the same edit as the long press: the gesture is the
+  // quick way, and a menu is where somebody looks when they have not found
+  // it.
   const menuActions = useMemo(
     () => [
+      {
+        label: 'Change time',
+        onPress: handleEditFromMenu,
+      },
       {
         label: 'Delete reminder',
         destructive: true,
         onPress: handleRemove,
       },
     ],
-    [handleRemove],
+    [handleEditFromMenu, handleRemove],
   );
 
   const onPressBack = useCallback(() => {
@@ -280,6 +343,7 @@ export const HydrationReminderScreen = () => {
               evening={evening}
               onToggle={toggleReminder}
               onPressAdd={openPicker}
+              onEdit={openEditor}
               onPressViewAll={notImplemented}
             />
 
@@ -288,6 +352,7 @@ export const HydrationReminderScreen = () => {
               repeatLabel={repeatLabel}
               onToggle={toggleReminder}
               onPressMore={setMenuId}
+              onEdit={openEditor}
               onPressAdd={openCustomPicker}
             />
 
@@ -308,11 +373,12 @@ export const HydrationReminderScreen = () => {
       </ScrollView>
 
       <TimePickerSheet
-        visible={pickerSlot !== null}
-        value={DEFAULT_TIME}
-        onSubmit={handleAddTime}
+        visible={picker !== null}
+        value={picker?.mode === 'edit' ? picker.time : DEFAULT_TIME}
+        onSubmit={handleSubmitTime}
         onClose={closePicker}
-        title="Add a reminder"
+        title={picker?.mode === 'edit' ? 'Change the time' : 'Add a reminder'}
+        submitLabel={picker?.mode === 'edit' ? 'Save time' : 'Add time'}
       />
 
       <ActionSheet
