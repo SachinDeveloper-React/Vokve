@@ -1,7 +1,9 @@
 import {
   appNotificationSchema,
+  notificationPreferenceSchema,
   type AppNotification,
   type NotificationCategory,
+  type NotificationPreferenceKey,
   type NotificationTopic,
 } from '../../contracts/index.js';
 import { newId } from '../../lib/ids.js';
@@ -30,12 +32,22 @@ export const FEED_CATEGORY: Record<NotificationTopic, NotificationCategory> = {
   system: 'system',
 };
 
-export type PreferenceSwitch = 'activity' | 'coins' | 'challenges' | 'orders' | 'offers' | 'announcements' | 'referrals' | 'health';
+export type PreferenceSwitch = NotificationPreferenceKey;
+
+/** The eight switches, in the order the settings screen shows them. */
+export const PREFERENCE_SWITCHES = notificationPreferenceSchema.options;
 
 /**
  * Which of the eight consent switches governs a topic's push. Coarser than
  * the topics on purpose: the settings screen asks about kinds of message,
  * and a user who turned "coins" off meant the expiry warning too.
+ *
+ * Three switches have no topic of their own and are reached only by a
+ * caller naming them — `notify({ preference })`. `orders` and `referrals`
+ * are both sent that way (the order verbs, the referral rewards), and
+ * `offers` is the one a broadcast has to name, since no job sends a promotion
+ * on its own. `preferencesInUse` is what tells the operator which is which,
+ * so a switch that governs nothing is never reported as consent.
  */
 const PREFERENCE_OF: Record<NotificationTopic, PreferenceSwitch> = {
   steps: 'activity',
@@ -48,6 +60,32 @@ const PREFERENCE_OF: Record<NotificationTopic, PreferenceSwitch> = {
   health: 'health',
   system: 'announcements',
 };
+
+/**
+ * Which switch governs each topic, for a reader outside this module — the
+ * admin consent report, which has to say what a switch actually silences.
+ */
+export function preferenceForTopic(topic: NotificationTopic): PreferenceSwitch {
+  return PREFERENCE_OF[topic];
+}
+
+/**
+ * The topics each switch governs, as the senders actually use it.
+ *
+ * A switch with no topics is one nothing is sent on unless a caller names it
+ * explicitly, which is worth saying out loud on a screen that reports
+ * consent: "offers: 412 members have it off" means nothing if no message has
+ * ever been sent on `offers`.
+ */
+export function preferencesInUse(): Record<PreferenceSwitch, NotificationTopic[]> {
+  const bySwitch = Object.fromEntries(
+    PREFERENCE_SWITCHES.map(key => [key, [] as NotificationTopic[]]),
+  ) as Record<PreferenceSwitch, NotificationTopic[]>;
+  for (const [topic, key] of Object.entries(PREFERENCE_OF) as [NotificationTopic, PreferenceSwitch][]) {
+    bySwitch[key].push(topic);
+  }
+  return bySwitch;
+}
 
 const MINUTES_PER_DAY = 24 * 60;
 

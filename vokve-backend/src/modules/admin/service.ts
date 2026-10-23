@@ -1,10 +1,11 @@
 import { getConfig } from '../../config/remote.js';
+import type { NotificationPreferenceKey } from '../../contracts/index.js';
 import { toCoins } from '../../lib/coins.js';
 import { Errors } from '../../lib/errors.js';
 import { OrderModel } from '../commerce/models.js';
 import { DeviceModel } from '../devices/models.js';
 import { CoinBalanceModel } from '../economy/models.js';
-import { RefreshTokenModel, UserModel } from '../identity/models.js';
+import { NotificationPreferencesModel, RefreshTokenModel, UserModel } from '../identity/models.js';
 import { AppErrorModel, DeviceHealthModel, DevicePermissionsModel, EventModel } from '../telemetry/models.js';
 import { toPermissionStatus, type StoredPermission } from '../telemetry/service.js';
 
@@ -40,6 +41,8 @@ export interface FindUsersQuery {
   platform?: 'ios' | 'android';
   /** A state support asks for by name rather than by field. */
   status?: 'any' | 'frozen' | 'deleted' | 'unverified' | 'deleting';
+  /** One subject switched off — the drill-down from the consent report. */
+  silenced?: NotificationPreferenceKey;
   sort: 'newest' | 'oldest' | 'name' | 'trust';
 }
 
@@ -90,6 +93,22 @@ export async function findUsers(query: FindUsersQuery) {
     // search above rather than replacing it.
     const ids = await DeviceModel.distinct('userId', { platform: query.platform, revokedAt: null });
     filter._id = { $in: ids };
+  }
+  if (query.silenced) {
+    // The accounts that turned one subject off (RULES P14). Only accounts
+    // with a preferences row can be in it: a member who never opened the
+    // screen is on the default and has refused nothing, which is the same
+    // distinction the consent report keeps as `untouched`.
+    const silenced = await NotificationPreferencesModel.distinct('_id', {
+      [`categories.${query.silenced}`]: false,
+    });
+    // ANDed with a platform filter rather than replacing it, so the two
+    // narrow together instead of the later one winning.
+    const existing = (filter._id as { $in?: string[] } | string | undefined) ?? undefined;
+    const previous =
+      existing && typeof existing === 'object' && Array.isArray(existing.$in) ? existing.$in : null;
+    const ids = (silenced as unknown as string[]).map(String);
+    filter._id = { $in: previous ? ids.filter(id => previous.includes(id)) : ids };
   }
 
   const order: Record<string, 1 | -1> =

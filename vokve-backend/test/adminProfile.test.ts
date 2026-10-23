@@ -253,6 +253,60 @@ describe('admin: the account’s own state', () => {
     expect(audit.body.data.some((row: { actorType: string }) => row.actorType === 'user')).toBe(true);
   });
 
+  it('proves a phone by hand for the member whose code never arrives, once', async () => {
+    const session = await signUpAndRegister();
+    // Signed up through the email channel, so the number is unproven and
+    // redeeming is shut (RULES O5) — which is the ticket this answers.
+    expect((await UserModel.findById(session.userId).lean())?.phoneVerifiedAt ?? null).toBeNull();
+
+    const noReason = await request(app)
+      .post(`/v1/admin/users/${session.userId}/verify-contact`)
+      .set(ADMIN)
+      .send({ channel: 'phone', confirm: session.phone });
+    expect(noReason.status).toBe(422);
+
+    // The number is typed back, because there is no route that undoes this.
+    const wrong = await request(app)
+      .post(`/v1/admin/users/${session.userId}/verify-contact`)
+      .set(ADMIN)
+      .send({ channel: 'phone', confirm: '+919000000000', reason: 'ticket 88 — no SMS on this carrier' });
+    expect(wrong.status).toBe(422);
+    expect(wrong.body.error.details).toHaveProperty('confirm');
+
+    // Punctuation is not the thing being checked: the digits are. `+91 98765
+    // 43211` is the same number as `+919876543211` — a dropped country code
+    // is not, and is refused above.
+    const done = await request(app)
+      .post(`/v1/admin/users/${session.userId}/verify-contact`)
+      .set(ADMIN)
+      .send({
+        channel: 'phone',
+        confirm: session.phone.replace(/^(\+\d{2})(\d{5})(\d{5})$/, '$1 $2 $3'),
+        reason: 'ticket 88 — no SMS on this carrier',
+      });
+    expect(done.status).toBe(200);
+    expect(done.body).toMatchObject({ channel: 'phone', canRedeem: true });
+    expect(done.body.phoneVerifiedAt).not.toBeNull();
+    // Told, through the same path every job uses.
+    expect(done.body.told.status).toBe('created');
+
+    // Not twice: a second stamp would move the date and say nothing new.
+    const again = await request(app)
+      .post(`/v1/admin/users/${session.userId}/verify-contact`)
+      .set(ADMIN)
+      .send({ channel: 'phone', confirm: session.phone, reason: 'again' });
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('ALREADY_VERIFIED');
+
+    const audit = await request(app).get(`/v1/admin/users/${session.userId}/audit`).set(ADMIN);
+    expect(
+      audit.body.data.some(
+        (row: { action: string; after?: { channel?: string } }) =>
+          row.action === 'member.verify_contact' && row.after?.channel === 'phone',
+      ),
+    ).toBe(true);
+  });
+
   it('credits coins as a new row, and claws them back as another', async () => {
     const session = await signUpAndRegister();
 

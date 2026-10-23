@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { notificationTopicSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
 import { UserModel } from '../identity/models.js';
+import { NotificationPreferencesModel } from '../identity/models.js';
 import { NotificationModel } from '../notifications/models.js';
+import { PREFERENCE_SWITCHES, preferencesInUse } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
 
 /**
@@ -44,6 +46,112 @@ const CATEGORY_OF: Record<string, 'activity' | 'reward' | 'system'> = {
   reward: 'reward',
   system: 'system',
 };
+
+// ─── What everybody has agreed to hear (RULES P14) ─────────────────────────
+
+/**
+ * The defaults every account is created with, read off the schema itself so
+ * this cannot drift from what a new member actually gets. Everything on
+ * except health, which is the member's body rather than the app's news.
+ */
+function defaultSwitches(): Record<string, boolean> {
+  const doc = new NotificationPreferencesModel({ _id: 'default' }).toObject() as {
+    categories: Record<string, boolean>;
+  };
+  return doc.categories;
+}
+
+/**
+ * Consent across the whole base, switch by switch.
+ *
+ * The member's own switches were already readable one account at a time, on
+ * their Config & messages tab. What had no answer was the question an
+ * operator asks before a send — *how many people will this reach?* — and its
+ * follow-up, *who turned it off?* The segment count on the broadcast form
+ * answers neither, because it counts accounts and not consent.
+ *
+ * Three figures per switch. `on` and `off` are the reach; `chosen` is how
+ * many members moved that switch away from the value they were created with,
+ * which is what tells a deliberate refusal from a default nobody has
+ * touched. A preferences row is written at sign-up, so "has a row" says
+ * nothing — comparing against the default is the only way to know.
+ *
+ * `governs` is the honesty. It lists the topics actually sent on a switch,
+ * and a switch with none is one no message reaches the member through unless
+ * a caller names it: `offers` is the live example, which is why a broadcast
+ * can now name it. Without this, "412 members have offers off" reads as lost
+ * reach that was never there.
+ *
+ * Counted with one `$sum` per switch rather than by gathering the rows:
+ * every member has a document here, and a pipeline that pushed them into one
+ * group would walk into the 16MB limit on a base of any size.
+ */
+export async function notificationConsent() {
+  const defaults = defaultSwitches();
+  const governs = preferencesInUse();
+
+  const sumOf = (field: string, value: boolean) => ({
+    $sum: { $cond: [{ $eq: [`$${field}`, value] }, 1, 0] },
+  });
+
+  const [members, rows] = await Promise.all([
+    UserModel.countDocuments({ deletedAt: null }),
+    NotificationPreferencesModel.aggregate<Record<string, number>>([
+      {
+        $group: {
+          _id: null,
+          withRow: { $sum: 1 },
+          quietOn: sumOf('quietHours.enabled', true),
+          smsOn: sumOf('sms', true),
+          emailOn: sumOf('email', true),
+          ...Object.fromEntries(
+            PREFERENCE_SWITCHES.flatMap(key => [
+              [`${key}_on`, sumOf(`categories.${key}`, true)],
+              // Explicitly false, not "not true": a row written before a
+              // switch existed has no field for it, and the server reads the
+              // schema default there rather than a refusal.
+              [`${key}_off`, sumOf(`categories.${key}`, false)],
+            ]),
+          ),
+        },
+      },
+    ]),
+  ]);
+
+  const tally = rows[0] ?? {};
+  const withRow = tally.withRow ?? 0;
+  /** Accounts with no preferences row at all: on every default, by omission. */
+  const noRow = Math.max(0, members - withRow);
+
+  return {
+    members,
+    noRow,
+    quietHours: {
+      on: (tally.quietOn ?? 0) + noRow,
+      off: withRow - (tally.quietOn ?? 0),
+    },
+    channels: {
+      sms: { on: (tally.smsOn ?? 0) + noRow, off: withRow - (tally.smsOn ?? 0) },
+      email: { on: tally.emailOn ?? 0, off: withRow - (tally.emailOn ?? 0) + noRow },
+    },
+    switches: PREFERENCE_SWITCHES.map(key => {
+      const defaultOn = defaults[key] ?? true;
+      const on = (tally[`${key}_on`] ?? 0) + (defaultOn ? noRow : 0);
+      const off = (tally[`${key}_off`] ?? 0) + (defaultOn ? 0 : noRow);
+      return {
+        key,
+        defaultOn,
+        /** Everybody a push on this switch can reach today. */
+        on,
+        off,
+        /** Members who moved it away from the value they were created with. */
+        chosen: defaultOn ? off : on,
+        /** The topics sent on it; empty means only a caller naming it. */
+        governs: governs[key] ?? [],
+      };
+    }),
+  };
+}
 
 export const notificationQuery = z.object({
   /** Words in the title or the message, or a member's id, email or name. */

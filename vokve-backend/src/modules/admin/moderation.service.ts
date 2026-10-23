@@ -10,15 +10,17 @@ import { unlockAchievement } from '../challenges/service.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../economy/models.js';
 import { credit } from '../economy/service.js';
 import { UserModel } from '../identity/models.js';
+import { notify } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
 
 /**
- * The two things an operator may change about an account, kept in their own
- * file so nothing on a reading screen can write by accident.
+ * The things an operator may change about an account, kept in their own file
+ * so nothing on a reading screen can write by accident.
  *
- * Both are decisions rather than data: whether this account may go on
- * spending, and a correction to what it was paid. Both carry a reason, both
- * write an audit row, and neither touches what the member did — a frozen
+ * Each is a decision rather than data: whether this account may go on
+ * spending, a correction to what it was paid, and whether a contact detail
+ * the member cannot prove is taken as proven. All three carry a reason, all
+ * three write an audit row, and none touches what the member did — a frozen
  * account keeps its days, its badges and its history.
  */
 
@@ -80,6 +82,120 @@ export async function setMemberStatus(actor: string, userId: string, body: Statu
       purgeAt: iso(after?.deletion?.purgeAt),
       reason: after?.deletion?.reason ?? null,
     },
+  };
+}
+
+// ─── A contact detail proven by hand (RULES O5) ────────────────────────────
+
+/** Digits only, so `+91 98765 43210` and `9876543210` are the same number. */
+const digitsOf = (value: string) => value.replace(/\D/g, '');
+
+export const verifyContactBody = z
+  .object({
+    channel: z.enum(['phone', 'email']),
+    /**
+     * The address or number as the operator reads it on the account, typed
+     * back. The panel's own rule for anything irreversible, and this is one:
+     * there is no unverify, and verifying the wrong account's number lets it
+     * spend. Compared on digits for a phone and lower-cased for an email, so
+     * the check is on the value and not on how it was punctuated.
+     */
+    confirm: z.string().trim().min(3).max(190),
+    /** Why this was done by hand. The whole point of the record. */
+    reason: z.string().trim().min(3).max(300),
+  })
+  .strict();
+export type VerifyContactBody = z.infer<typeof verifyContactBody>;
+
+/**
+ * Marks a phone number or an email address as proven, because the member
+ * cannot prove it themselves.
+ *
+ * The case this exists for is the one that has no other answer: SMS does not
+ * deliver to the member's number — no provider on this route, a carrier
+ * dropping it, a number the gateway will not take — so `POST
+ * /auth/verify-otp` can never succeed and the member is stuck behind
+ * `requireVerifiedContacts` for good. Support has already confirmed who they
+ * are by then; what is missing is not the identity, it is the code.
+ *
+ * **This unlocks spending.** Both contact details proven is what
+ * `requireVerifiedContacts` gates redeeming, payouts and addresses on (RULES
+ * O5, D-20), and the pair is also worth five points of trust score. So it
+ * asks for the value typed back and for a reason, refuses an account that is
+ * already verified rather than re-stamping the date, and writes the audit row
+ * the member's own Overview tab shows.
+ *
+ * There is no way back. A verification undone would be a member who could
+ * spend yesterday and cannot today, with nothing they did to explain it —
+ * freezing the account is how that is answered instead.
+ */
+export async function verifyMemberContact(actor: string, userId: string, body: VerifyContactBody) {
+  const user = await UserModel.findById(userId)
+    .select({ email: 1, phone: 1, emailVerifiedAt: 1, phoneVerifiedAt: 1, deletedAt: 1 })
+    .lean();
+  if (!user) throw Errors.notFound('That member');
+  if (user.deletedAt) {
+    throw Errors.conflict('ALREADY_DELETED', 'That account has already been deleted and anonymised.');
+  }
+
+  const isPhone = body.channel === 'phone';
+  const held = (isPhone ? user.phone : user.email) ?? '';
+  const already = isPhone ? user.phoneVerifiedAt : user.emailVerifiedAt;
+  if (already) {
+    throw Errors.conflict(
+      'ALREADY_VERIFIED',
+      `Their ${isPhone ? 'number' : 'email address'} was already verified on ${already.toISOString().slice(0, 10)}.`,
+    );
+  }
+
+  const matches = isPhone
+    ? digitsOf(body.confirm) === digitsOf(held) && digitsOf(held).length > 0
+    : body.confirm.trim().toLowerCase() === held.trim().toLowerCase();
+  if (!matches) {
+    throw Errors.validation({
+      confirm: `That does not match the ${isPhone ? 'number' : 'address'} on this account.`,
+    });
+  }
+
+  const now = new Date();
+  await UserModel.updateOne(
+    { _id: userId },
+    { $set: isPhone ? { phoneVerifiedAt: now } : { emailVerifiedAt: now } },
+  );
+
+  await AuditLogModel.create({
+    actorType: 'admin',
+    actorId: actor,
+    action: 'member.verify_contact',
+    subjectType: 'user',
+    subjectId: userId,
+    before: { channel: body.channel, verifiedAt: null },
+    after: { channel: body.channel, verifiedAt: now.toISOString(), target: held, reason: body.reason },
+  });
+
+  // Told, because the member is the one who was stuck: they tried, the code
+  // never came, and nothing on their screen would otherwise change. Through
+  // the same path every job uses, so their switches and quiet hours still
+  // decide how it reaches them.
+  const told = await notify({
+    userId,
+    topic: 'system',
+    title: isPhone ? 'Your number is verified' : 'Your email is verified',
+    message: isPhone
+      ? 'We confirmed your mobile number for you. You can redeem rewards and add an address now.'
+      : 'We confirmed your email address for you. You can redeem rewards now.',
+  });
+
+  const after = await UserModel.findById(userId)
+    .select({ emailVerifiedAt: 1, phoneVerifiedAt: 1 })
+    .lean();
+  return {
+    channel: body.channel,
+    emailVerifiedAt: iso(after?.emailVerifiedAt),
+    phoneVerifiedAt: iso(after?.phoneVerifiedAt),
+    /** Both proven is what unlocks redeeming, so the answer says it outright. */
+    canRedeem: Boolean(after?.emailVerifiedAt && after?.phoneVerifiedAt),
+    told: { status: told.status, push: told.push },
   };
 }
 

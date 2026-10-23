@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { notificationTopicSchema } from '../../contracts/index.js';
+import { notificationPreferenceSchema, notificationTopicSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { DeviceModel } from '../devices/models.js';
@@ -107,6 +107,16 @@ export const broadcastBody = z
   .object({
     segment: segmentSchema.default({}),
     topic: notificationTopicSchema,
+    /**
+     * Which of the eight consent switches governs this send (RULES P14).
+     *
+     * Left out, the topic decides, as it does for every job. Named, it
+     * overrides — which is the only way `offers` ever means anything: no
+     * topic maps to it, so a promotion sent on `system` was governed by
+     * `announcements`, and a member who had switched offers off was pushed
+     * it anyway. The switch existed on their screen and silenced nothing.
+     */
+    preference: notificationPreferenceSchema.optional(),
     title: z.string().trim().min(1).max(120),
     message: z.string().trim().min(1).max(500),
     /** Quiet hours hold a push rather than dropping it; nothing bypasses them here. */
@@ -148,6 +158,7 @@ export async function sendBroadcast(actor: string, body: BroadcastBody) {
         notify({
           userId,
           topic: body.topic,
+          preference: body.preference,
           title: body.title,
           message: body.message,
           suppressPush: body.suppressPush,
@@ -179,6 +190,7 @@ export async function sendBroadcast(actor: string, body: BroadcastBody) {
     after: {
       segment: body.segment,
       topic: body.topic,
+      preference: body.preference ?? null,
       title: body.title,
       message: body.message,
       recipients: recipients.length,

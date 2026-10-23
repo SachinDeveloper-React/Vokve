@@ -53,6 +53,81 @@ describe('admin: the notification system', () => {
     expect((await request(app).get('/v1/admin/notifications')).status).toBe(401);
   });
 
+  it('counts consent switch by switch, and tells a default apart from a refusal', async () => {
+    const quiet = await member('Quiet Member');
+    const fresh = await member('Never Opened Settings');
+
+    // One member turns two subjects off through their own screen, which is
+    // the only way consent is ever given or taken (RULES P14).
+    const off = await request(app)
+      .put('/v1/me/notification-preferences')
+      .set(authed(quiet))
+      .send({ categories: { offers: false, coins: false } });
+    expect(off.status).toBe(200);
+
+    const consent = await request(app).get('/v1/admin/notifications/consent').set(ADMIN);
+    expect(consent.status).toBe(200);
+    expect(consent.body.members).toBe(2);
+
+    const bySwitch = Object.fromEntries(
+      consent.body.switches.map((row: { key: string }) => [row.key, row]),
+    );
+
+    // Two switches refused by one member, so one member is still reachable
+    // on each. `chosen` is the figure that says it was a decision: a
+    // preferences row is written at sign-up, so the only way to tell a
+    // refusal from a default nobody touched is to compare with the default.
+    expect(bySwitch.offers).toMatchObject({ on: 1, off: 1, chosen: 1, defaultOn: true });
+    expect(bySwitch.coins).toMatchObject({ on: 1, off: 1, chosen: 1, defaultOn: true });
+    // Untouched by either member, so nobody has chosen anything about it.
+    expect(bySwitch.activity).toMatchObject({ on: 2, off: 0, chosen: 0 });
+    // Health is the one switch that starts off, so a member *on* it chose it
+    // — and neither of these two did.
+    expect(bySwitch.health).toMatchObject({ defaultOn: false, on: 0, off: 2, chosen: 0 });
+
+    // And the honesty: which switches anything is actually sent on. `offers`
+    // has no topic of its own — only a broadcast naming it — so a count of
+    // refusals against it would otherwise read as lost reach.
+    expect(bySwitch.activity.governs).toContain('steps');
+    expect(bySwitch.offers.governs).toEqual([]);
+
+    // The drill-down: who, not how many.
+    const silenced = await request(app).get('/v1/admin/users').query({ silenced: 'offers' }).set(ADMIN);
+    expect(silenced.status).toBe(200);
+    expect(silenced.body.total).toBe(1);
+    expect(silenced.body.data[0].id).toBe(quiet.userId);
+    // Not the member who left it alone: they are on the default, and a list
+    // of refusals that included them would be a list of everybody.
+    expect(silenced.body.data.some((row: { id: string }) => row.id === fresh.userId)).toBe(false);
+  });
+
+  it('lets a broadcast name the switch that governs it, so offers silences something', async () => {
+    const session = await member('Promo Refuser');
+    await request(app)
+      .put('/v1/me/notification-preferences')
+      .set(authed(session))
+      .send({ categories: { offers: false } });
+
+    // Sent on `system`, which maps to `announcements` — but named as an
+    // offer, which is what the member actually switched off.
+    const sent = await request(app)
+      .post('/v1/admin/notifications/broadcast')
+      .set(ADMIN)
+      .send({
+        topic: 'system',
+        preference: 'offers',
+        title: 'Half price on everything',
+        message: 'Three days only.',
+        expected: 1,
+        confirm: true,
+        reason: 'weekend promotion',
+      });
+    expect(sent.status).toBe(202);
+    // The feed row is still written — it is the channel they can go and look
+    // at — and the push is the thing their switch withheld.
+    expect(sent.body).toMatchObject({ created: 1, pushed: 0 });
+  });
+
   it('says what became of every notification, across the filter rather than the page', async () => {
     const session = await member();
     await feedRow(session.userId, 'ntf_read', { read: true, readAt: new Date(), pushedAt: new Date() });

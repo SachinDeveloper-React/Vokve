@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { notificationPreferenceSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
 import { requireAdmin } from '../../middleware/admin.js';
 import { validate } from '../../middleware/validate.js';
@@ -108,6 +109,8 @@ import {
   memberAudit,
   setMemberStatus,
   statusBody,
+  verifyContactBody,
+  verifyMemberContact,
 } from './moderation.service.js';
 import {
   addressBody,
@@ -147,6 +150,7 @@ import {
   deleteNotification,
   deleteNotificationBody,
   listNotifications,
+  notificationConsent,
   notificationQuery,
   retractBody,
   retractBroadcast,
@@ -229,6 +233,11 @@ const usersQuery = z.object({
   platform: z.enum(['ios', 'android']).optional(),
   /** The states support asks for by name. */
   status: z.enum(['any', 'frozen', 'deleted', 'unverified', 'deleting']).optional(),
+  /**
+   * Accounts that have switched one subject off (RULES P14) — the drill-down
+   * from the consent report, so "412 have offers off" names them.
+   */
+  silenced: notificationPreferenceSchema.optional(),
   sort: z.enum(['newest', 'oldest', 'name', 'trust']).default('newest'),
 });
 
@@ -503,6 +512,15 @@ adminUsersRouter.get('/admin/users/:userId/audit', validate('query', auditQuery)
  */
 adminUsersRouter.put('/admin/users/:userId/status', validate('body', statusBody), async (req, res) => {
   res.json(await setMemberStatus(req.ctx.adminActor!, String(req.params.userId), req.body));
+});
+
+/**
+ * A contact detail proven by hand, for the member whose code never arrives
+ * (RULES O5). It unlocks redeeming, so it asks for the value typed back and
+ * for a reason, and there is no route that undoes it.
+ */
+adminUsersRouter.post('/admin/users/:userId/verify-contact', validate('body', verifyContactBody), async (req, res) => {
+  res.json(await verifyMemberContact(req.ctx.adminActor!, String(req.params.userId), req.body));
 });
 
 /**
@@ -967,6 +985,14 @@ adminUsersRouter.get('/admin/notifications/preview', validate('query', segmentSc
  * preview gave are all required — a segment that has moved by more than a
  * tenth since is refused rather than sent to.
  */
+/**
+ * Consent across the base, switch by switch (RULES P14): who will be reached,
+ * who turned it off, and which switches anything is actually sent on.
+ */
+adminUsersRouter.get('/admin/notifications/consent', async (_req, res) => {
+  res.json(await notificationConsent());
+});
+
 adminUsersRouter.post('/admin/notifications/broadcast', validate('body', broadcastBody), async (req, res) => {
   res.status(202).json(await sendBroadcast(req.ctx.adminActor!, req.body));
 });

@@ -1938,6 +1938,28 @@ export type NotificationCategory = z.infer<typeof notificationCategorySchema>;
  * that name, and a screen importing the wrong one would still compile.
  */
 /**
+ * The eight consent switches, as a closed list.
+ *
+ * Named here rather than only inside `notificationPreferencesSchema`,
+ * because three places need the same list and none of them is the member's
+ * own record: the admin consent report counts members per switch, the member
+ * search filters by one, and a broadcast says which switch governs it. A
+ * ninth switch added to the object below and not here would be a switch the
+ * operator could never see or send on.
+ */
+export const notificationPreferenceSchema = z.enum([
+  'activity',
+  'coins',
+  'challenges',
+  'orders',
+  'offers',
+  'announcements',
+  'referrals',
+  'health',
+]);
+export type NotificationPreferenceKey = z.infer<typeof notificationPreferenceSchema>;
+
+/**
  * What the user has agreed to be told about (BACKEND §5 Notification
  * Settings): eight subject switches, the quiet window and the two other
  * channels. The server enforces these before any push, SMS or email.
