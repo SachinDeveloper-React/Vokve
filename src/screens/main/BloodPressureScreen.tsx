@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Heart } from 'lucide-react-native';
 import { AddReadingSheet } from '../../components/health/AddReadingSheet';
-import { LiveMeasureCard } from '../../components/health/LiveMeasureCard';
+import { LogReadingCard } from '../../components/health/LogReadingCard';
 import { RecentVitalReadingsCard } from '../../components/health/RecentVitalReadingsCard';
 import { VitalHeader } from '../../components/health/VitalHeader';
 import { VitalTipCard } from '../../components/health/VitalTipCard';
@@ -30,15 +30,12 @@ const makeStyles = ({ spacing }: ThemeShape) =>
 const TREND_POINTS = 7;
 const RECENT_ROWS = 4;
 
-/** See `HeartRateScreen`: no sensor in this build, and the card says so. */
-const HAS_SENSOR = false;
-
 /**
  * Blood pressure on its own: the latest reading, both halves of it, and how
  * it has moved.
  *
  * The same shape as the heart rate screen and built from the same parts —
- * header, live card, readings list, tip — with only the hero and the chart
+ * header, log card, readings list, tip — with only the hero and the chart
  * of its own. Everything comes from the vitals store, so a reading logged
  * here changes the checkup's tile in the same breath, and its verdict comes
  * off the same bands that tile uses.
@@ -116,11 +113,10 @@ export const BloodPressureScreen = () => {
           />
         )}
 
-        <LiveMeasureCard
-          title="Live Blood Pressure"
-          connectedCopy="Measure using your connected device"
-          available={HAS_SENSOR}
-          onPressMeasure={openLog}
+        <LogReadingCard
+          title="Log your blood pressure"
+          helper="Systolic over diastolic, from your own cuff or your clinic. Vokve keeps the history and the trend."
+          onPressLog={openLog}
         />
 
         {trend.length > 1 ? (

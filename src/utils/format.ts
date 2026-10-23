@@ -102,6 +102,36 @@ export function formatRelativeDay(isoDate: string): string {
 }
 
 /**
+ * How long ago a timestamp was, for a figure that may not be current —
+ * `just now`, `12 min ago`, `3 h ago`, `yesterday`, `4 days ago`.
+ *
+ * The sibling of `formatRelativeDay`, which answers in whole days because it
+ * labels a day's worth of data. This one is for a *reading*: a step count
+ * cached while the phone was offline is worth showing, and how stale it is
+ * decides whether the user trusts it. Rounded down and lower case, so it
+ * reads inside a sentence ("updated 3 h ago") rather than as a heading.
+ */
+export function formatTimeSince(isoDate: string): string {
+  const then = new Date(isoDate).getTime();
+  if (Number.isNaN(then)) {
+    return '';
+  }
+
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return 'just now';
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
+}
+
+/**
  * The clock time a timestamp lands on — `10:30 AM`, `6:45 PM`.
  *
  * Written out rather than handed to `toLocaleTimeString`, for the same reason

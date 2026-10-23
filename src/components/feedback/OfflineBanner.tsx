@@ -20,6 +20,15 @@ import { Icon } from '../media/Icon';
  * event, and a workout logged in a basement gym needs the user to understand
  * that their sets are saved locally and will sync later — not to see a message
  * disappear after three seconds.
+ *
+ * It says both halves of what offline means here, because both are true and
+ * each is the answer to a different worry. **What is shown** is the last
+ * figures the server sent, kept past the end of the process so the app opens
+ * on numbers rather than on "Couldn't load" (`useServerRead`); a panel can
+ * date its own with `StaleFigures`. **What is logged** — a drink, a meal, a
+ * reading, a walk — is queued on the phone and goes when the network comes
+ * back. Neither is lost, and a user who thinks either one is will stop using
+ * the app in the one place it is most useful.
  */
 export const OfflineBanner = memo(() => {
   const { isOffline } = useNetworkStatus();
@@ -58,7 +67,8 @@ export const OfflineBanner = memo(() => {
           variant="caption"
           style={{ color: colors.primaryForeground }}
         >
-          You are offline. Workouts are saved on this device.
+          You are offline. Showing your last synced figures — anything you
+          log is saved on this device.
         </AppText>
       </View>
     </Animated.View>

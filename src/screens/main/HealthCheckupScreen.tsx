@@ -8,6 +8,7 @@ import { HealthTipCard } from '../../components/health/HealthTipCard';
 import { RecentHistoryCard } from '../../components/health/RecentHistoryCard';
 import { TrackProgressCard } from '../../components/health/TrackProgressCard';
 import { VitalsCard } from '../../components/health/VitalsCard';
+import { StaleFigures } from '../../components/feedback';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { DateChip } from '../../components/streak/DateChip';
 import { LoadState } from '../../components/ui/LoadState';
@@ -133,6 +134,8 @@ export const HealthCheckupScreen = () => {
           onPress={openCalendar}
           accessibilityHint="Change the day"
         />
+
+        <StaleFigures at={score.cachedAt} stale={score.isStale} />
 
         {score.data ? (
           <HealthScoreCard

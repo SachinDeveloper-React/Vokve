@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Heart } from 'lucide-react-native';
 import { AddReadingSheet } from '../../components/health/AddReadingSheet';
-import { LiveMeasureCard } from '../../components/health/LiveMeasureCard';
+import { LogReadingCard } from '../../components/health/LogReadingCard';
 import { RecentVitalReadingsCard } from '../../components/health/RecentVitalReadingsCard';
 import { VitalHeader } from '../../components/health/VitalHeader';
 import { VitalTipCard } from '../../components/health/VitalTipCard';
@@ -29,16 +29,6 @@ const makeStyles = ({ spacing }: ThemeShape) =>
 /** How many readings the trend plots and the list shows. */
 const TREND_POINTS = 8;
 const RECENT_ROWS = 4;
-
-/**
- * Whether a sensor can take the reading itself.
- *
- * A constant rather than a check, and deliberately so: this build has no
- * health integration, and the card above it says "not connected" instead of
- * promising a live measurement it cannot make. It becomes a real capability
- * check the day the native side lands.
- */
-const HAS_SENSOR = false;
 
 /**
  * Heart rate on its own: the latest reading, where it sits clinically, and how
@@ -119,11 +109,10 @@ export const HeartRateScreen = () => {
           />
         )}
 
-        <LiveMeasureCard
-          title="Live Heart Rate"
-          connectedCopy="Real-time measurement using your device"
-          available={HAS_SENSOR}
-          onPressMeasure={openLog}
+        <LogReadingCard
+          title="Log your heart rate"
+          helper="Beats per minute, from your own monitor, your watch or your clinic. Vokve keeps the history and the trend."
+          onPressLog={openLog}
         />
 
         {trend.length > 1 ? (

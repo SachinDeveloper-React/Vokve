@@ -168,11 +168,17 @@ describe('HeartRateScreen', () => {
     expect(text).toContain('> 120');
   });
 
-  test('the live card does not claim a sensor this build has not got', async () => {
+  test('the only way a reading gets in is typed, and the card says so', async () => {
     const text = allText(await render());
 
-    expect(text).toContain('Not connected');
-    expect(text).toContain('Log a reading');
+    // There was a "Live Heart Rate" card here with a "Not connected" pill
+    // and a *Start Measuring* button behind a `HAS_SENSOR = false` constant.
+    // No vital Vokve holds has ever come from a device — Health Connect is
+    // wired for steps and distance alone — so the card asks for the number
+    // rather than advertising a measurement it will never take.
+    expect(text).toContain('Log your heart rate');
+    expect(text).toContain('Add a reading');
+    expect(text).not.toContain('Not connected');
     expect(text).not.toContain('Real-time measurement');
   });
 
@@ -180,7 +186,7 @@ describe('HeartRateScreen', () => {
     const tree = await render();
     const before = useVitalsStore.getState().readings?.length ?? 0;
 
-    press(tree, 'Log a reading');
+    press(tree, 'Add a reading');
     ReactTestRenderer.act(() =>
       useVitalsStore.getState().addReading('heart_rate', 104),
     );

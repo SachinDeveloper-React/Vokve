@@ -14,6 +14,7 @@ import {
 } from '../../components/analytics/StepsOverviewCard';
 import { StepsSummaryCard } from '../../components/analytics/StepsSummaryCard';
 import { WeeklyTrendCard } from '../../components/analytics/WeeklyTrendCard';
+import { StaleFigures } from '../../components/feedback';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { HStack } from '../../components/layout/Stack';
 import { Screen } from '../../components/ui/Screen';
@@ -135,7 +136,10 @@ export const AnalyticsScreen = () => {
   const isToday = date === todayIso();
   // Every step figure on this screen is the verified part of the server's
   // day, never the whole count a phone sent (see `verifiedActivityOf`).
-  const day = verifiedActivityOf(useActivityDay(date).data);
+  // The day's read is also what dates this screen: every figure below comes
+  // from it or from the range reads beside it, which are refreshed together.
+  const dayRead = useActivityDay(date);
+  const day = verifiedActivityOf(dayRead.data);
   const previous = useActivityDay(addDays(date, -1)).data;
   const today = useTodaySteps();
 
@@ -251,6 +255,8 @@ export const AnalyticsScreen = () => {
           onChange={setRange}
           onPressDate={openCalendar}
         />
+
+        <StaleFigures at={dayRead.cachedAt} stale={dayRead.isStale} />
 
         <StepsSummaryCard
           steps={day.steps}
