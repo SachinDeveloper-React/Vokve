@@ -8,6 +8,7 @@ import {
   AnalyticsRangeFilter,
   type AnalyticsRange,
 } from '../../components/analytics/AnalyticsRangeFilter';
+import { StepsInsightsSheet } from '../../components/analytics/StepsInsightsSheet';
 import {
   StepsOverviewCard,
   type OverviewPoint,
@@ -129,9 +130,12 @@ export const AnalyticsScreen = () => {
   const [range, setRange] = useState<AnalyticsRange>('day');
   const [date, setDate] = useState<IsoDate>(todayIso());
   const [isCalendarOpen, setCalendarOpen] = useState(false);
+  const [isInsightsOpen, setInsightsOpen] = useState(false);
 
   const openCalendar = useCallback(() => setCalendarOpen(true), []);
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
+  const openInsights = useCallback(() => setInsightsOpen(true), []);
+  const closeInsights = useCallback(() => setInsightsOpen(false), []);
 
   const isToday = date === todayIso();
   // Every step figure on this screen is the verified part of the server's
@@ -159,10 +163,10 @@ export const AnalyticsScreen = () => {
     [week],
   );
 
-  const { points, caption, axisLabels } = useMemo<{
+  const { points, caption, labelEvery } = useMemo<{
     points: OverviewPoint[];
     caption: string;
-    axisLabels: string[];
+    labelEvery: number;
   }>(() => {
     const drawn = (chart?.points ?? []).map((point, index) => ({
       label: labelFor(range, point, index),
@@ -177,7 +181,7 @@ export const AnalyticsScreen = () => {
           caption: isCurrent(chartQuery.from)
             ? 'This week, day by day'
             : `Week of ${formatLongDate(chartQuery.from)}, day by day`,
-          axisLabels: ['Mon', 'Sun'],
+          labelEvery: 1,
         };
       case 'month': {
         const anchor = fromIsoDate(date);
@@ -189,7 +193,7 @@ export const AnalyticsScreen = () => {
                 anchor.getFullYear(),
                 anchor.getMonth(),
               )}, week by week`,
-          axisLabels: drawn.map(point => point.label),
+          labelEvery: 1,
         };
       }
       case 'year':
@@ -198,7 +202,7 @@ export const AnalyticsScreen = () => {
           caption: isCurrent(chartQuery.from)
             ? 'This year, month by month'
             : `${date.slice(0, 4)}, month by month`,
-          axisLabels: ['Jan', 'Apr', 'Jul', 'Oct', 'Dec'],
+          labelEvery: 1,
         };
       default:
         return {
@@ -206,9 +210,7 @@ export const AnalyticsScreen = () => {
           caption: isToday
             ? 'Today, hour by hour'
             : `${formatLongDate(date)}, hour by hour`,
-          axisLabels: Array.from({ length: 24 / HOUR_LABEL_STEP }, (_, index) =>
-            hourLabel(index * HOUR_LABEL_STEP),
-          ),
+          labelEvery: HOUR_LABEL_STEP,
         };
     }
   }, [chart, chartQuery.from, date, isToday, range]);
@@ -236,9 +238,9 @@ export const AnalyticsScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The AI report and the insights breakdown have no screens yet. Wired as
-  // no-ops rather than left off, so each control keeps the shape it will ship
-  // with and only the handler changes when its screen lands.
+  // The AI report has no screen yet. Wired as a no-op rather than left off, so
+  // the control keeps the shape it will ship with and only the handler changes
+  // when its screen lands.
   const notImplemented = useCallback(() => {}, []);
 
   return (
@@ -272,8 +274,8 @@ export const AnalyticsScreen = () => {
         <StepsOverviewCard
           points={points}
           caption={caption}
-          axisLabels={axisLabels}
-          onPressInsights={notImplemented}
+          labelEvery={labelEvery}
+          onPressInsights={openInsights}
         />
 
         <HStack align="stretch" gap="md">
@@ -322,6 +324,16 @@ export const AnalyticsScreen = () => {
         onChange={setDate}
         onClose={closeCalendar}
         title="Show analytics for"
+      />
+
+      <StepsInsightsSheet
+        visible={isInsightsOpen}
+        onClose={closeInsights}
+        range={range}
+        caption={caption}
+        points={points}
+        totals={chart?.totals ?? null}
+        goal={goal}
       />
     </Screen>
   );

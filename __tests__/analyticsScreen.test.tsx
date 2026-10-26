@@ -115,18 +115,22 @@ const range = (query: ActivityRangeQuery) => {
           steps: 100_000,
           verifiedSteps: 100_000,
         }));
+  // The totals are the server's own, not the app's sum of the points — the
+  // insights sheet reads them, so a mock that left them at zero would let the
+  // sheet quietly add the bars up instead and still pass.
+  const steps = points.reduce((sum, point) => sum + point.steps, 0);
   return {
     from: query.from,
     to: query.to,
     granularity: query.granularity,
     points,
     totals: {
-      steps: 0,
-      verifiedSteps: 0,
-      distanceKm: 0,
-      caloriesBurned: 0,
-      activeMinutes: 0,
-      activeDays: 0,
+      steps,
+      verifiedSteps: steps,
+      distanceKm: 29.4,
+      caloriesBurned: 2506,
+      activeMinutes: 336,
+      activeDays: query.granularity === 'hour' ? 1 : 7,
     },
     best: null,
   };
@@ -306,6 +310,36 @@ describe('AnalyticsScreen', () => {
     await press(tree, 'Today,');
 
     expect(allText(tree)).toContain('Show analytics for');
+  });
+
+  test('view insights opens the breakdown of the period on screen', async () => {
+    const tree = await render();
+
+    await press(tree, 'View insights');
+
+    const text = allText(tree);
+    expect(text).toContain('Steps Insights');
+    expect(text).toContain('Today, hour by hour');
+    // The day's own total and its busiest hour, both from the hourly read.
+    expect(text).toContain('Total steps');
+    expect(text).toContain('Busiest hour');
+    expect(text).toContain('9 AM · 6,245');
+    expect(text).toContain('That total is 62% of the 10,000 step daily goal.');
+  });
+
+  test('the breakdown follows the range it was opened over', async () => {
+    const tree = await render();
+
+    await press(tree, 'Week');
+    await press(tree, 'View insights');
+
+    const text = allText(tree);
+    expect(text).toContain('This week, day by day');
+    expect(text).toContain('Busiest day');
+    expect(text).toContain('Wed · 10,245');
+    // 52,642 steps over the seven days the server counted.
+    expect(text).toContain('Daily average');
+    expect(text).toContain('7,520');
   });
 
   test('the chevron returns to whatever opened the screen', async () => {

@@ -56,8 +56,11 @@ interface Props {
   points: OverviewPoint[];
   /** What the series covers — "Today, hour by hour". */
   caption: string;
-  /** Labels written under the axis, evenly spaced. */
-  axisLabels: string[];
+  /**
+   * How many bars one axis label stands for. One per bar by default; a day of
+   * twenty-four hourly bars passes 4 and gets a label every fourth hour.
+   */
+  labelEvery?: number;
   onPressInsights: () => void;
 }
 
@@ -69,11 +72,15 @@ interface Props {
  * screen is a texture rather than a reading. What each bar is worth is in its
  * accessibility label, and the shape is what the card is for.
  *
- * Only a handful of axis labels are drawn, spaced across the row rather than
- * one per bar, for the same reason.
+ * The axis is drawn as one cell per label, each the same width, so a label
+ * always sits under the bars it names: every label comes from a bar's own
+ * label rather than from a list passed in beside the series, which is what
+ * used to let the two drift apart as soon as the period changed length. A
+ * dense series labels every nth bar instead of every one — twenty-four hours
+ * of "12 AM" across a 375pt screen would overlap into a smudge.
  */
 export const StepsOverviewCard = memo(
-  ({ points, caption, axisLabels, onPressInsights }: Props) => {
+  ({ points, caption, labelEvery = 1, onPressInsights }: Props) => {
     const { colors } = useTheme();
     const foreground = darkColors.tierForeground;
 
@@ -81,6 +88,16 @@ export const StepsOverviewCard = memo(
       () => Math.max(1, ...points.map(point => point.steps)),
       [points],
     );
+
+    const ticks = useMemo(() => {
+      const step = Math.max(1, Math.round(labelEvery));
+      return points
+        .filter((_, index) => index % step === 0)
+        .map((point, index) => ({
+          key: `${index}-${point.label}`,
+          label: point.label,
+        }));
+    }, [points, labelEvery]);
 
     return (
       <View style={[styles.panel, { backgroundColor: colors.tierBackground }]}>
@@ -120,7 +137,7 @@ export const StepsOverviewCard = memo(
         <HStack align="end" gap="xxs" style={styles.plot}>
           {points.map((point, index) => (
             <OverviewBar
-              key={point.label}
+              key={`${index}-${point.label}`}
               point={point}
               fraction={point.steps / peak}
               alternate={index % 2 === 1}
@@ -128,15 +145,16 @@ export const StepsOverviewCard = memo(
           ))}
         </HStack>
 
-        <HStack align="center" justify="between">
-          {axisLabels.map(label => (
+        <HStack align="center">
+          {ticks.map(tick => (
             <AppText
-              key={label}
+              key={tick.key}
               variant="miniMicro"
               numberOfLines={1}
-              style={{ color: withAlpha(foreground, 0.56) }}
+              center
+              style={[styles.tick, { color: withAlpha(foreground, 0.56) }]}
             >
-              {label}
+              {tick.label}
             </AppText>
           ))}
         </HStack>
@@ -151,5 +169,7 @@ const styles = StyleSheet.create({
   panel: { borderRadius: radius.xl, padding: spacing.base, gap: spacing.md },
   plot: { height: BAR_MAX },
   column: { flex: 1, justifyContent: 'flex-end' },
+  // Equal cells: the nth label lands over the nth group of bars.
+  tick: { flex: 1 },
   bar: { width: '100%', borderRadius: radius.pill },
 });

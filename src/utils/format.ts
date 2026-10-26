@@ -78,6 +78,18 @@ export function formatDuration(totalSeconds: number): string {
     : `${minutes}:${pad(secs)}`;
 }
 
+/**
+ * Minutes of movement as a person would say them — "1h 32m", or "48m" while
+ * the day is still short. Not `formatDuration`: that counts a workout in
+ * seconds and prints a clock, which is the wrong reading for a figure that is
+ * only ever accurate to the minute.
+ */
+export function formatActiveTime(minutes: number): string {
+  const whole = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(whole / 60);
+  return hours > 0 ? `${hours}h ${whole % 60}m` : `${whole}m`;
+}
+
 export function formatRelativeDay(isoDate: string): string {
   const then = new Date(isoDate);
   if (Number.isNaN(then.getTime())) {

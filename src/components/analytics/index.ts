@@ -4,6 +4,7 @@ export type { AnalyticsRange } from './AnalyticsRangeFilter';
 export { StepsSummaryCard } from './StepsSummaryCard';
 export { StepsOverviewCard } from './StepsOverviewCard';
 export type { OverviewPoint } from './StepsOverviewCard';
+export { StepsInsightsSheet } from './StepsInsightsSheet';
 export { AnalyticsHighlightCard } from './AnalyticsHighlightCard';
 export { WeeklyTrendCard } from './WeeklyTrendCard';
 export { AnalyticsCheerCard } from './AnalyticsCheerCard';
