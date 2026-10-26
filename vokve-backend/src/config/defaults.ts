@@ -203,6 +203,37 @@ export const CONFIG_DEFAULTS = {
     /** The most times one reminder plan may hold. */
     maxReminders: 24,
     /**
+     * The most times one block of the plan may hold — morning, afternoon,
+     * evening or custom (Y5).
+     *
+     * Five is a reminder every two or three hours inside the part of the day
+     * the block covers; past that another one stops being a reminder and
+     * becomes a stream, and every one of them is an alarm the phone has to
+     * keep. The app holds the same number (`constants/reminderSlots`) and
+     * says it on each block — "3 of 5 times" — so nobody meets the cap as a
+     * refusal. Custom times are bounded by `maxReminders` alone: they are
+     * the way out of the blocks, and capping them at five would close it.
+     */
+    maxRemindersPerSlot: 5,
+    /**
+     * Which half of the clock each block of the plan takes (Y5b).
+     *
+     * A block is a part of the day, so its times belong to that part of the
+     * day: the app pins each block's time picker to the half named here
+     * rather than accepting a 20:00 "morning" reminder and correcting it
+     * afterwards. `any` is the way out of the rule, which is what custom
+     * times are for. Here rather than in the app so the three blocks can be
+     * re-cut — an operator who wants a late-night block makes `evening`
+     * `any` — without a release, and the app ships the same three as its
+     * offline fallback.
+     */
+    reminderSlotPeriods: {
+      morning: 'am',
+      afternoon: 'pm',
+      evening: 'pm',
+      custom: 'any',
+    } as Record<'morning' | 'afternoon' | 'evening' | 'custom', 'am' | 'pm' | 'any'>,
+    /**
      * The sounds a reminder may arrive with (Y5).
      *
      * The id is what the plan stores, what the app names its audio file
@@ -236,6 +267,30 @@ export const CONFIG_DEFAULTS = {
       'Time for a drink \u2014 {remaining} to go.',
     ],
     /**
+     * How long a reminder's push is worth delivering, in seconds.
+     *
+     * A reminder is a promise about a minute, so a push that could not be
+     * delivered within a few of them should be dropped rather than held:
+     * FCM and APNs will both keep an undeliverable message for hours and
+     * hand it over the moment the phone comes back, which is how somebody
+     * gets "time for water" at midnight for a 7 pm reminder — next to the
+     * one that was actually due. Five minutes is long enough to ride out a
+     * lift, a tunnel or a slow network and short enough that nothing
+     * arrives for a time that has gone.
+     */
+    reminderPushTtlSeconds: 300,
+    /**
+     * How many missed minutes the sweep will go back and send, at most.
+     *
+     * The tick is a timer, and a timer that is held up — a slow query, a
+     * deploy, a restart — skips the minute it was supposed to run in, and
+     * nobody due in that minute is ever told. So each tick sends the minutes
+     * since the last one as well as its own, bounded by this: inside the
+     * bound a reminder is a minute or two late, past it it is a reminder for
+     * a time that has gone and is dropped (the same rule quiet hours follow).
+     */
+    reminderCatchUpMinutes: 3,
+    /**
      * How long a device's claim that it schedules reminders itself is
      * trusted for, in days. Past it the server sends the push again: an
      * install that has not been near the app in a week may have been wiped,
@@ -265,12 +320,97 @@ export const CONFIG_DEFAULTS = {
     countryNames: { IN: 'India' } as Record<string, string>,
     /** Score = ⌊verified steps ÷ stepsPerPoint⌋ + workouts × perWorkout + challenges × perChallenge (L3, D-10). */
     score: { stepsPerPoint: 100, perWorkout: 50, perChallenge: 100 },
-    /** What each place pays (L7). Leaderboard coins are exempt from the daily ceiling (E8d). */
+    /**
+     * What each place pays (L7). Leaderboard coins are exempt from the daily
+     * ceiling (E8d).
+     *
+     * `label` is what the app writes above the rung. Left out, the server
+     * derives one from the ranks ("Rank 1", "Rank 2 – 3"), which is correct
+     * and never what marketing would have written — so it is a field rather
+     * than a sentence in the code.
+     */
     tiers: [
-      { fromRank: 1, toRank: 1, coins: 5000, perks: ['Premium T-Shirt', 'Water Bottle'] },
-      { fromRank: 2, toRank: 3, coins: 3000, perks: ['Premium T-Shirt', 'Fitness Mat'] },
-      { fromRank: 4, toRank: 10, coins: 1000, perks: ['Fitness Mat'] },
-    ] as { fromRank: number; toRank: number; coins: number; perks: string[] }[],
+      { fromRank: 1, toRank: 1, coins: 5000, perks: ['Premium T-Shirt', 'Water Bottle'], label: '1st Place' },
+      { fromRank: 2, toRank: 3, coins: 3000, perks: ['Premium T-Shirt', 'Fitness Mat'], label: 'Top 3' },
+      { fromRank: 4, toRank: 10, coins: 1000, perks: ['Fitness Mat'], label: 'Top 10' },
+    ] as { fromRank: number; toRank: number; coins: number; perks: string[]; label?: string }[],
+    /**
+     * The words the leaderboard screen says, worded here so a prize, a
+     * promise or a piece of marketing never needs an app release (D-89).
+     *
+     * Every string may carry placeholders, filled in per reader by
+     * `getRules` — the same pattern the hydration reminder bodies follow:
+     *
+     *   `{scope}`          the board's country, for people — "India"
+     *   `{stepsPerPoint}`  steps to a point, `{perWorkout}`, `{perChallenge}`
+     *   `{lastPaid}`       the last place that is paid anything
+     *   `{prizes}`         every rung as a sentence, from `tiers`
+     *   `{tierCount}`      how many rungs there are
+     *
+     * A placeholder nothing fills is left alone rather than blanked, so a
+     * typo reads as a typo instead of as a missing figure.
+     */
+    banner: {
+      kicker: 'Climb the leaderboard',
+      title: 'Win Amazing Rewards!',
+      subtitle: 'Perform. Compete. Earn.',
+    },
+    /** The line under the reward ladder. */
+    note: 'Rewards are given every week based on leaderboard ranking.',
+    /**
+     * What a closed week's outcome is called, and why (D-90).
+     *
+     * A member has to be able to tell "the coins are in my wallet" from
+     * "the place was won and nothing was paid", and the second needs a
+     * reason — otherwise the only honest reading of a zero is that we kept
+     * it. One line per outcome, worded here so the reason can be corrected
+     * the same day:
+     *
+     *   `paid`    the coins are in the wallet
+     *   `held`    the place pays, and prizes were not running at the close
+     *             (⚙ `coins.steps.enabled`, D-46). Deliberately not a
+     *             promise: nothing is paid retroactively, and an answer
+     *             that does not say must never read as one.
+     *   `skipped` the place was held by an account with an open hard fraud
+     *             flag that week (L9); nobody moved up into it
+     *   `none`    the place is below the last one that pays
+     *
+     * `{coins}`, `{rank}`, `{perks}`, `{lastPaid}` and `{week}` are filled
+     * in per row.
+     */
+    outcomes: {
+      paid: '{coins} coins are in your wallet.',
+      held: 'Place {rank} pays {coins} coins, and leaderboard prizes were not running when this week closed. Your place is on record.',
+      skipped: 'This place is under review, so nothing was paid for it.',
+      none: 'Only the top {lastPaid} places win coins — you finished {rank}.',
+    } as Record<'paid' | 'held' | 'skipped' | 'none', string>,
+    /** How a place is won, in the order it happens to the member. */
+    howItWorks: [
+      {
+        title: 'Compete every week',
+        detail:
+          'Verified steps, workouts and completed challenges all count: a point for every {stepsPerPoint} steps, {perWorkout} for a workout and {perChallenge} for a challenge. The week runs Monday to Sunday.',
+      },
+      {
+        title: 'Climb your country board',
+        detail:
+          'You are ranked against everyone in {scope}, so a place is won against people in the same week as you. A tie goes to whoever reached the score first.',
+      },
+      {
+        title: 'Finish in the top {lastPaid}',
+        detail: '{prizes}.',
+      },
+      {
+        title: 'Rewards land on Monday',
+        detail:
+          'Coins are credited to your wallet automatically once the week closes. We will be in touch about any gear.',
+      },
+      {
+        title: 'Every week starts over',
+        detail:
+          'Scores reset on Monday and each week is paid on its own. Finish first again next week and the prize is paid again — and a quiet week costs you nothing you have already been paid.',
+      },
+    ] as { title: string; detail: string }[],
     /** Hours into Monday before last week is closed and paid, so Sunday's late syncs count (L6, L10). */
     closeAfterHours: 6,
     /** How many places `GET /leaderboard` serves. */

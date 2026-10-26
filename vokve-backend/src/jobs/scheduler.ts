@@ -5,7 +5,7 @@ import { nudgeStaleSyncs } from '../modules/activity/nudge.job.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { releaseDueHolds } from '../modules/economy/holds.service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
-import { sendDueReminders } from '../modules/hydration/reminders.job.js';
+import { sweepReminders } from '../modules/hydration/reminders.job.js';
 import { flushDeferredPushes } from '../modules/notifications/service.js';
 import { warnStreaksAtRisk } from '../modules/streak/service.js';
 import { closeDueWeeks } from '../modules/leaderboard/service.js';
@@ -35,6 +35,16 @@ const CLAIM_TTL_SECONDS = 26 * 60 * 60;
  * take — two instances racing the same minute means one of them sends.
  */
 const MINUTE_MS = 60 * 1000;
+
+/**
+ * How far past the minute the sweep aims.
+ *
+ * A reminder due at 07:15 is found by matching `07:15` on the member's
+ * clock, so the tick has to run *inside* that minute — firing at 07:14:59.8
+ * would miss it and 07:15:59 would send it a minute late. Just past the
+ * boundary is the safe end to be at.
+ */
+const TICK_OFFSET_MS = 500;
 
 interface DailyJob {
   name: string;
@@ -110,10 +120,44 @@ export async function runHourlyJobs(now = new Date()): Promise<void> {
 /** The reminders due this minute (RULES Y6). Its own tick, every minute. */
 export async function runMinuteJobs(now = new Date()): Promise<void> {
   try {
-    await sendDueReminders(now);
+    await sweepReminders(now);
   } catch (err) {
     logger.error({ err, at: now }, 'job.failed');
   }
+}
+
+/**
+ * The minute tick, re-aimed at the next minute boundary after every run.
+ *
+ * `setInterval(60_000)` drifts: Node fires it a little late each time, the
+ * error accumulates, and a tick that was running at :00.2 is running at
+ * :59.6 a few hours later — at which point it skips a minute of the clock
+ * entirely and nobody due in that minute is told. One timer at a time,
+ * aimed at the next boundary from the clock rather than from the last fire,
+ * cannot drift. The sweep's own catch-up covers a minute lost to a slow run
+ * (`sweepReminders`), and re-arming only once a run finishes is what stops
+ * two sweeps overlapping.
+ */
+function startMinuteTicks(): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+
+  const arm = (): void => {
+    const now = Date.now();
+    const next = Math.floor(now / MINUTE_MS) * MINUTE_MS + MINUTE_MS + TICK_OFFSET_MS;
+    timer = setTimeout(() => {
+      void runMinuteJobs().finally(() => {
+        if (!stopped) arm();
+      });
+    }, next - now);
+    timer.unref();
+  };
+
+  arm();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 async function tick(): Promise<void> {
@@ -128,11 +172,10 @@ export function startScheduler(): () => void {
   hourly.unref();
 
   void runMinuteJobs();
-  const minutely = setInterval(() => void runMinuteJobs(), MINUTE_MS);
-  minutely.unref();
+  const stopMinutely = startMinuteTicks();
 
   return () => {
     clearInterval(hourly);
-    clearInterval(minutely);
+    stopMinutely();
   };
 }

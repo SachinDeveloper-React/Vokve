@@ -32,6 +32,15 @@ export async function createFcmTransport(): Promise<PushTransport | null> {
 
   return {
     async send(tokens: string[], message: PushMessage): Promise<PushResult> {
+      // What a message's own lifetime means to each provider: FCM takes a
+      // duration, APNs an instant to stop trying at. Both drop the message
+      // at it rather than delivering it late.
+      const ttl = message.ttlSeconds;
+      const androidTtl: { ttl?: number } = ttl === undefined ? {} : { ttl: ttl * 1000 };
+      const apnsExpiry: Record<string, string> =
+        ttl === undefined
+          ? {}
+          : { 'apns-expiration': String(Math.floor(Date.now() / 1000) + ttl) };
       // A silent message carries no notification block at all: with one,
       // Android shows the tray entry itself and never hands the payload to
       // the background handler, which is the whole point of sending it.
@@ -43,9 +52,13 @@ export async function createFcmTransport(): Promise<PushTransport | null> {
           ? {
               tokens,
               data: message.data,
-              android: { priority: 'high' },
+              android: { priority: 'high', ...androidTtl },
               apns: {
-                headers: { 'apns-push-type': 'background', 'apns-priority': '5' },
+                headers: {
+                  'apns-push-type': 'background',
+                  'apns-priority': '5',
+                  ...apnsExpiry,
+                },
                 payload: { aps: { 'content-available': 1 } },
               },
             }
@@ -53,8 +66,19 @@ export async function createFcmTransport(): Promise<PushTransport | null> {
               tokens,
               notification: { title: message.title ?? '', body: message.body ?? '' },
               data: message.data,
-              android: { priority: 'high', notification: { channelId: 'vokve.default' } },
-              apns: { payload: { aps: { sound: 'default' } } },
+              android: { priority: 'high', ...androidTtl, notification: { channelId: 'vokve.default' } },
+              apns: {
+                // Spelled out rather than left to the default: an alert at
+                // priority 10 is delivered at once instead of being held for
+                // a moment the system finds convenient, which for a message
+                // about a minute is the whole point.
+                headers: {
+                  'apns-push-type': 'alert',
+                  'apns-priority': '10',
+                  ...apnsExpiry,
+                },
+                payload: { aps: { sound: 'default' } },
+              },
             },
       );
       const invalid: string[] = [];

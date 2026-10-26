@@ -172,7 +172,16 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
   ReactTestRenderer.act(() => node.props.onPress());
 };
 
-const longPress = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
+/** The time sheet, if one is open. */
+const openPicker = (tree: ReactTestRenderer.ReactTestRenderer) =>
+  tree.root
+    .findAll(n => typeof n.props?.onSubmit === 'function')
+    .find(n => n.props.visible === true);
+
+const longPress = (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  prefix: string,
+) => {
   const node = tree.root
     .findAll(
       n =>
@@ -181,7 +190,8 @@ const longPress = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) =>
     )
     .find(n => typeof n.props.onLongPress === 'function');
 
-  if (!node) throw new Error(`Nothing labelled "${prefix}…" takes a long press`);
+  if (!node)
+    throw new Error(`Nothing labelled "${prefix}…" takes a long press`);
   ReactTestRenderer.act(() => node.props.onLongPress());
 };
 
@@ -414,9 +424,9 @@ describe('HydrationReminderScreen', () => {
 
     press(tree, 'Turn on');
 
-    expect(
-      useNotificationSettingsStore.getState().categories.health,
-    ).toBe(true);
+    expect(useNotificationSettingsStore.getState().categories.health).toBe(
+      true,
+    );
   });
 
   test('a time added inside quiet hours says so at once, not silently', async () => {
@@ -462,5 +472,215 @@ describe('HydrationReminderScreen', () => {
     press(await render(), 'Back');
 
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * What each block of the plan will take (RULES Y5).
+ *
+ * A block is a part of the day, so the sheet it opens is pinned to that part
+ * of the day's half of the clock, and the block holds a bounded number of
+ * times. Both are rules a member meets while they are setting a reminder, so
+ * both are checked here rather than only in the store.
+ */
+describe('HydrationReminderScreen: what a block takes', () => {
+  /** Five morning times: the block at its own cap. */
+  const fullMorning = (): HydrationReminderPlan => ({
+    ...PLAN,
+    reminders: [
+      ...['06:00', '07:00', '08:00', '09:00', '10:00'].map(time => ({
+        id: `morning-${time}`,
+        time,
+        slot: 'morning' as const,
+        enabled: true,
+      })),
+      ...PLAN.reminders.filter(reminder => reminder.slot !== 'morning'),
+    ],
+  });
+
+  test('each block says how many of its times it holds', async () => {
+    const text = allText(await render());
+
+    // The cap is on screen before it is reached, rather than only at the
+    // moment somebody is told they cannot add another.
+    expect(text).toContain('3 of 5 times');
+    expect(text).toContain('2 of 5 times');
+  });
+
+  test('the morning sheet is pinned to AM and says so', async () => {
+    const tree = await render();
+
+    press(tree, 'Add a time to Morning');
+
+    expect(openPicker(tree)?.props.period).toBe('am');
+    const text = allText(tree);
+    expect(text).toContain('Morning times are AM');
+    // And the way round it, for a member who wanted 1 pm in the morning.
+    expect(text).toContain('custom time');
+  });
+
+  test('the afternoon and evening sheets are pinned to PM, and open on their own hour', async () => {
+    const tree = await render();
+
+    press(tree, 'Add a time to Afternoon');
+    expect(openPicker(tree)?.props.period).toBe('pm');
+    // 14:00 rather than 08:00: an afternoon block that opened at 8 would be
+    // offering 8 pm the moment the half was applied.
+    expect(openPicker(tree)?.props.value).toBe('14:00');
+    expect(allText(tree)).toContain('Afternoon times are PM');
+
+    press(tree, 'Close');
+    press(tree, 'Add a time to Evening');
+    expect(openPicker(tree)?.props.period).toBe('pm');
+    expect(openPicker(tree)?.props.value).toBe('19:00');
+  });
+
+  test('a custom time is still any hour of the day', async () => {
+    const tree = await render();
+
+    press(tree, 'Add a custom time');
+
+    expect(openPicker(tree)?.props.period).toBe('any');
+    expect(openPicker(tree)?.props.note).toBeUndefined();
+  });
+
+  test('holding a chip opens the editor inside its own block’s half', async () => {
+    const tree = await render();
+
+    longPress(tree, '06:00 PM, on');
+
+    expect(openPicker(tree)?.props.period).toBe('pm');
+    expect(openPicker(tree)?.props.value).toBe('18:00');
+  });
+
+  test('a time a block cannot take any more opens the editor on one it can', async () => {
+    // As an older build, or another phone, could have left it: a PM time in
+    // the morning block. The editor opens on the same hour in AM, which is
+    // how the member is shown what the block will now take.
+    useRemindersStore.setState({
+      plan: {
+        ...PLAN,
+        reminders: [
+          { id: 'legacy', time: '13:00', slot: 'morning', enabled: true },
+        ],
+      },
+    });
+    const tree = await render();
+
+    longPress(tree, '01:00 PM, on');
+
+    expect(openPicker(tree)?.props.period).toBe('am');
+    expect(openPicker(tree)?.props.value).toBe('01:00');
+  });
+
+  test('a full block says so rather than opening a sheet that cannot be used', async () => {
+    useRemindersStore.setState({ plan: fullMorning() });
+    const tree = await render();
+
+    // The chip reads "Full" rather than disappearing, so the rule is where
+    // the control was.
+    expect(allText(tree)).toContain('Full');
+    expect(allText(tree)).toContain('5 of 5 times');
+
+    press(tree, 'Morning is full');
+
+    expect(openPicker(tree)).toBeUndefined();
+    const text = allText(tree);
+    expect(text).toContain('Morning is full');
+    expect(text).toContain('5 times at most');
+  });
+
+  test('a full block does not stop the others, or a custom time', async () => {
+    useRemindersStore.setState({ plan: fullMorning() });
+    const tree = await render();
+
+    press(tree, 'Add a time to Afternoon');
+    expect(openPicker(tree)?.props.period).toBe('pm');
+
+    press(tree, 'Close');
+    press(tree, 'Add a custom time');
+    expect(openPicker(tree)?.props.period).toBe('any');
+  });
+
+  test('the store refuses a time past the cap, whatever asks for it', async () => {
+    useRemindersStore.setState({ plan: fullMorning() });
+    await render();
+
+    ReactTestRenderer.act(() => {
+      useRemindersStore.getState().addReminder('11:30', 'morning');
+    });
+
+    // The screen is where a member meets the cap; this is the guard for a
+    // plan that arrived full from somewhere else.
+    expect(reminders().filter(r => r.slot === 'morning')).toHaveLength(5);
+    expect(reminders().some(r => r.time === '11:30')).toBe(false);
+
+    ReactTestRenderer.act(() => {
+      useRemindersStore.getState().addReminder('11:30', 'custom');
+    });
+    expect(reminders().some(r => r.time === '11:30')).toBe(true);
+  });
+});
+
+/**
+ * The blocks as the server cut them (RULES Y5b).
+ *
+ * The plan carries each block's half of the clock and its cap, so the panel
+ * can change either without an app release. What is checked here is that the
+ * screen actually follows the plan rather than its own constant.
+ */
+describe('HydrationReminderScreen: the server’s own rules', () => {
+  test('a cap the server raised is what the block says and what it takes', async () => {
+    useRemindersStore.setState({
+      plan: {
+        ...PLAN,
+        slots: {
+          morning: { period: 'am', maxTimes: 8 },
+          afternoon: { period: 'pm', maxTimes: 8 },
+          evening: { period: 'pm', maxTimes: 8 },
+          custom: { period: 'any', maxTimes: 24 },
+        },
+      },
+    });
+    const tree = await render();
+
+    expect(allText(tree)).toContain('3 of 8 times');
+
+    // And the chip is not full at five any more.
+    ReactTestRenderer.act(() => {
+      useRemindersStore.getState().addReminder('11:30', 'morning');
+    });
+    expect(reminders().filter(r => r.slot === 'morning')).toHaveLength(4);
+  });
+
+  test('a half the server moved is the half the sheet offers', async () => {
+    useRemindersStore.setState({
+      plan: {
+        ...PLAN,
+        slots: {
+          morning: { period: 'am', maxTimes: 5 },
+          afternoon: { period: 'pm', maxTimes: 5 },
+          // A late-night block, re-cut from the panel.
+          evening: { period: 'any', maxTimes: 5 },
+          custom: { period: 'any', maxTimes: 24 },
+        },
+      },
+    });
+    const tree = await render();
+
+    press(tree, 'Add a time to Evening');
+
+    expect(openPicker(tree)?.props.period).toBe('any');
+    // Nothing to explain when any hour will do.
+    expect(openPicker(tree)?.props.note).toBeUndefined();
+  });
+
+  test('without them the screen falls back to the rules it shipped with', async () => {
+    // A server older than the field, or a plan restored from disk offline.
+    const tree = await render();
+
+    expect(allText(tree)).toContain('3 of 5 times');
+    press(tree, 'Add a time to Morning');
+    expect(openPicker(tree)?.props.period).toBe('am');
   });
 });

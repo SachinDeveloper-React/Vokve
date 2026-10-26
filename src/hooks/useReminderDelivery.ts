@@ -2,11 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
 import {
   exactAlarmsAllowed,
+  openBatterySettings,
   openExactAlarmSettings,
+  openPowerManagerSettings,
+  readBackgroundLimits,
   remindersAllowed,
   requestReminderPermission,
 } from '../services/notifications';
-import { lastReminderStatus, resyncReminders } from '../services/reminderScheduler';
+import {
+  lastReminderStatus,
+  resyncReminders,
+} from '../services/reminderScheduler';
 import { isQuiet } from '../services/reminderSchedule';
 import { useNotificationSettingsStore } from '../stores/notificationSettingsStore';
 import { useRemindersStore } from '../stores/remindersStore';
@@ -32,6 +38,18 @@ export interface ReminderDelivery {
   healthOn: boolean;
   /** Alarms are set for the exact minute rather than a window near it. */
   exact: boolean;
+  /**
+   * Android is optimising this app's battery, which holds its alarms until
+   * the system next feels like waking it — the usual reason a reminder set
+   * for 07:15 arrives at 07:48.
+   */
+  batteryLimited: boolean;
+  /**
+   * This phone's manufacturer has a background page of its own as well.
+   * There is nothing to read back from it, so it is never a fault — only
+   * somewhere to send a member whose reminders are still late.
+   */
+  hasPowerManager: boolean;
   /** How many alarms this phone is holding for the plan. */
   scheduled: number;
   /**
@@ -55,6 +73,10 @@ export interface ReminderDelivery {
   enableHealth: () => void;
   /** The system page where exact alarms are granted. Android only. */
   openExactAlarms: () => Promise<void>;
+  /** Android's battery-optimisation page for this app. Android only. */
+  openBattery: () => Promise<void>;
+  /** The manufacturer's own background page. Android only. */
+  openPowerManager: () => Promise<void>;
 }
 
 export function useReminderDelivery(): ReminderDelivery {
@@ -74,6 +96,8 @@ export function useReminderDelivery(): ReminderDelivery {
   const [state, setState] = useState({
     allowed: true,
     exact: true,
+    batteryLimited: false,
+    hasPowerManager: false,
     scheduled: 0,
     checking: true,
   });
@@ -87,12 +111,20 @@ export function useReminderDelivery(): ReminderDelivery {
     // whatever the last sync happened to leave behind. A sync with nothing
     // to do returns the previous answer without touching the OS.
     resyncReminders()
-      .then(() => Promise.all([remindersAllowed(), exactAlarmsAllowed()]))
-      .then(([allowed, exact]) => {
+      .then(() =>
+        Promise.all([
+          remindersAllowed(),
+          exactAlarmsAllowed(),
+          readBackgroundLimits(),
+        ]),
+      )
+      .then(([allowed, exact, limits]) => {
         if (!current) return;
         setState({
           allowed,
           exact,
+          batteryLimited: limits.battery,
+          hasPowerManager: limits.powerManager,
           scheduled: lastReminderStatus()?.scheduled ?? 0,
           checking: false,
         });
@@ -129,13 +161,25 @@ export function useReminderDelivery(): ReminderDelivery {
     // above picks the answer up when the user returns.
   }, []);
 
+  const openBattery = useCallback(async () => {
+    await openBatterySettings();
+  }, []);
+
+  const openPowerManager = useCallback(async () => {
+    await openPowerManagerSettings();
+  }, []);
+
   return {
     ...state,
     healthOn,
     quietCount,
-    quietLabel: quietHours.enabled ? `${quietHours.start}–${quietHours.end}` : null,
+    quietLabel: quietHours.enabled
+      ? `${quietHours.start}–${quietHours.end}`
+      : null,
     allow,
     enableHealth,
     openExactAlarms,
+    openBattery,
+    openPowerManager,
   };
 }

@@ -38,7 +38,29 @@ import { getHydrationDay } from './service.js';
  * two instances ticking together cannot both send it, a tick that runs twice
  * in the same minute sends once, and a plan holding 10:00 in two blocks
  * sends one reminder. The feed row's dedupe key is a second guard behind it.
+ *
+ * ## Sending on time
+ *
+ * Two things here are about lateness rather than delivery, because a
+ * reminder that arrives at the wrong time is worse than one that does not
+ * arrive at all — it is an app that cannot be trusted with a minute.
+ *
+ * `sweepReminders` sends the minutes *since the last sweep* as well as the
+ * current one, up to ⚙ `hydration.reminderCatchUpMinutes`. The tick is a
+ * timer, and a timer held up by a slow query, a deploy or a restart skips
+ * the minute it should have run in — and nobody due in that minute was ever
+ * told. Past the bound a missed minute is dropped rather than sent, for the
+ * same reason quiet hours drop one (Y6).
+ *
+ * And the push carries ⚙ `hydration.reminderPushTtlSeconds`, so FCM and
+ * APNs drop it instead of handing it to a phone that comes back online
+ * hours later, next to the reminder that is actually due.
  */
+
+const MINUTE_MS = 60_000;
+
+/** The minute `now` falls in, as ms since the epoch. */
+const minuteFloor = (now: Date) => Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS;
 
 /** `YYYY-MM-DDTHH:mm` on the member's clock: the minute a plan claims. */
 function minuteKey(day: string, time: string): string {
@@ -188,8 +210,12 @@ export async function sendDueReminders(now = new Date()): Promise<ReminderSweep>
       title: config.hydration.reminderTitle,
       message: bodyFor(config, entry.time, day.consumedMl, day.goalMl),
       dedupeKey: `hydration-reminder:${entry.userId}:${key}`,
-      // A reminder is only worth its own minute (Y6).
+      // A reminder is only worth its own minute (Y6) — which is as true of
+      // the push in flight as it is of the hour it was sent in, so the
+      // message carries its own lifetime and the provider drops it rather
+      // than delivering it late.
       dropInQuietHours: true,
+      pushTtlSeconds: config.hydration.reminderPushTtlSeconds,
       suppressPush: !push,
       now,
     });
@@ -199,4 +225,47 @@ export async function sendDueReminders(now = new Date()): Promise<ReminderSweep>
 
   if (sweep.due > 0) logger.info(sweep, 'hydration.reminders_swept');
   return sweep;
+}
+
+/** The last minute this process swept, as ms since the epoch. */
+let lastSweptMinute: number | null = null;
+
+/** Forgets it, so the next sweep starts from its own minute. For tests. */
+export function resetReminderSweep(): void {
+  lastSweptMinute = null;
+}
+
+/**
+ * The tick's entry point: this minute, and any the tick missed.
+ *
+ * The first sweep of a process only ever sends its own minute — the minutes
+ * before it belong to whatever was running then, and a restart is not a
+ * reason to re-send an hour of reminders. After that it fills the gap, which
+ * is what stops a held-up tick losing a minute silently.
+ */
+export async function sweepReminders(now = new Date()): Promise<ReminderSweep> {
+  const { hydration } = await getConfig();
+  const catchUp = Math.max(0, Math.floor(hydration.reminderCatchUpMinutes));
+  const current = minuteFloor(now);
+  const oldest = current - catchUp * MINUTE_MS;
+  const from =
+    lastSweptMinute === null
+      ? current
+      : Math.min(current, Math.max(lastSweptMinute + MINUTE_MS, oldest));
+  lastSweptMinute = current;
+
+  const total: ReminderSweep = { due: 0, sent: 0, pushed: 0 };
+  for (let minute = from; minute <= current; minute += MINUTE_MS) {
+    // The minute's own instant, so every reminder is read against the clock
+    // it was due on rather than the one the tick happens to run on.
+    const result = await sendDueReminders(new Date(minute));
+    total.due += result.due;
+    total.sent += result.sent;
+    total.pushed += result.pushed;
+  }
+  const missed = (current - from) / MINUTE_MS;
+  if (missed > 0) {
+    logger.warn({ missed, ...total }, 'hydration.reminders_caught_up');
+  }
+  return total;
 }

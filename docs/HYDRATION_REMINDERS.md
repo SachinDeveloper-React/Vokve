@@ -90,6 +90,30 @@ HydrationReminderScreen  →  remindersStore  →  PUT /hydration/reminders
                        server: feed row only, no push
 ```
 
+**On the minute, not around it.** Three things are about lateness rather
+than delivery, because a reminder that arrives at the wrong time is worse
+than one that does not arrive: it is an app that cannot be trusted with a
+minute.
+
+1. **The phone's own limits.** Exact alarms (Android 12+) and, the bigger
+   one, battery optimisation: a phone "optimising" the app holds its alarms
+   until it next decides to wake it, which is how 07:15 becomes 07:48. The
+   reminder screen reads both (`readBackgroundLimits`) and offers the page
+   that fixes it — battery before exact alarms, since the first costs
+   however long the system likes and the second a few minutes. Where the
+   maker has a background page of its own, it is offered under the line that
+   says the plan is working; nothing reads back from it, so it can never be
+   raised as a fault that clears.
+2. **The server's tick.** Aimed at the next minute boundary from the clock
+   rather than `setInterval(60_000)`, which drifts until it skips a minute
+   of the clock entirely — and each sweep sends the minutes since the last
+   one as well as its own, up to ⚙ `hydration.reminderCatchUpMinutes`.
+   Anything older than the bound is dropped, not sent.
+3. **The push's own lifetime.** ⚙ `hydration.reminderPushTtlSeconds`, so FCM
+   and APNs drop a reminder they could not deliver rather than handing it to
+   a phone that comes back online hours later, next to the one that is
+   actually due.
+
 **What gets scheduled.** One alarm per *time*, not per reminder — a plan
 holding 10:00 in the morning block and 10:00 as a custom time rings once,
 because the member asked to be reminded at ten, not twice at ten. A plan that
@@ -155,6 +179,8 @@ break:
 ── Can a reminder arrive? ───────────────────
 OS permission:     authorized
 exact alarms:      DISABLED (reminders will be batched)
+battery saver:     OPTIMISING (alarms held until the system wakes the app)
+power manager:     Xiaomi has its own page (com.miui.powerkeeper/…)
 health category:   no  ← OFF: nothing is scheduled (RULES Y6)
 plan enabled:      yes
 quiet hours:       22:00–07:00
@@ -190,10 +216,13 @@ Then:
   rejects, and `createChannel` throwing used to leave everything unscheduled.
   `reminderNotifications.test` runs notifee's own validators over the exact
   channel and notification objects the app builds, so that cannot recur.
-- Chinese-OEM builds (Xiaomi, Oppo, Vivo, Huawei) kill background alarms
-  unless the app is whitelisted. Notifee can open those pages
-  (`getPowerManagerInfo`, `openPowerManagerSettings`) if that turns out to
-  be worth adding.
+- **Battery optimisation**, and the OEM pages behind it. Both are now on the
+  delivery card: `isBatteryOptimizationEnabled` is reported and offered as a
+  fault, and `getPowerManagerInfo` / `openPowerManagerSettings` are offered
+  as a link where this phone has such a page (Xiaomi, Oppo, Vivo, Huawei
+  kill background alarms unless the app is allowed through). The report
+  prints both — `battery saver:` and `power manager:` — so a late reminder
+  can be read rather than guessed at.
 - `adb shell dumpsys alarm | grep vokve` lists what AlarmManager is holding.
 
 ### When the sound preview is silent
@@ -208,6 +237,36 @@ played and you still heard nothing:
 - On Android, the report's channel section prints the sound each channel
   actually carries (`sound=water_drop`). `sound=none` on a channel that
   should have one means the raw resource did not resolve.
+
+---
+
+---
+
+## 5a. What a block will take
+
+Each preset block is one half of the clock — **morning AM, afternoon and
+evening PM** — so its time sheet offers only that half and says so, with a
+custom time as the way round it (RULES Y5b, `src/constants/reminderSlots.ts`).
+Each block holds **five** times at most; the card says "3 of 5 times", the
+add chip reads "Full" at the cap and explains itself when tapped, and the
+server refuses a block past ⚙ `hydration.maxRemindersPerSlot` with the block
+named. Custom times are any hour and bounded only by ⚙
+`hydration.maxReminders`.
+
+**Both are the server's.** The plan arrives with a `slots` block — each
+block's half and its cap, from ⚙ `hydration.reminderSlotPeriods` and ⚙
+`hydration.maxRemindersPerSlot` — and `useSlotRules` merges it over the
+app's own copy, so a block can be re-cut from the panel (App config →
+hydration) without a release: raise the cap to eight, or make `evening`
+`any` for a late-night block. What is written in `constants/reminderSlots`
+is this build's fallback, for the plan that has not arrived yet, a server
+older than the field, and offline — the same rule the rest of the app
+follows.
+
+A plan written before the rule is never refused for its halves: the server
+bounds the *count* and leaves the halves to the app, and the editor opens
+such a time in its block's own half so the member can see what the block
+will now take.
 
 ---
 

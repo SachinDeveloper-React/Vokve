@@ -1,6 +1,7 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { BottomSheet } from '../disclosure/BottomSheet';
 import { HStack, VStack } from '../layout/Stack';
+import { AppText } from '../ui/AppText';
 import { Button } from '../ui/Button';
 import { PickerColumn } from './PickerColumn';
 
@@ -9,6 +10,24 @@ const HOURS = Array.from({ length: 12 }, (_, index) => index + 1);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
 /** 0 is AM, 1 is PM — the column takes numbers. */
 const PERIODS = [0, 1];
+const AM_ONLY = [0];
+const PM_ONLY = [1];
+
+/**
+ * Which halves of the clock the sheet offers.
+ *
+ * `am` and `pm` leave the column with one option rather than hiding it: the
+ * user has to be able to see which half they are picking in, and a sheet
+ * that silently decided for them would read as a bug the first time
+ * somebody tried to set an evening time and got a morning one.
+ */
+export type TimePeriod = 'am' | 'pm' | 'any';
+
+function periodOptions(period: TimePeriod): number[] {
+  if (period === 'am') return AM_ONLY;
+  if (period === 'pm') return PM_ONLY;
+  return PERIODS;
+}
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -37,6 +56,13 @@ function fromTimeString(time: string): Parts {
   };
 }
 
+/** The same draft inside the half of the clock the sheet is pinned to. */
+function inPeriod(parts: Parts, period: TimePeriod): Parts {
+  if (period === 'any') return parts;
+  const wanted = period === 'am' ? 0 : 1;
+  return parts.period === wanted ? parts : { ...parts, period: wanted };
+}
+
 interface Props {
   visible: boolean;
   /** The time the columns open on, `HH:mm`. */
@@ -45,6 +71,14 @@ interface Props {
   onClose: () => void;
   title?: string;
   submitLabel?: string;
+  /**
+   * The half of the clock this time belongs in. A reminder block owns one of
+   * them, so the column is pinned to it and the sheet cannot hand back a
+   * time outside it.
+   */
+  period?: TimePeriod;
+  /** One line under the columns saying why the half is fixed. */
+  note?: string;
 }
 
 /**
@@ -66,16 +100,21 @@ export const TimePickerSheet = memo(
     onClose,
     title = 'Pick a time',
     submitLabel = 'Add time',
+    period = 'any',
+    note,
   }: Props) => {
-    const [draft, setDraft] = useState<Parts>(() => fromTimeString(value));
+    const periods = useMemo(() => periodOptions(period), [period]);
+    const [draft, setDraft] = useState<Parts>(() =>
+      inPeriod(fromTimeString(value), period),
+    );
 
     // Re-seeds the columns each time the sheet opens, so reopening after a
     // dismissal starts from the committed time, not the abandoned draft.
     useEffect(() => {
       if (visible) {
-        setDraft(fromTimeString(value));
+        setDraft(inPeriod(fromTimeString(value), period));
       }
-    }, [value, visible]);
+    }, [period, value, visible]);
 
     const setHour = useCallback(
       (hour12: number) => setDraft(current => ({ ...current, hour12 })),
@@ -86,7 +125,7 @@ export const TimePickerSheet = memo(
       [],
     );
     const setPeriod = useCallback(
-      (period: number) => setDraft(current => ({ ...current, period })),
+      (half: number) => setDraft(current => ({ ...current, period: half })),
       [],
     );
 
@@ -115,12 +154,18 @@ export const TimePickerSheet = memo(
             />
             <PickerColumn
               title="AM / PM"
-              options={PERIODS}
+              options={periods}
               selected={draft.period}
-              format={period => (period === 0 ? 'AM' : 'PM')}
+              format={option => (option === 0 ? 'AM' : 'PM')}
               onSelect={setPeriod}
             />
           </HStack>
+
+          {note ? (
+            <AppText variant="micro" color="textSecondary">
+              {note}
+            </AppText>
+          ) : null}
 
           <Button label={submitLabel} size="lg" fullWidth onPress={confirm} />
         </VStack>

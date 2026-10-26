@@ -19,7 +19,10 @@ import notifee, {
 } from '@notifee/react-native';
 import {
   cancelHydrationReminders,
+  openBatterySettings,
+  openPowerManagerSettings,
   previewReminderSound,
+  readBackgroundLimits,
   reminderChannelId,
   syncHydrationReminders,
   VIBRATION_PATTERN,
@@ -90,7 +93,10 @@ const call = (n = 0) => {
 
 describe('scheduling the plan', () => {
   test('schedules one alarm per time, exact and repeating daily', async () => {
-    const status = await syncHydrationReminders(PLAN, { now: NOW, goalMl: 2500 });
+    const status = await syncHydrationReminders(PLAN, {
+      now: NOW,
+      goalMl: 2500,
+    });
 
     expect(status).toEqual({ scheduled: 2, allowed: true, exact: true });
     expect(api.createTriggerNotification).toHaveBeenCalledTimes(2);
@@ -125,7 +131,10 @@ describe('scheduling the plan', () => {
   });
 
   test('falls back to an inexact alarm where the phone will not allow an exact one', async () => {
-    allowed(AuthorizationStatus.AUTHORIZED, AndroidNotificationSetting.DISABLED);
+    allowed(
+      AuthorizationStatus.AUTHORIZED,
+      AndroidNotificationSetting.DISABLED,
+    );
 
     const status = await syncHydrationReminders(PLAN, { now: NOW });
 
@@ -169,7 +178,10 @@ describe('what we send notifee is what notifee accepts', () => {
     for (const sound of ['default', 'water_drop', 'chime', 'bell', 'silent']) {
       for (const vibration of [true, false]) {
         api.createChannel.mockClear();
-        await syncHydrationReminders({ ...PLAN, sound, vibration }, { now: NOW });
+        await syncHydrationReminders(
+          { ...PLAN, sound, vibration },
+          { now: NOW },
+        );
 
         const channel = api.createChannel.mock.calls[0][0];
         expect(() => validateChannel(channel)).not.toThrow();
@@ -187,7 +199,9 @@ describe('what we send notifee is what notifee accepts', () => {
   test('the preview’s channel and notification are valid too', async () => {
     await previewReminderSound('bell', true);
 
-    expect(() => validateChannel(api.createChannel.mock.calls[0][0])).not.toThrow();
+    expect(() =>
+      validateChannel(api.createChannel.mock.calls[0][0]),
+    ).not.toThrow();
     const preview = api.displayNotification.mock.calls[0][0];
     expect(() => validateNotification(preview.android)).not.toThrow();
   });
@@ -280,7 +294,9 @@ describe('the sound and the vibration', () => {
     await syncHydrationReminders(PLAN, { now: NOW });
 
     expect(api.deleteChannel).toHaveBeenCalledTimes(1);
-    expect(api.deleteChannel).toHaveBeenCalledWith(reminderChannelId('chime', true));
+    expect(api.deleteChannel).toHaveBeenCalledWith(
+      reminderChannelId('chime', true),
+    );
   });
 
   test('a channel the phone refuses falls back, rather than losing every reminder', async () => {
@@ -294,7 +310,9 @@ describe('the sound and the vibration', () => {
     expect(api.createChannel).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: 'vokve.hydration.fallback' }),
     );
-    expect(call(0).notification.android.channelId).toBe('vokve.hydration.fallback');
+    expect(call(0).notification.android.channelId).toBe(
+      'vokve.hydration.fallback',
+    );
   });
 
   test('the fallback channel is not then deleted as a stale one', async () => {
@@ -307,7 +325,9 @@ describe('the sound and the vibration', () => {
     await syncHydrationReminders(PLAN, { now: NOW });
 
     expect(api.deleteChannel).toHaveBeenCalledTimes(1);
-    expect(api.deleteChannel).toHaveBeenCalledWith(reminderChannelId('chime', true));
+    expect(api.deleteChannel).toHaveBeenCalledWith(
+      reminderChannelId('chime', true),
+    );
   });
 
   test('on iOS the sound is on the notification, since there are no channels', async () => {
@@ -325,7 +345,10 @@ describe('the sound and the vibration', () => {
       await previewReminderSound('bell', false);
 
       expect(api.createChannel).toHaveBeenCalledWith(
-        expect.objectContaining({ id: reminderChannelId('bell', false), sound: 'bell' }),
+        expect.objectContaining({
+          id: reminderChannelId('bell', false),
+          sound: 'bell',
+        }),
       );
       const notification = api.displayNotification.mock.calls[0][0];
       // Android clears it itself; iOS needs the timer, which is what runs here.
@@ -436,5 +459,80 @@ describe('cancelling', () => {
     await cancelHydrationReminders();
 
     expect(api.cancelTriggerNotifications).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * What else the phone is doing to the alarms.
+ *
+ * The permission and the exact-alarm setting are not the whole story on
+ * Android: a phone optimising the app's battery holds its alarms until it
+ * next decides to wake it, which is the usual reason a reminder set for
+ * 07:15 arrives at 07:48 — and the manufacturers' own background pages can
+ * stop them arriving at all. Neither is visible from the plan, so the app
+ * asks, and these are the answers the card is drawn from.
+ */
+describe('background limits', () => {
+  test('reports battery optimisation and a maker’s own page', async () => {
+    api.isBatteryOptimizationEnabled.mockResolvedValue(true);
+    api.getPowerManagerInfo.mockResolvedValue({
+      manufacturer: 'Xiaomi',
+      activity: 'com.miui.powerkeeper/.ui.HiddenAppsConfigActivity',
+    });
+
+    expect(await readBackgroundLimits()).toEqual({
+      battery: true,
+      powerManager: true,
+    });
+  });
+
+  test('a phone with no extra page and no optimisation reports neither', async () => {
+    api.isBatteryOptimizationEnabled.mockResolvedValue(false);
+    api.getPowerManagerInfo.mockResolvedValue({
+      manufacturer: 'Google',
+      activity: null,
+    });
+
+    expect(await readBackgroundLimits()).toEqual({
+      battery: false,
+      powerManager: false,
+    });
+  });
+
+  test('a read that fails or answers nothing is not a fault to report', async () => {
+    // An older notifee, or a phone that answers nothing: the one thing the
+    // card must not do is raise a problem the member cannot act on.
+    api.isBatteryOptimizationEnabled.mockRejectedValue(
+      new Error('no such method'),
+    );
+    api.getPowerManagerInfo.mockResolvedValue(undefined);
+
+    expect(await readBackgroundLimits()).toEqual({
+      battery: false,
+      powerManager: false,
+    });
+  });
+
+  test('neither applies off Android, and the pages are no-ops there', async () => {
+    Platform.OS = 'ios';
+    api.isBatteryOptimizationEnabled.mockResolvedValue(true);
+
+    expect(await readBackgroundLimits()).toEqual({
+      battery: false,
+      powerManager: false,
+    });
+
+    await openBatterySettings();
+    await openPowerManagerSettings();
+    expect(api.openBatteryOptimizationSettings).not.toHaveBeenCalled();
+    expect(api.openPowerManagerSettings).not.toHaveBeenCalled();
+  });
+
+  test('on Android each page is the system’s own', async () => {
+    await openBatterySettings();
+    await openPowerManagerSettings();
+
+    expect(api.openBatteryOptimizationSettings).toHaveBeenCalledTimes(1);
+    expect(api.openPowerManagerSettings).toHaveBeenCalledTimes(1);
   });
 });

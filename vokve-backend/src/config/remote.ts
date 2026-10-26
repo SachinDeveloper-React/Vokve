@@ -146,6 +146,117 @@ function validate(config: AppConfig): void {
   if (water.hourlyMl <= 0 || water.hourlyMinutes <= 0) {
     throw new Error('hydration.hourlyMl and hourlyMinutes must both be above zero');
   }
+  // The reminder caps (RULES Y5): a block that may hold nothing, or more
+  // than the whole plan, is a cap the app and the server would read two
+  // different ways.
+  if (!(water.maxRemindersPerSlot > 0 && water.maxRemindersPerSlot <= water.maxReminders)) {
+    throw new Error(
+      `hydration.maxRemindersPerSlot (${water.maxRemindersPerSlot}) must be above zero and no more than maxReminders (${water.maxReminders})`,
+    );
+  }
+  if (water.reminderPushTtlSeconds <= 0) {
+    throw new Error('hydration.reminderPushTtlSeconds must be above zero — a reminder push with no life left is never sent');
+  }
+  if (water.reminderCatchUpMinutes < 0) {
+    throw new Error('hydration.reminderCatchUpMinutes cannot be negative');
+  }
+  // A block is a part of the day, so the times a new member starts with have
+  // to be in it: the app pins each block's picker to the half named in
+  // `reminderSlotPeriods`, and a default plan that broke that would ship
+  // every new member a chip they could not have set themselves.
+  for (const [slot, half] of Object.entries(water.reminderSlotPeriods)) {
+    if (!['am', 'pm', 'any'].includes(half)) {
+      throw new Error(`hydration.reminderSlotPeriods.${slot}: '${half}' is not one of am, pm, any`);
+    }
+  }
+  for (const slot of ['morning', 'afternoon', 'evening'] as const) {
+    const half = water.reminderSlotPeriods[slot];
+    const times = water.defaultPlan.times[slot] ?? [];
+    if (times.length > water.maxRemindersPerSlot) {
+      throw new Error(
+        `hydration.defaultPlan.times.${slot} holds ${times.length} times, above maxRemindersPerSlot (${water.maxRemindersPerSlot})`,
+      );
+    }
+    if (half === 'any') continue;
+    for (const time of times) {
+      const hours = Number(time.slice(0, 2));
+      const isAm = hours < 12;
+      if (!Number.isFinite(hours) || isAm !== (half === 'am')) {
+        throw new Error(
+          `hydration.defaultPlan.times.${slot}: '${time}' is not a ${half.toUpperCase()} time, and hydration.reminderSlotPeriods.${slot} is ${half.toUpperCase()}`,
+        );
+      }
+    }
+  }
+  // The prize ladder (RULES L7). This one is money: `tierFor` takes the
+  // *first* tier whose range holds a rank, so two ranges over the same place
+  // is an ambiguity nobody would see until a Monday paid the wrong figure,
+  // and a gap between them is a rank that silently wins nothing while the one
+  // below it does. A ladder is therefore: starts at 1, each rung continuing
+  // where the last ended.
+  const board = config.leaderboard;
+  let previous = 0;
+  for (const [index, tier] of board.tiers.entries()) {
+    const where = `leaderboard.tiers[${index}]`;
+    if (!(Number.isInteger(tier.fromRank) && Number.isInteger(tier.toRank))) {
+      throw new Error(`${where}: ranks are whole places, not ${tier.fromRank}–${tier.toRank}`);
+    }
+    if (tier.fromRank < 1 || tier.toRank < tier.fromRank) {
+      throw new Error(`${where}: ${tier.fromRank}–${tier.toRank} is not a range of places`);
+    }
+    if (tier.fromRank !== previous + 1) {
+      throw new Error(
+        previous === 0
+          ? `${where}: the ladder has to start at place 1, not ${tier.fromRank}`
+          : `${where}: places ${previous + 1}–${tier.fromRank - 1} would win nothing while ${tier.fromRank}–${tier.toRank} does. Each rung continues where the last ended.`,
+      );
+    }
+    if (!(tier.coins >= 0) || !Number.isInteger(tier.coins)) {
+      throw new Error(`${where}.coins (${tier.coins}) is not a number of coins`);
+    }
+    if (tier.perks.some(perk => perk.trim().length === 0)) {
+      throw new Error(`${where}.perks holds an empty line`);
+    }
+    previous = tier.toRank;
+  }
+  if (!(board.score.stepsPerPoint >= 1)) {
+    throw new Error('leaderboard.score.stepsPerPoint must be at least 1 — a point per zero steps is every member on the same score');
+  }
+  if (board.score.perWorkout < 0 || board.score.perChallenge < 0) {
+    throw new Error('leaderboard.score: a workout or a challenge cannot be worth negative points');
+  }
+  if (!(board.boardSize >= 1)) {
+    throw new Error('leaderboard.boardSize must be at least 1');
+  }
+  if (board.closeAfterHours < 0 || board.closeAfterHours > 23) {
+    throw new Error(`leaderboard.closeAfterHours (${board.closeAfterHours}) is hours into Monday, so 0–23`);
+  }
+  // The words the screen says (D-89). Empty copy is a blank card, and the
+  // app draws whatever is here without a release to correct it.
+  if (board.howItWorks.length === 0) {
+    throw new Error('leaderboard.howItWorks: the How it works tab would be empty');
+  }
+  for (const [index, step] of board.howItWorks.entries()) {
+    if (step.title.trim().length === 0 || step.detail.trim().length === 0) {
+      throw new Error(`leaderboard.howItWorks[${index}]: a step needs both a title and a detail`);
+    }
+  }
+  for (const [key, line] of Object.entries(board.banner)) {
+    if (String(line).trim().length === 0) {
+      throw new Error(`leaderboard.banner.${key} is empty, and the app draws the banner whatever is in it`);
+    }
+  }
+  if (board.note.trim().length === 0) {
+    throw new Error('leaderboard.note is empty — it is the line under the prize ladder');
+  }
+  // A week that paid nothing has to be able to say why (D-90). An empty
+  // reason is a zero with no explanation, which reads as money kept.
+  for (const outcome of ['paid', 'held', 'skipped', 'none'] as const) {
+    if (String(board.outcomes[outcome] ?? '').trim().length === 0) {
+      throw new Error(`leaderboard.outcomes.${outcome} is empty — a closed week would state a figure and no reason`);
+    }
+  }
+
   const { paymentMode, coinShareMin, coinShareMax } = config.commerce;
   if (!['coins', 'money', 'mixed'].includes(paymentMode)) {
     throw new Error(`commerce.paymentMode: '${paymentMode}' is not one of coins, money, mixed`);

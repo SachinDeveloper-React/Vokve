@@ -4,7 +4,12 @@ import { localDayOf, localMidnightUtc, localTimeOf, weekdayOf } from '../src/lib
 import { setPushTransport, type PushMessage } from '../src/lib/push.js';
 import { DeviceModel } from '../src/modules/devices/models.js';
 import { NotificationPreferencesModel, UserModel, UserSettingsModel } from '../src/modules/identity/models.js';
-import { sendDueReminders } from '../src/modules/hydration/reminders.job.js';
+import {
+  resetReminderSweep,
+  sendDueReminders,
+  sweepReminders,
+} from '../src/modules/hydration/reminders.job.js';
+import { CONFIG_DEFAULTS } from '../src/config/defaults.js';
 import { HydrationPlanModel } from '../src/modules/hydration/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
 import { app, authed, signUpAndRegister, type Session } from './helpers.js';
@@ -47,7 +52,13 @@ function capturingTransport() {
   return sent;
 }
 
-afterEach(() => setPushTransport(null));
+afterEach(() => {
+  setPushTransport(null);
+  // `sweepReminders` remembers the last minute it swept, and the memory is
+  // the process's: a test that left it set would decide what the next test
+  // caught up on.
+  resetReminderSweep();
+});
 
 /** Saves a plan through the API, so it carries the device's zone. */
 async function savePlan(
@@ -290,5 +301,197 @@ describe('hydration reminders: the sounds (RULES Y5)', () => {
     // A plan stored before the catalogue existed held the label.
     await HydrationPlanModel.updateOne({ _id: session.userId }, { $set: { sound: 'Water Drop' } });
     expect((await request(app).get('/v1/hydration/reminders').set(authed(session))).body.sound).toBe('water_drop');
+  });
+});
+
+/**
+ * Arriving on time, which is a different question from arriving at all.
+ *
+ * Two things can make a reminder late rather than lost, and both of them
+ * read as the app being wrong about the one thing it promised: a tick held
+ * up long enough to skip a minute of the clock, and a push a provider keeps
+ * for hours and hands over next to the one that was actually due.
+ */
+describe('hydration reminders: on time (RULES Y6)', () => {
+  it('the push carries its own lifetime, so a provider drops it rather than delivering it late', async () => {
+    const session = await signUpAndRegister();
+    await reachable(session);
+    await savePlan(session, {});
+    const sent = capturingTransport();
+
+    await sendDueReminders(DUE);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].message.ttlSeconds).toBe(
+      CONFIG_DEFAULTS.hydration.reminderPushTtlSeconds,
+    );
+  });
+
+  it('sends the minutes a held-up tick missed, each against its own clock', async () => {
+    const session = await signUpAndRegister();
+    await reachable(session);
+    await savePlan(session, {
+      reminders: [
+        { id: 'a', time: '09:31', slot: 'morning', enabled: true },
+        { id: 'b', time: '09:33', slot: 'morning', enabled: true },
+      ],
+    });
+
+    // The tick that ran at 09:30, then nothing until 09:33 — a slow query,
+    // a deploy, a restart. Without the catch-up, 09:31 is simply never sent.
+    expect(await sweepReminders(DUE)).toMatchObject({ due: 0 });
+    const caught = await sweepReminders(new Date(DUE.getTime() + 3 * 60_000));
+
+    expect(caught).toMatchObject({ due: 2, sent: 2 });
+    expect(await rows(session.userId)).toHaveLength(2);
+  });
+
+  it('drops a minute older than the catch-up bound rather than sending it late', async () => {
+    const session = await signUpAndRegister();
+    await reachable(session);
+    await savePlan(session, {
+      reminders: [
+        { id: 'a', time: '09:31', slot: 'morning', enabled: true },
+        { id: 'b', time: '09:38', slot: 'morning', enabled: true },
+      ],
+    });
+
+    const bound = CONFIG_DEFAULTS.hydration.reminderCatchUpMinutes;
+    expect(await sweepReminders(DUE)).toMatchObject({ due: 0 });
+    // Ten minutes later: 09:31 is well past the bound and is a reminder for
+    // a time that has gone, where 09:38 is inside it.
+    const late = await sweepReminders(new Date(DUE.getTime() + 10 * 60_000));
+
+    expect(bound).toBeLessThan(9);
+    expect(late).toMatchObject({ due: 1, sent: 1 });
+    const written = await rows(session.userId);
+    expect(written).toHaveLength(1);
+    expect(written[0].message).toBeTruthy();
+  });
+
+  it('the first sweep of a process sends its own minute and nothing before it', async () => {
+    const session = await signUpAndRegister();
+    await reachable(session);
+    await savePlan(session, {
+      reminders: [
+        { id: 'a', time: '09:29', slot: 'morning', enabled: true },
+        { id: 'b', time: '09:30', slot: 'morning', enabled: true },
+      ],
+    });
+
+    // A restart is not a reason to re-send the minutes that belonged to
+    // whatever was running before it.
+    expect(await sweepReminders(DUE)).toMatchObject({ due: 1, sent: 1 });
+    expect(await rows(session.userId)).toHaveLength(1);
+  });
+});
+
+/**
+ * What one block will hold (RULES Y5).
+ *
+ * The app shows the cap on each block — "3 of 5 times" — and its add chip
+ * reads "Full" at the top of it, so nobody should ever meet this as a
+ * refusal. It is here for the case the screen cannot cover: another install,
+ * an older build, or anything else talking to the API directly.
+ */
+describe('hydration reminders: what a block holds (RULES Y5)', () => {
+  const morning = (times: string[]) =>
+    times.map((time, index) => ({
+      id: `m${index}`,
+      time,
+      slot: 'morning',
+      enabled: true,
+    }));
+
+  it('takes a block filled to its cap', async () => {
+    const session = await signUpAndRegister();
+    const cap = CONFIG_DEFAULTS.hydration.maxRemindersPerSlot;
+    const times = ['06:00', '07:00', '08:00', '09:00', '10:00'].slice(0, cap);
+
+    const plan = await savePlan(session, { reminders: morning(times) }, 'cap-ok');
+
+    expect(plan.reminders).toHaveLength(cap);
+  });
+
+  it('refuses one past it, and says which block and how many', async () => {
+    const session = await signUpAndRegister();
+
+    const res = await request(app)
+      .put('/v1/hydration/reminders')
+      .set({ ...authed(session), 'idempotency-key': 'cap-over' })
+      .send({
+        enabled: true,
+        sound: 'water_drop',
+        vibration: true,
+        repeatDays: [0, 1, 2, 3, 4, 5, 6],
+        reminders: morning(['06:00', '06:30', '07:00', '07:30', '08:00', '08:30']),
+      });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error?.details?.reminders ?? '').toContain('morning');
+    // And nothing was written: a refused plan leaves the one before it.
+    expect(await HydrationPlanModel.findById(session.userId).lean()).toBeNull();
+  });
+
+  it('counts each block on its own, and leaves custom times to the plan-wide cap', async () => {
+    const session = await signUpAndRegister();
+    const cap = CONFIG_DEFAULTS.hydration.maxRemindersPerSlot;
+
+    const plan = await savePlan(
+      session,
+      {
+        reminders: [
+          ...morning(['06:00', '07:00', '08:00', '09:00', '10:00'].slice(0, cap)),
+          { id: 'a1', time: '13:00', slot: 'afternoon', enabled: true },
+          { id: 'e1', time: '19:00', slot: 'evening', enabled: true },
+          ...['11:00', '11:30', '12:00', '12:30', '14:00', '14:30'].map((time, index) => ({
+            id: `c${index}`,
+            time,
+            slot: 'custom',
+            enabled: true,
+          })),
+        ],
+      },
+      'cap-blocks',
+    );
+
+    // Six custom times, which is past a block's cap and well inside the
+    // plan's: the blocks are the three parts of the day, and custom times
+    // are the way out of them.
+    expect(plan.reminders.filter((r: { slot: string }) => r.slot === 'custom')).toHaveLength(6);
+    expect(plan.reminders).toHaveLength(cap + 8);
+  });
+});
+
+/**
+ * What the app is told each block will take (RULES Y5b).
+ *
+ * The halves and the caps are the server's so they can be re-cut from the
+ * panel without an app release; the app keeps the same three blocks as its
+ * offline fallback. The plan carries them rather than a route of its own,
+ * because the screen reads the plan already.
+ */
+describe('hydration reminders: the blocks the app draws (RULES Y5b)', () => {
+  it('sends each block’s half of the clock and its cap with the plan', async () => {
+    const session = await signUpAndRegister();
+
+    const plan = await request(app).get('/v1/hydration/reminders').set(authed(session));
+
+    expect(plan.status).toBe(200);
+    expect(plan.body.slots).toMatchObject({
+      morning: { period: 'am', maxTimes: CONFIG_DEFAULTS.hydration.maxRemindersPerSlot },
+      afternoon: { period: 'pm', maxTimes: CONFIG_DEFAULTS.hydration.maxRemindersPerSlot },
+      evening: { period: 'pm', maxTimes: CONFIG_DEFAULTS.hydration.maxRemindersPerSlot },
+      // The way out of the blocks, so the only cap on it is the plan's own.
+      custom: { period: 'any', maxTimes: CONFIG_DEFAULTS.hydration.maxReminders },
+    });
+  });
+
+  it('a saved plan is answered with them too', async () => {
+    const session = await signUpAndRegister();
+
+    const saved = await savePlan(session, {}, 'slots-save');
+
+    expect(saved.slots?.morning).toMatchObject({ period: 'am' });
   });
 });

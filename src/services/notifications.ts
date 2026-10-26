@@ -206,7 +206,10 @@ export async function displayPushNotification(message: {
       title,
       body,
       data,
-      android: { channelId: DEFAULT_CHANNEL_ID, pressAction: { id: 'default' } },
+      android: {
+        channelId: DEFAULT_CHANNEL_ID,
+        pressAction: { id: 'default' },
+      },
     });
   } catch (error) {
     logger.warn('notifications', 'A push could not be shown', error);
@@ -283,7 +286,11 @@ export async function remindersAllowed(): Promise<boolean> {
       settings.authorizationStatus === AuthorizationStatus.PROVISIONAL
     );
   } catch (error) {
-    logger.warn('notifications', 'Could not read the notification settings', error);
+    logger.warn(
+      'notifications',
+      'Could not read the notification settings',
+      error,
+    );
     return false;
   }
 }
@@ -313,6 +320,67 @@ export async function openExactAlarmSettings(): Promise<void> {
 }
 
 /**
+ * What else this phone is doing to the app's alarms.
+ *
+ * The permission and the exact-alarm setting are not the whole story, and on
+ * Android they are not even the usual story: a phone that is "optimising
+ * battery" for an app holds its alarms until it next decides to wake it,
+ * which is how a 07:15 reminder arrives at 07:48 — or, on the Chinese OEM
+ * builds that kill background work outright, not at all. Nothing in the plan
+ * or the permission says so, so the only way the user can find out is for
+ * the app to ask and tell them.
+ *
+ * Two separate things, because they are fixed on two different pages:
+ *
+ *  - `battery` is Android's own optimisation, which has an answer the OS
+ *    will give us — so it can be reported, offered, and seen to clear.
+ *  - `powerManager` is the manufacturer's extra page (Xiaomi's autostart,
+ *    Oppo's and Vivo's equivalents). There is nothing to read back from it,
+ *    only whether this phone has one, so it is never raised as a fault —
+ *    it is offered where a user who is *still* seeing late reminders will
+ *    look for it.
+ */
+export interface BackgroundLimits {
+  battery: boolean;
+  powerManager: boolean;
+}
+
+const NO_LIMITS: BackgroundLimits = { battery: false, powerManager: false };
+
+export async function readBackgroundLimits(): Promise<BackgroundLimits> {
+  if (Platform.OS !== 'android') return NO_LIMITS;
+  const [battery, powerManager] = await Promise.all([
+    notifee.isBatteryOptimizationEnabled().catch(error => {
+      logger.warn(
+        'notifications',
+        'Could not read battery optimisation',
+        error,
+      );
+      return false;
+    }),
+    notifee
+      .getPowerManagerInfo()
+      // `undefined` from a phone that answers nothing, and from an older
+      // notifee: either way there is no page to send anybody to.
+      .then(info => Boolean(info?.activity))
+      .catch(() => false),
+  ]);
+  return { battery, powerManager };
+}
+
+/** Android's battery-optimisation page for this app. */
+export async function openBatterySettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await notifee.openBatteryOptimizationSettings();
+}
+
+/** The manufacturer's own background page, where this phone has one. */
+export async function openPowerManagerSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await notifee.openPowerManagerSettings();
+}
+
+/**
  * Asks for permission to notify, with the system dialog.
  *
  * Only called from where the user has already been told what the
@@ -327,7 +395,11 @@ export async function requestReminderPermission(): Promise<boolean> {
       settings.authorizationStatus === AuthorizationStatus.PROVISIONAL
     );
   } catch (error) {
-    logger.warn('notifications', 'The notification permission was not granted', error);
+    logger.warn(
+      'notifications',
+      'The notification permission was not granted',
+      error,
+    );
     return false;
   }
 }
@@ -347,7 +419,11 @@ async function claimLocalScheduling(scheduled: boolean): Promise<void> {
   try {
     await deviceApi.setLocalReminders(deviceId, scheduled);
   } catch (error) {
-    logger.warn('notifications', 'Could not tell the server who is reminding', toApiError(error));
+    logger.warn(
+      'notifications',
+      'Could not tell the server who is reminding',
+      toApiError(error),
+    );
   }
 }
 
@@ -358,7 +434,11 @@ export async function cancelHydrationReminders(): Promise<void> {
     const ours = ids.filter(id => id.startsWith(ALARM_ID_PREFIX));
     if (ours.length > 0) await notifee.cancelTriggerNotifications(ours);
   } catch (error) {
-    logger.warn('notifications', 'Could not clear the scheduled reminders', error);
+    logger.warn(
+      'notifications',
+      'Could not clear the scheduled reminders',
+      error,
+    );
   }
 }
 
@@ -370,7 +450,9 @@ export async function cancelHydrationReminders(): Promise<void> {
  */
 function bodyFor(goalMl: number | null): string {
   if (goalMl === null) return 'Tap to log a glass.';
-  return `A glass now keeps you on track for your ${(goalMl / 1000).toFixed(1)} L goal.`;
+  return `A glass now keeps you on track for your ${(goalMl / 1000).toFixed(
+    1,
+  )} L goal.`;
 }
 
 function notificationFor(
@@ -443,7 +525,10 @@ export async function syncHydrationReminders(
   }
 
   const soundId = plan?.sound ?? DEFAULT_SOUND_ID;
-  const channelId = await ensureReminderChannel(soundId, plan?.vibration ?? true);
+  const channelId = await ensureReminderChannel(
+    soundId,
+    plan?.vibration ?? true,
+  );
   const exact = await exactAlarmsAllowed();
 
   let scheduled = 0;
@@ -455,7 +540,9 @@ export async function syncHydrationReminders(
           type: TriggerType.TIMESTAMP,
           timestamp: alarm.timestamp,
           repeatFrequency:
-            alarm.repeat === 'daily' ? RepeatFrequency.DAILY : RepeatFrequency.WEEKLY,
+            alarm.repeat === 'daily'
+              ? RepeatFrequency.DAILY
+              : RepeatFrequency.WEEKLY,
           // AlarmManager rather than WorkManager: a reminder set for 07:15
           // has to arrive at 07:15, and WorkManager will not wake a dozing
           // phone to do it. Exact where the phone allows it, and allowed
@@ -549,7 +636,10 @@ async function displayPreview(
 function isHydrationReminder(notification: Notification | undefined): boolean {
   if (!notification) return false;
   if (notification.data?.topic === 'hydration') return true;
-  return typeof notification.id === 'string' && notification.id.startsWith(ALARM_ID_PREFIX);
+  return (
+    typeof notification.id === 'string' &&
+    notification.id.startsWith(ALARM_ID_PREFIX)
+  );
 }
 
 /**
@@ -700,7 +790,13 @@ export function startReminderTapHandling(): () => void {
       const route = routeForNotification(initial?.notification);
       if (route) recordNotificationTap(route);
     })
-    .catch(error => logger.warn('notifications', 'Could not read the opening notification', error));
+    .catch(error =>
+      logger.warn(
+        'notifications',
+        'Could not read the opening notification',
+        error,
+      ),
+    );
 
   return notifee.onForegroundEvent(({ type, detail }) => {
     if (type !== EventType.PRESS) return;

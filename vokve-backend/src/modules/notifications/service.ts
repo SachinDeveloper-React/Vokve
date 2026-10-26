@@ -150,6 +150,13 @@ export interface NotifyInput {
    */
   suppressPush?: boolean;
   /**
+   * How long this message's push is worth delivering, in seconds (see
+   * `PushMessage.ttlSeconds`). For anything that is only true at its own
+   * minute — a hydration reminder — so the provider drops it rather than
+   * handing it over hours later.
+   */
+  pushTtlSeconds?: number;
+  /**
    * A message aimed at this member rather than sent to everyone — a deal
    * picked from what they browse. Honours the privacy switch as well as the
    * notification one (RULES P7): opted out, nothing is written at all,
@@ -218,7 +225,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     return { id, status: 'created', push: 'deferred' };
   }
 
-  const push = await pushRow(id, input.userId, input.title, input.message, input.topic);
+  const push = await pushRow(id, input.userId, input.title, input.message, input.topic, input.pushTtlSeconds);
   return { id, status: 'created', push };
 }
 
@@ -261,7 +268,7 @@ async function refusedNotifications(userId: string, deviceIds: string[]): Promis
   return refused;
 }
 
-async function pushRow(id: string, userId: string, title: string, message: string, topic: NotificationTopic): Promise<NotifyResult['push']> {
+async function pushRow(id: string, userId: string, title: string, message: string, topic: NotificationTopic, ttlSeconds?: number): Promise<NotifyResult['push']> {
   const devices = await DeviceModel.find({ userId, 'push.token': { $type: 'string' }, 'push.invalidAt': null }, { 'push.token': 1 }).lean();
   if (devices.length === 0) return 'no_device';
 
@@ -274,7 +281,7 @@ async function pushRow(id: string, userId: string, title: string, message: strin
   // the only channel, and that is worth telling apart from having no phone.
   if (tokens.length === 0) return 'not_permitted';
 
-  const result = await sendPush(tokens, { title, body: message, data: { topic, notificationId: id } });
+  const result = await sendPush(tokens, { title, body: message, data: { topic, notificationId: id }, ttlSeconds });
   if (result.invalid.length > 0) {
     await DeviceModel.updateMany({ 'push.token': { $in: result.invalid } }, { $set: { 'push.invalidAt': new Date() } });
   }

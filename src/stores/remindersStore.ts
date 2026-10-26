@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import {
+  SLOT_RULES,
+  mergeSlotRules,
+  type SlotRules,
+} from '../constants/reminderSlots';
 import { hydrationApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import type {
@@ -39,7 +44,10 @@ interface RemindersState {
   refreshIfStale: () => Promise<void>;
   setEnabled: (value: boolean) => void;
   toggleReminder: (id: string) => void;
-  /** Adds a time to a block. A time already in that block is not duplicated. */
+  /**
+   * Adds a time to a block. A time already in that block is not duplicated,
+   * and a block already holding its own cap (`SLOT_RULES`) takes no more.
+   */
   addReminder: (time: string, slot?: ReminderSlot) => void;
   /**
    * Moves one reminder to another time, keeping its block and its switch.
@@ -169,10 +177,22 @@ export const useRemindersStore = create<RemindersState>()(
 
         addReminder: (time, slot = 'custom') =>
           edit(plan => {
-            const exists = plan.reminders.some(
-              reminder => reminder.time === time && reminder.slot === slot,
+            const held = plan.reminders.filter(
+              reminder => reminder.slot === slot,
             );
+            const exists = held.some(reminder => reminder.time === time);
             if (exists) {
+              return plan;
+            }
+            // A block holds what its rule says it holds and no more — the
+            // server's number where the plan carried one, this build's where
+            // it did not. The screen says so before the user gets here (a
+            // full block's chip reads "Full" and explains itself), so this is
+            // the guard for a plan that arrived full from another phone or an
+            // older build, not the place the user finds out.
+            const cap =
+              plan.slots?.[slot]?.maxTimes ?? SLOT_RULES[slot].maxTimes;
+            if (held.length >= cap) {
               return plan;
             }
             const entry: HydrationReminder = {
@@ -264,6 +284,18 @@ export const useReminderVibration = () =>
   useRemindersStore(s => s.plan?.vibration ?? false);
 export const useRepeatDays = () =>
   useRemindersStore(s => s.plan?.repeatDays ?? NO_DAYS);
+
+/**
+ * What each block of the plan will take (RULES Y5b) — the server's rules
+ * where the plan carried them, this build's where it did not.
+ *
+ * A selector rather than a constant the screens import, so re-cutting a
+ * block from the panel reaches the pickers and the caps without a release.
+ */
+export const useSlotRules = (): SlotRules => {
+  const slots = useRemindersStore(s => s.plan?.slots);
+  return useMemo(() => mergeSlotRules(slots), [slots]);
+};
 
 /**
  * How many times are switched on — the figure the screen leads with.

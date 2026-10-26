@@ -355,24 +355,54 @@ function normalizeSound(stored: string, sounds: { id: string; label: string }[])
   return (match ?? sounds[0]).id;
 }
 
+/**
+ * What each block of the plan will take, for the app's pickers (Y5b).
+ *
+ * Sent with the plan rather than from a route of its own: the screen reads
+ * the plan already, and a second request for two numbers per block would be
+ * empty for a beat every time somebody opened it. The app keeps the same
+ * three blocks as a fallback, so an older server — or no network at all —
+ * still gives it a rule to draw.
+ */
+function slotRules(config: AppConfig): HydrationReminderPlan['slots'] {
+  const { maxRemindersPerSlot, maxReminders, reminderSlotPeriods } = config.hydration;
+  const rule = (slot: 'morning' | 'afternoon' | 'evening' | 'custom') => ({
+    period: reminderSlotPeriods[slot] ?? 'any',
+    // Custom times are the way out of the blocks, so the only cap on them
+    // is the plan's own.
+    maxTimes: slot === 'custom' ? maxReminders : maxRemindersPerSlot,
+  });
+  return {
+    morning: rule('morning'),
+    afternoon: rule('afternoon'),
+    evening: rule('evening'),
+    custom: rule('custom'),
+  };
+}
+
 /** The member's plan, or the default one until they have changed anything. */
 export async function getReminderPlan(userId: string): Promise<HydrationReminderPlan> {
   const config = await getConfig();
   const row = await HydrationPlanModel.findById(userId).lean();
-  if (!row) return hydrationReminderPlanSchema.parse(defaultPlan(config));
+  if (!row) return hydrationReminderPlanSchema.parse({ ...defaultPlan(config), slots: slotRules(config) });
   return hydrationReminderPlanSchema.parse({
     enabled: row.enabled,
     reminders: row.reminders.map(r => ({ id: r.id, time: r.time, slot: r.slot, enabled: r.enabled })),
     sound: normalizeSound(row.sound, config.hydration.sounds),
     vibration: row.vibration,
     repeatDays: row.repeatDays,
+    slots: slotRules(config),
   });
 }
 
 /**
  * Replaces the plan whole (RULES Y5): times in clock order, a second
  * (time, block) pair dropped, repeat days unique and in order. Bounded
- * (X9) — a plan of a thousand alarms is not one anybody means.
+ * (X9) — a plan of a thousand alarms is not one anybody means — and
+ * bounded per block as well, because that is the cap a member can see:
+ * each block says "3 of 5 times" on the screen, and a second phone talking
+ * its way past it would leave the first showing a block fuller than its own
+ * rule allows.
  */
 export async function putReminderPlan(
   userId: string,
@@ -391,6 +421,15 @@ export async function putReminderPlan(
     .sort((a, b) => minutesOf(a.time) - minutesOf(b.time));
   if (reminders.length > config.hydration.maxReminders) {
     throw Errors.validation({ reminders: `A plan holds at most ${config.hydration.maxReminders} times.` });
+  }
+  const perSlot = config.hydration.maxRemindersPerSlot;
+  for (const slot of ['morning', 'afternoon', 'evening'] as const) {
+    const held = reminders.filter(reminder => reminder.slot === slot).length;
+    if (held > perSlot) {
+      throw Errors.validation({
+        reminders: `The ${slot} block holds at most ${perSlot} times.`,
+      });
+    }
   }
   const repeatDays = [...new Set(plan.repeatDays)].sort((a, b) => a - b);
 

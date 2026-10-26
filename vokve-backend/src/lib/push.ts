@@ -14,6 +14,18 @@ export interface PushMessage {
    * still spent a wake-up, so the type asks for one.
    */
   silent?: boolean;
+  /**
+   * How long this message is worth delivering, in seconds. Past it the
+   * provider drops it instead of holding it for the next time the phone is
+   * reachable.
+   *
+   * Left out, a message lives as long as FCM and APNs will keep it — hours,
+   * and a day in FCM's case. That is right for an order update and wrong for
+   * anything about a moment: a hydration reminder handed over at midnight
+   * for a 19:00 time is not a late reminder, it is a reminder for a time
+   * that has gone, arriving next to the one that was actually due.
+   */
+  ttlSeconds?: number;
 }
 
 export interface PushResult {

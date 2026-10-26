@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { ChevronRight } from 'lucide-react-native';
+import { SLOT_RULES, type SlotRules } from '../../constants/reminderSlots';
 import { useTheme } from '../../theme';
 import type { HydrationReminder, ReminderSlot } from '../../types/models';
 import { HStack, VStack } from '../layout/Stack';
@@ -17,6 +18,8 @@ interface Props {
   /** A chip held down: change that time. */
   onEdit: (id: string) => void;
   onPressViewAll: () => void;
+  /** What each block will take (Y5b). The server's, through the plan. */
+  rules?: SlotRules;
 }
 
 /**
@@ -42,6 +45,7 @@ export const PresetTimesSection = memo(
     onPressAdd,
     onEdit,
     onPressViewAll,
+    rules = SLOT_RULES,
   }: Props) => {
     const { colors } = useTheme();
 
@@ -76,6 +80,7 @@ export const PresetTimesSection = memo(
           <PresetBlockCard
             slot="morning"
             title="Morning"
+            maxTimes={rules.morning.maxTimes}
             tint={colors.primary}
             reminders={morning}
             onToggle={onToggle}
@@ -85,6 +90,7 @@ export const PresetTimesSection = memo(
           <PresetBlockCard
             slot="afternoon"
             title="Afternoon"
+            maxTimes={rules.afternoon.maxTimes}
             tint={colors.brandAccent}
             reminders={afternoon}
             onToggle={onToggle}
@@ -94,6 +100,7 @@ export const PresetTimesSection = memo(
           <PresetBlockCard
             slot="evening"
             title="Evening"
+            maxTimes={rules.evening.maxTimes}
             tint={colors.avatarPurple}
             reminders={evening}
             onToggle={onToggle}

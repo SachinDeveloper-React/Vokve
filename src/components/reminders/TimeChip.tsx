@@ -25,6 +25,19 @@ interface Props {
    * the add chip, which has no time to change.
    */
   onLongPress?: (id: string) => void;
+  /**
+   * The add chip of a block that already holds all the times it may (see
+   * `SLOT_RULES`). Still drawn and still pressable — it says what the limit
+   * is when it is tapped, where a chip that had quietly disappeared would
+   * leave the user looking for the control rather than reading the rule.
+   */
+  full?: boolean;
+  /**
+   * The block this chip adds to, for the add chip's label. Three blocks
+   * carry the same control, and "add a time to this block" names none of
+   * them for a screen reader moving between them.
+   */
+  blockName?: string;
 }
 
 /**
@@ -41,7 +54,16 @@ interface Props {
  * `accessibilityHint` is how a screen reader is told about it.
  */
 export const TimeChip = memo(
-  ({ id, time, enabled = true, tint, onPress, onLongPress }: Props) => {
+  ({
+    id,
+    time,
+    enabled = true,
+    tint,
+    onPress,
+    onLongPress,
+    full = false,
+    blockName,
+  }: Props) => {
     const { colors, isDark } = useTheme();
     const isAdd = time === null;
 
@@ -58,7 +80,9 @@ export const TimeChip = memo(
       ? withAlpha(tint, isDark ? 0.22 : 0.12)
       : colors.muted;
     const foreground = isAdd
-      ? colors.textSecondary
+      ? full
+        ? colors.textTertiary
+        : colors.textSecondary
       : enabled
       ? tint
       : colors.textTertiary;
@@ -72,7 +96,9 @@ export const TimeChip = memo(
         accessibilityState={{ selected: !isAdd && enabled }}
         accessibilityLabel={
           isAdd
-            ? 'Add a time to this block'
+            ? full
+              ? `${blockName ?? 'This block'} is full`
+              : `Add a time to ${blockName ?? 'this block'}`
             : `${formatTimeOfDay(time)}, ${enabled ? 'on' : 'off'}`
         }
         accessibilityHint={
@@ -89,14 +115,16 @@ export const TimeChip = memo(
           py="sm"
           style={[styles.chip, { backgroundColor: background }]}
         >
-          {isAdd ? <Icon as={Plus} size="xs" tint={foreground} /> : null}
+          {isAdd && !full ? (
+            <Icon as={Plus} size="xs" tint={foreground} />
+          ) : null}
 
           <AppText
             variant="micro"
             numberOfLines={1}
             style={[styles.label, { color: foreground }]}
           >
-            {isAdd ? 'Add Time' : formatTimeOfDay(time)}
+            {isAdd ? (full ? 'Full' : 'Add Time') : formatTimeOfDay(time)}
           </AppText>
 
           {!isAdd && enabled ? (

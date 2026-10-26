@@ -16,6 +16,8 @@ interface Props {
   onPressAdd: (slot: ReminderSlot) => void;
   /** A chip held down: change that time. */
   onEdit: (id: string) => void;
+  /** The most times this block may hold — the server's rule (Y5b). */
+  maxTimes: number;
 }
 
 /**
@@ -24,10 +26,21 @@ interface Props {
  * The count under the title says how many times the block holds, not how many
  * are switched on: it is the size of the block, and a number that shrank as
  * the user turned chips off would make the block look as though times had been
- * deleted.
+ * deleted. It is written against the block's own cap — "3 of 5" — so the limit
+ * is on screen before it is reached rather than only at the moment somebody
+ * is told they cannot add another.
  */
 export const PresetBlockCard = memo(
-  ({ slot, title, tint, reminders, onToggle, onPressAdd, onEdit }: Props) => {
+  ({
+    slot,
+    title,
+    tint,
+    reminders,
+    onToggle,
+    onPressAdd,
+    onEdit,
+    maxTimes,
+  }: Props) => {
     // One handler for every chip in the block: the add chip reports a null id,
     // which is the only thing that tells the two apart.
     const handleChipPress = useCallback(
@@ -41,6 +54,8 @@ export const PresetBlockCard = memo(
       [onPressAdd, onToggle, slot],
     );
 
+    const full = reminders.length >= maxTimes;
+
     return (
       <Card radius="lg" padding="md" style={styles.card}>
         <VStack gap="sm">
@@ -49,9 +64,7 @@ export const PresetBlockCard = memo(
               {title}
             </AppText>
             <AppText variant="miniMicro" color="textSecondary">
-              {`${reminders.length} ${
-                reminders.length === 1 ? 'time' : 'times'
-              }`}
+              {`${reminders.length} of ${maxTimes} times`}
             </AppText>
           </VStack>
 
@@ -72,6 +85,8 @@ export const PresetBlockCard = memo(
               id={null}
               time={null}
               tint={tint}
+              full={full}
+              blockName={title}
               onPress={handleChipPress}
             />
           </VStack>

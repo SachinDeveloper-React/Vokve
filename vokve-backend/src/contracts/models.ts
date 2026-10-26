@@ -2905,6 +2905,18 @@ export const leaderboardRulesSchema = z.object({
   howItWorks: z.array(z.object({ title: z.string(), detail: z.string() })),
   /** The line under the tiers. */
   note: z.string(),
+  /**
+   * The three lines across the top of the screen (⚙ `leaderboard.banner`).
+   *
+   * Optional on the wire: a build installed before this existed never reads
+   * it, and one talking to a server that does not send it falls back to the
+   * copy it shipped with. Marketing's line about winning things is the most
+   * likely string in the app to be rewritten and was the one that needed a
+   * release (D-89).
+   */
+  banner: z
+    .object({ kicker: z.string(), title: z.string(), subtitle: z.string() })
+    .optional(),
 });
 export type LeaderboardRules = z.infer<typeof leaderboardRulesSchema>;
 
@@ -2922,11 +2934,22 @@ export const leaderboardPeriodSchema = z.object({
 });
 export type LeaderboardPeriod = z.infer<typeof leaderboardPeriodSchema>;
 
-/** `GET /leaderboard`: this week's board, the top of it, and the caller's own place. */
+/** `GET /leaderboard`: this week's board, a page of it, and the caller's own place. */
 export const leaderboardBoardSchema = z.object({
   period: leaderboardPeriodSchema,
   /** In rank order (RULES L5: no two share a rank). */
   entries: z.array(leaderboardEntrySchema),
+  /** Where this page starts, and how many it was served (L2b). */
+  offset: z.number().int().nonnegative().default(0),
+  limit: z.number().int().positive().default(50),
+  /**
+   * The board's own length — everyone scoring, up to ⚙
+   * `leaderboard.boardSize`. Not `ranked`: the board is the top 50 and the
+   * country may hold thousands.
+   */
+  total: z.number().int().nonnegative().default(0),
+  /** Whether another page exists above this one. */
+  hasMore: z.boolean().default(false),
   /** The caller's place; null until they have scored this week. */
   me: z
     .object({
@@ -2961,9 +2984,37 @@ export const leaderboardHistorySchema = z.object({
       end: z.string(),
       rank: z.number().int().positive(),
       score: z.number().nonnegative(),
+      /** Coins actually credited for the week. */
       coins: z.number().nonnegative(),
+      /**
+       * What the place *won* by the tiers in force at the close, which is
+       * not always what was paid (D-90). A zero `coins` against a `won` of
+       * 5,000 is the whole reason `state` exists.
+       */
+      won: z.number().nonnegative().default(0),
+      /** The gear the place won, if any. */
+      perks: z.array(z.string()).default([]),
+      /**
+       * How the week ended for this member:
+       *
+       *   `paid`    the coins are in the wallet
+       *   `held`    the place pays and prizes were not running at the close
+       *   `skipped` the place was under review (RULES L9)
+       *   `none`    the place is below the last one that pays
+       */
+      state: z.enum(['paid', 'held', 'skipped', 'none']).default('none'),
+      /** Why, in the server's words (⚙ `leaderboard.outcomes`). */
+      reason: z.string().default(''),
     }),
   ),
+  /**
+   * Coins the places won that were never credited — the sum of every `held`
+   * week. Worth a line of its own: a member looking at "2,350 earned" has
+   * no way to know that another 5,000 was won and not paid.
+   */
+  rewardCoinsHeld: z.number().nonnegative().default(0),
+  /** Whether prizes are being credited *now* (⚙ `coins.steps.enabled`). */
+  prizesRunning: z.boolean().default(true),
 });
 export type LeaderboardHistory = z.infer<typeof leaderboardHistorySchema>;
 
@@ -3083,6 +3134,21 @@ export const hydrationStatsSchema = z.object({
 });
 export type HydrationStats = z.infer<typeof hydrationStatsSchema>;
 
+/**
+ * What one block of the plan will take (RULES Y5b).
+ *
+ * A block is a part of the day, so its times belong to that part of the day:
+ * `period` is the half of the clock its picker offers and `maxTimes` is how
+ * many times it holds. Both are the server's (⚙ `hydration.*`) so they can
+ * be re-cut without a release; the app carries the same three blocks as its
+ * offline fallback.
+ */
+export const reminderSlotRuleSchema = z.object({
+  period: z.enum(['am', 'pm', 'any']),
+  maxTimes: z.number().int().min(1).max(100),
+});
+export type ReminderSlotRule = z.infer<typeof reminderSlotRuleSchema>;
+
 /** `GET/PUT /hydration/reminders`: the whole reminder plan (RULES Y5). */
 export const hydrationReminderPlanSchema = z.object({
   /** The master switch. */
@@ -3093,6 +3159,19 @@ export const hydrationReminderPlanSchema = z.object({
   vibration: z.boolean(),
   /** Weekday indices the plan repeats on, 0 = Monday. */
   repeatDays: z.array(z.number().int().min(0).max(6)),
+  /**
+   * What each block will take. Optional on the wire: a build installed
+   * before this existed never sees it, and one talking to a server that
+   * does not send it falls back to its own copy of the same three rules.
+   */
+  slots: z
+    .object({
+      morning: reminderSlotRuleSchema,
+      afternoon: reminderSlotRuleSchema,
+      evening: reminderSlotRuleSchema,
+      custom: reminderSlotRuleSchema,
+    })
+    .optional(),
 });
 export type HydrationReminderPlan = z.infer<typeof hydrationReminderPlanSchema>;
 

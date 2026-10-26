@@ -15,6 +15,11 @@ import { useToast } from '../../components/feedback';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { soundLabelFor } from '../../constants/reminderSounds';
+import {
+  clampTimeToSlot,
+  slotFullMessage,
+  slotPeriodNote,
+} from '../../constants/reminderSlots';
 import { useTip } from '../../hooks/useContent';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useReminderDelivery } from '../../hooks/useReminderDelivery';
@@ -34,6 +39,7 @@ import {
   useRemindersInSlot,
   useRemindersStore,
   useRepeatDays,
+  useSlotRules,
 } from '../../stores/remindersStore';
 import { useDailyWaterGoalMl } from '../../stores/settingsStore';
 import { useThemedStyles, type ThemeShape } from '../../theme';
@@ -43,9 +49,6 @@ const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
   });
-
-/** The time a picker opens on when the block has nothing to start from. */
-const DEFAULT_TIME = '08:00';
 
 /** Stable, so the focus hook does not re-run on every render. */
 const reportReminders = () => logReminderDebug('reminder screen opened');
@@ -119,6 +122,10 @@ export const HydrationReminderScreen = () => {
   const delivery = useReminderDelivery();
   const quietHours = useQuietHours();
   const toast = useToast();
+  // What each block will take: the server's rules where the plan carried
+  // them (⚙ `hydration.reminderSlotPeriods`, `maxRemindersPerSlot`), this
+  // build's where it did not — so a block can be re-cut from the panel.
+  const slotRules = useSlotRules();
 
   const setEnabled = useRemindersStore(s => s.setEnabled);
   const toggleReminder = useRemindersStore(s => s.toggleReminder);
@@ -128,13 +135,13 @@ export const HydrationReminderScreen = () => {
   const setVibration = useRemindersStore(s => s.setVibration);
   const toggleRepeatDay = useRemindersStore(s => s.toggleRepeatDay);
 
-  const repeatLabel = useMemo(
-    () => repeatLabelFor(repeatDays),
-    [repeatDays],
-  );
+  const repeatLabel = useMemo(() => repeatLabelFor(repeatDays), [repeatDays]);
 
   // The plan stores the sound's id; the row has to show its name.
-  const soundLabel = useMemo(() => soundLabelFor(sound, sounds), [sound, sounds]);
+  const soundLabel = useMemo(
+    () => soundLabelFor(sound, sounds),
+    [sound, sounds],
+  );
 
   const onOpenQuietHours = useCallback(
     () => navigation.navigate('NotificationSettings'),
@@ -151,23 +158,46 @@ export const HydrationReminderScreen = () => {
    * where the reminder is rather than at 08:00.
    */
   const [picker, setPicker] = useState<
-    { mode: 'add'; slot: ReminderSlot } | { mode: 'edit'; id: string; time: string } | null
+    | { mode: 'add'; slot: ReminderSlot }
+    | { mode: 'edit'; id: string; time: string; slot: ReminderSlot }
+    | null
   >(null);
   /** The custom time whose kebab was tapped. */
   const [menuId, setMenuId] = useState<string | null>(null);
 
-  const openPicker = useCallback(
-    (slot: ReminderSlot) => setPicker({ mode: 'add', slot }),
-    [],
-  );
-  const openCustomPicker = useCallback(
-    () => setPicker({ mode: 'add', slot: 'custom' }),
-    [],
-  );
   const closePicker = useCallback(() => setPicker(null), []);
 
   /** Every time in the plan, so an edit can be opened on the one it is for. */
   const reminders = useRemindersStore(s => s.plan?.reminders);
+
+  /**
+   * Adding a time to a block — or saying why it cannot take another.
+   *
+   * The block's chip reads "Full" at that point, so this is the second half
+   * of the same sentence rather than a surprise: a cap the user only meets
+   * as a control that does nothing is indistinguishable from a bug.
+   */
+  const openPicker = useCallback(
+    (slot: ReminderSlot) => {
+      const held = (reminders ?? []).filter(
+        reminder => reminder.slot === slot,
+      ).length;
+      if (held >= slotRules[slot].maxTimes) {
+        toast.show({
+          title: `${slotRules[slot].title} is full`,
+          message: slotFullMessage(slot, slotRules),
+          tone: 'warning',
+        });
+        return;
+      }
+      setPicker({ mode: 'add', slot });
+    },
+    [reminders, slotRules, toast],
+  );
+  const openCustomPicker = useCallback(
+    () => openPicker('custom'),
+    [openPicker],
+  );
 
   /**
    * A chip or a row held down: the same sheet, opened on that time.
@@ -180,7 +210,12 @@ export const HydrationReminderScreen = () => {
     (id: string) => {
       const reminder = reminders?.find(entry => entry.id === id);
       if (!reminder) return;
-      setPicker({ mode: 'edit', id, time: reminder.time });
+      setPicker({
+        mode: 'edit',
+        id,
+        time: reminder.time,
+        slot: reminder.slot,
+      });
     },
     [reminders],
   );
@@ -218,6 +253,23 @@ export const HydrationReminderScreen = () => {
     },
     [addReminder, editReminder, picker, warnIfQuiet],
   );
+
+  /**
+   * What the sheet offers, which is whatever the block it was opened for
+   * will take: morning is AM, afternoon and evening are PM, and a custom
+   * time is any hour of the day (`SLOT_RULES`).
+   *
+   * An edit opens on the reminder's own time, clamped into its block's half
+   * — a plan written before this rule may hold 1 PM in the morning block,
+   * and the editor showing 1 AM is how the user is told what it will now
+   * take. Adding opens on the block's own hour rather than 8 o'clock for
+   * every one of them, so the afternoon does not start the user at 8 PM.
+   */
+  const pickerSlot = picker?.slot ?? 'custom';
+  const pickerTime =
+    picker?.mode === 'edit'
+      ? clampTimeToSlot(picker.time, pickerSlot, slotRules)
+      : slotRules[pickerSlot].defaultTime;
 
   const closeMenu = useCallback(() => setMenuId(null), []);
   const handleEditFromMenu = useCallback(() => {
@@ -319,6 +371,8 @@ export const HydrationReminderScreen = () => {
                 allowed={delivery.allowed}
                 healthOn={delivery.healthOn}
                 exact={delivery.exact}
+                batteryLimited={delivery.batteryLimited}
+                hasPowerManager={delivery.hasPowerManager}
                 scheduled={delivery.scheduled}
                 quietCount={delivery.quietCount}
                 quietLabel={delivery.quietLabel}
@@ -327,6 +381,8 @@ export const HydrationReminderScreen = () => {
                 onEnableHealth={delivery.enableHealth}
                 onOpenExactAlarms={delivery.openExactAlarms}
                 onOpenQuietHours={onOpenQuietHours}
+                onOpenBattery={delivery.openBattery}
+                onOpenPowerManager={delivery.openPowerManager}
               />
             ) : null}
 
@@ -345,6 +401,7 @@ export const HydrationReminderScreen = () => {
               onPressAdd={openPicker}
               onEdit={openEditor}
               onPressViewAll={notImplemented}
+              rules={slotRules}
             />
 
             <CustomTimesCard
@@ -374,7 +431,9 @@ export const HydrationReminderScreen = () => {
 
       <TimePickerSheet
         visible={picker !== null}
-        value={picker?.mode === 'edit' ? picker.time : DEFAULT_TIME}
+        value={pickerTime}
+        period={slotRules[pickerSlot].period}
+        note={slotPeriodNote(pickerSlot, slotRules)}
         onSubmit={handleSubmitTime}
         onClose={closePicker}
         title={picker?.mode === 'edit' ? 'Change the time' : 'Add a reminder'}

@@ -1,4 +1,5 @@
 import { config } from '../../constants/config';
+import { SLOT_RULES } from '../../constants/reminderSlots';
 import {
   REFERRAL_REWARD_COINS,
   dietPlanRotation,
@@ -1854,6 +1855,7 @@ const MOCK_TIERS = [
     toRank: 1,
     coins: 5000,
     perks: ['Premium T-Shirt', 'Water Bottle'],
+    label: '1st Place',
   },
   {
     fromRank: 2,
@@ -1864,14 +1866,23 @@ const MOCK_TIERS = [
   { fromRank: 4, toRank: 10, coins: 1000, perks: ['Fitness Mat'] },
 ];
 
+/** What the mock serves as the board's own size (⚙ `leaderboard.boardSize`). */
+const MOCK_BOARD_SIZE = 50;
+
 export const mockLeaderboardApi: LeaderboardApi = {
-  async board() {
+  async board(page) {
     await delay();
     const today = mockToday();
     const [y, m, d] = today.split('-').map(Number);
     const weekday = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
     const start = mockStreakDayShift(today, -weekday);
     const end = mockStreakDayShift(start, 6);
+    const total = Math.min(seedLeaderboard.length, MOCK_BOARD_SIZE);
+    const offset = Math.min(Math.max(0, page?.offset ?? 0), MOCK_BOARD_SIZE);
+    const limit = Math.min(
+      Math.max(1, page?.limit ?? MOCK_BOARD_SIZE),
+      MOCK_BOARD_SIZE - offset || 1,
+    );
     return leaderboardBoardSchema.parse({
       period: {
         id: start,
@@ -1883,12 +1894,18 @@ export const mockLeaderboardApi: LeaderboardApi = {
         country: 'IN',
         status: 'live',
       },
-      entries: seedLeaderboard,
+      // Paged the way the server pages it: both clipped to the board's own
+      // size, so no request walks past the last place it holds.
+      entries: seedLeaderboard.slice(offset, offset + limit),
       // Outside the places the board lists, which is the case the full board
       // screen has to handle: the reader's own place is stated above the list
       // rather than found by scrolling it.
       me: { rank: 14, score: 1_240, coins: 0, percentile: 86 },
       ranked: 96,
+      offset,
+      limit,
+      total,
+      hasMore: offset + Math.min(limit, Math.max(0, total - offset)) < total,
     });
   },
   async history() {
@@ -1900,13 +1917,68 @@ export const mockLeaderboardApi: LeaderboardApi = {
       rewardCoinsEarned,
       rewardsWon,
     } = leaderboardHighlights;
+    // Four closed weeks, one of each outcome (D-90): the question the card
+    // answers is "did I get the coins", and a mock with only paid weeks would
+    // never show the three ways a week pays nothing.
+    const week = (ago: number) => {
+      const end = mockStreakDayShift(mockToday(), -ago);
+      return {
+        id: mockStreakDayShift(end, -6),
+        start: mockStreakDayShift(end, -6),
+        end,
+      };
+    };
     return leaderboardHistorySchema.parse({
       bestRank,
       bestRankAchievedOn,
       topTenFinishes,
       rewardCoinsEarned,
       rewardsWon,
-      periods: [],
+      rewardCoinsHeld: 3_000,
+      prizesRunning: true,
+      periods: [
+        {
+          ...week(7),
+          rank: 1,
+          score: 2_480,
+          coins: 5_000,
+          won: 5_000,
+          perks: ['Premium T-Shirt', 'Water Bottle'],
+          state: 'paid',
+          reason: '5,000 coins are in your wallet.',
+        },
+        {
+          ...week(14),
+          rank: 18,
+          score: 1_310,
+          coins: 0,
+          won: 0,
+          perks: [],
+          state: 'none',
+          reason: 'Only the top 10 places win coins — you finished 18.',
+        },
+        {
+          ...week(21),
+          rank: 2,
+          score: 2_240,
+          coins: 0,
+          won: 3_000,
+          perks: ['Premium T-Shirt', 'Fitness Mat'],
+          state: 'held',
+          reason:
+            'Place 2 pays 3,000 coins, and leaderboard prizes were not running when this week closed. Your place is on record.',
+        },
+        {
+          ...week(28),
+          rank: 7,
+          score: 1_980,
+          coins: 1_000,
+          won: 1_000,
+          perks: ['Fitness Mat'],
+          state: 'paid',
+          reason: '1,000 coins are in your wallet.',
+        },
+      ],
     });
   },
   async rules() {
@@ -1916,11 +1988,21 @@ export const mockLeaderboardApi: LeaderboardApi = {
       tiers: MOCK_TIERS.map(t => ({
         id: `rank-${t.fromRank}-${t.toRank}`,
         ...t,
+        // The operator's own label where the config carries one, the ranks
+        // otherwise — the server's own rule (⚙ `leaderboard.tiers[].label`).
         label:
-          t.fromRank === t.toRank
+          'label' in t && t.label
+            ? t.label
+            : t.fromRank === t.toRank
             ? `Rank ${t.fromRank}`
             : `Rank ${t.fromRank} – ${t.toRank}`,
       })),
+      // ⚙ `leaderboard.banner`, as the default config words it.
+      banner: {
+        kicker: 'Climb the leaderboard',
+        title: 'Win Amazing Rewards!',
+        subtitle: 'Perform. Compete. Earn.',
+      },
       howItWorks: [
         {
           title: 'Compete every week',
@@ -1968,6 +2050,28 @@ function mockDefaultPlan(): HydrationReminderPlan {
     reminders: times.flatMap(([slot, list]) =>
       list.map(time => ({ id: `${slot}-${time}`, time, slot, enabled: true })),
     ),
+    // What each block takes (RULES Y5b). The real server sends ⚙
+    // `hydration.reminderSlotPeriods` and `maxRemindersPerSlot`; the mock
+    // sends this build's own copy of the same three rules, so a screen
+    // driven by the mock behaves like one driven by a default config.
+    slots: {
+      morning: {
+        period: SLOT_RULES.morning.period,
+        maxTimes: SLOT_RULES.morning.maxTimes,
+      },
+      afternoon: {
+        period: SLOT_RULES.afternoon.period,
+        maxTimes: SLOT_RULES.afternoon.maxTimes,
+      },
+      evening: {
+        period: SLOT_RULES.evening.period,
+        maxTimes: SLOT_RULES.evening.maxTimes,
+      },
+      custom: {
+        period: SLOT_RULES.custom.period,
+        maxTimes: SLOT_RULES.custom.maxTimes,
+      },
+    },
   };
 }
 
