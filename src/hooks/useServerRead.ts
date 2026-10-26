@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { config } from '../constants/config';
 import { toApiError } from '../services/api/errors';
 import { mmkvStorage } from '../stores';
 import { useLastStepSyncAt } from '../stores/stepsStore';
@@ -35,6 +36,32 @@ interface Entry {
 const STORAGE_KEY = 'vokve.reads';
 
 /**
+ * The shape of the answers kept on disk.
+ *
+ * Stored with the blob and checked on the way in: an answer written by a
+ * different build is **dropped rather than handed back**. A cache is the one
+ * place in the app where yesterday's contract can reach today's code — the
+ * schemas are parsed on the way *in*, so a field added to a response gets
+ * its default on a fresh read and is simply *absent* from an answer written
+ * before it existed. A screen that renders that field then crashes on a
+ * payload nothing validated (`WeeklyResultsCard` did, on `perks.length`).
+ *
+ * The app's own version is the honest key for it: a contract change ships
+ * with a build, so answers written by an earlier one are from an earlier
+ * contract. The cost is one launch of spinners after an update, which is
+ * what a different contract deserves. `SHAPE` is bumped by hand for the
+ * other case — a contract that changed while the version did not, which is
+ * every day in development.
+ */
+const SHAPE = 1;
+const VERSION = `${config.appVersion}.${SHAPE}`;
+
+interface Stored {
+  version: string;
+  answers: Record<string, Entry>;
+}
+
+/**
  * Answers kept past the end of the process, so the app opens on figures
  * rather than on "Couldn't load" (D-80).
  *
@@ -66,27 +93,50 @@ const WRITE_DEBOUNCE_MS = 400;
 let answers: Map<string, Entry> | null = null;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 
-function cache(): Map<string, Entry> {
-  if (answers !== null) return answers;
-  answers = new Map();
+/**
+ * The stored blob as entries — or nothing, which is every answer to the
+ * question "can this be trusted?" except yes.
+ *
+ * Pulled out and exported because it is the whole of the version rule and
+ * the only part of this cache that can be asked about without a renderer: a
+ * blob from another build, the unversioned one an older build wrote, half a
+ * write, or a value somebody edited by hand all have to read as an empty
+ * cache rather than as a payload.
+ */
+export function entriesFromStored(
+  raw: string | null | undefined,
+): Map<string, Entry> {
+  const entries = new Map<string, Entry>();
   try {
-    const raw = mmkvStorage.getItem(STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (parsed !== null && typeof parsed === 'object') {
-      for (const [key, entry] of Object.entries(parsed as Record<string, unknown>)) {
-        if (
-          entry !== null &&
-          typeof entry === 'object' &&
-          typeof (entry as Entry).at === 'string'
-        ) {
-          answers.set(key, entry as Entry);
-        }
+    const blob = (raw ? JSON.parse(raw) : null) as Stored | null;
+    const stored =
+      blob !== null && typeof blob === 'object' && blob.version === VERSION
+        ? blob.answers
+        : null;
+    for (const [key, entry] of Object.entries(stored ?? {})) {
+      if (
+        entry !== null &&
+        typeof entry === 'object' &&
+        typeof (entry as Entry).at === 'string'
+      ) {
+        entries.set(key, entry as Entry);
       }
     }
   } catch (error) {
     // A half-written blob, a shape from an older build, no native module at
     // all: an unreadable cache is an empty one, never a failed launch.
     logger.warn('serverRead', 'Stored answers could not be read', error);
+  }
+  return entries;
+}
+
+function cache(): Map<string, Entry> {
+  if (answers !== null) return answers;
+  try {
+    answers = entriesFromStored(mmkvStorage.getItem(STORAGE_KEY));
+  } catch (error) {
+    logger.warn('serverRead', 'Stored answers could not be read', error);
+    answers = new Map();
   }
   return answers;
 }
@@ -101,7 +151,7 @@ function serialise(entries: Map<string, Entry>): string {
     const json = JSON.stringify(entry);
     if (json !== undefined && json.length <= MAX_ENTRY_BYTES) keep[key] = entry;
   }
-  return JSON.stringify(keep);
+  return JSON.stringify({ version: VERSION, answers: keep } satisfies Stored);
 }
 
 function scheduleWrite(): void {
@@ -161,13 +211,15 @@ export function useServerRead<T>(
   refreshOn?: unknown,
 ): Loaded<T> {
   const remembered = key === null ? undefined : cache().get(key);
-  const [state, setState] = useState<{ data: T | null; cachedAt: string | null; fresh: boolean }>(
-    () => ({
-      data: (remembered?.data as T | undefined) ?? null,
-      cachedAt: remembered?.at ?? null,
-      fresh: false,
-    }),
-  );
+  const [state, setState] = useState<{
+    data: T | null;
+    cachedAt: string | null;
+    fresh: boolean;
+  }>(() => ({
+    data: (remembered?.data as T | undefined) ?? null,
+    cachedAt: remembered?.at ?? null,
+    fresh: false,
+  }));
   const [loading, setLoading] = useState(key !== null && state.data === null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);

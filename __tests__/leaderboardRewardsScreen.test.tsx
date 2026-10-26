@@ -320,3 +320,43 @@ describe('LeaderboardRewardsScreen: the weeks', () => {
     expect(leaderboardApi.board).toHaveBeenCalledWith({ limit: 5 });
   });
 });
+
+/**
+ * The row the crash came from.
+ *
+ * `state`, `reason`, `won` and `perks` arrived with the weeks card, and the
+ * answers cache keeps a payload past the end of the process and hands it
+ * back as it was written — the schema defaults only ever ran on the way in.
+ * So the first launch of the new build read a week with none of those fields
+ * and `perks.length` took the screen down. The cache is stamped with the
+ * build that wrote it now, and the row reads defensively regardless: this is
+ * the second belt, and the one that would have kept the screen up.
+ */
+test('a week stored by an older build draws rather than crashes', async () => {
+  leaderboardApi.history.mockImplementationOnce(
+    async () =>
+      ({
+        ...(await mockLeaderboardApi.history()),
+        rewardCoinsHeld: undefined,
+        periods: [
+          // Exactly the old shape: a place, a score, what was credited, and
+          // nothing about what it won or why.
+          {
+            id: '2026-10-12',
+            start: '2026-10-12',
+            end: '2026-10-18',
+            rank: 1,
+            score: 2_480,
+            coins: 5_000,
+          },
+        ],
+      } as never),
+  );
+
+  const text = allText(await render());
+
+  expect(text).toContain('Your Weeks');
+  expect(text).toContain('#1');
+  // Nothing is claimed about an outcome the row was never told.
+  expect(text).toContain('No prize');
+});

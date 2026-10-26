@@ -35,12 +35,22 @@ const STATE_LABEL: Record<State, string> = {
  */
 const WeekRow = memo(({ week }: { week: Week }) => {
   const { colors } = useTheme();
+  // Read defensively, and not out of superstition: `state`, `reason`, `won`
+  // and `perks` arrived with this card, and a *stored* answer written by the
+  // build before it has none of them (`useServerRead` keeps answers past the
+  // end of the process and hands them back as they were written — the schema
+  // defaults only ever ran on the way in). A row from an older shape must
+  // read as a week with nothing to say about itself, never as a crash on the
+  // screen that was opened to read it.
+  const state: State = week.state ?? 'none';
+  const perks = week.perks ?? [];
+  const paid = week.state === 'paid' ? week.coins ?? 0 : 0;
   const tint =
-    week.state === 'paid'
+    state === 'paid'
       ? colors.success
-      : week.state === 'skipped'
+      : state === 'skipped'
       ? colors.destructive
-      : week.state === 'held'
+      : state === 'held'
       ? colors.warning
       : colors.textTertiary;
 
@@ -52,7 +62,7 @@ const WeekRow = memo(({ week }: { week: Week }) => {
       accessibilityLabel={`Week of ${formatDateRange(
         week.start,
         week.end,
-      )}, rank ${week.rank}. ${STATE_LABEL[week.state]}. ${week.reason}`}
+      )}, rank ${week.rank}. ${STATE_LABEL[state]}. ${week.reason ?? ''}`}
     >
       <HStack align="center" justify="between" gap="sm">
         <VStack flex={1} gap="xxs">
@@ -70,19 +80,21 @@ const WeekRow = memo(({ week }: { week: Week }) => {
             numberOfLines={1}
             style={{ color: tint }}
           >
-            {week.state === 'paid' ? formatCoins(week.coins) : formatCoins(0)}
+            {formatCoins(paid)}
           </AppText>
-          <Chip label={STATE_LABEL[week.state]} tint={tint} />
+          <Chip label={STATE_LABEL[state]} tint={tint} />
         </VStack>
       </HStack>
 
-      <AppText variant="micro" color="textSecondary">
-        {week.reason}
-      </AppText>
+      {week.reason ? (
+        <AppText variant="micro" color="textSecondary">
+          {week.reason}
+        </AppText>
+      ) : null}
 
-      {week.perks.length > 0 ? (
+      {perks.length > 0 ? (
         <AppText variant="miniMicro" color="textTertiary" numberOfLines={1}>
-          {`Gear: ${week.perks.join(' + ')}`}
+          {`Gear: ${perks.join(' + ')}`}
         </AppText>
       ) : null}
     </VStack>
@@ -145,7 +157,7 @@ export const WeeklyResultsCard = memo(({ history }: Props) => {
           </VStack>
         )}
 
-        {history.rewardCoinsHeld > 0 ? (
+        {(history.rewardCoinsHeld ?? 0) > 0 ? (
           <HStack align="center" gap="xs" style={styles.note}>
             <Icon as={Info} size="xs" tint={colors.warning} />
             <AppText

@@ -19,6 +19,7 @@ import React, { useEffect } from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import {
   clearServerReads,
+  entriesFromStored,
   useServerRead,
   type Loaded,
 } from '../src/hooks/useServerRead';
@@ -166,6 +167,67 @@ test('signing out takes the stored answers with it', async () => {
   clearServerReads();
   expect(getMMKV().getString(STORAGE_KEY) ?? null).toBeNull();
 
-  const after = await mount('day:2026-10-21', () => new Promise<Figures>(() => {}));
+  const after = await mount(
+    'day:2026-10-21',
+    () => new Promise<Figures>(() => {}),
+  );
   expect(after().data).toBeNull();
+});
+
+/**
+ * A cache is the one place yesterday's contract can reach today's code.
+ *
+ * The schemas are parsed on the way *in*, so a field added to a response
+ * gets its default on a fresh read and is simply **absent** from an answer
+ * written before it existed — and a screen that renders that field crashes
+ * on a payload nothing validated. `WeeklyResultsCard` did exactly that, on
+ * `perks.length`, against a stored answer from the build before it. So a
+ * blob is stamped with the build that wrote it, and only that build reads
+ * it back.
+ */
+describe('what the stored blob is allowed to be', () => {
+  const entry = { at: new Date().toISOString(), data: { steps: 4242 } };
+
+  /** What the hook itself writes, read back as entries. */
+  const roundTrip = async () => {
+    clearServerReads();
+    await mount('day:2026-10-26', jest.fn().mockResolvedValue({ steps: 4242 }));
+    await waitFor(500);
+    return getMMKV().getString(STORAGE_KEY) ?? null;
+  };
+
+  test('its own stamp reads back', async () => {
+    const written = await roundTrip();
+
+    expect(written).toContain('"version"');
+    expect([...entriesFromStored(written).keys()]).toEqual(['day:2026-10-26']);
+  });
+
+  test('another build’s stamp reads as nothing', async () => {
+    const blob = JSON.parse((await roundTrip()) ?? '{}') as {
+      answers: unknown;
+    };
+
+    // What a device holds the first time it opens a release whose contracts
+    // have moved: answers that parsed against the *old* schemas.
+    const foreign = JSON.stringify({
+      version: '0.9.0.1',
+      answers: blob.answers,
+    });
+
+    expect(entriesFromStored(foreign).size).toBe(0);
+  });
+
+  test('the unversioned shape — the one before this — reads as nothing', () => {
+    // Exactly what the build before the stamp left behind.
+    expect(
+      entriesFromStored(JSON.stringify({ 'day:2026-10-26': entry })).size,
+    ).toBe(0);
+  });
+
+  test('a half-written blob is an empty cache, not a failed launch', () => {
+    expect(entriesFromStored('{"version":').size).toBe(0);
+    expect(entriesFromStored(null).size).toBe(0);
+    expect(entriesFromStored('"a string"').size).toBe(0);
+  });
 });
