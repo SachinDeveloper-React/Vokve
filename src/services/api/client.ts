@@ -46,9 +46,13 @@ export function setOnUpgradeRequired(
  * imports it.
  */
 let requestHeadersProvider: () => Record<string, string> = () => ({});
-let deviceReregistrar: ((tokens: AuthTokens | null) => Promise<string | null>) | null = null;
+let deviceReregistrar:
+  | ((tokens: AuthTokens | null) => Promise<string | null>)
+  | null = null;
 
-export function setRequestHeadersProvider(provider: () => Record<string, string>): void {
+export function setRequestHeadersProvider(
+  provider: () => Record<string, string>,
+): void {
   requestHeadersProvider = provider;
 }
 
@@ -78,16 +82,30 @@ apiClient.interceptors.request.use(async requestConfig => {
 });
 
 /**
+ * What a refresh attempt settles on.
+ *
+ * The two ways it can come back empty are not the same thing and must not be
+ * treated as one. `refused: true` is the server saying this session is over —
+ * the refresh token revoked, expired or unknown — and the only outcome that
+ * ends it. `refused: false` is the app failing to ask: no connection, a
+ * timeout, a 5xx, or a captive portal answering with its own HTML. Signing
+ * somebody out for that is the same mistake as sending them to a connection
+ * screen with a day's steps on their phone (see `authStore`): the session is
+ * intact, and the next request that reaches the server will refresh it.
+ */
+type Refreshed = { tokens: AuthTokens } | { tokens: null; refused: boolean };
+
+/**
  * A single in-flight refresh shared by every request that got a 401. Without
  * this, an app that fires several requests on launch would run one refresh per
  * request, and all but one of the new refresh tokens would be invalidated.
  */
-let refreshPromise: Promise<AuthTokens | null> | null = null;
+let refreshPromise: Promise<Refreshed> | null = null;
 
-async function refreshTokens(): Promise<AuthTokens | null> {
+async function refreshTokens(): Promise<Refreshed> {
   const current = await secureStorage.readTokens();
   if (!current) {
-    return null;
+    return { tokens: null, refused: true };
   }
 
   try {
@@ -101,15 +119,22 @@ async function refreshTokens(): Promise<AuthTokens | null> {
 
     const parsed = authTokensSchema.safeParse(response.data);
     if (!parsed.success) {
+      // Something answered, but not the server: a portal's sign-in page, a
+      // proxy's error body. Nothing was refused.
       logger.error('api', 'Refresh response did not match schema');
-      return null;
+      return { tokens: null, refused: false };
     }
 
     await secureStorage.saveTokens(parsed.data);
-    return parsed.data;
+    return { tokens: parsed.data };
   } catch (error) {
-    logger.warn('api', 'Token refresh failed', error);
-    return null;
+    const failure = toApiError(error);
+    logger.warn('api', 'Token refresh failed', failure);
+    const refused =
+      failure.kind === 'unauthorized' ||
+      failure.kind === 'forbidden' ||
+      failure.kind === 'not_found';
+    return { tokens: null, refused };
   }
 }
 
@@ -143,7 +168,9 @@ apiClient.interceptors.response.use(
     ) {
       original._isRetryAfterDeviceRegister = true;
       const tokens = await secureStorage.readTokens();
-      const deviceId = deviceReregistrar ? await deviceReregistrar(tokens) : null;
+      const deviceId = deviceReregistrar
+        ? await deviceReregistrar(tokens)
+        : null;
       if (!deviceId) {
         throw apiError;
       }
@@ -154,17 +181,22 @@ apiClient.interceptors.response.use(
     // Expired access token: refresh once, then replay the original request.
     if (apiError.kind === 'unauthorized' && !original._isRetryAfterRefresh) {
       refreshPromise = refreshPromise ?? refreshTokens();
-      const tokens = await refreshPromise;
+      const refreshed = await refreshPromise;
       refreshPromise = null;
 
-      if (!tokens) {
-        await secureStorage.clearTokens();
-        onSessionExpired?.();
+      if (refreshed.tokens === null) {
+        // Only a refusal ends the session. A refresh that never reached the
+        // server leaves it alone: the caller gets its error, the screens keep
+        // the figures they are showing, and the next request tries again.
+        if (refreshed.refused) {
+          await secureStorage.clearTokens();
+          onSessionExpired?.();
+        }
         throw apiError;
       }
 
       original._isRetryAfterRefresh = true;
-      original.headers.Authorization = `Bearer ${tokens.accessToken}`;
+      original.headers.Authorization = `Bearer ${refreshed.tokens.accessToken}`;
       return apiClient(original);
     }
 

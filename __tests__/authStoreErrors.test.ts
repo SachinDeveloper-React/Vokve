@@ -40,6 +40,12 @@ const mockSecureStorage = {
   readTokens: jest.fn(),
   saveTokens: jest.fn().mockResolvedValue(undefined),
   clearTokens: jest.fn().mockResolvedValue(undefined),
+  // No snapshot of the member, so a session the server cannot confirm has
+  // nothing to open the app on — which is what these tests are about. The
+  // offline restore has its own file.
+  readUser: jest.fn().mockResolvedValue(null),
+  saveUser: jest.fn().mockResolvedValue(undefined),
+  clearUser: jest.fn().mockResolvedValue(undefined),
 };
 jest.mock('../src/services/secureStorage', () => ({ secureStorage: mockSecureStorage }));
 

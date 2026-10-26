@@ -69,6 +69,7 @@ import { UpgradeRequiredScreen } from '../screens/system/UpgradeRequiredScreen';
 import { UpdateSheet } from '../components/system/UpdateSheet';
 import { useUpgradeRequired } from '../stores/appStatusStore';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
+import { useSessionRecovery } from '../hooks/useSessionRecovery';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { usePermissionReporting } from '../hooks/usePermissionReporting';
 import { useDeviceHealthReporting } from '../hooks/useDeviceHealthReporting';
@@ -181,6 +182,10 @@ export const RootNavigator = () => {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // A session the app opened on its stored snapshot is asked about again the
+  // moment the phone can reach the server, whatever is on screen.
+  useSessionRecovery();
 
   // Step counting follows the session, not any one screen.
   useStepTrackingSession();

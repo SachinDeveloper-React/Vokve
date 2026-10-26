@@ -25,6 +25,7 @@ import { useCheckoutStore } from './checkoutStore';
 import { useCoinsStore } from './coinsStore';
 import { useNotificationSettingsStore } from './notificationSettingsStore';
 import { useNotificationsStore } from './notificationsStore';
+import { useOnboardingStore } from './onboardingStore';
 import { useOrdersStore } from './ordersStore';
 import { useReferralStore } from './referralStore';
 import { useSettingsStore } from './settingsStore';
@@ -39,10 +40,11 @@ import type { CompleteProfilePayload, SignUpPayload } from '../types/forms';
 import { logger } from '../utils/logger';
 
 /**
- * `unreachable` is a session that exists but could not be confirmed — the
- * tokens are there, the server was not. It is neither signed in (there is no
- * user to show) nor signed out (nothing has been revoked), and the root
- * navigator gives it a retry screen rather than either stack.
+ * `unreachable` is a session that exists, could not be confirmed, and has
+ * nothing to show for itself — the tokens are there, the server was not, and
+ * there is no stored snapshot of the member to draw the app around (see
+ * `isSessionUnconfirmed`). It is neither signed in nor signed out, and the
+ * root navigator gives it a retry screen rather than either stack.
  */
 export type AuthStatus =
   | 'idle'
@@ -73,6 +75,13 @@ interface AuthState {
    * once; cleared on sign-out. Never persisted — ten minutes is its life.
    */
   stepUpToken: string | null;
+  /**
+   * The session on screen was restored from the stored snapshot rather than
+   * confirmed by the server: the member is in the app, on their own figures,
+   * with the network down. `useSessionRecovery` asks again as soon as the
+   * phone can, and that answer either confirms the session or ends it.
+   */
+  isSessionUnconfirmed: boolean;
   /** Set while a sign-in / sign-up / verification request is in flight. */
   isSubmitting: boolean;
   error: ApiError | null;
@@ -151,10 +160,17 @@ interface AuthState {
 }
 
 /**
- * Session state is deliberately *not* persisted through MMKV — the tokens live
- * in the Keychain and the user object is re-fetched on launch. Persisting a
- * `user` to plain-text storage would leak profile data and let a stale record
- * outlive a revoked session.
+ * Session state is deliberately *not* persisted through MMKV — the tokens
+ * live in the Keychain and the user object is re-fetched on launch.
+ * Persisting a `user` to plain-text storage would leak profile data.
+ *
+ * The user *is* remembered, in the Keychain beside the tokens, and only as
+ * the launch fallback: a phone with no network cannot be told who is signed
+ * in, and an app that answers that with a retry screen has thrown away a
+ * day's steps it is holding on disk. Nothing reads the snapshot while the
+ * server can be reached, it is replaced on every confirmation, and it goes
+ * the moment a session ends — so it cannot outlive a revoked one by longer
+ * than it takes the phone to get a connection.
  */
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'idle',
@@ -162,6 +178,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   pendingVerification: null,
   pendingReset: null,
   stepUpToken: null,
+  isSessionUnconfirmed: false,
   isSavingAvatar: false,
   isSubmitting: false,
   error: null,
@@ -170,10 +187,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setNotice: notice => set({ notice }),
 
   hydrate: async () => {
-    // A retry from the connection screen stays `unreachable` — the splash
-    // would replace the screen the user is pressing a button on — and shows
-    // its progress through `isSubmitting` instead.
-    if (get().status === 'unreachable') {
+    // A launch shows the splash; anything else already has something on
+    // screen that the splash would replace — the connection screen the user
+    // is pressing a button on, or the whole app, when a session restored
+    // from the snapshot is being confirmed. Those show their progress
+    // through `isSubmitting` instead.
+    const resumed =
+      get().status === 'unreachable' || get().status === 'authenticated';
+    if (resumed) {
       set({ isSubmitting: true, error: null });
     } else {
       set({ status: 'hydrating' });
@@ -181,7 +202,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const tokens = await secureStorage.readTokens();
 
     if (!tokens) {
-      set({ status: 'signed_out', user: null, isSubmitting: false });
+      set({
+        status: 'signed_out',
+        user: null,
+        isSessionUnconfirmed: false,
+        isSubmitting: false,
+      });
+      // No session, so nothing to remember about it. `endSession` forgets
+      // the snapshot itself; this is for the tokens that went without it —
+      // cleared by a shape change, or by a build from before they were kept
+      // together.
+      await secureStorage.clearUser();
       // A service outlives the app that started it, so a phone signed out
       // before this fix shipped — or by anything that cleared the tokens
       // without going through `endSession` — can still be counting. Asking
@@ -195,7 +226,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // so the device is (re-)registered before the first real call.
       await registerDevice(tokens);
       const user = await userApi.me();
-      set({ status: 'authenticated', user, error: null, isSubmitting: false });
+      set({
+        status: 'authenticated',
+        user,
+        isSessionUnconfirmed: false,
+        error: null,
+        isSubmitting: false,
+      });
       hydrateUserCaches();
     } catch (error) {
       const apiError = toApiError(error);
@@ -210,7 +247,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // the tokens are worthless and should go. The server saying nothing —
       // no connection, a timeout, a 5xx — means nothing about the session,
       // and throwing the tokens away would sign a user out for being on a
-      // train. That case gets a retry screen instead.
+      // train. That case keeps the session and shows what the phone already
+      // has (below), or a retry screen when there is nothing to show.
       const rejected =
         apiError.kind === 'unauthorized' ||
         apiError.kind === 'forbidden' ||
@@ -223,9 +261,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ isSubmitting: false });
         return;
       }
+
+      // Nothing was refused, so the session stands — and if the member can
+      // be drawn from the snapshot, the app opens on them. Everything the
+      // step screens show is already on this phone: what the tracker has
+      // counted today, the days waiting in the sync queue, and the server's
+      // last answers in the read cache, each dated by `StaleFigures`. A
+      // retry screen in front of all of that is the app refusing to show a
+      // walk it is holding, which is the one thing it must never do.
+      const restored = await restorableSession();
+      if (restored) {
+        set({
+          status: 'authenticated',
+          user: restored,
+          isSessionUnconfirmed: true,
+          error: null,
+          isSubmitting: false,
+        });
+        logger.info(
+          'authStore',
+          'Session restored from the stored snapshot; the server will be asked again',
+        );
+        // The same caches as a confirmed session: each read fails back onto
+        // its own stored copy, and the figures are the ones that were there
+        // when the network went. The identities go with them, so a fault
+        // offline still arrives with an owner.
+        hydrateUserCaches();
+        return;
+      }
+
       set({
         status: 'unreachable',
         user: null,
+        isSessionUnconfirmed: false,
         error: apiError,
         isSubmitting: false,
       });
@@ -621,6 +689,50 @@ function resetUserCaches(): void {
   clearServerReads();
 }
 
+/**
+ * Keeps the Keychain's snapshot of the member in step with the session.
+ *
+ * Subscribed rather than written at each call site: the user is replaced by
+ * seven paths — launch, sign-in, verification, finishing the profile, a
+ * profile edit, the avatar and the silent refresh — and the one that forgot
+ * to save would be found months later, as somebody's old name on an offline
+ * launch. Fire-and-forget: nothing on screen waits for the Keychain.
+ *
+ * Only writes. Forgetting it belongs to `endSession`, which is the one place
+ * a session ends: a `user` going null is not an ending — `unreachable` does
+ * it too, and a phone that has just failed to reach the server is the last
+ * place that should throw away the member it is holding.
+ */
+useAuthStore.subscribe((state, previous) => {
+  if (state.user === null || state.user === previous.user) {
+    return;
+  }
+  const kept = state.user;
+  secureStorage.saveUser(kept).catch(error => {
+    logger.warn('authStore', 'The session user was not remembered', error);
+  });
+});
+
+/**
+ * The stored member, when opening the app on them is better than a retry
+ * screen — which is to say, when they can actually get anywhere.
+ *
+ * Two conditions, both about the gates in front of the app. A profile the
+ * server never stamped sends them into onboarding, and a phone that has not
+ * been through the permission screens stops at the step goal — and both of
+ * those end in a request that offline cannot make, so the member would be
+ * held in a flow that cannot finish. There the honest answer is the
+ * connection screen.
+ */
+async function restorableSession(): Promise<User | null> {
+  const remembered = await secureStorage.readUser();
+  if (!remembered || remembered.profileCompletedAt === null) {
+    return null;
+  }
+  const { permissionsDoneFor } = useOnboardingStore.getState();
+  return permissionsDoneFor.includes(remembered.id) ? remembered : null;
+}
+
 // When a refresh fails mid-session the API layer cannot import this store
 // without creating a cycle, so it calls back through this handler instead.
 setOnSessionExpired(() => {
@@ -691,11 +803,14 @@ async function endSession(notice: string | null): Promise<void> {
     pendingVerification: null,
     pendingReset: null,
     stepUpToken: null,
+    isSessionUnconfirmed: false,
     error: null,
     notice,
   });
-  // Nothing may use this session again, whatever happens below.
+  // Nothing may use this session again, whatever happens below — neither
+  // the tokens nor the snapshot the app would otherwise open on offline.
   await secureStorage.clearTokens();
+  await secureStorage.clearUser();
   // Nobody is left to count for, and a notification that says otherwise is
   // untrue. Never throws: counting that would not stop is not a reason to
   // keep somebody signed in.

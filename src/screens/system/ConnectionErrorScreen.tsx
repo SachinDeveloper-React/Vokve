@@ -17,13 +17,16 @@ const styles = StyleSheet.create({
 });
 
 /**
- * Shown when a session exists but could not be confirmed at launch — the
- * server was unreachable, timed out, or answered 5xx.
+ * Shown when a session exists, could not be confirmed at launch — the server
+ * was unreachable, timed out, or answered 5xx — and there is nothing stored
+ * to open the app on: no snapshot of the member, or one that would land them
+ * in onboarding or the permission screens, where every way forward is a
+ * request (`restorableSession`). A session that *can* be drawn offline never
+ * reaches this screen; it gets the app, on its last figures.
  *
- * Not the sign-in screen: the user did nothing wrong and their session is
- * intact. Not the app either: there is no user record to draw it with, and
- * guessing one would send them through onboarding. So: what happened, in the
- * server's own words when it had any, and the two honest ways out.
+ * Not the sign-in screen either: the user did nothing wrong and their session
+ * is intact. So: what happened, in the server's own words when it had any,
+ * and the two honest ways out.
  */
 export const ConnectionErrorScreen = () => {
   const { colors } = useTheme();
