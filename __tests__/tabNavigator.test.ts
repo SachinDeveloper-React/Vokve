@@ -4,14 +4,24 @@
  * never a React component. Picking the wrong one leaves a tab bar with no
  * icons at all, which nothing else in the suite would catch.
  *
+ * The Android bar's *look* is held here too. It is drawn to feel like the one
+ * UIKit gives iOS, and each of those four decisions is one line of style that
+ * a tidy-up could undo without anything looking broken.
+ *
  * @format
  */
 
-import { JsTabNavigator } from '../src/navigation/JsTabNavigator';
+import {
+  JsTabNavigator,
+  TabBarButton,
+  tabBarStyles,
+} from '../src/navigation/JsTabNavigator';
 import { NativeTabNavigator } from '../src/navigation/NativeTabNavigator';
 import { AccountNavigator } from '../src/navigation/AccountNavigator';
 import { MAIN_TABS } from '../src/navigation/tabs';
 import { pickTabNavigator, TabNavigator } from '../src/navigation/TabNavigator';
+import { typography } from '../src/theme';
+import type React from 'react';
 
 test('iOS gets the native UITabBarController navigator', () => {
   // This is what brings Liquid Glass and tabBarMinimizeBehavior on iOS 26.
@@ -64,4 +74,45 @@ test('every tab carries an icon for both bars', () => {
     expect(tab.sfSymbol).toMatch(/^[a-z0-9.]+$/);
     expect(tab.title.length).toBeGreaterThan(0);
   }
+});
+
+describe('the Android bar feels like iOS', () => {
+  test('a tab item dims instead of rippling', () => {
+    // The library's own button is a `PlatformPressable`, which on Android
+    // always draws a ripple and skips its own opacity animation — the single
+    // loudest thing marking the bar as Android.
+    const element = TabBarButton({
+      children: null,
+      style: { flex: 1 },
+      android_ripple: { borderless: true },
+    } as never) as React.ReactElement<{
+      android_ripple?: unknown;
+      style: (state: { pressed: boolean }) => unknown[];
+    }>;
+
+    expect(element.props.android_ripple).toBeUndefined();
+    expect(element.props.style({ pressed: false })).toEqual([
+      { flex: 1 },
+      false,
+    ]);
+    const [, pressed] = element.props.style({ pressed: true });
+    expect(pressed).toMatchObject({ opacity: expect.any(Number) });
+  });
+
+  test('the bar is a hairline, not a lifted Material surface', () => {
+    // The library sets `elevation: 8` on Android; a UITabBar has one hairline
+    // and no shadow.
+    expect(tabBarStyles.bar).toMatchObject({ elevation: 0, shadowOpacity: 0 });
+    expect(tabBarStyles.bar.borderTopWidth).toBeGreaterThan(0);
+  });
+
+  test('the label is a caption, not an upper-cased Material chip', () => {
+    // `typography.label` is 11pt, upper-cased and letter-spaced, which is
+    // Material's tab label to the letter. UIKit's is 10pt and sentence case.
+    expect(tabBarStyles.label.textTransform).toBe('none');
+    expect(tabBarStyles.label.fontSize).toBeLessThan(typography.label.fontSize);
+    expect(tabBarStyles.label.letterSpacing ?? 0).toBeLessThan(
+      typography.label.letterSpacing ?? 0,
+    );
+  });
 });
