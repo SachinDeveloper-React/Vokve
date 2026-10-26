@@ -48,6 +48,11 @@ function tierFor(config: AppConfig, rank: number): Tier | null {
 }
 
 function tierLabel(tier: Tier): string {
+  // The operator's own words where they wrote any (⚙ `leaderboard.tiers[].label`,
+  // D-89); the ranks themselves otherwise, which is correct and never what
+  // marketing would have said.
+  const written = tier.label?.trim();
+  if (written) return written;
   return tier.fromRank === tier.toRank ? `Rank ${tier.fromRank}` : `Rank ${tier.fromRank} – ${tier.toRank}`;
 }
 
@@ -107,8 +112,28 @@ const RANKED = { score: -1, scoreReachedAt: 1, userId: 1 } as const;
 
 // ─── Reads ─────────────────────────────────────────────────────────────────
 
-/** `GET /leaderboard`: this week's board for the caller's country, the top of it, and the caller's place. */
-export async function getBoard(userId: string, now = new Date()): Promise<LeaderboardBoard> {
+export interface BoardPage {
+  /** How many places to skip. Clipped to the board's own size. */
+  offset?: number;
+  /** How many to serve. Clipped to the board's own size. */
+  limit?: number;
+}
+
+/**
+ * `GET /leaderboard`: this week's board for the caller's country, a page of
+ * it, and the caller's place.
+ *
+ * **The board is the top ⚙ `leaderboard.boardSize` places and nothing
+ * further** (L2b): ranking the whole country would be a list nobody scrolls
+ * and a query that grows with the member count, and the places that pay are
+ * all inside it. `ranked` says how many are scoring beyond the page so the
+ * app never has to pretend the list is everyone.
+ *
+ * Paged within that: `offset` and `limit` are both clipped to the board, so
+ * no request can walk past place 50 however it is asked. A call with neither
+ * gets the whole board, which is what an installed build does (X2).
+ */
+export async function getBoard(userId: string, page: BoardPage = {}, now = new Date()): Promise<LeaderboardBoard> {
   const config = await getConfig();
   const me = await UserModel.findById(userId, { country: 1 }).lean();
   const country = me?.country ?? config.locale.country;
@@ -116,8 +141,14 @@ export async function getBoard(userId: string, now = new Date()): Promise<Leader
   const week = weekOf(localDayOf(now, zone));
   const scored = { periodId: week.id, country, score: { $gt: 0 } };
 
+  const size = config.leaderboard.boardSize;
+  // Clipped rather than refused: a page past the end of the board is an app
+  // asking for one more page than there is, and an empty page is the answer.
+  const offset = Math.min(Math.max(0, Math.trunc(page.offset ?? 0)), size);
+  const limit = Math.min(Math.max(1, Math.trunc(page.limit ?? size)), size - offset || 1);
+
   const [top, ranked, mine] = await Promise.all([
-    LeaderboardScoreModel.find(scored).sort(RANKED).limit(config.leaderboard.boardSize).lean(),
+    LeaderboardScoreModel.find(scored).sort(RANKED).skip(offset).limit(limit).lean(),
     LeaderboardScoreModel.countDocuments(scored),
     LeaderboardScoreModel.findById(`${week.id}:${country}:${userId}`).lean(),
   ]);
@@ -128,7 +159,7 @@ export async function getBoard(userId: string, now = new Date()): Promise<Leader
   const location = countryNameOf(config, country);
 
   const entries = top.map((row, index) => {
-    const rank = index + 1;
+    const rank = offset + index + 1;
     const tier = tierFor(config, rank);
     const person = people.get(row.userId);
     return {
@@ -175,42 +206,144 @@ export async function getBoard(userId: string, now = new Date()): Promise<Leader
     entries,
     me: mePlace,
     ranked,
+    offset,
+    limit,
+    /** The board's own length: everyone scoring, up to its size. */
+    total: Math.min(ranked, size),
+    /** Whether another page of the board exists above the member's request. */
+    hasMore: offset + entries.length < Math.min(ranked, size),
   });
 }
 
-/** `GET /leaderboard/history`: the caller's record over closed weeks, from the frozen results (L6). */
+/** How a closed week ended for one member (D-90). */
+type Outcome = 'paid' | 'held' | 'skipped' | 'none';
+
+function outcomeOf(row: { coins: number; granted?: number | null; excluded?: boolean }): Outcome {
+  if (row.excluded) return 'skipped';
+  if ((row.granted ?? 0) > 0) return 'paid';
+  // A place that pays, and nothing credited: prizes were not running when
+  // the week closed (⚙ `coins.steps.enabled`, D-46). Not a promise — nothing
+  // is paid retroactively.
+  if (row.coins > 0) return 'held';
+  return 'none';
+}
+
+/**
+ * `GET /leaderboard/history`: the caller's record over closed weeks, from
+ * the frozen results (L6).
+ *
+ * Every week carries **what it won, what was paid, and why those differ**
+ * (D-90). A zero against a place that pays is the one figure a member cannot
+ * explain to themselves, and the three reasons it can be zero — prizes not
+ * running, a place under review, a place below the ladder — are not
+ * interchangeable. The words are the operator's (⚙ `leaderboard.outcomes`).
+ */
 export async function getHistory(userId: string): Promise<LeaderboardHistory> {
+  const config = await getConfig();
   const results = await LeaderboardResultModel.find({ userId }).sort({ periodId: -1 }).lean();
   const best = results.reduce<(typeof results)[number] | null>(
     (top, row) => (top === null || row.rank < top.rank || (row.rank === top.rank && row.periodId < top.periodId) ? row : top),
     null,
   );
+  const lastPaid = Math.max(0, ...config.leaderboard.tiers.map(t => t.toRank));
+
   return leaderboardHistorySchema.parse({
     bestRank: best?.rank ?? null,
     bestRankAchievedOn: best?.end ?? null,
     topTenFinishes: results.filter(r => r.rank <= 10 && !r.excluded).length,
     rewardCoinsEarned: results.reduce((sum, r) => sum + (r.granted ?? 0), 0),
     rewardsWon: results.filter(r => !r.excluded && r.perks.length > 0).length,
-    periods: results.slice(0, 12).map(r => ({ id: r.periodId, start: r.start, end: r.end, rank: r.rank, score: r.score, coins: r.granted ?? 0 })),
+    rewardCoinsHeld: results.reduce(
+      (sum, r) => sum + (outcomeOf(r) === 'held' ? r.coins : 0),
+      0,
+    ),
+    prizesRunning: config.coins.steps.enabled,
+    periods: results.slice(0, 12).map(r => {
+      const state = outcomeOf(r);
+      return {
+        id: r.periodId,
+        start: r.start,
+        end: r.end,
+        rank: r.rank,
+        score: r.score,
+        coins: r.granted ?? 0,
+        won: r.coins,
+        perks: r.perks ?? [],
+        state,
+        reason: fill(config.leaderboard.outcomes[state] ?? '', {
+          coins: fmt(state === 'paid' ? r.granted ?? 0 : r.coins),
+          rank: fmt(r.rank),
+          perks: (r.perks ?? []).join(' + '),
+          lastPaid: fmt(lastPaid),
+          week: r.end,
+        }),
+      };
+    }),
   });
+}
+
+/**
+ * Every rung as a sentence — "Place 1 takes 5,000 coins and a T-Shirt + a
+ * Bottle; places 2–3 take 3,000 coins…".
+ *
+ * Built rather than written because it is the one string that is *only* the
+ * figures: an operator who changes a prize would otherwise have to change
+ * the sentence about it too, and the two would drift apart the first time
+ * somebody forgot.
+ */
+function prizeSentence(tiers: readonly Tier[]): string {
+  const lines = tiers.map((tier, index) => {
+    const who = tier.fromRank === tier.toRank ? `place ${tier.fromRank}` : `places ${tier.fromRank}–${tier.toRank}`;
+    const gear = tier.perks.length > 0 ? ` and ${tier.perks.join(' + ')}` : '';
+    const line = `${who} ${tier.fromRank === tier.toRank ? 'takes' : 'take'} ${fmt(tier.coins)} coins${gear}`;
+    return index === 0 ? line.charAt(0).toUpperCase() + line.slice(1) : line;
+  });
+  return lines.join('; ');
+}
+
+/**
+ * The operator's words with this reader's figures in them (D-89).
+ *
+ * A placeholder nothing fills is left alone rather than blanked: a typo
+ * should read as a typo, not as a missing prize.
+ */
+function fill(text: string, values: Record<string, string>): string {
+  return text.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole);
 }
 
 /** `GET /leaderboard/reward-tiers`: the prizes and the rules, worded from the config in force. */
 export async function getRules(userId: string): Promise<LeaderboardRules> {
   const config = await getConfig();
   const me = await UserModel.findById(userId, { country: 1 }).lean();
-  const country = me?.country ?? config.locale.country;
+  return rulesFor(config, me?.country ?? config.locale.country);
+}
+
+/**
+ * The same answer for a country rather than a member.
+ *
+ * Split out for the operator panel, which has to be able to show *exactly*
+ * what the app will say for a board (D-89): the copy carries placeholders
+ * filled in per reader, so a preview written anywhere else would be a second
+ * implementation of the one thing the page exists to get right.
+ */
+export function rulesFor(config: AppConfig, country: string): LeaderboardRules {
   const scope = countryNameOf(config, country);
   const { stepsPerPoint, perWorkout, perChallenge } = config.leaderboard.score;
   const tiers = config.leaderboard.tiers;
   const lastPaid = Math.max(0, ...tiers.map(t => t.toRank));
 
-  const prizeLines = tiers.map((tier, index) => {
-    const who = tier.fromRank === tier.toRank ? `place ${tier.fromRank}` : `places ${tier.fromRank}–${tier.toRank}`;
-    const gear = tier.perks.length > 0 ? ` and ${tier.perks.join(' + ')}` : '';
-    const line = `${who} ${tier.fromRank === tier.toRank ? 'takes' : 'take'} ${fmt(tier.coins)} coins${gear}`;
-    return index === 0 ? line.charAt(0).toUpperCase() + line.slice(1) : line;
-  });
+  // What every string on the screen may ask for. One map, so the panel's
+  // preview and the app's copy can never be filled from two different sets.
+  const values: Record<string, string> = {
+    scope,
+    stepsPerPoint: fmt(stepsPerPoint),
+    perWorkout: fmt(perWorkout),
+    perChallenge: fmt(perChallenge),
+    lastPaid: fmt(lastPaid),
+    tierCount: fmt(tiers.length),
+    prizes: prizeSentence(tiers),
+  };
+  const words = config.leaderboard;
 
   return leaderboardRulesSchema.parse({
     scope,
@@ -218,31 +351,23 @@ export async function getRules(userId: string): Promise<LeaderboardRules> {
       id: `rank-${tier.fromRank}-${tier.toRank}`,
       fromRank: tier.fromRank,
       toRank: tier.toRank,
-      label: tierLabel(tier),
+      label: fill(tierLabel(tier), values),
       coins: tier.coins,
       perks: tier.perks,
     })),
-    howItWorks: [
-      {
-        title: 'Compete every week',
-        detail: `Verified steps, workouts and completed challenges all count: a point for every ${fmt(stepsPerPoint)} steps, ${fmt(perWorkout)} for a workout and ${fmt(perChallenge)} for a challenge. The week runs Monday to Sunday.`,
-      },
-      {
-        title: 'Climb your country board',
-        detail: `You are ranked against everyone in ${scope}, so a place is won against people in the same week as you. A tie goes to whoever reached the score first.`,
-      },
-      {
-        title: `Finish in the top ${lastPaid}`,
-        detail: `${prizeLines.join('; ')}.`,
-      },
-      {
-        title: 'Rewards land on Monday',
-        detail: 'Coins are credited to your wallet automatically once the week closes. We will be in touch about any gear.',
-      },
-    ],
-    note: 'Rewards are given every week based on leaderboard ranking.',
+    banner: {
+      kicker: fill(words.banner.kicker, values),
+      title: fill(words.banner.title, values),
+      subtitle: fill(words.banner.subtitle, values),
+    },
+    howItWorks: words.howItWorks.map(step => ({
+      title: fill(step.title, values),
+      detail: fill(step.detail, values),
+    })),
+    note: fill(words.note, values),
   });
 }
+
 
 // ─── Close and pay (RULES L6, L9, L10) ─────────────────────────────────────
 
@@ -326,9 +451,21 @@ async function closeWeek(country: string, week: { id: string; start: IsoDate; en
       userId: row.userId,
       topic: 'reward',
       title: `You finished #${rank} on the ${countryNameOf(config, country)} board! 🏆`,
-      message: granted > 0
-        ? `${fmt(granted)} coins are in your wallet${tier.perks.length > 0 ? `, and ${tier.perks.join(' + ')} are on the way` : ''}.`
-        : 'Leaderboard prizes start soon — your place is on record.',
+      // The same words the week's own row will carry in the history
+      // (⚙ `leaderboard.outcomes`, D-90), so the push and the screen cannot
+      // tell a member two different stories about one week. The unpaid case
+      // is deliberately not "coming soon": nothing is paid retroactively.
+      message:
+        granted > 0
+          ? `${fill(config.leaderboard.outcomes.paid, { coins: fmt(granted), rank: fmt(rank), perks: tier.perks.join(' + '), week: week.end })}${
+              tier.perks.length > 0 ? ` ${tier.perks.join(' + ')} are on the way.` : ''
+            }`
+          : fill(config.leaderboard.outcomes.held, {
+              coins: fmt(tier.coins),
+              rank: fmt(rank),
+              perks: tier.perks.join(' + '),
+              week: week.end,
+            }),
       dedupeKey: `leaderboard:${resultId}`,
       now,
     }).catch(err => logger.warn({ err, userId: row.userId }, 'leaderboard.notify_failed'));

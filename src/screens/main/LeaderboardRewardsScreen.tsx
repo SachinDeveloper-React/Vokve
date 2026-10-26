@@ -14,6 +14,7 @@ import {
   RewardTiersCard,
   toRewardTiers,
 } from '../../components/leaderboard/RewardTiersCard';
+import { WeeklyResultsCard } from '../../components/leaderboard/WeeklyResultsCard';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import {
@@ -29,6 +30,9 @@ const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
   });
+
+/** How many places the card under the prize table shows. */
+const TOP_ON_CARD = 5;
 
 /**
  * The leaderboard's reward side: what each place pays, who is holding those
@@ -55,13 +59,16 @@ export const LeaderboardRewardsScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
-  const { params } = useRoute<RootStackScreenProps<'LeaderboardRewards'>['route']>();
+  const { params } =
+    useRoute<RootStackScreenProps<'LeaderboardRewards'>['route']>();
   const coins = useCoinBalance();
 
   const [tab, setTab] = useState<LeaderboardTab>(params?.tab ?? 'rewards');
 
   const rules = useLeaderboardRules();
-  const board = useLeaderboardBoard();
+  // Five places, not fifty: this card illustrates the prize table above it,
+  // and the full board is a tap away (`LeaderboardBoardScreen`).
+  const board = useLeaderboardBoard(TOP_ON_CARD);
   const history = useLeaderboardHistory();
 
   const tiers = useMemo(
@@ -69,7 +76,10 @@ export const LeaderboardRewardsScreen = () => {
     [rules.data],
   );
   // The card is a glance at who is winning; the rest is behind "View Full".
-  const top = useMemo(() => board.data?.entries.slice(0, 5) ?? [], [board.data]);
+  const top = useMemo(
+    () => board.data?.entries.slice(0, TOP_ON_CARD) ?? [],
+    [board.data],
+  );
 
   // A pull asks all three again; each card shows its own answer as it lands.
   const { reload: reloadRules } = rules;
@@ -110,7 +120,9 @@ export const LeaderboardRewardsScreen = () => {
       >
         <LeaderboardHeader coins={coins} onPressBack={onPressBack} />
 
-        <LeaderboardHeroBanner />
+        {/* The server's words where the read has landed; this build's until
+            then (⚙ `leaderboard.banner`). */}
+        <LeaderboardHeroBanner banner={rules.data?.banner} />
 
         <LeaderboardTabs value={tab} onChange={setTab} />
 
@@ -141,6 +153,8 @@ export const LeaderboardRewardsScreen = () => {
                 onRetry={board.reload}
               />
             )}
+
+            {history.data ? <WeeklyResultsCard history={history.data} /> : null}
 
             {history.data ? (
               <BestRankingsCard

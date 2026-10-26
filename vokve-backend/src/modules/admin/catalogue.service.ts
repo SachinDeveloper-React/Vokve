@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
-import { Errors } from '../../lib/errors.js';
+import { ApiError, Errors } from '../../lib/errors.js';
 import { shopBadgeSchema } from '../../contracts/index.js';
 import { CartModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel, WishlistModel } from '../commerce/models.js';
 import { UserModel } from '../identity/models.js';
@@ -87,6 +87,156 @@ export type ItemBody = z.infer<typeof itemBody>;
 /** Everything but the id, and every field optional: a patch. */
 export const itemPatch = itemBody.partial().omit({ id: true }).strict();
 export type ItemPatch = z.infer<typeof itemPatch>;
+
+/**
+ * One row of an imported sheet.
+ *
+ * The same item as `itemBody` with two differences, both of them about a
+ * spreadsheet being a spreadsheet:
+ *
+ *  - **the slug is optional.** Nobody types slugs into a column; it is
+ *    derived from the title when it is missing, which is also what makes
+ *    re-importing the same sheet correct the rows it created last time
+ *    rather than adding a second copy of each.
+ *  - **`line` travels with the row**, so a refusal can name the line in the
+ *    operator's own file instead of an index into an array they never saw.
+ */
+export const itemImportRow = itemBody
+  .omit({ id: true })
+  .extend({
+    id: z.string().trim().regex(/^[a-z0-9][a-z0-9-]{1,48}$/, 'A slug looks like travel-bottle').optional(),
+    line: z.number().int().min(1).max(100_000).optional(),
+  })
+  .strict();
+export type ItemImportRow = z.infer<typeof itemImportRow>;
+
+export interface ItemImportResult {
+  dryRun: boolean;
+  created: number;
+  updated: number;
+  /** Rows the sheet named twice; the last one wins. */
+  duplicates: number;
+  failed: { line: number | null; title: string; reason: string }[];
+  /** The slugs written, for the audit trail and the panel's confirmation. */
+  ids: string[];
+}
+
+/**
+ * A title as a slug: `Travel Bottle 750ml` → `travel-bottle-750ml`.
+ *
+ * Deterministic on purpose — it is the key that makes an import idempotent
+ * — and clipped to the 49 characters the slug pattern allows.
+ */
+export function slugOfTitle(title: string): string {
+  return title
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 49)
+    .replace(/-+$/g, '');
+}
+
+/** What went wrong with one row, in words an operator can act on. */
+function reasonOf(error: unknown): string {
+  if (error instanceof ApiError) {
+    const details = error.details ?? {};
+    const said = Object.values(details)
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ');
+    return said || error.message;
+  }
+  return error instanceof Error && error.message ? error.message : 'Refused.';
+}
+
+/**
+ * A spreadsheet's worth of products, matched by slug.
+ *
+ * JSON rather than a file upload, the same as the food library's import
+ * (RULES N8): the panel reads the `.xlsx`, maps its columns and sends rows,
+ * so this stays the same JSON surface as every other admin route and can be
+ * driven by a script just as well as by a dialog.
+ *
+ * `dryRun` is the half that matters. A sheet's columns are whatever somebody
+ * typed, and a catalogue is the one collection where a bad import is visible
+ * to every member at once — so the panel asks what *would* happen, shows it,
+ * and only writes on a second press. Every row goes through `saveItem`, so
+ * an import cannot write anything a typed-in form could not: the shelf has
+ * to exist, the slug has to be a slug, the price has to be paise above zero,
+ * and a row that fails is skipped by itself rather than taking the sheet
+ * down with it.
+ *
+ * `data` is deliberately not returned. Two thousand catalogue items with
+ * their stock and shelves is a response nobody reads; the counts, the
+ * skipped lines and the slugs written are what the panel shows.
+ */
+export async function importItems(
+  actor: string,
+  rows: ItemImportRow[],
+  options: { dryRun?: boolean } = {},
+): Promise<ItemImportResult> {
+  const dryRun = options.dryRun === true;
+  const existing = await ShopItemModel.find({}, { _id: 1 }).lean<{ _id: string }[]>();
+  const known = new Set(existing.map(row => row._id));
+
+  const failed: ItemImportResult['failed'] = [];
+  const ids: string[] = [];
+  let created = 0;
+  let updated = 0;
+  let duplicates = 0;
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const { line = null, ...item } = row;
+    const title = item.title.trim();
+    const id = item.id ?? slugOfTitle(title);
+    if (!/^[a-z0-9][a-z0-9-]{1,48}$/.test(id)) {
+      failed.push({
+        line,
+        title,
+        reason: `“${title}” does not make a slug — add an id column with something like travel-bottle.`,
+      });
+      continue;
+    }
+    if (seen.has(id)) duplicates += 1;
+    seen.add(id);
+
+    try {
+      if (dryRun) {
+        // The shelf is checked even on a dry run: it is the refusal an
+        // operator is most likely to hit, and finding out on the second
+        // press would defeat the point of the first.
+        await assertShelf(item.category, item.subcategory ?? null);
+        if (known.has(id)) updated += 1;
+        else created += 1;
+        continue;
+      }
+      const result = await saveItem(actor, { ...item, id, title });
+      if (result.created) created += 1;
+      else updated += 1;
+      // A sheet that names the same product twice is one product: the
+      // second row corrects the first rather than adding a twin.
+      known.add(id);
+      ids.push(id);
+    } catch (error) {
+      failed.push({ line, title, reason: reasonOf(error) });
+    }
+  }
+
+  if (!dryRun) {
+    await AuditLogModel.create({
+      actorType: 'admin',
+      actorId: actor,
+      action: 'shop.items_imported',
+      subjectType: 'shop_item',
+      subjectId: 'import',
+      before: null,
+      after: { created, updated, duplicates, failed: failed.length, ids: ids.slice(0, 50) },
+    });
+  }
+
+  return { dryRun, created, updated, duplicates, failed, ids };
+}
 
 export const catalogueQuery = z.object({
   q: z.string().max(120).default(''),

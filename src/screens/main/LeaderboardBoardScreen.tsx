@@ -1,11 +1,12 @@
 import React, { Fragment, useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Trophy } from 'lucide-react-native';
+import { ChevronDown, Trophy } from 'lucide-react-native';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { Divider } from '../../components/layout/Divider';
 import { HStack, VStack } from '../../components/layout/Stack';
 import { Icon } from '../../components/media/Icon';
+import { Pressable } from '../../components/form/Pressable';
 import { LeaderboardEntryRow } from '../../components/leaderboard/LeaderboardEntryRow';
 import { MyPlaceCard } from '../../components/leaderboard/MyPlaceCard';
 import { AppText } from '../../components/ui/AppText';
@@ -36,15 +37,26 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * answers "who is around me", and a member in the eighties would have to
  * scroll past everyone ahead of them to get the first answer from the second.
  *
- * It does not page. The server serves the top ⚙ `leaderboard.boardSize`
- * places and no cursor, so this screen shows exactly what it is given and says
- * how many are ranked beyond it rather than pretending the list is everyone.
+ * It pages. The board itself is the top ⚙ `leaderboard.boardSize` places —
+ * ranking a whole country would be a list nobody scrolls, and every place
+ * that pays is inside it — so this asks for a page at a time and says how
+ * many are ranked beyond what it holds rather than pretending the list is
+ * everyone. "Show more" asks for the next page; the server clips the request
+ * to the board, so the button runs out exactly where the board does.
  */
+/** How many places one page of the board holds. */
+const PAGE = 20;
+
 export const LeaderboardBoardScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
-  const board = useLeaderboardBoard();
+  // Pages are asked for by growing the number of places wanted, so the list
+  // on screen is always one answer rather than several stitched together —
+  // which is what keeps a refresh from showing two different weeks at once.
+  const [pages, setPages] = useState(1);
+  const board = useLeaderboardBoard(PAGE * pages);
+  const showMore = useCallback(() => setPages(current => current + 1), []);
 
   const [refreshing, setRefreshing] = useState(false);
   const { reload } = board;
@@ -131,9 +143,30 @@ export const LeaderboardBoardScreen = () => {
                   </VStack>
                 )}
 
+                {board.data.hasMore ? (
+                  <Pressable
+                    onPress={showMore}
+                    feedback="opacity"
+                    accessibilityRole="button"
+                    accessibilityLabel="Show more places"
+                  >
+                    <HStack align="center" justify="center" gap="xs" py="sm">
+                      <AppText
+                        variant="micro"
+                        style={{ color: colors.primary }}
+                      >
+                        {board.loading ? 'Loading…' : 'Show more'}
+                      </AppText>
+                      <Icon as={ChevronDown} size="xs" tint={colors.primary} />
+                    </HStack>
+                  </Pressable>
+                ) : null}
+
                 {beyond > 0 ? (
                   <AppText variant="micro" color="textTertiary" center>
-                    {`${formatGrouped(beyond)} more ranked below the places shown`}
+                    {`${formatGrouped(
+                      beyond,
+                    )} more ranked below the places shown`}
                   </AppText>
                 ) : null}
               </VStack>

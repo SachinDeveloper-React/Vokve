@@ -10,3 +10,4 @@ export { LeaderboardEntryRow } from './LeaderboardEntryRow';
 export { BestRankingsCard } from './BestRankingsCard';
 export { RankingStatTile } from './RankingStatTile';
 export { LeaderboardHowItWorks } from './LeaderboardHowItWorks';
+export { WeeklyResultsCard } from './WeeklyResultsCard';

@@ -272,7 +272,9 @@ const realTelemetryApi: TelemetryApi = {
   sendEvents: events =>
     request(eventIntakeSchema, client => client.post('/events', { events })),
   reportErrors: errors =>
-    request(appErrorIntakeSchema, client => client.post('/me/errors', { errors })),
+    request(appErrorIntakeSchema, client =>
+      client.post('/me/errors', { errors }),
+    ),
   reportDeviceHealth: report =>
     request(deviceHealthSnapshotSchema, client =>
       client.put('/me/device-health', report),
@@ -683,8 +685,12 @@ const realChallengeApi: ChallengeApi = {
 };
 
 const realLeaderboardApi: LeaderboardApi = {
-  board: () =>
-    request(leaderboardBoardSchema, client => client.get('/leaderboard')),
+  board: page =>
+    request(leaderboardBoardSchema, client =>
+      client.get('/leaderboard', {
+        params: { offset: page?.offset, limit: page?.limit },
+      }),
+    ),
   history: () =>
     request(leaderboardHistorySchema, client =>
       client.get('/leaderboard/history'),
@@ -807,7 +813,9 @@ const realNutritionApi: NutritionApi = {
       client.get('/diet-plan/days', { params: { from, to } }),
     ),
   dietPlans: () =>
-    request(z.array(dietPlanSummarySchema), client => client.get('/diet-plans')),
+    request(z.array(dietPlanSummarySchema), client =>
+      client.get('/diet-plans'),
+    ),
   dietPlan: id =>
     request(dietPlanDetailSchema, client =>
       client.get(`/diet-plans/${encodeURIComponent(id)}`),
@@ -1081,13 +1089,14 @@ export const streakApi: StreakApi = {
 
 export const challengeApi: ChallengeApi = {
   board: date => pick(mockChallengeApi, realChallengeApi).board(date),
-  detail: (id, date) => pick(mockChallengeApi, realChallengeApi).detail(id, date),
+  detail: (id, date) =>
+    pick(mockChallengeApi, realChallengeApi).detail(id, date),
   achievements: () => pick(mockChallengeApi, realChallengeApi).achievements(),
   achievement: id => pick(mockChallengeApi, realChallengeApi).achievement(id),
 };
 
 export const leaderboardApi: LeaderboardApi = {
-  board: () => pick(mockLeaderboardApi, realLeaderboardApi).board(),
+  board: page => pick(mockLeaderboardApi, realLeaderboardApi).board(page),
   history: () => pick(mockLeaderboardApi, realLeaderboardApi).history(),
   rules: () => pick(mockLeaderboardApi, realLeaderboardApi).rules(),
 };

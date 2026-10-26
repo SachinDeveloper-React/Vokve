@@ -18,7 +18,9 @@ import {
   catalogueQuery,
   deleteItem,
   getCatalogueItem,
+  importItems,
   itemBody,
+  itemImportRow,
   itemInsight,
   itemPatch,
   listCatalogue,
@@ -179,6 +181,18 @@ import {
   saveFaq,
   saveGuideSection,
 } from './faq.service.js';
+import { adminLeaderboard, adminLeaderboardQuery } from './leaderboard.service.js';
+import {
+  addTips,
+  deleteTip,
+  listTips,
+  patchTip,
+  saveTip,
+  tipBody,
+  tipPatch,
+  tipQuery,
+  tipsBody,
+} from './tips.service.js';
 import {
   memberConfig,
   memberConfigBody,
@@ -589,6 +603,23 @@ adminUsersRouter.get('/admin/shop/items/:itemId', async (req, res) => {
 adminUsersRouter.post('/admin/shop/items', validate('body', itemBody), async (req, res) => {
   const result = await saveItem(req.ctx.adminActor!, req.body);
   res.status(result.created ? 201 : 200).json(result);
+});
+
+/**
+ * A spreadsheet's worth of products, matched by slug.
+ *
+ * Declared before `/:itemId` only in the reader's eye — Express matches the
+ * literal path first whatever the order — and takes the same rows a typed-in
+ * form would. `dryRun` writes nothing and answers with what *would* happen,
+ * which is what the panel shows before the operator presses Import.
+ */
+const itemImportBody = z
+  .object({ rows: z.array(itemImportRow).min(1).max(2000), dryRun: z.boolean().optional() })
+  .strict();
+
+adminUsersRouter.post('/admin/shop/items/import', validate('body', itemImportBody), async (req, res) => {
+  const body = req.body as z.infer<typeof itemImportBody>;
+  res.json(await importItems(req.ctx.adminActor!, body.rows, { dryRun: body.dryRun }));
 });
 
 /** A patch, for the one field somebody came to change. */
@@ -1214,6 +1245,69 @@ adminUsersRouter.delete(
   validate('body', z.object({ note: z.string().trim().max(300).optional() })),
   async (req, res) => {
     res.json(await deleteGuideSection(req.ctx.adminActor!, String(req.params.sectionId), req.body.note));
+  },
+);
+
+// ─── The weekly board, and what it pays (RULES §L) ─────────────────────────
+
+/**
+ * The board as the operator needs it: the prize ladder in force, **the words
+ * the app will say** with their placeholders filled for that country, who is
+ * standing in the paid places right now and what each would take, and the
+ * last week that closed with what it actually paid.
+ *
+ * Read-only. The ladder and the copy are config, so they are written through
+ * `PUT /admin/config` like every other knob — which is what puts them through
+ * the cross-field validator that refuses two rungs over the same place.
+ */
+adminUsersRouter.get('/admin/leaderboard', validate('query', adminLeaderboardQuery), async (req, res) => {
+  res.json(await adminLeaderboard(req.query as unknown as z.infer<typeof adminLeaderboardQuery>));
+});
+
+// ─── The app's own words (BACKEND §6.15) ───────────────────────────────────
+
+/**
+ * Every line the app says in its own voice, with the rotation spelled out.
+ *
+ * `showingToday` and `byTopic[].todayId` are the reason this is a page and
+ * not a collection browser: one line per topic per day is shown, in `sort`
+ * order, and which one that is today is a question only the server can
+ * answer. `silentTopics` is the other half — a screen whose card is simply
+ * not drawn because nothing is live for it.
+ */
+adminUsersRouter.get('/admin/tips', validate('query', tipQuery), async (req, res) => {
+  res.json(await listTips(req.query as unknown as z.infer<typeof tipQuery>, req.ctx.timezone));
+});
+
+/** Writes a line, creating it where the id is new. Idempotent on the id. */
+adminUsersRouter.post('/admin/tips', validate('body', tipBody), async (req, res) => {
+  const result = await saveTip(req.ctx.adminActor!, req.body);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+/**
+ * A list of lines for one topic in one go — somebody arrives with twenty
+ * quotes in a document, and inventing twenty ids by hand is not the job.
+ */
+adminUsersRouter.post('/admin/tips/bulk', validate('body', tipsBody), async (req, res) => {
+  res.status(201).json(await addTips(req.ctx.adminActor!, req.body));
+});
+
+/** A patch, for the one field somebody came to change — usually `active`. */
+adminUsersRouter.put('/admin/tips/:tipId', validate('body', tipPatch), async (req, res) => {
+  res.json(await patchTip(req.ctx.adminActor!, String(req.params.tipId), req.body));
+});
+
+/**
+ * A real delete: nothing holds a snapshot of a tip. Hiding it
+ * (`active: false`) is the other option, and the right one for a line being
+ * drafted or withdrawn for a fortnight.
+ */
+adminUsersRouter.delete(
+  '/admin/tips/:tipId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteTip(req.ctx.adminActor!, String(req.params.tipId), req.body.note));
   },
 );
 

@@ -144,7 +144,7 @@ describe('LeaderboardRewardsScreen', () => {
       tree.root.findAll(n => n.props?.accessibilityLabel === 'Loading').length,
     ).toBeGreaterThanOrEqual(3);
     const text = allText(tree);
-    expect(text).not.toContain('Rank 1');
+    expect(text).not.toContain('1st Place');
     expect(text).not.toContain('Rahul Verma');
   });
 
@@ -154,7 +154,31 @@ describe('LeaderboardRewardsScreen', () => {
 
     expect(allText(tree)).toContain("Couldn't load the board");
     // The prizes came back on their own.
-    expect(allText(tree)).toContain('Rank 1');
+    expect(allText(tree)).toContain('1st Place');
+  });
+
+  test('a rung is labelled in the operator’s words, or by its ranks', async () => {
+    const text = allText(await render());
+
+    // ⚙ `leaderboard.tiers[].label` where somebody wrote one (D-89) — the
+    // app draws the server's word, not a sentence of its own.
+    expect(text).toContain('1st Place');
+    // And the server's derived label where nobody did, which is correct and
+    // never what marketing would have written.
+    expect(text).toContain('Rank 2 – 3');
+  });
+
+  test('the banner is the server’s words, and this build’s before they land', async () => {
+    const withServer = allText(await render());
+    expect(withServer).toContain('Win Amazing Rewards!');
+
+    // A server older than the field sends no banner at all; the screen still
+    // has a banner (⚙ `leaderboard.banner`, D-89).
+    leaderboardApi.rules.mockImplementationOnce(async () => ({
+      ...(await mockLeaderboardApi.rules()),
+      banner: undefined,
+    }));
+    expect(allText(await render())).toContain('Win Amazing Rewards!');
   });
 
   test('the header states the balance the prizes are paid in', async () => {
@@ -239,5 +263,60 @@ describe('LeaderboardRewardsScreen', () => {
     press(await render(), 'Back');
 
     expect(mockGoBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * "Did I get the coins, or not?" (D-90)
+ *
+ * The one question the screen could not answer: a place that pays and a zero
+ * beside it are the same row until something says why. Every state and every
+ * sentence here is the server's — the app only draws them — so these checks
+ * are that it draws all four and never invents one.
+ */
+describe('LeaderboardRewardsScreen: the weeks', () => {
+  test('each closed week says where it placed, what was paid, and why', async () => {
+    const text = allText(await render());
+
+    expect(text).toContain('Your Weeks');
+    // Paid: the figure and the server's own sentence.
+    expect(text).toContain('5,000 coins are in your wallet.');
+    // Won and not paid — the figure shown is what was *paid*, with the
+    // reason beside it rather than a bare zero.
+    expect(text).toContain('Not paid');
+    expect(text).toContain('leaderboard prizes were not running');
+    // Below the ladder.
+    expect(text).toContain('Only the top 10 places win coins');
+    // And the total that was won and never credited.
+    expect(text).toContain('3,000');
+  });
+
+  test('it says every week is paid on its own — the repeat-win question', async () => {
+    const text = allText(await render());
+
+    // A member who won at #1, slipped to #18 and came back has no way to
+    // know whether the prize pays twice. It does; the card says so and the
+    // list shows it week by week.
+    expect(text).toContain('Every week is paid on its own');
+    expect(text).toContain('#1');
+    expect(text).toContain('#18');
+  });
+
+  test('a member with no closed week is told what would record one', async () => {
+    leaderboardApi.history.mockImplementationOnce(async () => ({
+      ...(await mockLeaderboardApi.history()),
+      periods: [],
+      rewardCoinsHeld: 0,
+    }));
+
+    expect(allText(await render())).toContain('No week has closed with you');
+  });
+
+  test('the card under the prize table asks for five places, not fifty', async () => {
+    await render();
+
+    // It illustrates the ladder above it; the board itself is a tap away.
+    // Taking fifty rows to draw five is a page of the board nobody reads.
+    expect(leaderboardApi.board).toHaveBeenCalledWith({ limit: 5 });
   });
 });

@@ -735,9 +735,21 @@ export interface ChallengeApi {
   achievement(id: string): Promise<AchievementDetail>;
 }
 
+/** A page of the board. Both are clipped to the board's own size server-side. */
+export interface LeaderboardPage {
+  offset?: number;
+  limit?: number;
+}
+
 export interface LeaderboardApi {
-  /** This week's board for the caller's country, and their place on it. */
-  board(): Promise<LeaderboardBoard>;
+  /**
+   * This week's board for the caller's country, and their place on it.
+   *
+   * Paged: the board is the top ⚙ `leaderboard.boardSize` places, and the
+   * full-board screen asks for them a page at a time rather than taking
+   * fifty rows to draw five.
+   */
+  board(page?: LeaderboardPage): Promise<LeaderboardBoard>;
   /** The caller's record over the weeks that have closed. */
   history(): Promise<LeaderboardHistory>;
   /** The prizes and how a place is won, worded from the server's rules. */
