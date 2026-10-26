@@ -232,7 +232,12 @@ afterEach(async () => {
   }
 });
 
-const render = async () => {
+/**
+ * The screen as it is on the frame the tab press lands on: the cheap half
+ * only. The shelf and the catalogue request are both deferred to an idle
+ * moment, which `settle` is what waits for.
+ */
+const mount = async () => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await ReactTestRenderer.act(() => {
     tree = ReactTestRenderer.create(
@@ -246,6 +251,13 @@ const render = async () => {
     );
   });
   mounted = tree;
+  return tree;
+};
+
+/** The screen with that idle moment past: what a user is looking at. */
+const render = async () => {
+  const tree = await mount();
+  await settle();
   return tree;
 };
 
@@ -264,10 +276,16 @@ const press = async (
   await ReactTestRenderer.act(() => node.props.onPress());
 };
 
-/** Waits for the promises a press set off — a mocked server answering. */
+/**
+ * Waits for the promises a press set off — a mocked server answering — and
+ * for the idle moment the screen defers its heavy half and its catalogue
+ * sync to. A macrotask is what that moment is here: `whenIdle` falls back to
+ * one where there is no `requestIdleCallback`, and the test environment has
+ * none.
+ */
 const settle = () =>
   ReactTestRenderer.act(async () => {
-    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
     await Promise.resolve();
   });
 
@@ -297,6 +315,25 @@ const tee = shopItems.find(i => i.id === 'tee')!;
 const shaker = shopItems.find(i => i.id === 'shaker')!;
 
 describe('ShopScreen', () => {
+  test('the tab changes first: the frame the press lands on draws nothing heavy and asks the server nothing', async () => {
+    // What the hang was: the shelf, the tiles and a hundred-item parse all
+    // in the same commit as the tab press, with the bar waiting on it.
+    useShopStore.getState().reset();
+    seed(5000);
+
+    const tree = await mount();
+
+    // The cheap half is up, so the tab has visibly changed.
+    expect(allText(tree)).toContain('Shop');
+    expect(shopApi.items).not.toHaveBeenCalled();
+    expect(allText(tree)).not.toContain(tee.title);
+
+    await settle();
+
+    expect(shopApi.items).toHaveBeenCalled();
+    expect(allText(tree)).toContain(tee.title);
+  });
+
   test('before the first sync the shelf says it is loading, not that the shop is empty', async () => {
     useShopStore.getState().reset();
     shopApi.items.mockReturnValue(new Promise(() => {}));

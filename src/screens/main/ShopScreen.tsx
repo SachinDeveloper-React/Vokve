@@ -15,6 +15,7 @@ import { ShopSearchBar } from '../../components/shop/ShopSearchBar';
 import { TopCategoriesGrid } from '../../components/shop/TopCategoriesGrid';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { useAfterTransition } from '../../hooks/useAfterTransition';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import { useCartCount } from '../../stores/cartStore';
 import { useCoinBalance } from '../../stores/coinsStore';
@@ -27,6 +28,7 @@ import {
 import { useWishlistCount } from '../../stores/wishlistStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { PaymentMode, ShopCategory, ShopItem } from '../../types/models';
+import { whenIdle, type Idle } from '../../utils/idle';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -53,6 +55,15 @@ const SUBTITLE: Record<PaymentMode, string> = {
  * tiles lower down open the category's own page, for one who wants all of
  * it. Both are the same shelves — whatever the server is carrying — drawn
  * twice.
+ *
+ * **The tab changes before any of this happens.** Everything below the
+ * chips is the expensive half — a shelf of cards with their art, the
+ * category tiles, the offers — and mounting it in the same frame as the tab
+ * press is what made the Shop tab feel stuck on Android: the press lands,
+ * the bar waits for this screen's first commit, and nothing moves until it
+ * is done. So the cheap half paints first and the rest is gated on
+ * `useAfterTransition`; the catalogue sync waits for the same moment,
+ * rather than competing with the transition for the thread it is running on.
  */
 export const ShopScreen = () => {
   const styles = useThemedStyles(makeStyles);
@@ -75,15 +86,33 @@ export const ShopScreen = () => {
   const wishlistCount = useWishlistCount();
 
   const [filter, setFilter] = useState<ShopFilter>('all');
+  const ready = useAfterTransition();
 
   // The catalogue is stock-aware, so the tab refreshes on focus — stale-checked,
   // and only with a session, like the wallet.
+  //
+  // After the interaction, never inside it: the sync parses a hundred items
+  // and sets the store, and doing that while the tab is still animating puts
+  // both on the same thread with the bar waiting. Re-armed on every focus,
+  // because coming back to the tab is a transition too.
   useEffect(() => {
     if (!isSignedIn) {
       return undefined;
     }
-    refreshCatalogueIfStale();
-    return navigation.addListener('focus', refreshCatalogueIfStale);
+    let idle: Idle | null = null;
+    const refresh = () => {
+      idle?.cancel();
+      idle = whenIdle(() => {
+        idle = null;
+        refreshCatalogueIfStale();
+      });
+    };
+    refresh();
+    const stopListening = navigation.addListener('focus', refresh);
+    return () => {
+      idle?.cancel();
+      stopListening();
+    };
   }, [isSignedIn, navigation, refreshCatalogueIfStale]);
 
   // The shelf: featured items first, then the rest, under the chosen chip.
@@ -177,9 +206,9 @@ export const ShopScreen = () => {
           categories={categories}
         />
 
-        {catalogueSyncedAt === null ? (
+        {!ready || catalogueSyncedAt === null ? (
           <LoadState
-            loading={isCatalogueSyncing || catalogueError === null}
+            loading={!ready || isCatalogueSyncing || catalogueError === null}
             title="Couldn't load the shop"
             message={catalogueError}
             onRetry={hydrateCatalogue}

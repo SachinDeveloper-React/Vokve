@@ -2,6 +2,7 @@ export { useResponsive, BREAKPOINTS } from './useResponsive';
 export type { Breakpoint, Responsive } from './useResponsive';
 export { useCountdown } from './useCountdown';
 export type { Countdown } from './useCountdown';
+export { useAfterTransition } from './useAfterTransition';
 export { useNetworkStatus } from './useNetworkStatus';
 export type { NetworkStatus } from './useNetworkStatus';
 export { useSessionRecovery } from './useSessionRecovery';
