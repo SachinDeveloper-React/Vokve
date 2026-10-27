@@ -1,8 +1,12 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react-native';
+import { useTheme } from '../../theme';
 import { BottomSheet } from '../disclosure/BottomSheet';
 import { HStack, VStack } from '../layout/Stack';
+import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { Button } from '../ui/Button';
+import { Pressable } from './Pressable';
 import { PickerColumn } from './PickerColumn';
 
 const HOURS = Array.from({ length: 12 }, (_, index) => index + 1);
@@ -79,6 +83,14 @@ interface Props {
   period?: TimePeriod;
   /** One line under the columns saying why the half is fixed. */
   note?: string;
+  /**
+   * Removes whatever this sheet was opened on, when there is something to
+   * remove. Left off for a sheet that is adding a time, which has nothing to
+   * delete — that is what keeps one sheet usable for both.
+   */
+  onDelete?: () => void;
+  /** What the delete action is called. Name the thing, not the gesture. */
+  deleteLabel?: string;
 }
 
 /**
@@ -91,6 +103,11 @@ interface Props {
  *
  * The draft is held here until Add. Committing on every scroll would add a
  * reminder for each hour passed on the way to the right one.
+ *
+ * A sheet opened on an existing time can also delete it (`onDelete`). The
+ * same tap that opens this is the one a user makes to get rid of a time, and
+ * sending them back out to hunt for a separate control is how a plan ends up
+ * with times nobody wants and everybody switches off instead.
  */
 export const TimePickerSheet = memo(
   ({
@@ -102,7 +119,10 @@ export const TimePickerSheet = memo(
     submitLabel = 'Add time',
     period = 'any',
     note,
+    onDelete,
+    deleteLabel = 'Delete',
   }: Props) => {
+    const { colors } = useTheme();
     const periods = useMemo(() => periodOptions(period), [period]);
     const [draft, setDraft] = useState<Parts>(() =>
       inPeriod(fromTimeString(value), period),
@@ -133,6 +153,13 @@ export const TimePickerSheet = memo(
       onSubmit(toTimeString(draft));
       onClose();
     }, [draft, onClose, onSubmit]);
+
+    // Closed before the removal runs, like the action sheet's rows: deleting
+    // first can take the screen somewhere else while this is still mounted.
+    const remove = useCallback(() => {
+      onClose();
+      onDelete?.();
+    }, [onClose, onDelete]);
 
     return (
       <BottomSheet visible={visible} onClose={onClose} title={title}>
@@ -168,6 +195,25 @@ export const TimePickerSheet = memo(
           ) : null}
 
           <Button label={submitLabel} size="lg" fullWidth onPress={confirm} />
+
+          {onDelete ? (
+            <Pressable
+              onPress={remove}
+              feedback="opacity"
+              accessibilityRole="button"
+              accessibilityLabel={deleteLabel}
+            >
+              <HStack align="center" justify="center" gap="xs" py="sm">
+                <Icon as={Trash2} size="sm" tint={colors.destructive} />
+                <AppText
+                  variant="bodyStrong"
+                  style={{ color: colors.destructive }}
+                >
+                  {deleteLabel}
+                </AppText>
+              </HStack>
+            </Pressable>
+          ) : null}
         </VStack>
       </BottomSheet>
     );

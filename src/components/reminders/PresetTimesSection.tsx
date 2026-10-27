@@ -33,8 +33,8 @@ interface Props {
  *
  * The subtitle says what a long press does, because a gesture nothing on
  * screen mentions is a feature only the person who built it knows about —
- * and the alternative for a user who wants 09:00 instead of 08:00 is
- * deleting one chip and adding another.
+ * and holding a chip is the only way to a time's own sheet, which is where
+ * both changing it and deleting it live.
  */
 export const PresetTimesSection = memo(
   ({
@@ -56,8 +56,8 @@ export const PresetTimesSection = memo(
             <AppText variant="h3" numberOfLines={1}>
               Smart Preset Times
             </AppText>
-            <AppText variant="micro" color="textSecondary" numberOfLines={1}>
-              Tap to switch a time off · hold to change it
+            <AppText variant="micro" color="textSecondary" numberOfLines={2}>
+              Tap to switch a time off · hold to change or delete it
             </AppText>
           </VStack>
 

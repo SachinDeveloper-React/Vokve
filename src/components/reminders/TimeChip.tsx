@@ -21,8 +21,9 @@ interface Props {
   /** Called with the chip's id, or null from the add chip. */
   onPress: (id: string | null) => void;
   /**
-   * Held down: change this time rather than switch it off. Never called by
-   * the add chip, which has no time to change.
+   * Held down: open this time's own sheet — where it is changed or deleted —
+   * rather than switch it off. Never called by the add chip, which has no
+   * time to open.
    */
   onLongPress?: (id: string) => void;
   /**
@@ -48,10 +49,10 @@ interface Props {
  * chip also dims when it is off, so the state survives for a reader who cannot
  * make out a small tick.
  *
- * Changing the time is the long press, because the tap is already spoken for
- * and a chip this size has room for one control, not two. The gesture is
- * named in the section's own subtitle rather than left to be discovered, and
- * `accessibilityHint` is how a screen reader is told about it.
+ * Changing the time — or deleting it — is the long press, because the tap is
+ * already spoken for and a chip this size has room for one control, not two.
+ * The gesture is named in the section's own subtitle rather than left to be
+ * discovered, and `accessibilityHint` is how a screen reader is told about it.
  */
 export const TimeChip = memo(
   ({
@@ -104,7 +105,7 @@ export const TimeChip = memo(
         accessibilityHint={
           isAdd || !onLongPress
             ? undefined
-            : 'Double tap to switch it on or off, or press and hold to change the time'
+            : 'Double tap to switch it on or off, or press and hold to change or delete the time'
         }
       >
         <HStack

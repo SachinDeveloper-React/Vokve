@@ -241,6 +241,20 @@ export const HydrationReminderScreen = () => {
     [onOpenQuietHours, quietHours, toast],
   );
 
+  /**
+   * Deleting the time the sheet was opened on.
+   *
+   * Offered wherever a time can be changed, which is every time in the plan:
+   * a preset chip and a custom row both open this one sheet, so neither is
+   * left with a way to move a reminder and no way to be rid of it. The
+   * custom rows' kebab keeps its own delete for somebody who never found the
+   * hold.
+   */
+  const handleDeleteTime = useCallback(() => {
+    if (picker?.mode !== 'edit') return;
+    removeReminder(picker.id);
+  }, [picker, removeReminder]);
+
   const handleSubmitTime = useCallback(
     (time: string) => {
       if (picker === null) return;
@@ -438,6 +452,8 @@ export const HydrationReminderScreen = () => {
         onClose={closePicker}
         title={picker?.mode === 'edit' ? 'Change the time' : 'Add a reminder'}
         submitLabel={picker?.mode === 'edit' ? 'Save time' : 'Add time'}
+        onDelete={picker?.mode === 'edit' ? handleDeleteTime : undefined}
+        deleteLabel="Delete reminder"
       />
 
       <ActionSheet

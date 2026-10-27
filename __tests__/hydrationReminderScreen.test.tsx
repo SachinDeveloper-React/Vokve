@@ -325,6 +325,45 @@ describe('HydrationReminderScreen', () => {
     expect(allText(tree)).toContain('09:15 AM');
   });
 
+  test('a preset time can be deleted from the sheet its hold opens', async () => {
+    const tree = await render();
+    expect(reminders()).toHaveLength(9);
+
+    // The chips have room for one control and the tap is the switch, so the
+    // hold is the only way in — and what it opens has to offer both halves
+    // of what a user does to a time they set by mistake.
+    longPress(tree, '08:30 AM, on');
+    press(tree, 'Delete reminder');
+
+    expect(reminders().some(r => r.time === '08:30')).toBe(false);
+    expect(reminders()).toHaveLength(8);
+    // The block's own count follows it down.
+    expect(allText(tree)).toContain('2 of 5 times');
+    expect(allText(tree)).not.toContain('08:30 AM');
+  });
+
+  test('a custom time can be deleted from its sheet as well as its menu', async () => {
+    const tree = await render();
+
+    longPress(tree, '11:00 AM, Everyday');
+    press(tree, 'Delete reminder');
+
+    expect(reminders().some(r => r.time === '11:00')).toBe(false);
+    expect(allText(tree)).toContain('1 custom time');
+  });
+
+  test('a sheet opened to add a time has nothing to delete', async () => {
+    const tree = await render();
+
+    press(tree, 'Add a time to Morning');
+
+    expect(
+      tree.root.findAll(
+        node => node.props?.accessibilityLabel === 'Delete reminder',
+      ),
+    ).toHaveLength(0);
+  });
+
   test('holding a custom row changes its time, and so does its menu', async () => {
     const tree = await render();
 

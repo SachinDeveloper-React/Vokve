@@ -15,7 +15,10 @@ interface Props {
   repeatLabel: string;
   onToggle: (id: string) => void;
   onPressMore: (id: string) => void;
-  /** The row held down: change this time. Also the kebab's first action. */
+  /**
+   * The row held down: open this time's sheet, where it is changed or
+   * deleted. Also the kebab's first action.
+   */
   onEdit: (id: string) => void;
 }
 
@@ -58,7 +61,7 @@ export const CustomTimeRow = memo(
           feedback="opacity"
           accessibilityRole="button"
           accessibilityLabel={`${time}, ${repeatLabel}`}
-          accessibilityHint="Press and hold to change this time"
+          accessibilityHint="Press and hold to change or delete this time"
         >
           <HStack align="center" gap="md">
             <AppText variant="bodyStrong" numberOfLines={1}>
