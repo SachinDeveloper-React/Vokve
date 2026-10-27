@@ -54,7 +54,7 @@ OverviewBar.displayName = 'OverviewBar';
 
 interface Props {
   points: OverviewPoint[];
-  /** What the series covers — "Today, hour by hour". */
+  /** What the series covers, dated — "Today · 27 October 2026, hour by hour". */
   caption: string;
   /**
    * How many bars one axis label stands for. One per bar by default; a day of
@@ -112,7 +112,9 @@ export const StepsOverviewCard = memo(
             </AppText>
             <AppText
               variant="miniMicro"
-              numberOfLines={1}
+              // Two lines: the caption carries the period's dates, which a
+              // single line truncates on a 375pt screen beside the link.
+              numberOfLines={2}
               style={{ color: withAlpha(foreground, 0.56) }}
             >
               {caption}

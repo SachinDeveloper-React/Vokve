@@ -21,7 +21,10 @@ import { useStepsStore } from '../src/stores/stepsStore';
 import type { ActivityRangeQuery } from '../src/services/api/contracts';
 import {
   addDays,
-  formatWeekdayShort,
+  formatDateRange,
+  formatLongDate,
+  formatWeekdayDate,
+  formatWeekdayDay,
   mondayOf,
   todayIso,
 } from '../src/utils/date';
@@ -67,6 +70,7 @@ const HOURLY = Array.from({ length: 24 }, (_, hour) => (hour === 9 ? 6245 : 0));
 
 const today = todayIso();
 const monday = mondayOf(today);
+const sunday = addDays(monday, 6);
 
 const day = (date: string, steps: number) => ({
   date,
@@ -236,7 +240,10 @@ describe('AnalyticsScreen', () => {
       to: today,
       granularity: 'hour',
     });
-    expect(allText(tree)).toContain('Today, hour by hour');
+    // Dated: a chart nobody can date is a shape, not a figure.
+    expect(allText(tree)).toContain(
+      `Today · ${formatLongDate(today)}, hour by hour`,
+    );
     expect(bars(tree, /^\d{1,2} (AM|PM), /).size).toBe(24);
     expect(bars(tree, /^9 AM, 6,245 steps$/).size).toBe(1);
   });
@@ -251,7 +258,11 @@ describe('AnalyticsScreen', () => {
       granularity: 'day',
     });
     const text = allText(tree);
-    expect(text).toContain('This week, day by day');
+    expect(text).toContain(
+      `This week · ${formatDateRange(monday, sunday)}, day by day`,
+    );
+    // Each bar is named for the day it covers, not only for its weekday.
+    expect(bars(tree, /^Mon \d{1,2}, /).size).toBe(1);
     // The headline is a daily readout and deliberately does not follow the
     // range — it would be the least trustworthy number on the screen if it did.
     expect(text).toContain('6,245');
@@ -260,7 +271,10 @@ describe('AnalyticsScreen', () => {
     expect(mockActivityApi.range).toHaveBeenLastCalledWith(
       expect.objectContaining({ granularity: 'week' }),
     );
-    expect(bars(tree, /^W\d, /).size).toBe(5);
+    // The month's weeks are labelled by the days they cover — "1–7" — rather
+    // than by a week number nobody can date.
+    expect(bars(tree, /^1–7, /).size).toBe(1);
+    expect(bars(tree, /^\d{1,2}–\d{1,2}, /).size).toBe(5);
 
     await press(tree, 'Year');
     expect(mockActivityApi.range).toHaveBeenLastCalledWith({
@@ -268,7 +282,9 @@ describe('AnalyticsScreen', () => {
       to: `${today.slice(0, 4)}-12-31`,
       granularity: 'month',
     });
-    expect(allText(tree)).toContain('This year, month by month');
+    expect(allText(tree)).toContain(
+      `This year · ${today.slice(0, 4)}, month by month`,
+    );
   });
 
   test('the week highlights its best day, not its last', async () => {
@@ -277,10 +293,14 @@ describe('AnalyticsScreen', () => {
     expect(text).toContain('Best Day This Week');
     expect(text).toContain('10,245 steps');
     expect(text).toContain(
-      `${formatWeekdayShort(
+      `${formatWeekdayDate(
         addDays(monday, 2),
       )} — your highest count of the week`,
     );
+    // The trend card draws the same week whatever the range is, so it says
+    // which week that is.
+    expect(text).toContain(`This week · ${formatDateRange(monday, sunday)}`);
+    expect(text).toContain(formatWeekdayDay(monday));
   });
 
   test('a week with no steps says so rather than crowning a day', async () => {
@@ -319,7 +339,7 @@ describe('AnalyticsScreen', () => {
 
     const text = allText(tree);
     expect(text).toContain('Steps Insights');
-    expect(text).toContain('Today, hour by hour');
+    expect(text).toContain(`Today · ${formatLongDate(today)}, hour by hour`);
     // The day's own total and its busiest hour, both from the hourly read.
     expect(text).toContain('Total steps');
     expect(text).toContain('Busiest hour');
@@ -334,9 +354,12 @@ describe('AnalyticsScreen', () => {
     await press(tree, 'View insights');
 
     const text = allText(tree);
-    expect(text).toContain('This week, day by day');
+    expect(text).toContain(
+      `This week · ${formatDateRange(monday, sunday)}, day by day`,
+    );
     expect(text).toContain('Busiest day');
-    expect(text).toContain('Wed · 10,245');
+    // The busiest bar is named as the chart names it, date and all.
+    expect(text).toContain(`${formatWeekdayDay(addDays(monday, 2))} · 10,245`);
     // 52,642 steps over the seven days the server counted.
     expect(text).toContain('Daily average');
     expect(text).toContain('7,520');

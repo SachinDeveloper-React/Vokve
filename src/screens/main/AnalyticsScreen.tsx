@@ -30,10 +30,13 @@ import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { ActivityRangePoint } from '../../types/models';
 import {
   addDays,
+  formatDateRange,
+  formatDayNumberRange,
   formatLongDate,
   formatMonthShort,
   formatMonthYear,
-  formatWeekdayShort,
+  formatWeekdayDate,
+  formatWeekdayDay,
   fromIsoDate,
   mondayOf,
   monthBounds,
@@ -84,7 +87,16 @@ function queryFor(range: AnalyticsRange, date: IsoDate): ActivityRangeQuery {
   }
 }
 
-/** What each bar is called, from the point the server drew it for. */
+/**
+ * What each bar is called, from the point the server drew it for.
+ *
+ * Every label carries its own date: "Mon 20" rather than "Mon", and the days
+ * a month's week covers ("8–14") rather than "W2". A bar labelled only by
+ * its weekday is readable as a shape and unreadable as a figure — which week
+ * it belongs to is exactly what a user comes to this screen to find out. The
+ * hours of a single day and the months of a year are already unambiguous
+ * under a caption that names the day or the year.
+ */
 function labelFor(
   range: AnalyticsRange,
   point: ActivityRangePoint,
@@ -92,9 +104,9 @@ function labelFor(
 ): string {
   switch (range) {
     case 'week':
-      return formatWeekdayShort(point.start);
+      return formatWeekdayDay(point.start);
     case 'month':
-      return `W${index + 1}`;
+      return formatDayNumberRange(point.start, point.end);
     case 'year':
       return formatMonthShort(point.start);
     default:
@@ -157,11 +169,23 @@ export const AnalyticsScreen = () => {
   const weekSteps = useMemo(
     () =>
       (week?.points ?? []).map(point => ({
-        day: formatWeekdayShort(point.start),
+        // Dated, so the trend's bars and the week's best day each say which
+        // day they mean rather than only which weekday.
+        day: formatWeekdayDay(point.start),
+        date: point.start,
         steps: point.verifiedSteps,
       })),
     [week],
   );
+
+  // The trend card draws the week whatever range the chart is on, so it is
+  // dated from the week's own query rather than from the chart's caption.
+  const weekCaption = useMemo(() => {
+    const span = formatDateRange(weekQuery.from, weekQuery.to);
+    return weekQuery.from === mondayOf(todayIso())
+      ? `This week · ${span}`
+      : span;
+  }, [weekQuery]);
 
   const { points, caption, labelEvery } = useMemo<{
     points: OverviewPoint[];
@@ -174,50 +198,56 @@ export const AnalyticsScreen = () => {
     }));
     const isCurrent = (from: IsoDate) =>
       from === queryFor(range, todayIso()).from;
+    // Every caption names the dates the bars cover, the current period
+    // included: "This week" on its own leaves the reader counting back from
+    // today to work out which Monday it started on, and the sheet behind
+    // "View Insights" reads the same line over the same figures.
     switch (range) {
-      case 'week':
+      case 'week': {
+        const span = formatDateRange(chartQuery.from, chartQuery.to);
         return {
           points: drawn,
           caption: isCurrent(chartQuery.from)
-            ? 'This week, day by day'
-            : `Week of ${formatLongDate(chartQuery.from)}, day by day`,
-          labelEvery: 1,
-        };
-      case 'month': {
-        const anchor = fromIsoDate(date);
-        return {
-          points: drawn,
-          caption: isCurrent(chartQuery.from)
-            ? 'This month, week by week'
-            : `${formatMonthYear(
-                anchor.getFullYear(),
-                anchor.getMonth(),
-              )}, week by week`,
+            ? `This week · ${span}, day by day`
+            : `${span}, day by day`,
           labelEvery: 1,
         };
       }
-      case 'year':
+      case 'month': {
+        const anchor = fromIsoDate(date);
+        const month = formatMonthYear(anchor.getFullYear(), anchor.getMonth());
         return {
           points: drawn,
           caption: isCurrent(chartQuery.from)
-            ? 'This year, month by month'
-            : `${date.slice(0, 4)}, month by month`,
+            ? `This month · ${month}, week by week`
+            : `${month}, week by week`,
           labelEvery: 1,
         };
+      }
+      case 'year': {
+        const year = date.slice(0, 4);
+        return {
+          points: drawn,
+          caption: isCurrent(chartQuery.from)
+            ? `This year · ${year}, month by month`
+            : `${year}, month by month`,
+          labelEvery: 1,
+        };
+      }
       default:
         return {
           points: drawn,
           caption: isToday
-            ? 'Today, hour by hour'
+            ? `Today · ${formatLongDate(date)}, hour by hour`
             : `${formatLongDate(date)}, hour by hour`,
           labelEvery: HOUR_LABEL_STEP,
         };
     }
-  }, [chart, chartQuery.from, date, isToday, range]);
+  }, [chart, chartQuery.from, chartQuery.to, date, isToday, range]);
 
   const bestDay = useMemo(
     () =>
-      weekSteps.reduce<{ day: string; steps: number } | null>(
+      weekSteps.reduce<{ day: string; date: string; steps: number } | null>(
         (best, entry) => (entry.steps > (best?.steps ?? 0) ? entry : best),
         null,
       ),
@@ -285,7 +315,9 @@ export const AnalyticsScreen = () => {
             value={`${formatGrouped(bestDay?.steps ?? 0)} steps`}
             caption={
               bestDay
-                ? `${bestDay.day} — your highest count of the week`
+                ? `${formatWeekdayDate(
+                    bestDay.date,
+                  )} — your highest count of the week`
                 : 'No steps counted this week yet'
             }
             tint={colors.success}
@@ -313,7 +345,7 @@ export const AnalyticsScreen = () => {
           />
         </HStack>
 
-        <WeeklyTrendCard data={weekSteps} />
+        <WeeklyTrendCard data={weekSteps} caption={weekCaption} />
 
         <AnalyticsCheerCard name={user?.name} steps={today.shown} goal={goal} />
       </ScrollView>

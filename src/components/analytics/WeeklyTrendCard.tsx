@@ -56,6 +56,14 @@ TrendBar.displayName = 'TrendBar';
 
 interface Props {
   data: DaySteps[];
+  /**
+   * The week the bars cover — "This week · 20 – 26 October 2026".
+   *
+   * The card draws the same seven days whatever period the chart above is
+   * set to, so it has to date itself: a reader who has just looked at a year
+   * of months cannot otherwise tell which week this one is.
+   */
+  caption?: string;
 }
 
 /**
@@ -66,15 +74,22 @@ interface Props {
  * comparison: which day the user actually walked the most, in a colour that
  * survives being glanced at from across a room.
  */
-export const WeeklyTrendCard = memo(({ data }: Props) => {
+export const WeeklyTrendCard = memo(({ data, caption }: Props) => {
   const peak = Math.max(1, ...data.map(entry => entry.steps));
 
   return (
     <Card radius="xl" padding="base">
       <VStack gap="base">
-        <AppText variant="label" color="textSecondary">
-          Weekly Trend
-        </AppText>
+        <VStack gap="xxs">
+          <AppText variant="label" color="textSecondary">
+            Weekly Trend
+          </AppText>
+          {caption ? (
+            <AppText variant="miniMicro" color="textTertiary">
+              {caption}
+            </AppText>
+          ) : null}
+        </VStack>
 
         <HStack align="end" gap="xs">
           {data.map(entry => (

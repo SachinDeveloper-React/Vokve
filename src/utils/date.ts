@@ -101,3 +101,29 @@ export function monthBounds(iso: IsoDate): { first: IsoDate; last: IsoDate } {
   const last = toIsoDate(new Date(date.getFullYear(), date.getMonth() + 1, 0));
   return { first, last };
 }
+
+/** "Mon 20" — a weekday with its day of the month, for a dated axis. */
+export function formatWeekdayDay(iso: IsoDate): string {
+  const date = fromIsoDate(iso);
+  return `${WEEKDAYS_SHORT[date.getDay()]} ${date.getDate()}`;
+}
+
+/** "Wed 22 Oct" — a day named in a sentence whose year is already clear. */
+export function formatWeekdayDate(iso: IsoDate): string {
+  const date = fromIsoDate(iso);
+  return `${WEEKDAYS_SHORT[date.getDay()]} ${date.getDate()} ${MONTHS[
+    date.getMonth()
+  ].slice(0, 3)}`;
+}
+
+/**
+ * "1–7" — the days of the month a bucket covers, for a narrow axis cell.
+ *
+ * Day numbers rather than a date range: this labels one bar among five on a
+ * 375pt screen, and the month it belongs to is in the chart's own caption.
+ */
+export function formatDayNumberRange(from: IsoDate, to: IsoDate): string {
+  const first = fromIsoDate(from).getDate();
+  const last = fromIsoDate(to).getDate();
+  return first === last ? String(first) : `${first}–${last}`;
+}
