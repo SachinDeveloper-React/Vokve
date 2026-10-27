@@ -23,6 +23,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { CoinAmount } from '../../components/wallet/CoinAmount';
 import { checkoutApi } from '../../services/api/endpoints';
 import { toApiError } from '../../services/api/errors';
@@ -85,6 +86,10 @@ export const CheckoutScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  // The tab bar lies over this screen, so its own bottom bar leaves room for
+  // it rather than sitting under the glass.
+  const tabBarSpace = useTabBarSpace();
+  const bottomRoom = Math.max(tabBarSpace, insets.bottom, spacing.base);
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RootStackScreenProps<'Checkout'>['route']>();
@@ -457,7 +462,7 @@ export const CheckoutScreen = () => {
         <View
           style={[
             styles.bar,
-            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+            { paddingBottom: bottomRoom },
           ]}
         >
           {soldOut ? (

@@ -27,6 +27,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { Pressable } from '../../components/form/Pressable';
 import { appApi, checkoutApi } from '../../services/api/endpoints';
 import { toApiError } from '../../services/api/errors';
@@ -437,10 +438,18 @@ export const PaymentScreen = () => {
   }, [abandonCheckout, pendingCheckout, pendingContact, stepUpToken, toast]);
 
   const busy = isPlacing || isPaying;
+  // The bar goes while the charge is in flight, so no room is kept for one.
+  const tabBarSpace = useTabBarSpace(!busy);
+  const bottomRoom = Math.max(tabBarSpace, insets.bottom, spacing.base);
   const provider = config ? PROVIDER_NAME[config.paymentProvider] ?? null : null;
 
   return (
-    <Screen edges={['top']}>
+    // While a charge is in flight every control on this screen is disabled,
+    // and the tab bar would be the only live one left — a tap there walks
+    // away from a payment the server may already have taken. Before that it
+    // is an ordinary page: the basket and the pending checkout both survive
+    // leaving, so the bar stays.
+    <Screen edges={['top']} tabBar={!busy}>
       <ShopPageHeader
         title="Payment"
         subtitle="Choose your payment method"
@@ -615,7 +624,7 @@ export const PaymentScreen = () => {
         <View
           style={[
             styles.bar,
-            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+            { paddingBottom: bottomRoom },
           ]}
         >
           {soldOut ? (

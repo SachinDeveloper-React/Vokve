@@ -19,6 +19,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { toApiError } from '../../services/api/errors';
 import { useAuthStatus } from '../../stores/authStore';
 import { cartLineKey, useCart, useCartStore } from '../../stores/cartStore';
@@ -66,6 +67,10 @@ export const CartScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  // The tab bar lies over this screen, so its own bottom bar leaves room for
+  // it rather than sitting under the glass.
+  const tabBarSpace = useTabBarSpace();
+  const bottomRoom = Math.max(tabBarSpace, insets.bottom, spacing.base);
   const navigation = useNavigation();
   const toast = useToast();
   const balance = useCoinBalance();
@@ -310,7 +315,7 @@ export const CartScreen = () => {
         <View
           style={[
             styles.bar,
-            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+            { paddingBottom: bottomRoom },
           ]}
         >
           {blocked ? (

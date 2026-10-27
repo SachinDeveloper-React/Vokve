@@ -95,8 +95,9 @@ export type RootStackParamList = {
   ActiveWorkout: undefined;
   /**
    * Reached from the bell in every screen's header, so it belongs to no tab.
-   * On the root stack it covers the bar and returns the user to exactly the
-   * tab they opened it from, and every tab keeps leading to its own screen.
+   * On the root stack its chevron returns the user to exactly the tab they
+   * opened it from, and every tab keeps leading to its own screen — the tab
+   * bar under it is the one the screen draws for itself (`shellTabs`).
    */
   Notifications: undefined;
   /** Opened from Home's shortcut row, and later from the account's rewards. */

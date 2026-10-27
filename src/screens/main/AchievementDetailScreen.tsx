@@ -22,6 +22,7 @@ import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { Pressable } from '../../components/form/Pressable';
 import { useAchievementDetail } from '../../hooks/useChallenges';
 import { syncStepsNow } from '../../services/steps';
@@ -69,6 +70,9 @@ const makeStyles = ({ spacing, colors }: ThemeShape) =>
  */
 export const AchievementDetailScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  // The tab bar lies over this screen, so its own bottom bar leaves room for
+  // it rather than sitting under the glass.
+  const tabBarSpace = useTabBarSpace();
   const { colors } = useTheme();
   const navigation = useNavigation();
   const { params } =
@@ -208,7 +212,7 @@ export const AchievementDetailScreen = () => {
         />
       </ScrollView>
 
-      <View style={styles.bar}>
+      <View style={[styles.bar, { paddingBottom: tabBarSpace }]}>
         {cta.action === 'none' ? (
           <AppText variant="caption" color="textSecondary" center>
             {cta.label}

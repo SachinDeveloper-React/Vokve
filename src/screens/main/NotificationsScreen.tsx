@@ -47,8 +47,9 @@ const makeStyles = ({ spacing }: ThemeShape) =>
  * It is a root route rather than a page of the Account tab. The bell that opens
  * it is in every header, so filing it under one tab would leave that tab
  * showing a notification list the next time its own icon was tapped. On the
- * root stack it covers the bar and hands the user back to the tab they came
- * from.
+ * root stack its chevron hands the user back to the tab they came from, while
+ * the tab bar it draws for itself (`navigation/shellTabs`) leads to each tab's
+ * own screen.
  */
 export const NotificationsScreen = () => {
   const styles = useThemedStyles(makeStyles);

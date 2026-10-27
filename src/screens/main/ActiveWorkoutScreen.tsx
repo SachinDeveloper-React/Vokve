@@ -80,7 +80,11 @@ export const ActiveWorkoutScreen = ({
   }
 
   return (
-    <Screen edges={['top']}>
+    // No tab bar while a workout is being logged, for the same reason the
+    // back swipe is off: leaving is how the session is lost. Nothing offers
+    // a way back into it, and the next workout started overwrites it — so
+    // Finish and Discard are the two ways out, and they are both on screen.
+    <Screen edges={['top']} tabBar={false}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}

@@ -27,6 +27,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { CoinAmount } from '../../components/wallet/CoinAmount';
 import { checkoutApi, shopApi } from '../../services/api/endpoints';
 import { useCoinBalance } from '../../stores/coinsStore';
@@ -99,6 +100,10 @@ export const ProductDetailScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  // The tab bar lies over this screen, so its own bottom bar leaves room for
+  // it rather than sitting under the glass.
+  const tabBarSpace = useTabBarSpace();
+  const bottomRoom = Math.max(tabBarSpace, insets.bottom, spacing.base);
   const navigation = useNavigation();
   const route = useRoute<RootStackScreenProps<'ProductDetail'>['route']>();
   const { id } = route.params;
@@ -431,7 +436,7 @@ export const ProductDetailScreen = () => {
         <View
           style={[
             styles.bar,
-            { paddingBottom: Math.max(insets.bottom, spacing.base) },
+            { paddingBottom: bottomRoom },
           ]}
         >
           <VStack flex={1} gap="xxs">

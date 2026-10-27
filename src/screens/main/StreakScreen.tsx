@@ -16,6 +16,7 @@ import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/media/Icon';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { useToast } from '../../components/feedback/Toast';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useStreakHistory } from '../../hooks/useStreakHistory';
@@ -53,6 +54,9 @@ const makeStyles = ({ spacing, colors }: ThemeShape) =>
  */
 export const StreakScreen = () => {
   const styles = useThemedStyles(makeStyles);
+  // The tab bar lies over this screen, so its own bottom bar leaves room for
+  // it rather than sitting under the glass.
+  const tabBarSpace = useTabBarSpace();
   const { colors } = useTheme();
   const navigation = useNavigation();
   const toast = useToast();
@@ -375,7 +379,7 @@ export const StreakScreen = () => {
       </ScrollView>
 
       {summary === null ? null : (
-        <View style={styles.bar}>
+        <View style={[styles.bar, { paddingBottom: tabBarSpace }]}>
           {summary.todayCovered ? (
             <AppText variant="caption" color="textSecondary" center>
               Today already counts — your streak is safe.

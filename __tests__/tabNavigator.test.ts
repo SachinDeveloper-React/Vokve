@@ -4,24 +4,23 @@
  * never a React component. Picking the wrong one leaves a tab bar with no
  * icons at all, which nothing else in the suite would catch.
  *
- * The Android bar's *look* is held here too. It is drawn to feel like the one
- * UIKit gives iOS, and each of those four decisions is one line of style that
- * a tidy-up could undo without anything looking broken.
+ * The bar this app draws itself is held here too. It is a floating glass
+ * capsule — the shape iOS 26 gives a tab bar — and each part of that is one
+ * line of style that a tidy-up could undo without anything looking broken.
  *
  * @format
  */
 
-import {
-  JsTabNavigator,
-  TabBarButton,
-  tabBarStyles,
-} from '../src/navigation/JsTabNavigator';
+import { JsTabNavigator } from '../src/navigation/JsTabNavigator';
 import { NativeTabNavigator } from '../src/navigation/NativeTabNavigator';
 import { AccountNavigator } from '../src/navigation/AccountNavigator';
 import { MAIN_TABS } from '../src/navigation/tabs';
 import { pickTabNavigator, TabNavigator } from '../src/navigation/TabNavigator';
-import { typography } from '../src/theme';
-import type React from 'react';
+import {
+  floatingTabBarStyles,
+  glassOf,
+} from '../src/components/navigation/FloatingTabBar';
+import { radius, typography } from '../src/theme';
 
 test('iOS gets the native UITabBarController navigator', () => {
   // This is what brings Liquid Glass and tabBarMinimizeBehavior on iOS 26.
@@ -76,42 +75,53 @@ test('every tab carries an icon for both bars', () => {
   }
 });
 
-describe('the Android bar feels like iOS', () => {
-  test('a tab item dims instead of rippling', () => {
-    // The library's own button is a `PlatformPressable`, which on Android
-    // always draws a ripple and skips its own opacity animation — the single
-    // loudest thing marking the bar as Android.
-    const element = TabBarButton({
-      children: null,
-      style: { flex: 1 },
-      android_ripple: { borderless: true },
-    } as never) as React.ReactElement<{
-      android_ripple?: unknown;
-      style: (state: { pressed: boolean }) => unknown[];
-    }>;
+/** The alpha of an `rgba(...)` colour, or 1 for anything opaque. */
+const alphaOf = (color: string): number => {
+  const match = color.match(/rgba\([^)]*,\s*([\d.]+)\s*\)/);
+  return match ? Number(match[1]) : 1;
+};
 
-    expect(element.props.android_ripple).toBeUndefined();
-    expect(element.props.style({ pressed: false })).toEqual([
-      { flex: 1 },
-      false,
-    ]);
-    const [, pressed] = element.props.style({ pressed: true });
-    expect(pressed).toMatchObject({ opacity: expect.any(Number) });
+describe('the bar the app draws itself', () => {
+  test('it floats: laid over the page, inset, fully rounded and lifted', () => {
+    // A flush bar is a hairline and nothing else. This one is a capsule
+    // lying on the page, and all four of these are what say so. The
+    // position is the load-bearing one: in the layout flow instead, the
+    // page would stop above the bar and never show through the glass.
+    expect(floatingTabBarStyles.wrap.position).toBe('absolute');
+    expect(floatingTabBarStyles.wrap.paddingHorizontal).toBeGreaterThan(0);
+    expect(floatingTabBarStyles.pill.borderRadius).toBe(radius.pill);
+    const { elevation, shadowOpacity } = floatingTabBarStyles.pill as {
+      elevation?: number;
+      shadowOpacity?: number;
+    };
+    expect(elevation ?? shadowOpacity ?? 0).toBeGreaterThan(0);
   });
 
-  test('the bar is a hairline, not a lifted Material surface', () => {
-    // The library sets `elevation: 8` on Android; a UITabBar has one hairline
-    // and no shadow.
-    expect(tabBarStyles.bar).toMatchObject({ elevation: 0, shadowOpacity: 0 });
-    expect(tabBarStyles.bar.borderTopWidth).toBeGreaterThan(0);
+  test('the glass is translucent in both themes, under a highlight', () => {
+    // The whole trick: the page tints the bar. An opaque fill would leave
+    // something that still looked deliberate and was no longer glass.
+    const card = 'rgb(10, 20, 30)';
+    for (const isDark of [false, true]) {
+      const glass = glassOf(card, isDark);
+      for (const stop of glass.gradient) {
+        expect(alphaOf(stop)).toBeLessThan(1);
+      }
+      // A specular highlight across the top, the card's own colour below it.
+      expect(glass.gradient[0]).toMatch(/^rgba\(255, 255, 255/);
+      expect(glass.gradient[1]).toContain('10, 20, 30');
+      expect(glass.gradient[2]).toContain('10, 20, 30');
+      expect(alphaOf(glass.rim)).toBeGreaterThan(0);
+    }
   });
 
   test('the label is a caption, not an upper-cased Material chip', () => {
     // `typography.label` is 11pt, upper-cased and letter-spaced, which is
     // Material's tab label to the letter. UIKit's is 10pt and sentence case.
-    expect(tabBarStyles.label.textTransform).toBe('none');
-    expect(tabBarStyles.label.fontSize).toBeLessThan(typography.label.fontSize);
-    expect(tabBarStyles.label.letterSpacing ?? 0).toBeLessThan(
+    expect(floatingTabBarStyles.label.textTransform).toBe('none');
+    expect(floatingTabBarStyles.label.fontSize).toBeLessThan(
+      typography.label.fontSize,
+    );
+    expect(floatingTabBarStyles.label.letterSpacing ?? 0).toBeLessThan(
       typography.label.letterSpacing ?? 0,
     );
   });

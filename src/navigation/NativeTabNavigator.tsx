@@ -2,6 +2,7 @@ import React from 'react';
 import { createNativeBottomTabNavigator } from '@react-navigation/bottom-tabs/unstable';
 import { useTheme } from '../theme';
 import type { MainTabParamList } from '../types/navigation';
+import { TabBarBelowContext } from './shellTabs';
 import { MAIN_TABS } from './tabs';
 
 const Tab = createNativeBottomTabNavigator<MainTabParamList>();
@@ -23,29 +24,34 @@ export const NativeTabNavigator = () => {
   const { colors } = useTheme();
 
   return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        // iOS 26: the bar shrinks to a pill as the user scrolls down a screen
-        // and expands again on the way back up.
-        tabBarMinimizeBehavior: 'onScrollDown',
-      }}
-    >
-      {MAIN_TABS.map(tab => (
-        <Tab.Screen
-          key={tab.name}
-          name={tab.name}
-          component={tab.component}
-          options={{
-            title: tab.title,
-            // `as const` is load-bearing: without it the literal widens to
-            // `string` and no longer matches the SF Symbol variant of the
-            // icon union.
-            tabBarIcon: { type: 'sfSymbol' as const, name: tab.sfSymbol },
-          }}
-        />
-      ))}
-    </Tab.Navigator>
+    // Everything in here has UIKit's own tab bar under it, so no screen of
+    // it draws one of its own — and UIKit has already taken the room for it
+    // out of the screen, so none of them reserves any (`shellTabs`).
+    <TabBarBelowContext.Provider value="platform">
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: colors.primary,
+          // iOS 26: the bar shrinks to a pill as the user scrolls down a
+          // screen and expands again on the way back up.
+          tabBarMinimizeBehavior: 'onScrollDown',
+        }}
+      >
+        {MAIN_TABS.map(tab => (
+          <Tab.Screen
+            key={tab.name}
+            name={tab.name}
+            component={tab.component}
+            options={{
+              title: tab.title,
+              // `as const` is load-bearing: without it the literal widens to
+              // `string` and no longer matches the SF Symbol variant of the
+              // icon union.
+              tabBarIcon: { type: 'sfSymbol' as const, name: tab.sfSymbol },
+            }}
+          />
+        ))}
+      </Tab.Navigator>
+    </TabBarBelowContext.Provider>
   );
 };

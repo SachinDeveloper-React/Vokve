@@ -31,6 +31,7 @@ import { ShopPageHeader } from '../../components/shop/ShopPageHeader';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Screen } from '../../components/ui/Screen';
+import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { checkoutApi } from '../../services/api/endpoints';
 import { useAuthStatus } from '../../stores/authStore';
 import { useAddresses, useAddressesStore } from '../../stores/addressesStore';
@@ -85,6 +86,10 @@ export const ShippingAddressScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  // The tab bar lies over this screen, so its own bottom bar leaves room for
+  // it rather than sitting under the glass.
+  const tabBarSpace = useTabBarSpace();
+  const bottomRoom = Math.max(tabBarSpace, insets.bottom, spacing.base);
   const navigation = useNavigation();
   const route = useRoute<RootStackScreenProps<'ShippingAddress'>['route']>();
   const source = route.params;
@@ -313,7 +318,7 @@ export const ShippingAddressScreen = () => {
       <View
         style={[
           styles.bar,
-          { paddingBottom: Math.max(insets.bottom, spacing.base) },
+          { paddingBottom: bottomRoom },
         ]}
       >
         <VStack flex={1} gap="xxs">

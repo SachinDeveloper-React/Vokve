@@ -91,6 +91,7 @@ import type { RootStackParamList } from '../types/navigation';
 import { AuthNavigator } from './AuthNavigator';
 import { OnboardingNavigator } from './OnboardingNavigator';
 import { PermissionsNavigator } from './PermissionsNavigator';
+import { InAppShellContext } from './shellTabs';
 import { TabNavigator } from './TabNavigator';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -277,318 +278,327 @@ export const RootNavigator = () => {
     >
       {/* The knock sits over whatever is on screen; the wall replaces it. */}
       <UpdateSheet update={softUpdate} onDismiss={dismissUpdate} />
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {needsOnboarding ? (
-          <Stack.Screen name="Onboarding" component={OnboardingNavigator} />
-        ) : needsPermissions ? (
-          <Stack.Screen name="Permissions" component={PermissionsNavigator} />
-        ) : isSignedIn ? (
-          <Stack.Group>
-            <Stack.Screen name="Main" component={TabNavigator} />
-            <Stack.Screen
-              name="AddMeal"
-              component={AddMealScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="FoodLibrary"
-              component={FoodLibraryScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="DietPlan"
-              component={DietPlanScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="DietPlans"
-              component={DietPlansScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="NutritionHistory"
-              component={NutritionHistoryScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Nutrition"
-              component={NutritionScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Referral"
-              component={ReferralScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="CoinHistory"
-              component={CoinHistoryScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Orders"
-              component={OrdersScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="OrderDetail"
-              component={OrderDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Addresses"
-              component={AddressesScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="AddressForm"
-              component={AddressFormScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ShopBrowse"
-              component={ShopBrowseScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ShopSearch"
-              component={ShopSearchScreen}
-              options={{ animation: 'fade' }}
-            />
-            <Stack.Screen
-              name="ProductDetail"
-              component={ProductDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Cart"
-              component={CartScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ShippingAddress"
-              component={ShippingAddressScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Checkout"
-              component={CheckoutScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Payment"
-              component={PaymentScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="OrderConfirmation"
-              component={OrderConfirmationScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Wishlist"
-              component={WishlistScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Reviews"
-              component={ReviewsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="WriteReview"
-              component={WriteReviewScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="EditProfile"
-              component={EditProfileScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Security"
-              component={SecurityScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Privacy"
-              component={PrivacyScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="HelpSupport"
-              component={HelpSupportScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="HelpTopic"
-              component={HelpTopicScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ContactUs"
-              component={ContactUsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ReportIssue"
-              component={ReportIssueScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="AppGuide"
-              component={AppGuideScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="SupportTicket"
-              component={SupportTicketScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="About"
-              component={AboutScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="BloodPressure"
-              component={BloodPressureScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="HeartRate"
-              component={HeartRateScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="HealthCheckup"
-              component={HealthCheckupScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Analytics"
-              component={AnalyticsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="HydrationReminder"
-              component={HydrationReminderScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Hydration"
-              component={HydrationScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="HydrationHistory"
-              component={HydrationHistoryScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ReminderSound"
-              component={ReminderSoundScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="VerifyContact"
-              component={VerifyOtpScreen}
-              options={{ animation: 'slide_from_bottom' }}
-            />
-            <Stack.Screen
-              name="LeaderboardRewards"
-              component={LeaderboardRewardsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Streak"
-              component={StreakScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="StreakHistory"
-              component={StreakHistoryScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="StreakDay"
-              component={StreakDayScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="StepTracking"
-              component={StepTrackingScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="StepSources"
-              component={StepSourcesScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="StepGoal"
-              component={StepGoalScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Challenges"
-              component={ChallengesScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ChallengeDetail"
-              component={ChallengeDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ChallengeList"
-              component={ChallengeListScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Achievements"
-              component={AchievementsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="AchievementDetail"
-              component={AchievementDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="LeaderboardBoard"
-              component={LeaderboardBoardScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="NotificationSettings"
-              component={NotificationSettingsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="Notifications"
-              component={NotificationsScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="WorkoutDetail"
-              component={WorkoutDetailScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="ActiveWorkout"
-              component={ActiveWorkoutScreen}
-              options={{
-                animation: 'slide_from_bottom',
-                // A workout in progress should not be swiped away by accident.
-                gestureEnabled: false,
-              }}
-            />
-          </Stack.Group>
-        ) : (
-          <Stack.Screen name="Auth" component={AuthNavigator} />
-        )}
-      </Stack.Navigator>
+      {/*
+        Inside the app, every screen draws the tab bar for itself: these are
+        root-stack routes rather than pages inside a tab, so that a tab always
+        opens its own screen — and a stack screen covers the real bar
+        (`shellTabs`, `components/navigation/AppTabBar`). Auth, onboarding and
+        the permission screens are outside it and carry no bar.
+      */}
+      <InAppShellContext.Provider value={inApp}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {needsOnboarding ? (
+            <Stack.Screen name="Onboarding" component={OnboardingNavigator} />
+          ) : needsPermissions ? (
+            <Stack.Screen name="Permissions" component={PermissionsNavigator} />
+          ) : isSignedIn ? (
+            <Stack.Group>
+              <Stack.Screen name="Main" component={TabNavigator} />
+              <Stack.Screen
+                name="AddMeal"
+                component={AddMealScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="FoodLibrary"
+                component={FoodLibraryScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="DietPlan"
+                component={DietPlanScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="DietPlans"
+                component={DietPlansScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="NutritionHistory"
+                component={NutritionHistoryScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Nutrition"
+                component={NutritionScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Referral"
+                component={ReferralScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="CoinHistory"
+                component={CoinHistoryScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Orders"
+                component={OrdersScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="OrderDetail"
+                component={OrderDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Addresses"
+                component={AddressesScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="AddressForm"
+                component={AddressFormScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ShopBrowse"
+                component={ShopBrowseScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ShopSearch"
+                component={ShopSearchScreen}
+                options={{ animation: 'fade' }}
+              />
+              <Stack.Screen
+                name="ProductDetail"
+                component={ProductDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Cart"
+                component={CartScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ShippingAddress"
+                component={ShippingAddressScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Checkout"
+                component={CheckoutScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Payment"
+                component={PaymentScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="OrderConfirmation"
+                component={OrderConfirmationScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Wishlist"
+                component={WishlistScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Reviews"
+                component={ReviewsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="WriteReview"
+                component={WriteReviewScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="EditProfile"
+                component={EditProfileScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Security"
+                component={SecurityScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Privacy"
+                component={PrivacyScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="HelpSupport"
+                component={HelpSupportScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="HelpTopic"
+                component={HelpTopicScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ContactUs"
+                component={ContactUsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ReportIssue"
+                component={ReportIssueScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="AppGuide"
+                component={AppGuideScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="SupportTicket"
+                component={SupportTicketScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="About"
+                component={AboutScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="BloodPressure"
+                component={BloodPressureScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="HeartRate"
+                component={HeartRateScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="HealthCheckup"
+                component={HealthCheckupScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Analytics"
+                component={AnalyticsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="HydrationReminder"
+                component={HydrationReminderScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Hydration"
+                component={HydrationScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="HydrationHistory"
+                component={HydrationHistoryScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ReminderSound"
+                component={ReminderSoundScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="VerifyContact"
+                component={VerifyOtpScreen}
+                options={{ animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="LeaderboardRewards"
+                component={LeaderboardRewardsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Streak"
+                component={StreakScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="StreakHistory"
+                component={StreakHistoryScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="StreakDay"
+                component={StreakDayScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="StepTracking"
+                component={StepTrackingScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="StepSources"
+                component={StepSourcesScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="StepGoal"
+                component={StepGoalScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Challenges"
+                component={ChallengesScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ChallengeDetail"
+                component={ChallengeDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ChallengeList"
+                component={ChallengeListScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Achievements"
+                component={AchievementsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="AchievementDetail"
+                component={AchievementDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="LeaderboardBoard"
+                component={LeaderboardBoardScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="NotificationSettings"
+                component={NotificationSettingsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="Notifications"
+                component={NotificationsScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="WorkoutDetail"
+                component={WorkoutDetailScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="ActiveWorkout"
+                component={ActiveWorkoutScreen}
+                options={{
+                  animation: 'slide_from_bottom',
+                  // A workout in progress should not be swiped away by accident.
+                  gestureEnabled: false,
+                }}
+              />
+            </Stack.Group>
+          ) : (
+            <Stack.Screen name="Auth" component={AuthNavigator} />
+          )}
+        </Stack.Navigator>
+      </InAppShellContext.Provider>
     </NavigationContainer>
   );
 };
