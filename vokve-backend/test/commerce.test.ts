@@ -8,6 +8,7 @@ import { CoinLedgerModel } from '../src/modules/economy/models.js';
 import { credit } from '../src/modules/economy/service.js';
 import { UserModel } from '../src/modules/identity/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
+import { localDayOf } from '../src/lib/dates.js';
 import { setWhatsAppTransport } from '../src/lib/whatsapp.js';
 import { app, authed, signUpAndRegister, type Session } from './helpers.js';
 
@@ -311,6 +312,27 @@ describe('commerce: checkout and payment (RULES R2–R4, R11–R13, O8, T5)', ()
     expect(emptyCart.status).toBe(422);
     expect(emptyCart.body.error.code).toBe('CART_EMPTY');
     expect((await request(app).post('/v1/checkout').set(authed(session)).send({ addressId: created.body.id })).status).toBe(422);
+  });
+
+  it('numbers an order on the member\'s own day, whatever zone the server is in', async () => {
+    const { session, addressId } = await shopper(0);
+    // Two zones 25 hours apart are never on the same calendar day, so one of
+    // them is always a different day from this process — which is what the
+    // number used to be stamped with. Whichever that is, the number has to
+    // follow the member.
+    const now = new Date();
+    const here = localDayOf(now, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const zone = localDayOf(now, 'Pacific/Kiritimati') !== here ? 'Pacific/Kiritimati' : 'Pacific/Midway';
+
+    const placed = await request(app)
+      .post('/v1/checkout')
+      .set({ ...authed(session), 'x-vokve-timezone': zone })
+      .send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId });
+    expect(placed.status).toBe(200);
+
+    const order = placed.body.order;
+    const theirDay = localDayOf(new Date(order.placedAt), zone).slice(2).replace(/-/g, '');
+    expect(order.number.slice(0, 9)).toBe(`VKV${theirDay}`);
   });
 
   it('places a part-coins order as pending, collects the money, and only then calls it placed', async () => {

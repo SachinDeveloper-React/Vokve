@@ -1337,12 +1337,11 @@ function orderTitle(lines: { item: { title: string } }[]): string {
  * of thing support discovers at the worst moment. Six digits on the (never
  * seen) day that every attempt collides.
  */
-async function nextOrderNumber(placedAt: Date): Promise<string> {
-  const day = [
-    String(placedAt.getFullYear() % 100).padStart(2, '0'),
-    String(placedAt.getMonth() + 1).padStart(2, '0'),
-    String(placedAt.getDate()).padStart(2, '0'),
-  ].join('');
+async function nextOrderNumber(placedAt: Date, timeZone: string): Promise<string> {
+  // The member's own day, not the server's: read off the process's zone this
+  // was a day behind on anything placed before 05:30 IST, so the number they
+  // read out to support disagreed with the date on their own order.
+  const day = localDayOf(placedAt, timeZone).slice(2).replace(/-/g, '');
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = `VKV${day}${String(Math.floor(Math.random() * 10_000)).padStart(4, '0')}`;
     if (!(await OrderModel.exists({ number: candidate }))) return candidate;
@@ -1471,7 +1470,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
 
   const orderId = newId('ord');
   const now = new Date();
-  const number = await nextOrderNumber(now);
+  const number = await nextOrderNumber(now, input.timezone ?? config.locale.timezone);
   const window = deliveryWindowFrom(now, cfg);
   const snapshot = snapshotAddress(address);
   const coinsMc = toMilli(q.coinsApplied);
