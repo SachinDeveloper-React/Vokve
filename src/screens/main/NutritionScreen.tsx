@@ -26,9 +26,10 @@ import {
 } from '../../components/nutrition/nutritionLabels';
 import { LoadState } from '../../components/ui/LoadState';
 import { Button } from '../../components/ui/Button';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
 import { useActivityDay } from '../../hooks/useActivity';
-import { useTip } from '../../hooks/useContent';
+import { useReferralCard, useTip } from '../../hooks/useContent';
 import { useNutritionDay, useNutritionDays } from '../../hooks/useNutrition';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useCurrentUser } from '../../stores/authStore';
@@ -94,6 +95,16 @@ export const NutritionScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('nutrition');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
   const hasUnreadNotifications = useHasUnreadNotifications();
 
@@ -296,6 +307,12 @@ export const NutritionScreen = () => {
           />
         ) : null}
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         {profile === null ? (
           <LoadState
             loading={isSyncing || syncError === null}
@@ -323,7 +340,9 @@ export const NutritionScreen = () => {
               />
             ) : periodDays.data ? (
               <RangeSummaryCard
-                title={period === 'week' ? 'The last 7 days' : 'The last 30 days'}
+                title={
+                  period === 'week' ? 'The last 7 days' : 'The last 30 days'
+                }
                 days={periodDays.data}
                 goals={profile.goals}
               />
@@ -352,6 +371,12 @@ export const NutritionScreen = () => {
 
         {/* The meal rows are one day's; a period gets the day-by-day list
             instead, whose rows walk back into a single day. */}
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
+
         {period !== 'day' ? (
           periodDays.data ? (
             <DayTotalsCard
@@ -388,6 +413,7 @@ export const NutritionScreen = () => {
             onPressManage={onOpenDietPlan}
           />
         ) : null}
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <ActionSheet

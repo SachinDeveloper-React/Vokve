@@ -9,7 +9,10 @@ import {
 import { UpcomingChallengesCard } from '../../components/challenges/UpcomingChallengesCard';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { FilterChips, type FilterOption } from '../../components/ui/FilterChips';
+import {
+  FilterChips,
+  type FilterOption,
+} from '../../components/ui/FilterChips';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useChallengeBoard } from '../../hooks/useChallenges';

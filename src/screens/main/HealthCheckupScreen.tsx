@@ -12,8 +12,9 @@ import { StaleFigures } from '../../components/feedback';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { DateChip } from '../../components/streak/DateChip';
 import { LoadState } from '../../components/ui/LoadState';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
-import { useTip } from '../../hooks/useContent';
+import { useReferralCard, useTip } from '../../hooks/useContent';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useHealthScore } from '../../hooks/useVitals';
 import { useCurrentUser } from '../../stores/authStore';
@@ -53,6 +54,16 @@ export const HealthCheckupScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('health');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
 
   const latest = useLatestVitals();
@@ -99,6 +110,17 @@ export const HealthCheckupScreen = () => {
     [navigation],
   );
 
+  const onOpenTrends = useCallback(
+    () => navigation.navigate('VitalsTrends'),
+    [navigation],
+  );
+
+  /** No `kind`: from here the question is what has been logged, not of what. */
+  const onOpenAllReadings = useCallback(
+    () => navigation.navigate('VitalsHistory'),
+    [navigation],
+  );
+
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -107,9 +129,9 @@ export const HealthCheckupScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The trends screen, the full history and the two explainers have no screens
-  // yet. Wired as no-ops rather than left off, so each control keeps the shape
-  // it will ship with and only the handler changes when its screen lands.
+  // The two ⓘ explainers have no screens yet. Wired as no-ops rather than
+  // left off, so each control keeps the shape it will ship with and only the
+  // handler changes when its screen lands.
   const notImplemented = useCallback(() => {}, []);
 
   return (
@@ -137,6 +159,12 @@ export const HealthCheckupScreen = () => {
 
         <StaleFigures at={score.cachedAt} stale={score.isStale} />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         {score.data ? (
           <HealthScoreCard
             score={score.data.score}
@@ -154,6 +182,12 @@ export const HealthCheckupScreen = () => {
           />
         )}
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
+
         {synced ? (
           <>
             <VitalsCard
@@ -164,11 +198,11 @@ export const HealthCheckupScreen = () => {
               onPressBloodPressure={onOpenBloodPressure}
             />
 
-            <TrackProgressCard onPressTrends={notImplemented} />
+            <TrackProgressCard onPressTrends={onOpenTrends} />
 
             <RecentHistoryCard
               readings={recent}
-              onPressViewAll={notImplemented}
+              onPressViewAll={onOpenAllReadings}
             />
           </>
         ) : (
@@ -181,6 +215,7 @@ export const HealthCheckupScreen = () => {
         )}
 
         {tip ? <HealthTipCard tip={tip.text} /> : null}
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <AddReadingSheet

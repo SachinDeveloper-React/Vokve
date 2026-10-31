@@ -6,12 +6,13 @@ import { AppConfigModel } from '../modules/platform/models.js';
 import { CouponModel, ShopCategoryModel, ShopInventoryModel, ShopItemModel } from '../modules/commerce/models.js';
 import { ExerciseModel, WorkoutTemplateModel } from '../modules/training/models.js';
 import { AchievementDefinitionModel, ChallengeDefinitionModel } from '../modules/challenges/models.js';
-import { ContentTipModel } from '../modules/content/models.js';
+import { ContentTipModel, ReferralPromoModel } from '../modules/content/models.js';
 import { DietPlanModel, FoodItemModel } from '../modules/nutrition/models.js';
 import { addDays, localDayOf } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 import {
   ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLANS, EXERCISES, FOOD_ITEMS, SHOP_CATEGORIES, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
+  REFERRAL_PROMOS,
   SUPPORT_FAQS, SUPPORT_GUIDE_SECTIONS, WORKOUT_TEMPLATES,
 } from './data.js';
 
@@ -101,6 +102,17 @@ export async function seed(now = new Date()): Promise<void> {
   // The tips' wording is the seed's to keep current; whether one is shown is the operator's.
   await Promise.all(CONTENT_TIPS.map(({ _id, ...t }) =>
     ContentTipModel.updateOne({ _id }, { $set: t, $setOnInsert: { active: true } }, { upsert: true })));
+  // The invite cards are a campaign, and a campaign belongs to whoever is
+  // running it: a re-seed restores the wording of the ones it shipped and
+  // leaves anything an operator has written since — and whether a card is
+  // live stays theirs, so a card pulled from the shop screen stays pulled.
+  const ownedPromos = await operatorOwned(ReferralPromoModel, REFERRAL_PROMOS.map(p => p._id));
+  await Promise.all(REFERRAL_PROMOS.filter(p => !ownedPromos.has(p._id)).map(({ _id, ...promo }) =>
+    ReferralPromoModel.updateOne(
+      { _id },
+      { $set: { ...promo, updatedBy: 'seed' }, $setOnInsert: { active: true } },
+      { upsert: true },
+    )));
   // The foods the app ships with. Whether one is still offered is the
   // operator's (they retire it through /v1/admin/foods), so a re-seed
   // restores the figures without putting a retired food back on the shelf —

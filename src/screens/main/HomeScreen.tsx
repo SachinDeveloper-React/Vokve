@@ -9,8 +9,9 @@ import { WaterGuardSheet } from '../../components/hydration/WaterGuardSheet';
 import { StepGoalCard } from '../../components/fitness/StepGoalCard';
 import { WeeklyStepsChart } from '../../components/fitness/WeeklyStepsChart';
 import { StepTrackingPromptCard } from '../../components/steps/StepTrackingPromptCard';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
-import { useTip } from '../../hooks/useContent';
+import { useReferralCard, useTip } from '../../hooks/useContent';
 import { useLogWater } from '../../hooks/useLogWater';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { syncStepsNow } from '../../services/steps';
@@ -44,6 +45,16 @@ export const HomeScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('home');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
   const currentStreak = useCurrentStreak();
   const hasUnreadNotifications = useHasUnreadNotifications();
@@ -179,6 +190,12 @@ export const HomeScreen = () => {
           />
         ) : null}
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         <StepGoalCard
           steps={today.shown}
           goal={stepGoal}
@@ -193,6 +210,12 @@ export const HomeScreen = () => {
         />
 
         <WeeklyStepsChart data={week} goal={stepGoal} />
+
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
 
         <QuickActionsRow
           streakDays={currentStreak}
@@ -210,6 +233,7 @@ export const HomeScreen = () => {
         />
 
         {motivation ? <MotivationCard quote={motivation.text} /> : null}
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <WaterGuardSheet guard={water} />

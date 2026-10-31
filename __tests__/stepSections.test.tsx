@@ -147,6 +147,75 @@ describe('WeeklyStepsChart', () => {
     expect(allText(tree)).not.toMatch(/NaN|Infinity/);
     expect(allText(tree)).toContain('0%');
   });
+
+  test('draws a scale up the left, in whole thousands', async () => {
+    // Peak 10,245 rounds the scale to 12,000 in four steps.
+    const text = allText(await render(<WeeklyStepsChart data={week} goal={10000} />));
+
+    expect(text).toContain('4k');
+    expect(text).toContain('8k');
+    expect(text).toContain('12k');
+    // Not 4.0k: a tick is read at a glance, not measured.
+    expect(text).not.toContain('4.0k');
+  });
+
+  test('a week that never reaches a thousand is labelled in plain steps', async () => {
+    const small = week.map((d, i) => ({ ...d, steps: 100 * i }));
+    const text = allText(await render(<WeeklyStepsChart data={small} goal={900} />));
+
+    expect(text).toContain('300');
+    expect(text).toContain('600');
+    expect(text).toContain('900');
+    expect(text).not.toMatch(/0\.3k|k\b.*0\.6/);
+  });
+
+  test('each tick sits where a bar of that value would end', async () => {
+    const tree = await render(<WeeklyStepsChart data={week} goal={10000} />);
+
+    // The ticks are the only absolutely positioned text in the card.
+    const ticks = tree.root
+      .findAllByType(Text)
+      .map(n => flatten(n.props.style))
+      .filter(s => s.position === 'absolute' && typeof s.bottom === 'number')
+      .map(s => s.bottom as number);
+
+    expect(ticks).toHaveLength(4);
+    // 0, a third, two thirds and the full height of the tallest bar.
+    const top = Math.max(...ticks);
+    expect(ticks.map(b => b / top).sort()).toEqual([0, 1 / 3, 2 / 3, 1].sort());
+  });
+
+  test('the scale takes only the width its longest label needs', async () => {
+    const axisWidth = async (data: typeof week, goal: number) => {
+      const tree = await render(<WeeklyStepsChart data={data} goal={goal} />);
+      const box = tree.root
+        .findAllByType(View)
+        .map(n => flatten(n.props.style))
+        .find(s => s.alignSelf === 'flex-start' && typeof s.width === 'number');
+      return box?.width as number;
+    };
+
+    // "0 / 300 / 600 / 900" against "0 / 4k / 8k / 12k": three characters
+    // either way, so the bars lose the same either way.
+    const small = await axisWidth(week.map((d, i) => ({ ...d, steps: 100 * i })), 900);
+    const big = await axisWidth(week, 10000);
+    expect(small).toBe(big);
+
+    // A peak that rounds to a fraction needs the two extra characters.
+    const fractional = await axisWidth(week.map(d => ({ ...d, steps: 1100 })), 1100);
+    expect(fractional).toBeGreaterThan(big);
+  });
+
+  test('the scale is left to the bars to speak, so a reader does not read the week twice', async () => {
+    const tree = await render(<WeeklyStepsChart data={week} goal={10000} />);
+
+    const hidden = tree.root
+      .findAllByType(View)
+      .filter(n => n.props.accessibilityElementsHidden === true);
+
+    expect(hidden).toHaveLength(1);
+    expect(hidden[0].props.importantForAccessibility).toBe('no-hide-descendants');
+  });
 });
 
 describe('MetricTile', () => {

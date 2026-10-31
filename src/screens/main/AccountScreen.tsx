@@ -12,8 +12,10 @@ import { PremiumUpsellCard } from '../../components/account/PremiumUpsellCard';
 import { ProfileCompletenessCard } from '../../components/account/ProfileCompletenessCard';
 import { ProfileSummaryCard } from '../../components/account/ProfileSummaryCard';
 import { AchievementsCard } from '../../components/challenges/AchievementsCard';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
 import { config } from '../../constants/config';
+import { useReferralCard } from '../../hooks/useContent';
 import { useAchievements } from '../../hooks/useChallenges';
 import { useAccountStore, useProfileSummary } from '../../stores/accountStore';
 import {
@@ -60,6 +62,16 @@ export const AccountScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('account');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
   const balance = useCoinBalance();
   const hasUnreadNotifications = useHasUnreadNotifications();
@@ -191,6 +203,12 @@ export const AccountScreen = () => {
           onPress={go('EditProfile')}
         />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         {summary ? (
           <ProfileCompletenessCard
             percent={summary.completeness}
@@ -217,6 +235,12 @@ export const AccountScreen = () => {
 
         {summary ? <MilestoneShelf badges={summary.badges} /> : null}
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
+
         <PremiumUpsellCard onPressUpgrade={go('LeaderboardRewards')} />
 
         <AccountMenuList
@@ -233,6 +257,7 @@ export const AccountScreen = () => {
         />
 
         <DataSafetyNote />
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <AppearanceSheet visible={isAppearanceOpen} onClose={closeAppearance} />

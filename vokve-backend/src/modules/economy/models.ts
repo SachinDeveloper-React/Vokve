@@ -38,9 +38,26 @@ const balanceSchema = new Schema(
     pendingMc: { type: Number, default: 0, min: 0 },
     lifetimeEarnedMc: { type: Number, default: 0, min: 0 },
     lastCreditAt: { type: Date, default: null },
+    /**
+     * When this member's phone last reported steps: the receipt of the newest
+     * accepted snapshot, not the day that was walked (RULES E9).
+     *
+     * The idle-expiry clock runs from here, so it is denormalised off
+     * `devices.stepSync.uploadedAt` by the ingest path rather than read
+     * across collections — the sweep asks "whose window has run out?" of
+     * every wallet at once, and that is a field to index, not a per-member
+     * aggregate over devices to run nightly.
+     *
+     * Null for a member who has never synced: an install that never got the
+     * permission, or an account that only ever earned elsewhere. Their window
+     * falls back to `lastCreditAt`, which is what it ran from before.
+     */
+    lastStepSyncAt: { type: Date, default: null },
   },
   { timestamps: true, collection: 'coin_balances' },
 );
+/** The expiry sweep's one query: wallets with coins, on whichever clock they run. */
+balanceSchema.index({ balanceMc: 1, lastStepSyncAt: 1, lastCreditAt: 1 });
 export const CoinBalanceModel = model('CoinBalance', balanceSchema);
 
 /**

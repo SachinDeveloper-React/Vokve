@@ -53,7 +53,10 @@ jest.mock('../src/services/api/endpoints', () => {
       ),
       score: jest.fn(() => api.mockVitalsApi.score()),
     },
-    contentApi: { tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)) },
+    contentApi: {
+      tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
+      referralCards: jest.fn(() => api.mockContentApi.referralCards()),
+    },
   };
 });
 
@@ -211,6 +214,14 @@ describe('BloodPressureScreen', () => {
     const text = allText(tree);
     expect(text).toContain('136/');
     expect(text).toContain('High');
+  });
+
+  test('"View all" opens the archive, already filtered to this vital', async () => {
+    press(await render(), 'View all blood pressure readings');
+
+    expect(mockNavigate).toHaveBeenCalledWith('VitalsHistory', {
+      kind: 'blood_pressure',
+    });
   });
 
   test('the chevron returns to whatever opened the screen', async () => {

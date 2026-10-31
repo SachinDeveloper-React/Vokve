@@ -4,6 +4,7 @@ import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { Icon } from '../media/Icon';
 import { HStack, VStack } from '../layout/Stack';
+import { StepAxis } from './StepAxis';
 import { StepBarColumn } from './StepBarColumn';
 
 export interface DaySteps {
@@ -17,17 +18,20 @@ interface Props {
   goal: number;
 }
 
-/** How many steps the scale is divided into when rounding its top up. */
+/**
+ * How many labels the scale carries, the baseline zero included — and so how
+ * many steps its top is rounded up to.
+ */
 const SCALE_STEPS = 4;
 
 /**
  * Seven days of step counts.
  *
- * There is no axis and there are no gridlines: every bar already carries its
- * own value above it and its share of the goal below it, so a scale down the
- * side would be a third way of saying the same number. That is also why the
- * bars are one colour — the percentage under each says who met the goal far
- * more precisely than a shade could.
+ * Every bar carries its own value above it and its share of the goal below
+ * it, so the scale down the left is there to read the *heights* against, not
+ * to supply numbers the chart was missing: four ticks, no line, no gridlines.
+ * That is also why the bars are one colour — the percentage under each says
+ * who met the goal far more precisely than a shade could.
  *
  * A single series needs no legend: the card's title names it.
  */
@@ -60,6 +64,7 @@ export const WeeklyStepsChart = memo(({ data, goal }: Props) => {
         </HStack>
 
         <HStack align="end">
+          <StepAxis max={axisMax} ticks={SCALE_STEPS} />
           {data.map(entry => (
             <StepBarColumn
               key={entry.day}

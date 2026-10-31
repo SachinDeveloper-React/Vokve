@@ -5,9 +5,9 @@ import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { HStack, VStack } from '../layout/Stack';
 import { Pressable } from '../form/Pressable';
+import { WaterGlass } from '../hydration/WaterGlass';
 import { HydrationGlasses } from './HydrationGlasses';
 import { HydrationQuickAdd } from './HydrationQuickAdd';
-import { WaterDroplet } from './WaterDroplet';
 
 /** One glass in the indicator row, in millilitres. */
 const GLASS_ML = 250;
@@ -35,6 +35,10 @@ const litres = (ml: number) => (ml / 1000).toFixed(1);
  * same way: the accent marks what belongs to the reading of intake, so the
  * goal stays tertiary and does not compete with the figure it qualifies.
  *
+ * The glass is the card's one picture, and it is decorative: every figure it
+ * draws is written beside it, so the row it sits in gives it no label of its
+ * own and a screen reader walks past it to the readout.
+ *
  * Details open from the figures themselves rather than from a chevron, which
  * would be a third thing to press in a row that already has two. The target
  * deliberately stops short of the card: React Native's `Pressable` marks its
@@ -52,7 +56,7 @@ export const HydrationCard = memo(
     const { width } = useResponsive();
     const isNarrow = width < 360;
 
-    const { percent, filled, total } = useMemo(() => {
+    const { percent, progress, filled, total } = useMemo(() => {
       const safeGoal = Math.max(1, goalMl);
       const glasses = Math.min(
         MAX_GLASSES,
@@ -62,7 +66,10 @@ export const HydrationCard = memo(
 
       return {
         percent: Math.round((consumedMl / safeGoal) * 100),
-        filled: Math.min(glasses, Math.floor(consumedMl / perGlass)),
+        progress: consumedMl / safeGoal,
+        // Left fractional: the row draws the glass being drunk part full, and
+        // rounds down only for the count it speaks (`HydrationGlasses`).
+        filled: Math.min(glasses, Math.max(0, consumedMl / perGlass)),
         total: glasses,
       };
     }, [consumedMl, goalMl]);
@@ -95,7 +102,14 @@ export const HydrationCard = memo(
     return (
       <Card elevation="low" radius="xl" padding={isNarrow ? 'base' : 'lg'}>
         <HStack align="center" gap="base">
-          <WaterDroplet size={moderateScale(isNarrow ? 44 : 52)} />
+          {/* The same glass the water screen fills, at a size that reads as
+              the card's mark rather than as its subject — the litres beside
+              it are the headline. It fills with the day, so the card says
+              how things are going before a figure on it is read. */}
+          <WaterGlass
+            progress={progress}
+            size={moderateScale(isNarrow ? 36 : 42)}
+          />
 
           <VStack flex={1} gap="sm">
             <HStack align="center" justify="between" gap="sm">
@@ -121,7 +135,9 @@ export const HydrationCard = memo(
                   consumedMl,
                 )} of ${litres(
                   goalMl,
-                )} litres, ${percent} percent, ${filled} of ${total} glasses. Opens details.`}
+                )} litres, ${percent} percent, ${Math.floor(
+                  filled,
+                )} of ${total} glasses. Opens details.`}
               >
                 {readout}
               </Pressable>

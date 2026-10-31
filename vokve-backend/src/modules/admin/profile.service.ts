@@ -321,6 +321,10 @@ export async function memberWallet(userId: string) {
   const held = holds.filter(hold => hold.status === 'held');
   const expiryDays = config.coins.expiryDays;
   const lastCreditAt = balance?.lastCreditAt ?? null;
+  const lastStepSyncAt = balance?.lastStepSyncAt ?? null;
+  // The window runs from the newest step sync, and falls back to the newest
+  // credit only for a member who has never synced at all (RULES E9).
+  const idleSince = lastStepSyncAt ?? lastCreditAt;
 
   return {
     balance: {
@@ -328,10 +332,11 @@ export async function memberWallet(userId: string) {
       pending: toCoins(balance?.pendingMc ?? 0),
       lifetimeEarned: toCoins(balance?.lifetimeEarnedMc ?? 0),
       lastCreditAt: iso(lastCreditAt),
-      /** Idle coins lapse (RULES E9); the clock resets on any credit. */
+      lastStepSyncAt: iso(lastStepSyncAt),
+      /** Idle coins lapse (RULES E9); the clock resets on every step sync. */
       expiresAt:
-        lastCreditAt && (balance?.balanceMc ?? 0) > 0
-          ? new Date(lastCreditAt.getTime() + expiryDays * 86_400_000).toISOString()
+        idleSince && (balance?.balanceMc ?? 0) > 0
+          ? new Date(idleSince.getTime() + expiryDays * 86_400_000).toISOString()
           : null,
       expiryWindowDays: expiryDays,
     },

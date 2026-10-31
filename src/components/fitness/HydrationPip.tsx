@@ -1,67 +1,37 @@
-import React, { memo, useMemo } from 'react';
-import { StyleSheet } from 'react-native';
-import { useTheme } from '../../theme';
+import React, { memo } from 'react';
 import { moderateScale } from '../../theme/responsive';
-import { Box } from '../layout/Box';
+import { WaterGlass } from '../hydration/WaterGlass';
 
 interface Props {
-  /** Whether this glass has been drunk yet. */
-  filled: boolean;
+  /** 0–1: how much of this glass has been drunk. */
+  fill: number;
 }
 
 /**
- * The frame, and the mark inside it at exactly half.
+ * The height one glass is drawn at in the intake row.
  *
- * Fixed here rather than left to taste because ten frames and their gaps have
- * to sit on one line beside the droplet on a 320pt phone, where the whole row
- * gets about 205pt. At 20pt the row measured 252pt and the last glasses wrapped
- * onto a second line by themselves; 18pt brings it to 200pt and it fits at
- * every width the app runs at.
+ * 15pt tall is 10pt wide at the glass's 64 × 96 proportions — the same
+ * footprint the square frame here used to take, so ten of them and their `xs`
+ * gaps still measure the 136pt that fits beside the card's own glass on the
+ * narrowest phone the app runs at. Picked from the width budget backwards,
+ * in other words, not from how a glass looks on its own.
  */
-const FRAME = moderateScale(10);
-/** Scaled in its own right, not FRAME/2: halving an already pixel-rounded
-    value lands between device pixels and softens the mark's edges. */
-const MARK = moderateScale(5);
-/** A hairline vanishes at this size, so the outline is drawn deliberately. */
-const STROKE = moderateScale(1.5);
+const GLASS_HEIGHT = moderateScale(15);
 
 /**
- * One glass in the intake row: a frame with a mark inside it, the mark solid
- * once the glass has been drunk.
+ * One glass in the intake row, drawn as a glass.
  *
- * The frame is drawn whether or not the glass is filled, which is what keeps
- * the row countable — every position takes the same width, so the marks land
- * on one pitch and the empty slots read as slots rather than as a gap.
+ * It was a square frame with a dot in it, which counted correctly and looked
+ * like a checklist: the row said how many were done without saying what was
+ * being done. The same glass the water screen fills, drawn small, says both —
+ * and a part-drunk glass can then show as part full, which a dot cannot.
  *
- * Size, stroke and the theme's border colour are the three things `Box` has no
- * token for, so those — and nothing else — come from the stylesheet.
+ * Empty ones are still drawn rather than omitted, for the reason they always
+ * were: the row has to show what is left, not only what is done, and every
+ * position taking the same width is what keeps it countable.
  */
-export const HydrationPip = memo(({ filled }: Props) => {
-  const { colors } = useTheme();
-
-  const outline = useMemo(
-    () => ({ borderWidth: STROKE, borderColor: colors.textQuaternary }),
-    [colors],
-  );
-
-  return (
-    <Box style={[styles.frame, outline]}>
-      <Box
-        bg={filled ? 'primary' : undefined}
-        style={[styles.mark, filled ? null : outline]}
-      />
-    </Box>
-  );
-});
-
-const styles = StyleSheet.create({
-  frame: {
-    width: FRAME,
-    height: FRAME,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mark: { width: MARK, height: MARK },
-});
+export const HydrationPip = memo(({ fill }: Props) => (
+  <WaterGlass progress={fill} size={GLASS_HEIGHT} />
+));
 
 HydrationPip.displayName = 'HydrationPip';

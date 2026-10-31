@@ -5,6 +5,8 @@ export { VitalTile } from './VitalTile';
 export { BmiGuide } from './BmiGuide';
 export { TrackProgressCard } from './TrackProgressCard';
 export { RecentHistoryCard } from './RecentHistoryCard';
+export { VitalReadingRow, formatStamp } from './VitalReadingRow';
+export { VitalTrendCard } from './VitalTrendCard';
 export { HealthTipCard } from './HealthTipCard';
 export { AddReadingSheet } from './AddReadingSheet';
 export { VitalHeader } from './VitalHeader';

@@ -26,9 +26,9 @@ interface Props {
 
 /** What the panel advises, per urgency. One line: the column is narrow. */
 const ADVICE: Record<CoinExpiryUrgency, string> = {
-  safe: 'Stay active to keep your coins secure.',
-  soon: 'Earn coins soon to keep them.',
-  urgent: 'Earn coins today or they expire.',
+  safe: 'Keep syncing your steps to keep your coins.',
+  soon: 'Sync your steps soon to keep them.',
+  urgent: 'Sync your steps today or they expire.',
 };
 
 /**

@@ -66,6 +66,12 @@ export const BloodPressureScreen = () => {
   // first, which is the order the list below wants.
   const trend = useMemo(() => [...readings].reverse(), [readings]);
 
+  /** The archive, opened already filtered to this vital. */
+  const onOpenAllReadings = useCallback(
+    () => navigation.navigate('VitalsHistory', { kind: 'blood_pressure' }),
+    [navigation],
+  );
+
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -74,9 +80,9 @@ export const BloodPressureScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The explainer and the full archive have no screens yet. Wired as no-ops
-  // rather than left off, so each control keeps the shape it will ship with
-  // and only the handler changes when its screen lands.
+  // The explainer has no screen yet. Wired as a no-op rather than left off,
+  // so the control keeps the shape it will ship with and only the handler
+  // changes when its screen lands.
   const notImplemented = useCallback(() => {}, []);
 
   return (
@@ -128,7 +134,7 @@ export const BloodPressureScreen = () => {
           icon={Heart}
           tint={colors.primary}
           viewAllLabel="View all blood pressure readings"
-          onPressViewAll={notImplemented}
+          onPressViewAll={onOpenAllReadings}
         />
 
         {tip ? (

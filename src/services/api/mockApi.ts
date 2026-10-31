@@ -35,6 +35,8 @@ import {
   nutritionDaySchema,
   nutritionProfileSchema,
   contentTipSchema,
+  referralCardsSchema,
+  type ReferralCard,
   hydrationDaySchema,
   hydrationHistorySchema,
   hydrationReminderPlanSchema,
@@ -996,7 +998,8 @@ function addMockDays(date: string, days: number): string {
 
 const mockDays = (from: string, to: string) =>
   Math.round(
-    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+      86_400_000,
   );
 
 /** The mock step goal — the server's default, and what the mock profile shows. */
@@ -1077,7 +1080,11 @@ export const mockChallengeApi: ChallengeApi = {
     await delay();
     const seed = seedChallenges.find(c => c.id === id);
     if (!seed) {
-      throw new ApiError('not_found', 'That challenge could not be found.', 404);
+      throw new ApiError(
+        'not_found',
+        'That challenge could not be found.',
+        404,
+      );
     }
 
     const upcoming = seed.startsAt !== null && seed.startsAt > date;
@@ -1096,8 +1103,8 @@ export const mockChallengeApi: ChallengeApi = {
       seed.metric === 'days'
         ? MOCK_STEP_GOAL
         : days === 1
-          ? seed.goal
-          : Math.ceil(seed.goal / days);
+        ? seed.goal
+        : Math.ceil(seed.goal / days);
     const scope: 'today' | 'period' =
       upcoming || (seed.metric === 'workouts' && days > 1) ? 'period' : 'today';
     const target = scope === 'period' ? seed.goal : perDay;
@@ -1113,8 +1120,8 @@ export const mockChallengeApi: ChallengeApi = {
       seed.metric === 'days'
         ? `Complete all ${seed.goal} days to earn`
         : days === 1
-          ? "Finish today's goal to earn"
-          : `Finish the ${cadence} to earn`;
+        ? "Finish today's goal to earn"
+        : `Finish the ${cadence} to earn`;
 
     // The seeded board, as other people walking the same challenge.
     const standings = seedLeaderboard.slice(0, 6).map((entry, index) => ({
@@ -1136,7 +1143,13 @@ export const mockChallengeApi: ChallengeApi = {
         endsOn: upcoming ? null : end,
         completedAt: completed ? new Date().toISOString() : null,
       }),
-      period: { start, end, day, days, endsAt: mockMidnight(addMockDays(end, 1)) },
+      period: {
+        start,
+        end,
+        day,
+        days,
+        endsAt: mockMidnight(addMockDays(end, 1)),
+      },
       focus: {
         scope,
         label: scope === 'period' ? 'Challenge Goal' : 'Daily Goal',
@@ -1149,14 +1162,16 @@ export const mockChallengeApi: ChallengeApi = {
         caption: upcoming
           ? 'Challenge Starts In'
           : scope === 'today'
-            ? "Today's Challenge Ends In"
-            : 'Challenge Ends In',
+          ? "Today's Challenge Ends In"
+          : 'Challenge Ends In',
       },
       reward: {
         coins: seed.rewardCoins,
         // The same gate the server applies (D-87): the figure stands, and
         // whether it is paid today is said rather than assumed.
-        caption: seed.rewardPaid ? caption : 'Coins for this challenge start soon',
+        caption: seed.rewardPaid
+          ? caption
+          : 'Coins for this challenge start soon',
         paid: seed.rewardPaid,
         badge: seed.rewardsBadge
           ? achievementSchema.parse(
@@ -1171,10 +1186,14 @@ export const mockChallengeApi: ChallengeApi = {
           icon: 'goal',
           text:
             seed.metric === 'days'
-              ? `Walk at least ${MOCK_STEP_GOAL.toLocaleString('en-IN')} steps on each of the ${seed.goal} days`
+              ? `Walk at least ${MOCK_STEP_GOAL.toLocaleString(
+                  'en-IN',
+                )} steps on each of the ${seed.goal} days`
               : days > 1
-                ? `Reach ${seed.goal.toLocaleString('en-IN')} ${unit} over the ${cadence}`
-                : `Reach ${seed.goal.toLocaleString('en-IN')} ${unit} in the day`,
+              ? `Reach ${seed.goal.toLocaleString(
+                  'en-IN',
+                )} ${unit} over the ${cadence}`
+              : `Reach ${seed.goal.toLocaleString('en-IN')} ${unit} in the day`,
           tone: 'default',
         },
         {
@@ -1232,13 +1251,15 @@ export const mockChallengeApi: ChallengeApi = {
       cta: upcoming
         ? { label: `Opens ${seed.startsAt}`, action: 'none' }
         : completed
-          ? { label: 'Challenge Complete', action: 'view_board' }
-          : seed.metric === 'workouts'
-            ? { label: 'Start a Workout', action: 'go_home' }
-            : { label: 'Continue Challenge', action: 'track_steps' },
+        ? { label: 'Challenge Complete', action: 'view_board' }
+        : seed.metric === 'workouts'
+        ? { label: 'Start a Workout', action: 'go_home' }
+        : { label: 'Continue Challenge', action: 'track_steps' },
       shareText: upcoming
         ? `${seed.title} opens on ${seed.startsAt} on VOKVE. ${seed.description}`
-        : `I'm on day ${day} of ${days} of the ${seed.title} challenge on VOKVE — ${progress.toLocaleString(
+        : `I'm on day ${day} of ${days} of the ${
+            seed.title
+          } challenge on VOKVE — ${progress.toLocaleString(
             'en-IN',
           )} of ${seed.goal.toLocaleString('en-IN')} so far. Join me!`,
     });
@@ -1251,26 +1272,36 @@ export const mockChallengeApi: ChallengeApi = {
     await delay();
     const seed = seedAchievements.find(a => a.id === id);
     if (!seed) {
-      throw new ApiError('not_found', 'That achievement could not be found.', 404);
+      throw new ApiError(
+        'not_found',
+        'That achievement could not be found.',
+        404,
+      );
     }
 
     const unlocked = seed.achievedAt !== null;
     const target = seed.value;
     // The member's best on record. The mock has no history, so an unlocked
     // badge is shown just past its target and a locked one just short of it.
-    const value = unlocked ? Math.round(target * 1.043) : Math.round(target * 0.84);
+    const value = unlocked
+      ? Math.round(target * 1.043)
+      : Math.round(target * 0.84);
     const percent = Math.min(100, Math.round((value / target) * 100));
 
     const requirement =
       seed.metric === 'calories'
         ? `Burn ${target.toLocaleString('en-IN')} calories in a single day.`
         : seed.metric === 'minutes'
-          ? `Stay active for ${target.toLocaleString('en-IN')} minutes in a single day.`
-          : seed.metric === 'days'
-            ? `Keep your streak going for ${target.toLocaleString('en-IN')} days in a row.`
-            : seed.metric === 'workouts'
-              ? `Finish ${target.toLocaleString('en-IN')} workouts.`
-              : `Walk ${target.toLocaleString('en-IN')} steps in a single day.`;
+        ? `Stay active for ${target.toLocaleString(
+            'en-IN',
+          )} minutes in a single day.`
+        : seed.metric === 'days'
+        ? `Keep your streak going for ${target.toLocaleString(
+            'en-IN',
+          )} days in a row.`
+        : seed.metric === 'workouts'
+        ? `Finish ${target.toLocaleString('en-IN')} workouts.`
+        : `Walk ${target.toLocaleString('en-IN')} steps in a single day.`;
 
     const left = Math.max(0, target - value);
     const remaining = `${left.toLocaleString('en-IN')} ${
@@ -1281,7 +1312,9 @@ export const mockChallengeApi: ChallengeApi = {
     const family = seedAchievements
       .filter(a => a.metric === seed.metric)
       .sort((a, b) => a.value - b.value);
-    const hasNext = family.some(a => a.value > seed.value && a.achievedAt === null);
+    const hasNext = family.some(
+      a => a.value > seed.value && a.achievedAt === null,
+    );
 
     return achievementDetailSchema.parse({
       achievement: achievementSchema.parse(seed),
@@ -1299,13 +1332,18 @@ export const mockChallengeApi: ChallengeApi = {
       unlocked,
       unlockedAt: seed.achievedAt,
       progress: {
-        basis: seed.metric === 'days' ? 'longest_streak' : seed.metric === 'workouts' ? 'total_workouts' : 'best_day',
+        basis:
+          seed.metric === 'days'
+            ? 'longest_streak'
+            : seed.metric === 'workouts'
+            ? 'total_workouts'
+            : 'best_day',
         label:
           seed.metric === 'days'
             ? 'Your longest streak'
             : seed.metric === 'workouts'
-              ? 'Workouts finished'
-              : 'Your best day',
+            ? 'Workouts finished'
+            : 'Your best day',
         value,
         target,
         percent,
@@ -1336,8 +1374,8 @@ export const mockChallengeApi: ChallengeApi = {
         unlocked && !hasNext
           ? { label: 'View All Achievements', action: 'view_shelf' }
           : seed.metric === 'workouts'
-            ? { label: 'Start a Workout', action: 'go_home' }
-            : { label: 'Keep Going', action: 'track_steps' },
+          ? { label: 'Start a Workout', action: 'go_home' }
+          : { label: 'Keep Going', action: 'track_steps' },
       shareText: unlocked
         ? `I just unlocked the ${
             MOCK_ACHIEVEMENT_TITLES[seed.id] ?? seed.label
@@ -1479,7 +1517,11 @@ function mockStreakHistory(cursor?: string, limit = 30): StreakHistoryPage {
   const all = new Set([...mockStreak.completed, ...mockStreak.protectedDays]);
   const days = [...all].sort();
   if (days.length === 0) {
-    return streakHistoryPageSchema.parse({ data: [], nextCursor: null, total: 0 });
+    return streakHistoryPageSchema.parse({
+      data: [],
+      nextCursor: null,
+      total: 0,
+    });
   }
 
   const first = days[0];
@@ -2081,11 +2123,19 @@ function mockDefaultPlan(): HydrationReminderPlan {
  * mock. The ids match the audio the app bundles.
  */
 const MOCK_REMINDER_SOUNDS: ReminderSound[] = [
-  { id: 'default', label: 'Default', description: 'Your phone\u2019s notification sound' },
+  {
+    id: 'default',
+    label: 'Default',
+    description: 'Your phone\u2019s notification sound',
+  },
   { id: 'water_drop', label: 'Water Drop', description: 'A single drop' },
   { id: 'chime', label: 'Chime', description: 'Two soft notes' },
   { id: 'bell', label: 'Bell', description: 'A short bell' },
-  { id: 'silent', label: 'Silent', description: 'No sound \u2014 vibration only' },
+  {
+    id: 'silent',
+    label: 'Silent',
+    description: 'No sound \u2014 vibration only',
+  },
 ];
 
 let mockWater = new Map<string, { ml: number; at: string; day: string }>();
@@ -2139,7 +2189,9 @@ function mockWaterCaution(entries: { ml: number; at: string }[]) {
     return {
       kind: 'rate' as const,
       title: 'That is a lot of water very quickly',
-      message: `You have logged ${litres(recent)} in the last hour. Healthy kidneys clear about a litre an hour, so drinking faster than that for long can be harmful.`,
+      message: `You have logged ${litres(
+        recent,
+      )} in the last hour. Healthy kidneys clear about a litre an hour, so drinking faster than that for long can be harmful.`,
     };
   }
   const total = entries.reduce((sum, entry) => sum + entry.ml, 0);
@@ -2147,7 +2199,9 @@ function mockWaterCaution(entries: { ml: number; at: string }[]) {
     return {
       kind: 'high' as const,
       title: 'That is a lot of water today',
-      message: `You have logged ${litres(total)} today. Most adults need 2–3 litres; well past that, water can dilute the salts your body runs on.`,
+      message: `You have logged ${litres(
+        total,
+      )} today. Most adults need 2–3 litres; well past that, water can dilute the salts your body runs on.`,
     };
   }
   return null;
@@ -2652,9 +2706,7 @@ export const mockNutritionApi: NutritionApi = {
     await delay();
     return [...mockPlanLibrary]
       .map(mockPlanSummary)
-      .sort(
-        (a, b) => Number(b.suitsPreferences) - Number(a.suitsPreferences),
-      );
+      .sort((a, b) => Number(b.suitsPreferences) - Number(a.suitsPreferences));
   },
   async dietPlan(id) {
     await delay();
@@ -2816,6 +2868,132 @@ const MOCK_TIPS: Record<ContentTopic, { title: string | null; text: string }> =
     },
   };
 
+/**
+ * The invite card each screen opens with, as the seeded campaign writes them.
+ *
+ * `{coins}` is already filled here: the real server fills it from
+ * `coins.referral` as it is paying, and a mock that left the placeholder in
+ * would be the one place in the app where a reader sees the braces.
+ */
+const MOCK_REFERRAL_CARDS: Record<string, Omit<ReferralCard, 'screen'>> = {
+  home: {
+    id: 'home-invite-1',
+    title: 'Walk together, earn together',
+    message:
+      'Invite a friend and you each get 20 coins once they log their first workout.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'middle',
+    emoji: '🤝',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  wallet: {
+    id: 'wallet-invite-1',
+    title: 'The quickest 20 coins here',
+    message:
+      'No walking needed. Share your code and collect 20 coins for every friend who joins.',
+    ctaLabel: 'Share your code',
+    accent: 'gold',
+    position: 'middle',
+    emoji: '🪙',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  shop: {
+    id: 'shop-invite-1',
+    title: 'Short of coins?',
+    message:
+      'Every friend who joins is 20 coins towards whatever is in your basket.',
+    ctaLabel: 'Invite friends',
+    accent: 'primary',
+    position: 'middle',
+    emoji: '🛍',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  challenges: {
+    id: 'challenges-invite-1',
+    title: 'Challenges are better with company',
+    message:
+      'Bring a friend in and you both pick up 20 coins before the week even starts.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'bottom',
+    emoji: '🏆',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  nutrition: {
+    id: 'nutrition-invite-1',
+    title: 'Eating well is easier shared',
+    message: 'Invite a friend to track theirs too and you each earn 20 coins.',
+    ctaLabel: 'Invite friends',
+    accent: 'success',
+    position: 'bottom',
+    emoji: '🥬',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  health: {
+    id: 'health-invite-1',
+    title: 'Keep each other honest',
+    message: 'A friend logging their own numbers earns you both 20 coins.',
+    ctaLabel: 'Invite friends',
+    accent: 'primary',
+    position: 'middle',
+    emoji: '🫂',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  hydration: {
+    id: 'hydration-invite-1',
+    title: 'Drink up, and bring a friend',
+    message: 'Invite someone to Vokve and 20 coins land in both wallets.',
+    ctaLabel: 'Invite friends',
+    accent: 'primary',
+    position: 'bottom',
+    emoji: '💧',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  streak: {
+    id: 'streak-invite-1',
+    title: 'Streaks love a rival',
+    message: 'Invite a friend, earn 20 coins each, then see who breaks first.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'bottom',
+    emoji: '🔥',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  analytics: {
+    id: 'analytics-invite-1',
+    title: 'Numbers worth comparing',
+    message:
+      'Get a friend on board and you each collect 20 coins to start with.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'bottom',
+    emoji: '📈',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+  account: {
+    id: 'account-invite-1',
+    title: 'Invite friends, earn 20 coins',
+    message:
+      'They get 20 coins to start and you get 20 once they log a workout.',
+    ctaLabel: 'Share your code',
+    accent: 'gold',
+    position: 'top',
+    emoji: '🎁',
+    inviterCoins: 20,
+    inviteeCoins: 20,
+  },
+};
+
 export const mockContentApi: ContentApi = {
   async tip(topic) {
     await delay();
@@ -2823,6 +3001,17 @@ export const mockContentApi: ContentApi = {
       id: `${topic}-1`,
       topic,
       ...MOCK_TIPS[topic],
+    });
+  },
+  async referralCards() {
+    await delay();
+    return referralCardsSchema.parse({
+      cards: Object.fromEntries(
+        Object.entries(MOCK_REFERRAL_CARDS).map(([screen, card]) => [
+          screen,
+          { ...card, screen },
+        ]),
+      ),
     });
   },
 };
@@ -3488,13 +3677,22 @@ function mockResolveMethod(
       'PAYMENT_METHOD_MISMATCH',
     );
   if (chosen === 'coins' && quote.payable > 0) {
-    throw wrong('Your coins do not cover this order. Pick coins with UPI or a card.');
+    throw wrong(
+      'Your coins do not cover this order. Pick coins with UPI or a card.',
+    );
   }
-  if (chosen === 'coins_upi' && (quote.coinsApplied === 0 || quote.payable === 0)) {
-    throw wrong('This order is not part coins and part money. Pick another way to pay.');
+  if (
+    chosen === 'coins_upi' &&
+    (quote.coinsApplied === 0 || quote.payable === 0)
+  ) {
+    throw wrong(
+      'This order is not part coins and part money. Pick another way to pay.',
+    );
   }
   if (!spendsCoins && quote.coinsApplied > 0) {
-    throw wrong('This order is set to spend coins. Pick a way to pay that uses them.');
+    throw wrong(
+      'This order is set to spend coins. Pick a way to pay that uses them.',
+    );
   }
   if (!spendsCoins && quote.payable === 0) {
     throw wrong('There is nothing left to pay for this order.');
@@ -3766,7 +3964,8 @@ function mockSpreadCoins(
   floors: number[],
   caps: number[],
 ): number[] {
-  const sum = (parts: number[]) => parts.reduce((total, part) => total + part, 0);
+  const sum = (parts: number[]) =>
+    parts.reduce((total, part) => total + part, 0);
   const given = floors.map((floor, index) => Math.min(floor, caps[index]));
   const left = amount - sum(given);
   if (left > 0) {
@@ -4004,28 +4203,25 @@ export const mockShopApi: ShopApi = {
       { category: 'sports', label: 'Sports', icon: 'trophy' },
       { category: 'accessories', label: 'Accessories', icon: 'watch' },
     ] as const;
-    return shelves.map(
-      ({ category, label, icon }, index) => {
-        const mine = shopItems.filter(item => item.category === category);
-        const subcategories: { name: string; count: number }[] = [];
-        for (const item of mine) {
-          if (!item.subcategory) continue;
-          const found = subcategories.find(sc => sc.name === item.subcategory);
-          if (found) found.count += 1;
-          else subcategories.push({ name: item.subcategory, count: 1 });
-        }
-        return {
-          category,
-          label,
-          icon,
-          sort: index + 1,
-          count: mine.length,
-          inStock: mine.filter(item => (mockStock.get(item.id) ?? 0) > 0)
-            .length,
-          subcategories,
-        };
-      },
-    );
+    return shelves.map(({ category, label, icon }, index) => {
+      const mine = shopItems.filter(item => item.category === category);
+      const subcategories: { name: string; count: number }[] = [];
+      for (const item of mine) {
+        if (!item.subcategory) continue;
+        const found = subcategories.find(sc => sc.name === item.subcategory);
+        if (found) found.count += 1;
+        else subcategories.push({ name: item.subcategory, count: 1 });
+      }
+      return {
+        category,
+        label,
+        icon,
+        sort: index + 1,
+        count: mine.length,
+        inStock: mine.filter(item => (mockStock.get(item.id) ?? 0) > 0).length,
+        subcategories,
+      };
+    });
   },
   async config() {
     await delay();
@@ -4766,8 +4962,7 @@ export const mockOrderApi: OrderApi = {
     const after = cursor ? tab.findIndex(o => o.id === cursor) : -1;
     const data = tab.slice(after + 1, after + 1 + 20);
     const last = data[data.length - 1];
-    const hasMore =
-      last !== undefined && tab.indexOf(last) < tab.length - 1;
+    const hasMore = last !== undefined && tab.indexOf(last) < tab.length - 1;
     return { data, nextCursor: hasMore ? last.id : null };
   },
   async get(id) {
@@ -5260,7 +5455,7 @@ const MOCK_FAQS: SupportFaq[] = [
     category: 'coins',
     question: 'Do my coins expire?',
     answer:
-      'Coins expire after 90 days without earning anything. Earning even one coin resets the window; spending does not.',
+      'Coins expire after 90 days without a step sync. Every time your phone sends its steps the window starts again; earning coins another way, and spending them, do not.',
   },
   {
     id: 'faq-orders-pay',
@@ -5301,14 +5496,78 @@ const MOCK_FAQS: SupportFaq[] = [
 
 /** The help centre's rows, as the server's ⚙ orders them (RULES P12). */
 const MOCK_TOPICS: readonly Omit<SupportTopic, 'count'>[] = [
-  { id: 'faq', title: 'Frequently Asked Questions', subtitle: 'Find quick answers to common questions', kind: 'faq', category: null, icon: 'question', tint: 'destructive' },
-  { id: 'contact', title: 'Contact Us', subtitle: 'Get in touch with our support team', kind: 'contact', category: null, icon: 'mail', tint: 'primary' },
-  { id: 'report', title: 'Report an Issue', subtitle: 'Facing a problem? Let us know', kind: 'report', category: null, icon: 'alert', tint: 'success' },
-  { id: 'orders', title: 'Orders & Shipping', subtitle: 'Track orders, returns and replacements', kind: 'faq', category: 'orders', icon: 'package', tint: 'brandAccent' },
-  { id: 'coins', title: 'Coins & Rewards', subtitle: 'Learn about earning, redemption and expiry', kind: 'faq', category: 'coins', icon: 'coins', tint: 'gold' },
-  { id: 'account', title: 'Account & Login', subtitle: 'Manage your account, login issues', kind: 'faq', category: 'account', icon: 'user', tint: 'destructive' },
-  { id: 'privacy', title: 'Privacy & Security', subtitle: 'Your data and account safety', kind: 'faq', category: 'privacy', icon: 'shield', tint: 'purple' },
-  { id: 'guide', title: 'App Guide', subtitle: 'How to use VOKVE (step by step)', kind: 'guide', category: null, icon: 'guide', tint: 'success' },
+  {
+    id: 'faq',
+    title: 'Frequently Asked Questions',
+    subtitle: 'Find quick answers to common questions',
+    kind: 'faq',
+    category: null,
+    icon: 'question',
+    tint: 'destructive',
+  },
+  {
+    id: 'contact',
+    title: 'Contact Us',
+    subtitle: 'Get in touch with our support team',
+    kind: 'contact',
+    category: null,
+    icon: 'mail',
+    tint: 'primary',
+  },
+  {
+    id: 'report',
+    title: 'Report an Issue',
+    subtitle: 'Facing a problem? Let us know',
+    kind: 'report',
+    category: null,
+    icon: 'alert',
+    tint: 'success',
+  },
+  {
+    id: 'orders',
+    title: 'Orders & Shipping',
+    subtitle: 'Track orders, returns and replacements',
+    kind: 'faq',
+    category: 'orders',
+    icon: 'package',
+    tint: 'brandAccent',
+  },
+  {
+    id: 'coins',
+    title: 'Coins & Rewards',
+    subtitle: 'Learn about earning, redemption and expiry',
+    kind: 'faq',
+    category: 'coins',
+    icon: 'coins',
+    tint: 'gold',
+  },
+  {
+    id: 'account',
+    title: 'Account & Login',
+    subtitle: 'Manage your account, login issues',
+    kind: 'faq',
+    category: 'account',
+    icon: 'user',
+    tint: 'destructive',
+  },
+  {
+    id: 'privacy',
+    title: 'Privacy & Security',
+    subtitle: 'Your data and account safety',
+    kind: 'faq',
+    category: 'privacy',
+    icon: 'shield',
+    tint: 'purple',
+  },
+  {
+    id: 'guide',
+    title: 'App Guide',
+    subtitle: 'How to use VOKVE (step by step)',
+    kind: 'guide',
+    category: null,
+    icon: 'guide',
+    tint: 'success',
+  },
 ];
 
 /** The guide the mock serves — the same chapters the seed writes. */
@@ -5323,9 +5582,18 @@ const MOCK_GUIDE: AppGuide = {
       icon: 'guide',
       tint: 'primary',
       steps: [
-        { title: 'Create your account', body: 'Sign up with your phone and email; both are verified with a code.' },
-        { title: 'Allow step tracking', body: 'VOKVE reads steps from your phone’s health service. Without it the app works, but cannot pay you for walking.' },
-        { title: 'Set your daily goal', body: 'Pick something you will actually hit — you can change it any day.' },
+        {
+          title: 'Create your account',
+          body: 'Sign up with your phone and email; both are verified with a code.',
+        },
+        {
+          title: 'Allow step tracking',
+          body: 'VOKVE reads steps from your phone’s health service. Without it the app works, but cannot pay you for walking.',
+        },
+        {
+          title: 'Set your daily goal',
+          body: 'Pick something you will actually hit — you can change it any day.',
+        },
       ],
     },
     {
@@ -5335,9 +5603,18 @@ const MOCK_GUIDE: AppGuide = {
       icon: 'coins',
       tint: 'gold',
       steps: [
-        { title: 'Walk', body: 'Steps pay a little for every 100 you walk, up to a daily ceiling.' },
-        { title: 'Keep a streak', body: 'Consecutive days at your goal pay a bonus at each milestone.' },
-        { title: 'Finish a challenge', body: 'Challenges pay a fixed reward, and some pay a badge.' },
+        {
+          title: 'Walk',
+          body: 'Steps pay a little for every 100 you walk, up to a daily ceiling.',
+        },
+        {
+          title: 'Keep a streak',
+          body: 'Consecutive days at your goal pay a bonus at each milestone.',
+        },
+        {
+          title: 'Finish a challenge',
+          body: 'Challenges pay a fixed reward, and some pay a badge.',
+        },
       ],
     },
     {
@@ -5347,9 +5624,18 @@ const MOCK_GUIDE: AppGuide = {
       icon: 'package',
       tint: 'brandAccent',
       steps: [
-        { title: 'Find something in the shop', body: 'Every product shows what it costs and how much of that coins can cover.' },
-        { title: 'Choose how to pay', body: 'Coins only, or coins for part of the bill and card or UPI for the rest.' },
-        { title: 'Confirm', body: 'A coins-only order asks you to confirm the deduction; one with money opens the payment sheet.' },
+        {
+          title: 'Find something in the shop',
+          body: 'Every product shows what it costs and how much of that coins can cover.',
+        },
+        {
+          title: 'Choose how to pay',
+          body: 'Coins only, or coins for part of the bill and card or UPI for the rest.',
+        },
+        {
+          title: 'Confirm',
+          body: 'A coins-only order asks you to confirm the deduction; one with money opens the payment sheet.',
+        },
       ],
     },
   ],
@@ -5624,7 +5910,12 @@ export const mockAppApi: AppApi = {
     return {
       status: 'none' as const,
       installed: { version: config.appVersion, build: '1' },
-      latest: { version: config.appVersion, build: '1', releasedAt: daysAgoIso(3), notes: null },
+      latest: {
+        version: config.appVersion,
+        build: '1',
+        releasedAt: daysAgoIso(3),
+        notes: null,
+      },
       minVersion: '1.0.0',
       storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve',
       title: 'A new VOKVE is out',

@@ -239,7 +239,7 @@ export const PaymentScreen = () => {
   }, [offered, route.params.coins]);
 
   const coins = chosen ? coinsFor(chosen) : 0;
-  const payable = chosen ? payableFor(chosen) : (quote?.total ?? 0);
+  const payable = chosen ? payableFor(chosen) : quote?.total ?? 0;
   const itemCount = useMemo(
     () => (quote?.lines ?? []).reduce((sum, line) => sum + line.quantity, 0),
     [quote],
@@ -441,7 +441,9 @@ export const PaymentScreen = () => {
   // The bar goes while the charge is in flight, so no room is kept for one.
   const tabBarSpace = useTabBarSpace(!busy);
   const bottomRoom = Math.max(tabBarSpace, insets.bottom, spacing.base);
-  const provider = config ? PROVIDER_NAME[config.paymentProvider] ?? null : null;
+  const provider = config
+    ? PROVIDER_NAME[config.paymentProvider] ?? null
+    : null;
 
   return (
     // While a charge is in flight every control on this screen is disabled,
@@ -528,8 +530,7 @@ export const PaymentScreen = () => {
                     Pay using coins or coins + cash
                   </AppText>
                   <AppText variant="micro" color="textSecondary">
-                    Use your coin balance or combine with other payment
-                    methods.
+                    Use your coin balance or combine with other payment methods.
                   </AppText>
                 </VStack>
               </HStack>
@@ -621,12 +622,7 @@ export const PaymentScreen = () => {
       </ScrollView>
 
       {quote && lines.length > 0 ? (
-        <View
-          style={[
-            styles.bar,
-            { paddingBottom: bottomRoom },
-          ]}
-        >
+        <View style={[styles.bar, { paddingBottom: bottomRoom }]}>
           {soldOut ? (
             <AppText variant="micro" color="warning" center>
               {`${soldOut.title} is sold out — remove it to continue.`}

@@ -35,6 +35,7 @@ import type {
   CoinTransaction,
   ContentTip,
   ContentTopic,
+  ReferralCards,
   DailyActivity,
   DeviceAttestationResult,
   DietPlanDay,
@@ -801,6 +802,12 @@ export interface HydrationApi {
 export interface ContentApi {
   /** The day's tip for one place in the app — or, for `motivation`, the day's line. */
   tip(topic: ContentTopic): Promise<ContentTip>;
+  /**
+   * Every screen's invite card at once. One read for the whole app: the
+   * cards turn over once a day, and a request per screen would be ten of
+   * them saying the same thing.
+   */
+  referralCards(): Promise<ReferralCards>;
 }
 
 /** What `GET /foods/library` takes: a word to narrow by, and where the last page ended. */

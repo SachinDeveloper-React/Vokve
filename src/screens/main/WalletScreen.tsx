@@ -12,7 +12,9 @@ import { WalletActionsRow } from '../../components/wallet/WalletActionsRow';
 import { WalletHeader } from '../../components/wallet/WalletHeader';
 import { WalletSyncNotice } from '../../components/wallet/WalletSyncNotice';
 import { LoadState } from '../../components/ui/LoadState';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
+import { useReferralCard } from '../../hooks/useContent';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
@@ -57,6 +59,12 @@ export const WalletScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('wallet');
   const user = useCurrentUser();
   const isSignedIn = useAuthStatus() === 'authenticated';
 
@@ -185,6 +193,12 @@ export const WalletScreen = () => {
 
         <EmailVerificationBanner reason="place orders" />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         {syncedAt === null ? (
           <LoadState
             loading={isSyncing || syncError === null}
@@ -224,6 +238,12 @@ export const WalletScreen = () => {
 
         <KeepGoingCard />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
+
         {syncedAt !== null ? (
           <>
             <RecentTransactionsCard
@@ -238,6 +258,7 @@ export const WalletScreen = () => {
             />
           </>
         ) : null}
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <CoinExpirySheet

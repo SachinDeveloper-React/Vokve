@@ -4,9 +4,9 @@ import { AppConfigModel } from '../src/modules/platform/models.js';
 import { invalidateConfig } from '../src/config/remote.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../src/modules/economy/models.js';
 import { credit, debit, hold, release } from '../src/modules/economy/service.js';
-import { expireIdleWallets } from '../src/modules/economy/wallet.service.js';
+import { expireIdleWallets, stampStepSync } from '../src/modules/economy/wallet.service.js';
 import { runDailyJobs } from '../src/jobs/scheduler.js';
-import { app, authed, signUpAndRegister } from './helpers.js';
+import { app, authed, signUpAndRegister, type Session } from './helpers.js';
 
 const DAY = '2026-09-14';
 
@@ -197,7 +197,12 @@ describe('economy: ledger, daily cap, escrow', () => {
   });
 });
 
-describe('economy: idle expiry (RULES E9–E11)', () => {
+/**
+ * None of these wallets has ever synced steps, so they run on the fallback
+ * clock — the newest credit, which is what the window ran from before
+ * (RULES E9). The sync clock itself is the describe below.
+ */
+describe('economy: idle expiry, the never-synced fallback (RULES E9–E11)', () => {
   const DAYS = 86_400_000;
 
   it('the wallet reports the window, the date and the warn thresholds', async () => {
@@ -246,8 +251,9 @@ describe('economy: idle expiry (RULES E9–E11)', () => {
     expect(again).toMatchObject({ expired: 0, coins: 0 });
     expect(await CoinLedgerModel.countDocuments({ userId: idle.userId, source: 'refund' })).toBe(1);
 
-    // Earning again restarts the clock from zero. A challenge, not a second
-    // workout: the per-source cap would pay that one nothing today (E8c).
+    // With no sync ever recorded, earning again still restarts the clock from
+    // zero. A challenge, not a second workout: the per-source cap would pay
+    // that one nothing today (E8c).
     await credit({ userId: idle.userId, source: 'challenge', referenceType: 'challenge', referenceId: 'c1', amount: 100, title: '10K steps', localDay: DAY });
     const revived = await request(app).get('/v1/wallet').set(authed(idle));
     expect(revived.body).toMatchObject({ balance: 100, expiryDaysLeft: 90 });
@@ -279,5 +285,93 @@ describe('economy: idle expiry (RULES E9–E11)', () => {
     await CoinBalanceModel.updateOne({ _id: other.userId }, { $set: { lastCreditAt: new Date(Date.now() - 100 * DAYS) } });
     await runDailyJobs(runDay);
     expect((await CoinBalanceModel.findById(other.userId).lean())?.balanceMc).toBe(70_000); // claimed already: not swept
+  });
+});
+
+/**
+ * The window measures whether this member's phone is still reporting, not
+ * whether they are still earning (RULES E9). An accepted snapshot restarts
+ * it — however many steps were in it, and whoever walked them — and nothing
+ * else does.
+ */
+describe('economy: the expiry clock runs on step syncs (RULES E9)', () => {
+  const DAYS = 86_400_000;
+  const walletOf = (session: Session) => request(app).get('/v1/wallet').set(authed(session));
+
+  it('counts from the newest sync, and a credit does not move it', async () => {
+    const session = await signUpAndRegister();
+    await credit({ userId: session.userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day', localDay: DAY });
+
+    // Reported ten days ago, earned a moment ago: eighty days left, counted
+    // off the sync. On the old rule this wallet would have read ninety.
+    const tenDaysAgo = new Date(Date.now() - 10 * DAYS);
+    await CoinBalanceModel.updateOne({ _id: session.userId }, { $set: { lastStepSyncAt: tenDaysAgo } });
+
+    const idle = await walletOf(session);
+    expect(idle.body.expiryDaysLeft).toBe(80);
+    expect(new Date(idle.body.expiresAt).getTime()).toBe(tenDaysAgo.getTime() + 90 * DAYS);
+
+    // Another credit through the real path: the balance moves, the clock
+    // does not. A challenge, not a second workout, for the source cap (E8c).
+    await credit({ userId: session.userId, source: 'challenge', referenceType: 'challenge', referenceId: 'c1', amount: 100, title: '10K steps', localDay: DAY });
+    const earned = await walletOf(session);
+    expect(earned.body).toMatchObject({ balance: 200, expiryDaysLeft: 80 });
+
+    // A sync does move it, back to the full window.
+    await stampStepSync(session.userId);
+    expect((await walletOf(session)).body.expiryDaysLeft).toBe(90);
+  });
+
+  it('a month of syncing, a phone that goes quiet, and one that speaks again', async () => {
+    const session = await signUpAndRegister();
+    // Thirty days of walking, reporting throughout: 470 coins and a clock
+    // that has never started. Written straight to the wallet because the
+    // daily ceiling would take a month of real days to get there (E8).
+    await CoinBalanceModel.updateOne(
+      { _id: session.userId },
+      { $set: { balanceMc: 470_000, lifetimeEarnedMc: 470_000, lastCreditAt: new Date(), lastStepSyncAt: new Date() } },
+      { upsert: true },
+    );
+    expect((await walletOf(session)).body).toMatchObject({ balance: 470, expiryDaysLeft: 90 });
+
+    // The phone stops reporting. Ten days on, the countdown is at eighty and
+    // nothing has been swept — the window is still open.
+    await CoinBalanceModel.updateOne({ _id: session.userId }, { $set: { lastStepSyncAt: new Date(Date.now() - 10 * DAYS) } });
+    expect((await walletOf(session)).body).toMatchObject({ balance: 470, expiryDaysLeft: 80 });
+    expect(await expireIdleWallets()).toMatchObject({ expired: 0, coins: 0 });
+
+    // It syncs again: the full window, and it stays there while it reports.
+    await stampStepSync(session.userId);
+    expect((await walletOf(session)).body.expiryDaysLeft).toBe(90);
+
+    // Ninety-one days of silence is what empties it.
+    await CoinBalanceModel.updateOne({ _id: session.userId }, { $set: { lastStepSyncAt: new Date(Date.now() - 91 * DAYS) } });
+    expect(await expireIdleWallets()).toMatchObject({ expired: 1, coins: 470 });
+    expect((await walletOf(session)).body).toMatchObject({ balance: 0, expiresAt: null, expiryDaysLeft: 90 });
+  });
+
+  it('sweeps a wallet whose phone went quiet though the member kept earning', async () => {
+    const session = await signUpAndRegister();
+    await credit({ userId: session.userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day', localDay: DAY });
+    // Earned a moment ago; last reported ninety-one days ago.
+    await CoinBalanceModel.updateOne({ _id: session.userId }, { $set: { lastStepSyncAt: new Date(Date.now() - 91 * DAYS) } });
+
+    expect(await expireIdleWallets()).toMatchObject({ expired: 1, coins: 100 });
+    const rows = await request(app).get('/v1/wallet/transactions').set(authed(session));
+    expect(rows.body.data[0]).toMatchObject({ source: 'refund', amount: -100, title: 'Coins expired after 90 days of inactivity' });
+
+    // The sweep leaves both anchors as evidence, and the emptied wallet
+    // reports the full window rather than a countdown it cannot act on (E11).
+    const after = await CoinBalanceModel.findById(session.userId).lean();
+    expect(after?.lastStepSyncAt).toBeTruthy();
+    expect(after?.lastCreditAt).toBeTruthy();
+  });
+
+  it('a wallet that syncs but has never earned has nothing to expire', async () => {
+    const session = await signUpAndRegister();
+    await stampStepSync(session.userId, new Date(Date.now() - 200 * DAYS));
+
+    expect(await expireIdleWallets()).toMatchObject({ expired: 0, coins: 0 });
+    expect((await walletOf(session)).body).toMatchObject({ balance: 0, expiresAt: null, expiryDaysLeft: 90 });
   });
 });

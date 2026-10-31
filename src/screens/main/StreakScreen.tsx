@@ -15,9 +15,11 @@ import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Icon } from '../../components/media/Icon';
 import { LoadState } from '../../components/ui/LoadState';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
 import { useTabBarSpace } from '../../components/navigation/FloatingTabBar';
 import { useToast } from '../../components/feedback/Toast';
+import { useReferralCard } from '../../hooks/useContent';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useStreakHistory } from '../../hooks/useStreakHistory';
 import { ArrowRight } from 'lucide-react-native';
@@ -59,6 +61,16 @@ export const StreakScreen = () => {
   const tabBarSpace = useTabBarSpace();
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('streak');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const toast = useToast();
 
   const summary = useStreakStore(s => s.summary);
@@ -291,10 +303,7 @@ export const StreakScreen = () => {
 
   return (
     <Screen edges={['top', 'bottom']}>
-      <StreakDetailHeader
-        onPressBack={onPressBack}
-        onPressHelp={onPressHelp}
-      />
+      <StreakDetailHeader onPressBack={onPressBack} onPressHelp={onPressHelp} />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -317,6 +326,12 @@ export const StreakScreen = () => {
           />
         ) : (
           <>
+            <ReferralPromoCard
+              card={referralCard}
+              at="top"
+              onPress={onOpenReferral}
+            />
+
             <StreakFiguresCard
               currentStreak={summary.currentStreak}
               longestStreak={summary.longestStreak}
@@ -347,6 +362,12 @@ export const StreakScreen = () => {
               />
             ) : null}
 
+            <ReferralPromoCard
+              card={referralCard}
+              at="middle"
+              onPress={onOpenReferral}
+            />
+
             <StreakFreezeCard
               available={summary.freezesAvailable}
               maxFreezes={summary.maxFreezes}
@@ -376,6 +397,7 @@ export const StreakScreen = () => {
             <StreakBenefitsCard milestones={summary.milestones} />
           </>
         )}
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       {summary === null ? null : (

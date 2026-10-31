@@ -315,12 +315,7 @@ export const ShippingAddressScreen = () => {
         />
       </KeyboardAwareScrollView>
 
-      <View
-        style={[
-          styles.bar,
-          { paddingBottom: bottomRoom },
-        ]}
-      >
+      <View style={[styles.bar, { paddingBottom: bottomRoom }]}>
         <VStack flex={1} gap="xxs">
           <AppText variant="bodyStrong">You Pay</AppText>
           {quote ? <PayAmount quote={quote} size="lg" /> : null}

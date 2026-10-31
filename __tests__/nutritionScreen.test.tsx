@@ -84,7 +84,10 @@ jest.mock('../src/services/api/endpoints', () => {
         verified: false,
       })),
     },
-    contentApi: { tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)) },
+    contentApi: {
+      tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
+      referralCards: jest.fn(() => api.mockContentApi.referralCards()),
+    },
   };
 });
 

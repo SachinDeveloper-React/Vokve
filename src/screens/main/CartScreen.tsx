@@ -312,12 +312,7 @@ export const CartScreen = () => {
       </ScrollView>
 
       {lines.length > 0 && quote ? (
-        <View
-          style={[
-            styles.bar,
-            { paddingBottom: bottomRoom },
-          ]}
-        >
+        <View style={[styles.bar, { paddingBottom: bottomRoom }]}>
           {blocked ? (
             <AppText variant="micro" color="warning" center>
               {hasSoldOut

@@ -13,7 +13,9 @@ import { ChallengesHeader } from '../../components/challenges/ChallengesHeader';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { UpcomingChallengesCard } from '../../components/challenges/UpcomingChallengesCard';
 import { LoadState } from '../../components/ui/LoadState';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
+import { useReferralCard } from '../../hooks/useContent';
 import { useAchievements, useChallengeBoard } from '../../hooks/useChallenges';
 import { syncStepsNow } from '../../services/steps';
 import { useCurrentUser } from '../../stores/authStore';
@@ -59,6 +61,16 @@ export const ChallengesScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('challenges');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
   const hasUnreadNotifications = useHasUnreadNotifications();
 
@@ -99,8 +111,7 @@ export const ChallengesScreen = () => {
   const achievements = useMemo(
     () =>
       [...(shelf.data ?? [])].sort(
-        (a, b) =>
-          Number(b.achievedAt !== null) - Number(a.achievedAt !== null),
+        (a, b) => Number(b.achievedAt !== null) - Number(a.achievedAt !== null),
       ),
     [shelf.data],
   );
@@ -210,6 +221,12 @@ export const ChallengesScreen = () => {
           onPressDate={openCalendar}
         />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         {board.data === null ? (
           <LoadState
             loading={board.loading}
@@ -226,6 +243,12 @@ export const ChallengesScreen = () => {
         )}
 
         <ChallengeRewardStrip onPressHowItWorks={onOpenHowItWorks} />
+
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
 
         {shelf.data === null ? (
           <LoadState
@@ -252,6 +275,7 @@ export const ChallengesScreen = () => {
         ) : null}
 
         <ChallengeCheerCard name={user?.name} />
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <CalendarSheet

@@ -2128,7 +2128,11 @@ export const walletSchema = z.object({
    */
   pendingReleaseAt: z.string().nullable().default(null),
   lifetimeEarned: z.number().nonnegative(),
-  /** ISO-8601, or null when there is nothing to expire (RULES E11). */
+  /**
+   * When the coins in hand lapse, or null when there is nothing to expire
+   * (RULES E11). The window runs from the member's newest step sync, not
+   * their newest credit (RULES E9), so the app cannot derive it.
+   */
   expiresAt: z.string().nullable(),
   expiryDaysLeft: z.number().int().nonnegative(),
   /** The idle window itself (⚙ `coins.expiryDays`), so the client never hardcodes it. */
@@ -3213,6 +3217,83 @@ export const contentTipSchema = z.object({
   text: z.string(),
 });
 export type ContentTip = z.infer<typeof contentTipSchema>;
+
+/** The screens a referral card may be drawn on (⚙ `referral_promos.screen`). */
+export const referralScreenSchema = z.enum([
+  'home',
+  'wallet',
+  'shop',
+  'challenges',
+  'nutrition',
+  'health',
+  'hydration',
+  'streak',
+  'analytics',
+  'account',
+]);
+export type ReferralScreen = z.infer<typeof referralScreenSchema>;
+
+/** Which of the app's tints the card is drawn in. A name, never a colour. */
+export const referralAccentSchema = z.enum([
+  'brand',
+  'primary',
+  'success',
+  'gold',
+]);
+export type ReferralAccent = z.infer<typeof referralAccentSchema>;
+
+/**
+ * Where down the screen the banner sits: under the headline, after the first
+ * block of content, or at the foot of the scroll. Three anchors, because each
+ * is a gap the screen was built to open.
+ */
+export const referralPositionSchema = z.enum(['top', 'middle', 'bottom']);
+export type ReferralPosition = z.infer<typeof referralPositionSchema>;
+
+/**
+ * One invite card, as the screen it belongs to should draw it.
+ *
+ * Every word is the server's, placeholders already filled: the app writes
+ * none of this and so cannot promise a reward the economy is not paying.
+ */
+export const referralCardSchema = z.object({
+  id: z.string(),
+  screen: referralScreenSchema,
+  title: z.string(),
+  message: z.string(),
+  ctaLabel: z.string(),
+  accent: referralAccentSchema,
+  position: referralPositionSchema,
+  emoji: z.string(),
+  /** Coins the member earns per friend who qualifies, as `coins.referral` pays. */
+  inviterCoins: z.number().nonnegative(),
+  /** What the friend gets, for the card that mentions both halves. */
+  inviteeCoins: z.number().nonnegative(),
+});
+export type ReferralCard = z.infer<typeof referralCardSchema>;
+
+/**
+ * `GET /content/referral-cards`: every screen's card in one answer.
+ *
+ * One request rather than one per screen. The app reads this once, caches it
+ * like any other server read, and each screen picks its own out of the map —
+ * ten screens asking ten times for a card that changes once a day would be
+ * ten round trips to say the same thing.
+ */
+export const referralCardsSchema = z.object({
+  /**
+   * Keyed by screen. A screen with no active card is **absent**, not blank:
+   * the app draws nothing where there is no card, which is how the invite is
+   * switched off in one place without touching the rest.
+   *
+   * Keyed on a plain string rather than the screen enum because
+   * `z.record(enum, v)` insists every member of the enum is present, which
+   * is precisely what this map must not have to be. Each card carries its
+   * own `screen`, so the key is a convenience rather than the truth.
+   */
+  cards: z.record(z.string(), referralCardSchema),
+});
+export type ReferralCards = z.infer<typeof referralCardsSchema>;
 
 // ─── Nutrition ─────────────────────────────────────────────────────────────
 

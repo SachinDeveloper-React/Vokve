@@ -117,6 +117,13 @@ describe('step ingest: signed snapshots (BACKEND §7.3)', () => {
     const device = await DeviceModel.findById(session.deviceId, { stepSync: 1 }).lean();
     expect(device?.stepSync?.uploadedAt).toBeTruthy();
     expect(device?.stepSync?.nudgedAt ?? null).toBeNull();
+
+    // And the wallet's idle window with it (RULES E9): this upload minted
+    // nothing — step coins are off by default — and restarted the clock
+    // anyway, because reporting is what the window measures.
+    const wallet = await CoinBalanceModel.findById(session.userId).lean();
+    expect(wallet?.lastStepSyncAt?.getTime()).toBe(device?.stepSync?.uploadedAt?.getTime());
+    expect(wallet?.lastCreditAt ?? null).toBeNull();
   });
 
   it('answers the same snapshot again as it did the first time, and refuses a spent nonce', async () => {

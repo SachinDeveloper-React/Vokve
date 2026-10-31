@@ -13,8 +13,8 @@ interface Props {
   axisMax: number;
 }
 
-/** Tallest a bar can be drawn. */
-const BAR_MAX = moderateScale(112);
+/** Tallest a bar can be drawn. Exported for the scale beside it (`StepAxis`). */
+export const BAR_MAX = moderateScale(112);
 /** Room kept above the bar for its value, so a tall bar cannot clip it. */
 const VALUE_ROW = moderateScale(20);
 const BAR_WIDTH = moderateScale(13);

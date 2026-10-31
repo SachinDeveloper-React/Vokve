@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { Text as RNText } from 'react-native';
+import { ScrollView as RNScrollView, Text as RNText } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
@@ -34,6 +34,12 @@ jest.mock('@react-navigation/native', () => ({
 // The screen syncs with the wallet endpoints when signed in; none of these
 // tests start a session, so the API is stubbed to make any stray call visible.
 jest.mock('../src/services/api/endpoints', () => ({
+  /**
+   * The invite card the screens now carry. Left on its way, like the tips
+   * beside it: a promo is never worth a spinner, so a card that has not
+   * arrived is simply not drawn — which keeps these tests about the screen.
+   */
+  contentApi: { referralCards: jest.fn(() => new Promise(() => {})) },
   walletApi: {
     get: jest.fn(),
     transactions: jest.fn(),
@@ -150,6 +156,27 @@ const summaryFigures = (tree: ReactTestRenderer.ReactTestRenderer) => {
       ([label]) => !seen.has(label as string) && seen.add(label as string),
     );
 };
+
+const flattenStyle = (style: unknown): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (value && typeof value === 'object') Object.assign(out, value);
+  };
+  visit(style);
+  return out;
+};
+
+/**
+ * The scrolling body of an open sheet: the one scroll view on screen with a
+ * height ceiling on it (`useSheetBodyMaxHeight`).
+ */
+const sheetBody = (tree: ReactTestRenderer.ReactTestRenderer) =>
+  tree.root
+    .findAllByType(RNScrollView)
+    .filter(
+      node => typeof flattenStyle(node.props.style).maxHeight === 'number',
+    );
 
 const press = (tree: ReactTestRenderer.ReactTestRenderer, label: string) => {
   const node = tree.root
@@ -321,15 +348,15 @@ describe('WalletScreen', () => {
       synced({ expiryDaysLeft: 80 });
 
       const text = allText(await render());
-      expect(text).toContain('Stay active to keep your coins secure.');
+      expect(text).toContain('Keep syncing your steps to keep your coins.');
     });
 
-    test('inside the outer warn threshold the panel asks for coins soon', async () => {
+    test('inside the outer warn threshold the panel asks for a sync soon', async () => {
       // 14 days before, like the server's first reminder (RULES E10).
       synced({ expiryDaysLeft: 14 });
 
       expect(allText(await render())).toContain(
-        'Earn coins soon to keep them.',
+        'Sync your steps soon to keep them.',
       );
     });
 
@@ -337,7 +364,7 @@ describe('WalletScreen', () => {
       synced({ expiryDaysLeft: 3 });
 
       expect(allText(await render())).toContain(
-        'Earn coins today or they expire.',
+        'Sync your steps today or they expire.',
       );
     });
 
@@ -345,7 +372,7 @@ describe('WalletScreen', () => {
       synced({ balance: 0, expiryDaysLeft: 2 });
 
       expect(allText(await render())).toContain(
-        'Stay active to keep your coins secure.',
+        'Keep syncing your steps to keep your coins.',
       );
     });
 
@@ -353,8 +380,21 @@ describe('WalletScreen', () => {
       synced({ expiryDaysLeft: 20, expiryWarnDays: [30, 7] });
 
       expect(allText(await render())).toContain(
-        'Earn coins soon to keep them.',
+        'Sync your steps soon to keep them.',
       );
+    });
+
+    test('the expiry explainer keeps its actions out of the scroll too', async () => {
+      synced({ balance: 1_240, expiryDaysLeft: 80 });
+      const tree = await render();
+
+      press(tree, 'About coin expiry');
+
+      const body = sheetBody(tree);
+      expect(body).toHaveLength(1);
+      expect(
+        body[0].findAll(n => n.props?.label === 'Got it'),
+      ).toHaveLength(0);
     });
 
     test('"About Coin Expiry" opens the explainer with the user\'s own numbers', async () => {
@@ -423,6 +463,27 @@ describe('WalletScreen', () => {
   });
 
   describe('"Your Coins" explainer', () => {
+    test('keeps its actions out of the scroll, so they cannot be clipped', async () => {
+      // The bug this covers: a sheet's children do not shrink to fit, so this
+      // much content laid out as one column pushed "Spend in the shop" and
+      // "Got it" off the bottom edge on a small phone.
+      synced();
+      const tree = await render();
+      press(tree, 'Your Coins, what is this?');
+
+      const body = sheetBody(tree);
+      expect(body).toHaveLength(1);
+
+      const buttonsInBody = body[0].findAll(
+        n => n.props?.label === 'Got it' || n.props?.label === 'Spend in the shop',
+      );
+      expect(buttonsInBody).toHaveLength(0);
+      // They are on the sheet, just not inside the part that scrolls.
+      expect(
+        tree.root.findAll(n => n.props?.label === 'Got it').length,
+      ).toBeGreaterThan(0);
+    });
+
     test('opens from the "?" on the balance label with the served rate card', async () => {
       synced({
         earnRules: [

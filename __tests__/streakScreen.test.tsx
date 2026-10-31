@@ -44,6 +44,12 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 jest.mock('../src/services/api/endpoints', () => ({
+  /**
+   * The invite card the screens now carry. Left on its way, like the tips
+   * beside it: a promo is never worth a spinner, so a card that has not
+   * arrived is simply not drawn — which keeps these tests about the screen.
+   */
+  contentApi: { referralCards: jest.fn(() => new Promise(() => {})) },
   streakApi: {
     get: jest.fn(),
     freeze: jest.fn(),

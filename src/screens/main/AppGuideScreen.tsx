@@ -5,7 +5,10 @@ import { BrandSignOff } from '../../components/brand/BrandSignOff';
 import { Divider } from '../../components/layout/Divider';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { HStack, VStack } from '../../components/layout/Stack';
-import { SUPPORT_ICON, supportTint } from '../../components/support/supportLooks';
+import {
+  SUPPORT_ICON,
+  supportTint,
+} from '../../components/support/supportLooks';
 import { AppText } from '../../components/ui/AppText';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';

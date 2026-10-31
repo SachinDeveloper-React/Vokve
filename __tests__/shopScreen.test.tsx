@@ -47,6 +47,12 @@ jest.mock('@react-navigation/native', () => ({
 // The basket and the wishlist talk to the server; every endpoint the
 // stores reach for is stubbed, and each test says what the server answers.
 jest.mock('../src/services/api/endpoints', () => ({
+  /**
+   * The invite card the screens now carry. Left on its way, like the tips
+   * beside it: a promo is never worth a spinner, so a card that has not
+   * arrived is simply not drawn — which keeps these tests about the screen.
+   */
+  contentApi: { referralCards: jest.fn(() => new Promise(() => {})) },
   shopApi: {
     items: jest.fn(),
     item: jest.fn(),

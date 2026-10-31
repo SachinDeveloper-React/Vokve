@@ -1,5 +1,17 @@
-import React, { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import React, {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  ActivityIndicator,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import {
   ArrowUpRight,
@@ -335,7 +347,8 @@ export const OrderDetailScreen = () => {
 
                 <VStack align="end" gap="xxs">
                   <OrderStatusPill status={order.status} />
-                  {order.estimatedDelivery && ON_ITS_WAY.includes(order.status) ? (
+                  {order.estimatedDelivery &&
+                  ON_ITS_WAY.includes(order.status) ? (
                     <>
                       <AppText variant="miniMicro" color="textTertiary">
                         Expected by

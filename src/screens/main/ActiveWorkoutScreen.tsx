@@ -145,7 +145,12 @@ export const ActiveWorkoutScreen = ({
         ))}
 
         <View style={styles.footer}>
-          <Button label="Finish workout" size="lg" fullWidth onPress={handleFinish} />
+          <Button
+            label="Finish workout"
+            size="lg"
+            fullWidth
+            onPress={handleFinish}
+          />
           <Button
             label="Discard"
             variant="ghost"

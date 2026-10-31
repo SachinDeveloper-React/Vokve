@@ -11,6 +11,7 @@ import { ToastProvider } from '../src/components/feedback';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Text as RNText } from 'react-native';
+import { ChevronRight } from 'lucide-react-native';
 import { mockSnapshot } from 'react-native-step-tracker-pro/jest';
 import { HomeScreen } from '../src/screens/main/HomeScreen';
 import { useHydrationStore } from '../src/stores/hydrationStore';
@@ -34,8 +35,15 @@ jest.mock('@react-navigation/native', () => ({
 // wiring, so it is left on its way rather than fetched for real.
 jest.mock('../src/services/api/endpoints', () => ({
   ...jest.requireActual('../src/services/api/endpoints'),
-  contentApi: { tip: jest.fn(() => new Promise(() => {})) },
+  contentApi: {
+    tip: jest.fn(() => new Promise(() => {})),
+    referralCards: jest.fn(() => new Promise(() => {})),
+  },
 }));
+
+const { contentApi } = jest.requireMock('../src/services/api/endpoints') as {
+  contentApi: { tip: jest.Mock; referralCards: jest.Mock };
+};
 
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
@@ -84,7 +92,10 @@ const render = async () => {
   return tree;
 };
 
-const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
+const pressableFor = (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  prefix: string,
+) => {
   const node = tree.root
     .findAll(
       n =>
@@ -94,8 +105,43 @@ const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
     .find(n => typeof n.props.onPress === 'function');
 
   if (!node) throw new Error(`No pressable labelled "${prefix}…"`);
+  return node;
+};
+
+const press = (tree: ReactTestRenderer.ReactTestRenderer, prefix: string) => {
+  const node = pressableFor(tree, prefix);
   ReactTestRenderer.act(() => node.props.onPress());
 };
+
+/**
+ * The chevron's own box inside a shortcut tile. Host nodes only: `<View>` is
+ * a composite over a host `View`, so an unfiltered search counts it twice.
+ */
+const chevronMarkOf = (
+  tree: ReactTestRenderer.ReactTestRenderer,
+  prefix: string,
+) =>
+  pressableFor(tree, prefix).findAll(
+    n => typeof n.type === 'string' && n.props?.pointerEvents === 'none',
+  );
+
+const flatten = (style: unknown): Record<string, unknown> => {
+  const out: Record<string, unknown> = {};
+  const visit = (s: unknown) => {
+    if (Array.isArray(s)) return s.forEach(visit);
+    if (s && typeof s === 'object') Object.assign(out, s);
+  };
+  visit(style);
+  return out;
+};
+
+/** The four tiles of the shortcut row, by the prefix each is labelled with. */
+const SHORTCUTS = [
+  'Challenges &',
+  'Nutrition &',
+  'Health check up',
+  'Streaks',
+] as const;
 
 describe('HomeScreen', () => {
   test('the challenges shortcut opens the board as a route of its own', async () => {
@@ -144,6 +190,84 @@ describe('HomeScreen', () => {
     press(await render(), 'Streaks');
 
     expect(mockNavigate).toHaveBeenCalledWith('Streak');
+  });
+
+  test('the invite card is the one the server put on this screen, and it opens Referral', async () => {
+    // Every word is the server's: the screen names the placement and draws
+    // whatever comes back for it, so a campaign is a panel edit.
+    contentApi.referralCards.mockResolvedValueOnce({
+      cards: {
+        home: {
+          id: 'home-invite-diwali',
+          screen: 'home',
+          title: 'Double up this Diwali',
+          message: 'Bring a friend and take 40 coins each.',
+          ctaLabel: 'Share now',
+          accent: 'gold',
+          position: 'middle',
+          emoji: '\u{1FA94}',
+          inviterCoins: 40,
+          inviteeCoins: 40,
+        },
+      },
+    });
+
+    const tree = await render();
+    await ReactTestRenderer.act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(textOf(tree, RNText)).toContain('Double up this Diwali');
+    expect(textOf(tree, RNText)).toContain('Share now');
+    // Once only: the screen offers three anchors and the card names one, so
+    // three banners would mean the position was being ignored.
+    expect(textOf(tree, RNText).split('Double up this Diwali')).toHaveLength(2);
+
+    press(tree, 'Double up this Diwali');
+    expect(mockNavigate).toHaveBeenCalledWith('Referral');
+  });
+
+  test('a screen the operator has written no card for draws none', async () => {
+    contentApi.referralCards.mockResolvedValueOnce({ cards: {} });
+
+    const tree = await render();
+    await ReactTestRenderer.act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockNavigate).not.toHaveBeenCalledWith('Referral');
+    expect(textOf(tree, RNText)).not.toContain('Invite');
+  });
+
+  test('every shortcut tile wears a chevron, so the row reads as four doors', async () => {
+    const tree = await render();
+
+    for (const label of SHORTCUTS) {
+      const tile = pressableFor(tree, label);
+      // One, not two: a tile that collected a second would be a tile whose
+      // own content had started drawing arrows of its own.
+      expect(tile.findAllByType(ChevronRight)).toHaveLength(1);
+    }
+  });
+
+  test('the chevron is decoration — the whole tile stays one tap target', async () => {
+    const mark = chevronMarkOf(await render(), 'Challenges &');
+
+    expect(mark).toHaveLength(1);
+    expect(mark[0].findAllByType(ChevronRight)).toHaveLength(1);
+  });
+
+  test('the chevron sits in the top right, clear of the labels', async () => {
+    const style = flatten(chevronMarkOf(await render(), 'Streaks')[0].props.style);
+
+    expect(style.position).toBe('absolute');
+    // Hung from the top and the right, so it stays out of the two label
+    // lines however they wrap. Not stretched: a box pinned top *and* bottom
+    // would centre the glyph back down onto the text.
+    expect(typeof style.top).toBe('number');
+    expect(typeof style.right).toBe('number');
+    expect(style.bottom).toBeUndefined();
+    expect(style.left).toBeUndefined();
   });
 
   test('the dashboard cannot log past the day’s ceiling either', async () => {

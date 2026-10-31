@@ -55,6 +55,7 @@ jest.mock('../src/services/api/endpoints', () => {
       score: jest.fn(() => api.mockVitalsApi.score()),
     },
     contentApi: {
+      referralCards: jest.fn(() => api.mockContentApi.referralCards()),
       tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
     },
   };
@@ -248,6 +249,19 @@ describe('HealthCheckupScreen', () => {
     press(await render(), 'Blood Pressure, 118 / 76');
 
     expect(mockNavigate).toHaveBeenCalledWith('BloodPressure');
+  });
+
+  test('"Track Your Progress" opens the trends screen', async () => {
+    press(await render(), 'Track your progress');
+
+    expect(mockNavigate).toHaveBeenCalledWith('VitalsTrends');
+  });
+
+  test('"View All" opens the whole archive, unfiltered', async () => {
+    press(await render(), 'View all readings');
+
+    // No kind: from here the question is what has been logged, not of what.
+    expect(mockNavigate).toHaveBeenCalledWith('VitalsHistory');
   });
 
   test('the chevron returns to whatever opened the screen', async () => {

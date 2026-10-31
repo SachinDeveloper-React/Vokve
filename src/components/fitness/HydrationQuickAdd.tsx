@@ -16,11 +16,11 @@ const VISUAL_SIZE = moderateScale(20);
 /**
  * One quick-add amount: just how much it pours.
  *
- * Deliberately borderless and unillustrated. These two sit inside a card that
- * already has an edge, and boxing them draws a second frame inside the first;
- * a glass icon in front of each repeated, twice, what the droplet and the
- * "Hydration" label have already established. The accent colour is enough to
- * say the amounts can be tapped.
+ * Deliberately borderless. These two sit inside a card that already has an
+ * edge, and boxing them draws a second frame inside the first; the accent
+ * colour is enough to say the amounts can be tapped. What is in front of each
+ * is the row's own glass at its own size (`HydrationPip`), full — a bullet
+ * that happens to say what is being poured, not a second illustration.
  *
  * What dropping the frame and the icon loses is target size, which is why the
  * press area is grown back out to the 44pt floor through `visualSize` rather
@@ -42,7 +42,7 @@ export const HydrationQuickAdd = memo(({ ml, onPress }: Props) => {
         gap: moderateScale(4),
       }}
     >
-      <HydrationPip filled={true} />
+      <HydrationPip fill={1} />
       <AppText variant="micro" color="primary">
         {`+${ml} ml`}
       </AppText>

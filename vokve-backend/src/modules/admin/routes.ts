@@ -194,6 +194,15 @@ import {
   tipsBody,
 } from './tips.service.js';
 import {
+  deleteReferralCard,
+  listReferralCards,
+  patchReferralCard,
+  referralCardBody,
+  referralCardPatch,
+  referralCardQuery,
+  saveReferralCard,
+} from './referralCards.service.js';
+import {
   memberConfig,
   memberConfigBody,
   memberNotifications,
@@ -1308,6 +1317,51 @@ adminUsersRouter.delete(
   validate('body', z.object({ note: z.string().trim().max(300).optional() })),
   async (req, res) => {
     res.json(await deleteTip(req.ctx.adminActor!, String(req.params.tipId), req.body.note));
+  },
+);
+
+// ─── The invite card, screen by screen ──────────────────────
+
+/**
+ * Every invite card, with what each screen is drawing today.
+ *
+ * Same shape and same reasoning as the tips above: a screen with several
+ * active cards rotates them a day at a time in `sort` order, so which one is
+ * live is a question only the server can answer. `silentScreens` is the other
+ * half — a screen carrying no card at all, which is how the invite is turned
+ * off in one place without touching the rest.
+ *
+ * The reward is not in the rows. `{coins}` and `{friendCoins}` in the words
+ * are filled from `coins.referral` as it is paying, so a card cannot promise
+ * what the ledger will not honour.
+ */
+adminUsersRouter.get('/admin/referral-cards', validate('query', referralCardQuery), async (req, res) => {
+  res.json(
+    await listReferralCards(req.query as unknown as z.infer<typeof referralCardQuery>, req.ctx.timezone),
+  );
+});
+
+/** Writes a card, creating it where the id is new. Idempotent on the id. */
+adminUsersRouter.post('/admin/referral-cards', validate('body', referralCardBody), async (req, res) => {
+  const result = await saveReferralCard(req.ctx.adminActor!, req.body);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
+/** A patch, for the one field somebody came to change — usually `active`. */
+adminUsersRouter.put('/admin/referral-cards/:cardId', validate('body', referralCardPatch), async (req, res) => {
+  res.json(await patchReferralCard(req.ctx.adminActor!, String(req.params.cardId), req.body));
+});
+
+/**
+ * A real delete: nothing holds a snapshot of a card. Hiding it
+ * (`active: false`) is the other option, and the right one for a campaign
+ * that is being drafted or has been pulled.
+ */
+adminUsersRouter.delete(
+  '/admin/referral-cards/:cardId',
+  validate('body', z.object({ note: z.string().trim().max(300).optional() })),
+  async (req, res) => {
+    res.json(await deleteReferralCard(req.ctx.adminActor!, String(req.params.cardId), req.body.note));
   },
 );
 

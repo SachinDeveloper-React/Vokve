@@ -76,7 +76,10 @@ export const DietPlanScreen = () => {
     () => setDate(current => addDays(current, -1)),
     [],
   );
-  const nextDay = useCallback(() => setDate(current => addDays(current, 1)), []);
+  const nextDay = useCallback(
+    () => setDate(current => addDays(current, 1)),
+    [],
+  );
 
   // The add-meal screen rather than a sheet of this screen's own: logging a
   // meal is several foods with portions and macros, and the app has one place
@@ -88,7 +91,10 @@ export const DietPlanScreen = () => {
 
   // The library is a screen of its own rather than a sheet: choosing a plan
   // means reading several of them, days and all, and that is a scroll.
-  const openPlans = useCallback(() => navigation.navigate('DietPlans'), [navigation]);
+  const openPlans = useCallback(
+    () => navigation.navigate('DietPlans'),
+    [navigation],
+  );
 
   /** Tapping a day in either list is how those tabs get back to the plan. */
   const handlePickDay = useCallback((picked: IsoDate) => {

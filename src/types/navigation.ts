@@ -9,6 +9,7 @@ import type {
   PurchaseLine,
   ShopCategory,
   SupportCategory,
+  VitalKind,
   WorkoutTemplate,
 } from './models';
 
@@ -197,6 +198,14 @@ export type RootStackParamList = {
   HeartRate: undefined;
   /** Opened from the health checkup's blood pressure tile. */
   BloodPressure: undefined;
+  /**
+   * Every vital ever logged, from the checkup's "View All" and from a
+   * vital's own "View all" — `kind` opens it already filtered to that one,
+   * so a plain `navigate('VitalsHistory')` shows all of them.
+   */
+  VitalsHistory: { kind?: VitalKind } | undefined;
+  /** Each vital's shape over time, from the checkup's "Track Your Progress". */
+  VitalsTrends: undefined;
   /** Opened from the wallet's "Earn Coins" action. */
   Referral: undefined;
   /**

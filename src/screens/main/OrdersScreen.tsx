@@ -1,5 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, RefreshControl, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useNavigation } from '@react-navigation/native';
 import { Gift, MapPin } from 'lucide-react-native';
@@ -82,10 +88,10 @@ export const OrdersScreen = () => {
   const reorder = useOrdersStore(s => s.reorder);
   const reorderingId = useOrdersStore(s => s.reorderingId);
 
-  const refresh = useCallback(() => refreshIfStale(filter), [
-    filter,
-    refreshIfStale,
-  ]);
+  const refresh = useCallback(
+    () => refreshIfStale(filter),
+    [filter, refreshIfStale],
+  );
   useRefreshOnFocus(refresh);
 
   /**
@@ -174,7 +180,10 @@ export const OrdersScreen = () => {
                   order.number
                 }.`,
           tone: result.skipped.length > 0 ? 'info' : 'success',
-          action: { label: 'View cart', onPress: () => navigation.navigate('Cart') },
+          action: {
+            label: 'View cart',
+            onPress: () => navigation.navigate('Cart'),
+          },
         });
       } catch (error) {
         toast.show({
@@ -222,7 +231,14 @@ export const OrdersScreen = () => {
         />
       </Card>
     );
-  }, [colors.primary, filter, openShop, styles.empty, tab.isSyncing, tab.syncedAt]);
+  }, [
+    colors.primary,
+    filter,
+    openShop,
+    styles.empty,
+    tab.isSyncing,
+    tab.syncedAt,
+  ]);
 
   const footer = useMemo(
     () => (

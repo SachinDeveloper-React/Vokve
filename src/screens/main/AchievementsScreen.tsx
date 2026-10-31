@@ -9,7 +9,10 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { Icon } from '../../components/media/Icon';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { FilterChips, type FilterOption } from '../../components/ui/FilterChips';
+import {
+  FilterChips,
+  type FilterOption,
+} from '../../components/ui/FilterChips';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
 import { useAchievements } from '../../hooks/useChallenges';

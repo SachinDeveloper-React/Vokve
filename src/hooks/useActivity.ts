@@ -18,9 +18,16 @@ export function useActivityRange(
   return useServerRead(key, () => activityApi.range(query!));
 }
 
-/** One day as the server holds it (`GET /activity/day`). */
-export function useActivityDay(date: string): Loaded<DailyActivity> {
-  return useServerRead(`day:${date}`, () => activityApi.day(date));
+/**
+ * One day as the server holds it (`GET /activity/day`); null skips the read,
+ * for a day that is only wanted once something has been opened.
+ */
+export function useActivityDay(
+  date: string | null,
+): Loaded<DailyActivity> {
+  return useServerRead(date === null ? null : `day:${date}`, () =>
+    activityApi.day(date!),
+  );
 }
 
 /** Where a day's steps came from, and how they were matched (`GET /activity/sources`). */

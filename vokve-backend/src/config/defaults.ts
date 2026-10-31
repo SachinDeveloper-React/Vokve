@@ -60,7 +60,7 @@ export const CONFIG_DEFAULTS = {
      * `monthlyInviterCap` referrals a calendar month (F4).
      */
     referral: { inviter: 20, invitee: 20, monthlyInviterCap: 10, applyWindowDays: 7 },
-    /** Idle window; resets on any credit (RULES E9). */
+    /** Idle window; resets on every step sync, and on nothing else (RULES E9). */
     expiryDays: 90,
     expiryWarnDays: [14, 3],
     stepUpThreshold: 1000,

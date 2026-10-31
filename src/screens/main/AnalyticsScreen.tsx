@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { ActivityCalendarCard } from '../../components/analytics/ActivityCalendarCard';
 import { AnalyticsCheerCard } from '../../components/analytics/AnalyticsCheerCard';
 import { AnalyticsHeader } from '../../components/analytics/AnalyticsHeader';
 import { AnalyticsHighlightCard } from '../../components/analytics/AnalyticsHighlightCard';
@@ -8,6 +9,13 @@ import {
   AnalyticsRangeFilter,
   type AnalyticsRange,
 } from '../../components/analytics/AnalyticsRangeFilter';
+import { DayDetailSheet } from '../../components/analytics/DayDetailSheet';
+import { MostActiveCard } from '../../components/analytics/MostActiveCard';
+import {
+  PeriodOverviewCard,
+  PERIOD_DAYS,
+  type AnalyticsPeriod,
+} from '../../components/analytics/PeriodOverviewCard';
 import { StepsInsightsSheet } from '../../components/analytics/StepsInsightsSheet';
 import {
   StepsOverviewCard,
@@ -17,8 +25,9 @@ import { StepsSummaryCard } from '../../components/analytics/StepsSummaryCard';
 import { WeeklyTrendCard } from '../../components/analytics/WeeklyTrendCard';
 import { StaleFigures } from '../../components/feedback';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
-import { HStack } from '../../components/layout/Stack';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
+import { useReferralCard } from '../../hooks/useContent';
 import { useActivityDay, useActivityRange } from '../../hooks/useActivity';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import type { ActivityRangeQuery } from '../../services/api/contracts';
@@ -43,7 +52,6 @@ import {
   todayIso,
   type IsoDate,
 } from '../../utils/date';
-import { formatGrouped } from '../../utils/format';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -115,8 +123,8 @@ function labelFor(
 }
 
 /**
- * Steps, analysed: the chosen day's count against the goal, the period's
- * shape, and the two figures worth knowing about the week.
+ * Steps, analysed: the chosen day in full, the period's shape, and what the
+ * weeks around it say.
  *
  * The date anchors everything: the summary is that day's, and the chart is
  * the day, week, month or year it falls in. The range control drives the
@@ -126,13 +134,38 @@ function labelFor(
  * screen the least trustworthy one. The chart says which period it is
  * drawing under its own title instead.
  *
+ * Below the chart the screen answers the three questions a total cannot.
+ * **How much, lately** is the period overview, on rolling 7, 14 and 30-day
+ * windows against the same window before it — rolling because "the last
+ * thirty days" is the question people ask, where the first of the month is
+ * an accident of the calendar. **When** is the most-active card: the window's
+ * busiest day and the chosen day's busiest hour. **How often** is the
+ * calendar, a month of days weighted by how far each got, where a run of
+ * good days and the weekends that break it are a shape rather than a list.
+ *
+ * Every day that has happened is a way in: pressed in the grid or in the
+ * busiest-day row, it re-anchors the screen and opens that day in full. So
+ * the screen reads downwards as a summary and is navigated upwards from the
+ * calendar, and there is never more than one day being talked about.
+ *
  * Every figure is the server's (`/activity/day`, `/activity/range`), read
- * again whenever a sync lands — the same numbers the dashboard shows.
+ * again whenever a sync lands — the same numbers the dashboard shows, and
+ * always the verified part of them (`verifiedActivityOf`).
  */
 export const AnalyticsScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('analytics');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
 
   const goal = useDailyStepGoal();
@@ -140,14 +173,64 @@ export const AnalyticsScreen = () => {
   useRefreshOnFocus(useStreakStore.getState().refreshIfStale);
 
   const [range, setRange] = useState<AnalyticsRange>('day');
+  const [period, setPeriod] = useState<AnalyticsPeriod>('7d');
   const [date, setDate] = useState<IsoDate>(todayIso());
+  /**
+   * The month the calendar is showing, which is not the same thing as the
+   * day being read: paging to August to look at it should not move every
+   * figure on the screen to August, and picking a day out of the grid should
+   * not page the grid away from where the reader is. So the two are separate
+   * pieces of state, and only the date chip sets both.
+   */
+  const [calendarAnchor, setCalendarAnchor] = useState<IsoDate>(todayIso());
   const [isCalendarOpen, setCalendarOpen] = useState(false);
   const [isInsightsOpen, setInsightsOpen] = useState(false);
+  /**
+   * The day the detail sheet is showing, which is deliberately **not** the
+   * day the screen is anchored to.
+   *
+   * Opening a day used to move the anchor, which invalidated all five of the
+   * screen's reads at once: every card behind the sheet emptied while they
+   * were in flight, and the sheet itself opened on a day of zeros because its
+   * own figures had not landed either. So the sheet keeps its own day and
+   * reads it on its own, nothing else moves, and re-anchoring is a button
+   * inside the sheet for a reader who actually wants it.
+   */
+  const [openDay, setOpenDay] = useState<IsoDate | null>(null);
 
   const openCalendar = useCallback(() => setCalendarOpen(true), []);
   const closeCalendar = useCallback(() => setCalendarOpen(false), []);
   const openInsights = useCallback(() => setInsightsOpen(true), []);
   const closeInsights = useCallback(() => setInsightsOpen(false), []);
+  const closeDay = useCallback(() => setOpenDay(null), []);
+
+  /** The date chip: the whole screen, the calendar included, moves with it. */
+  const onPickDate = useCallback((next: IsoDate) => {
+    setDate(next);
+    setCalendarAnchor(next);
+  }, []);
+
+  /** A day pressed in the grid, or the busiest-day row: show it, in place. */
+  const onOpenDay = useCallback((next: IsoDate) => setOpenDay(next), []);
+
+  /** "Show this day" inside the sheet: move the whole screen onto it. */
+  const onAnchorToOpenDay = useCallback(() => {
+    if (openDay === null) return;
+    // Read from the closure rather than from inside a `setOpenDay` updater:
+    // an updater has to be pure, and React calls it twice in development.
+    setDate(openDay);
+    setCalendarAnchor(openDay);
+    setOpenDay(null);
+  }, [openDay]);
+
+  const onPreviousMonth = useCallback(
+    () => setCalendarAnchor(current => addDays(monthBounds(current).first, -1)),
+    [],
+  );
+  const onNextMonth = useCallback(
+    () => setCalendarAnchor(current => addDays(monthBounds(current).last, 1)),
+    [],
+  );
 
   const isToday = date === todayIso();
   // Every step figure on this screen is the verified part of the server's
@@ -165,6 +248,53 @@ export const AnalyticsScreen = () => {
   const chartQuery = useMemo(() => queryFor(range, date), [range, date]);
   const week = useActivityRange(weekQuery).data;
   const chart = useActivityRange(chartQuery).data;
+
+  // The rolling window the overview totals, the same length of time before
+  // it for the comparison, the month the calendar is drawing, and the chosen
+  // day by the hour. The hourly read shares its cache key with the chart's
+  // when the chart happens to be on D, so the two are one request.
+  const periodDays = PERIOD_DAYS[period];
+  const periodQuery = useMemo<ActivityRangeQuery>(
+    () => ({
+      from: addDays(date, -(periodDays - 1)),
+      to: date,
+      granularity: 'day',
+    }),
+    [date, periodDays],
+  );
+  const beforeQuery = useMemo<ActivityRangeQuery>(
+    () => ({
+      from: addDays(date, -(periodDays * 2 - 1)),
+      to: addDays(date, -periodDays),
+      granularity: 'day',
+    }),
+    [date, periodDays],
+  );
+  const calendarQuery = useMemo<ActivityRangeQuery>(() => {
+    const { first, last } = monthBounds(calendarAnchor);
+    return { from: first, to: last, granularity: 'day' };
+  }, [calendarAnchor]);
+  const hourQuery = useMemo<ActivityRangeQuery>(
+    () => ({ from: date, to: date, granularity: 'hour' }),
+    [date],
+  );
+
+  // The sheet's own day, read only once one has been opened: its count, the
+  // day before it for the comparison, and its hours for the busiest one.
+  const openDayRead = useActivityDay(openDay);
+  const openPrevious = useActivityDay(
+    openDay === null ? null : addDays(openDay, -1),
+  ).data;
+  const openHours = useActivityRange(
+    openDay === null
+      ? null
+      : { from: openDay, to: openDay, granularity: 'hour' },
+  ).data;
+
+  const periodRange = useActivityRange(periodQuery).data;
+  const beforeRange = useActivityRange(beforeQuery).data;
+  const calendar = useActivityRange(calendarQuery).data;
+  const hours = useActivityRange(hourQuery).data;
 
   const weekSteps = useMemo(
     () =>
@@ -245,13 +375,99 @@ export const AnalyticsScreen = () => {
     }
   }, [chart, chartQuery.from, chartQuery.to, date, isToday, range]);
 
-  const bestDay = useMemo(
+  /** The window's days, and the three findings read off them. */
+  const periodSteps = useMemo(
     () =>
-      weekSteps.reduce<{ day: string; date: string; steps: number } | null>(
+      (periodRange?.points ?? []).map(point => ({
+        date: point.start,
+        steps: point.verifiedSteps,
+      })),
+    [periodRange],
+  );
+
+  /**
+   * The window's totals, cut to the verified share — the same arithmetic
+   * `verifiedActivityOf` does for a single day, for the same reason: the
+   * server's own totals are of everything a phone counted, and this screen
+   * shows nothing it has not verified. The steps figure and the kilometres
+   * beside it have to be cut by the same share or the card states a distance
+   * that its own step count could not have covered.
+   */
+  const periodTotals = useMemo(() => {
+    const totals = periodRange?.totals;
+    if (!totals) return null;
+    const share =
+      totals.steps > 0 ? Math.min(1, totals.verifiedSteps / totals.steps) : 1;
+    return {
+      steps: Math.min(totals.steps, totals.verifiedSteps),
+      distanceKm: totals.distanceKm * share,
+      caloriesBurned: totals.caloriesBurned * share,
+      activeMinutes: Math.round(totals.activeMinutes * share),
+      activeDays: totals.activeDays,
+    };
+  }, [periodRange]);
+
+  const goalDays = useMemo(
+    () => periodSteps.filter(entry => entry.steps >= Math.max(1, goal)).length,
+    [goal, periodSteps],
+  );
+
+  // A day of no steps never becomes the best one, so a window with nothing
+  // in it stays null and the card says so rather than naming a day at zero.
+  const mostActiveDay = useMemo(
+    () =>
+      periodSteps.reduce<{ date: IsoDate; steps: number } | null>(
         (best, entry) => (entry.steps > (best?.steps ?? 0) ? entry : best),
         null,
       ),
-    [weekSteps],
+    [periodSteps],
+  );
+
+  /**
+   * A day's busiest hour, off the hourly series: the index *is* the hour, as
+   * `/activity/range` draws it. Used for the day on screen and again for the
+   * day in the sheet, which is why it is a function rather than one memo.
+   */
+  const peakHourOf = useCallback(
+    (hourly: ActivityRangePoint[] | undefined) =>
+      (hourly ?? []).reduce<{ hour: number; steps: number } | null>(
+        (top, point, hour) =>
+          point.verifiedSteps > (top?.steps ?? 0)
+            ? { hour, steps: point.verifiedSteps }
+            : top,
+        null,
+      ),
+    [],
+  );
+
+  const peakHour = useMemo(
+    () => peakHourOf(hours?.points),
+    [hours, peakHourOf],
+  );
+  const openPeakHour = useMemo(
+    () => peakHourOf(openHours?.points),
+    [openHours, peakHourOf],
+  );
+
+  const stepsByDay = useMemo(
+    () =>
+      new Map(
+        (calendar?.points ?? []).map(
+          point => [point.start, point.verifiedSteps] as const,
+        ),
+      ),
+    [calendar],
+  );
+
+  const calendarMonth = useMemo(() => {
+    const anchor = fromIsoDate(calendarAnchor);
+    return { year: anchor.getFullYear(), month: anchor.getMonth() };
+  }, [calendarAnchor]);
+
+  /** Nothing to see past this month, so the grid stops there. */
+  const canGoNextMonth = useMemo(
+    () => monthBounds(calendarAnchor).first < monthBounds(todayIso()).first,
+    [calendarAnchor],
   );
 
   // The streak and the milestone it is working towards are the server's.
@@ -267,11 +483,6 @@ export const AnalyticsScreen = () => {
     }
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
-
-  // The AI report has no screen yet. Wired as a no-op rather than left off, so
-  // the control keeps the shape it will ship with and only the handler changes
-  // when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
 
   return (
     <Screen edges={['top']}>
@@ -290,6 +501,12 @@ export const AnalyticsScreen = () => {
 
         <StaleFigures at={dayRead.cachedAt} stale={dayRead.isStale} />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         <StepsSummaryCard
           steps={day.steps}
           goal={goal}
@@ -298,7 +515,6 @@ export const AnalyticsScreen = () => {
           caloriesBurned={day.caloriesBurned}
           distanceKm={day.distanceKm}
           activeMinutes={day.activeMinutes}
-          onPressReport={notImplemented}
         />
 
         <StepsOverviewCard
@@ -308,54 +524,98 @@ export const AnalyticsScreen = () => {
           onPressInsights={openInsights}
         />
 
-        <HStack align="stretch" gap="md">
-          <AnalyticsHighlightCard
-            label="Top Achievement"
-            headline="Best Day This Week"
-            value={`${formatGrouped(bestDay?.steps ?? 0)} steps`}
-            caption={
-              bestDay
-                ? `${formatWeekdayDate(
-                    bestDay.date,
-                  )} — your highest count of the week`
-                : 'No steps counted this week yet'
-            }
-            tint={colors.success}
-          />
+        <PeriodOverviewCard
+          value={period}
+          onChange={setPeriod}
+          caption={formatDateRange(periodQuery.from, periodQuery.to)}
+          totals={periodTotals}
+          goalDays={goalDays}
+          previousSteps={beforeRange?.totals.verifiedSteps ?? null}
+        />
 
-          <AnalyticsHighlightCard
-            label="Streak"
-            headline={`${streak === 1 ? 'day' : 'days'} in a row`}
-            value={
-              streak === null
-                ? '—'
-                : `${streak} ${streak === 1 ? 'Day' : 'Days'}`
-            }
-            caption={
-              streak === null
-                ? 'Your streak is on its way.'
-                : toNext === null
-                ? 'Every milestone reached. Keep it rolling!'
-                : `Keep it up! ${toNext} more ${
-                    toNext === 1 ? 'day' : 'days'
-                  } to ${nextMilestone!.days}`
-            }
-            tint={colors.primary}
-            tintValue
-          />
-        </HStack>
+        <MostActiveCard
+          day={mostActiveDay}
+          dayWithin={`the last ${periodDays} days`}
+          hour={peakHour}
+          hourOn={formatWeekdayDate(date)}
+          onPressDay={onOpenDay}
+        />
+
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
+
+        <ActivityCalendarCard
+          year={calendarMonth.year}
+          month={calendarMonth.month}
+          stepsByDay={stepsByDay}
+          goal={goal}
+          today={todayIso()}
+          selected={date}
+          onPressDay={onOpenDay}
+          onPrevious={onPreviousMonth}
+          onNext={onNextMonth}
+          canGoNext={canGoNextMonth}
+        />
+
+        {/*
+          The week's best day used to sit beside this one. It has gone: the
+          busiest day of the chosen window is said properly above, and two
+          cards naming a best day over two different spans is how a screen
+          gets read wrong.
+        */}
+        <AnalyticsHighlightCard
+          label="Streak"
+          headline={`${streak === 1 ? 'day' : 'days'} in a row`}
+          value={
+            streak === null ? '—' : `${streak} ${streak === 1 ? 'Day' : 'Days'}`
+          }
+          caption={
+            streak === null
+              ? 'Your streak is on its way.'
+              : toNext === null
+              ? 'Every milestone reached. Keep it rolling!'
+              : `Keep it up! ${toNext} more ${
+                  toNext === 1 ? 'day' : 'days'
+                } to ${nextMilestone!.days}`
+          }
+          tint={colors.primary}
+          tintValue
+        />
 
         <WeeklyTrendCard data={weekSteps} caption={weekCaption} />
 
         <AnalyticsCheerCard name={user?.name} steps={today.shown} goal={goal} />
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <CalendarSheet
         visible={isCalendarOpen}
         value={date}
-        onChange={setDate}
+        onChange={onPickDate}
         onClose={closeCalendar}
         title="Show analytics for"
+      />
+
+      <DayDetailSheet
+        visible={openDay !== null}
+        onClose={closeDay}
+        // Left off when the screen is already on this day, which is every
+        // day opened from the grid while the grid is on the anchor's month:
+        // a button that does nothing is worse than no button.
+        onShowDay={
+          openDay !== null && openDay !== date ? onAnchorToOpenDay : undefined
+        }
+        date={openDay ?? date}
+        activity={verifiedActivityOf(openDayRead.data)}
+        goal={goal}
+        previousSteps={
+          openPrevious ? verifiedActivityOf(openPrevious).steps : null
+        }
+        peakHour={openPeakHour}
+        pending={openDayRead.data === null}
       />
 
       <StepsInsightsSheet

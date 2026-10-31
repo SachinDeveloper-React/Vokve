@@ -14,7 +14,9 @@ import { ShopHeader } from '../../components/shop/ShopHeader';
 import { ShopSearchBar } from '../../components/shop/ShopSearchBar';
 import { TopCategoriesGrid } from '../../components/shop/TopCategoriesGrid';
 import { LoadState } from '../../components/ui/LoadState';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
+import { useReferralCard } from '../../hooks/useContent';
 import { useAfterTransition } from '../../hooks/useAfterTransition';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import { useCartCount } from '../../stores/cartStore';
@@ -69,6 +71,16 @@ export const ShopScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('shop');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
   const user = useCurrentUser();
   const balance = useCoinBalance();
   const isSignedIn = useAuthStatus() === 'authenticated';
@@ -200,6 +212,12 @@ export const ShopScreen = () => {
         <EmailVerificationBanner reason="place orders" />
         <ShopCoinsBanner balance={balance} onPressBestRewards={onOpenAll} />
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         <ShopCategoryFilter
           value={filter}
           onChange={setFilter}
@@ -231,7 +249,14 @@ export const ShopScreen = () => {
           </>
         )}
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
+
         <ShopAssuranceStrip />
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
     </Screen>
   );

@@ -111,7 +111,10 @@ export const NutritionHistoryScreen = () => {
     () => setDate(current => addDays(current, -1)),
     [],
   );
-  const nextDay = useCallback(() => setDate(current => addDays(current, 1)), []);
+  const nextDay = useCallback(
+    () => setDate(current => addDays(current, 1)),
+    [],
+  );
 
   /** Tapping any day in any list brings the daily view to it. */
   const openDay = useCallback((picked: IsoDate) => {

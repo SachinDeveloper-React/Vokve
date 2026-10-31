@@ -2,11 +2,16 @@ import React, { Fragment, memo } from 'react';
 import { StyleSheet } from 'react-native';
 import { CalendarDays } from 'lucide-react-native';
 import { radius, useTheme } from '../../theme';
+import { moderateScale } from '../../theme/responsive';
 import type { CoinExpiry } from '../../stores/coinsStore';
 import { withAlpha } from '../../utils/color';
 import { toIsoDate, formatLongDate } from '../../utils/date';
 import { formatCoins } from '../../utils/format';
-import { BottomSheet } from '../disclosure/BottomSheet';
+import {
+  BottomSheet,
+  BottomSheetScrollView,
+  useSheetBodyMaxHeight,
+} from '../disclosure/BottomSheet';
 import { Box } from '../layout/Box';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
@@ -23,6 +28,11 @@ interface Rule {
  * The rules, worded from the figures in force rather than written out, so a
  * window the server changes to sixty days does not leave a sheet that still
  * promises ninety.
+ *
+ * What restarts the clock is a step sync, not a credit (RULES E9): the window
+ * asks whether this phone is still reporting, so a member who earns by
+ * referral alone still has a countdown running, and one who walks every day
+ * never sees one at all.
  */
 function rulesFor(expiry: CoinExpiry): Rule[] {
   const window = `${expiry.windowDays} days`;
@@ -36,13 +46,13 @@ function rulesFor(expiry: CoinExpiry): Rule[] {
 
   return [
     {
-      title: 'Every credit restarts the clock',
-      detail: `Any coin you earn — from steps, a workout, a streak bonus, a challenge or a referral — gives your whole balance a fresh ${window}.`,
+      title: 'Every step sync restarts the clock',
+      detail: `Each time your phone sends its steps, your whole balance gets a fresh ${window} — however many steps were in it. Keep the app syncing and the countdown never starts.`,
     },
     {
-      title: 'Spending does not count',
+      title: 'Earning and spending do not count',
       detail:
-        'Paying with coins in the shop spends them but does not reset the window. Only earning does.',
+        'Coins from a workout, a streak, a referral or a reward do not restart the clock, and paying with coins in the shop does not either. Only a step sync does.',
     },
     {
       title: 'We remind you before',
@@ -50,7 +60,7 @@ function rulesFor(expiry: CoinExpiry): Rule[] {
     },
     {
       title: 'If the window runs out',
-      detail: `The whole balance lapses at once and shows in your history as an expiry. Coins still pending verification are not affected. Earn again and the ${window} start over.`,
+      detail: `The whole balance lapses at once and shows in your history as an expiry. Coins still pending verification are not affected. Sync again and the ${window} start over.`,
     },
   ];
 }
@@ -58,13 +68,13 @@ function rulesFor(expiry: CoinExpiry): Rule[] {
 /** "Your 1,240 coins are safe until 12 December 2026." — or why there is no date. */
 function headlineFor(balance: number, expiry: CoinExpiry): string {
   if (balance <= 0 || expiry.expiresAt === null) {
-    return `Nothing to expire yet. Earn coins and the ${expiry.windowDays}-day clock starts from that moment.`;
+    return `Nothing to expire yet. Earn coins and your step syncs keep the ${expiry.windowDays}-day clock full.`;
   }
   const on = formatLongDate(toIsoDate(new Date(expiry.expiresAt)));
   if (expiry.daysLeft === 0) {
     return `Your ${formatCoins(
       balance,
-    )} coins expire tonight. Earn any coin today to keep them.`;
+    )} coins expire tonight. Sync your steps today to keep them.`;
   }
   return `Your ${formatCoins(balance)} coins are safe until ${on}.`;
 }
@@ -89,12 +99,17 @@ interface Props {
  * on the wallet the moment it is. The countdown is restated at the top so the
  * sheet stands on its own when a reminder opens it later.
  *
+ * The rules scroll and the buttons do not, for the reason `CoinsInfoSheet`
+ * does the same: a sheet's children do not shrink to fit, so a column this
+ * tall loses whatever is at the bottom of it on a small phone.
+ *
  * The urgency colour follows the panel's: an amber "12 days left" here and an
  * amber panel underneath are one message, not two.
  */
 export const CoinExpirySheet = memo(
   ({ visible, onClose, balance, expiry, onPressEarn }: Props) => {
     const { colors, isDark } = useTheme();
+    const maxBody = useSheetBodyMaxHeight(BUTTONS_HEIGHT);
     const tint =
       expiry.urgency === 'urgent'
         ? colors.destructive
@@ -106,60 +121,69 @@ export const CoinExpirySheet = memo(
     return (
       <BottomSheet visible={visible} onClose={onClose} title="Coin expiry">
         <VStack gap="base" pb="base">
-          <Box
-            radius="xl"
-            p="base"
-            style={{ backgroundColor: withAlpha(tint, isDark ? 0.14 : 0.08) }}
+          <BottomSheetScrollView
+            style={[styles.body, { maxHeight: maxBody }]}
+            showsVerticalScrollIndicator={false}
           >
-            <HStack align="center" gap="md">
-              <IconBadge icon={CalendarDays} tint={tint} size={40} />
-              <VStack flex={1} gap="xxs">
-                {hasDate ? (
-                  <AppText variant="h2" style={{ color: tint }}>
-                    {`${expiry.daysLeft} ${
-                      expiry.daysLeft === 1 ? 'day' : 'days'
-                    } left`}
-                  </AppText>
-                ) : null}
-                <AppText variant="caption" color="textSecondary">
-                  {headlineFor(balance, expiry)}
-                </AppText>
-              </VStack>
-            </HStack>
-          </Box>
+            <VStack gap="base">
+              <Box
+                radius="xl"
+                p="base"
+                style={{
+                  backgroundColor: withAlpha(tint, isDark ? 0.14 : 0.08),
+                }}
+              >
+                <HStack align="center" gap="md">
+                  <IconBadge icon={CalendarDays} tint={tint} size={40} />
+                  <VStack flex={1} gap="xxs">
+                    {hasDate ? (
+                      <AppText variant="h2" style={{ color: tint }}>
+                        {`${expiry.daysLeft} ${
+                          expiry.daysLeft === 1 ? 'day' : 'days'
+                        } left`}
+                      </AppText>
+                    ) : null}
+                    <AppText variant="caption" color="textSecondary">
+                      {headlineFor(balance, expiry)}
+                    </AppText>
+                  </VStack>
+                </HStack>
+              </Box>
 
-          <AppText variant="h3">How coin expiry works</AppText>
+              <AppText variant="h3">How coin expiry works</AppText>
 
-          {rulesFor(expiry).map((rule, index) => (
-            <Fragment key={rule.title}>
-              {index > 0 ? <Divider /> : null}
+              {rulesFor(expiry).map((rule, index) => (
+                <Fragment key={rule.title}>
+                  {index > 0 ? <Divider /> : null}
 
-              <HStack align="start" gap="md">
-                <AppText
-                  variant="micro"
-                  style={[
-                    styles.number,
-                    {
-                      backgroundColor: withAlpha(
-                        colors.primary,
-                        isDark ? 0.22 : 0.12,
-                      ),
-                      color: colors.primary,
-                    },
-                  ]}
-                >
-                  {index + 1}
-                </AppText>
+                  <HStack align="start" gap="md">
+                    <AppText
+                      variant="micro"
+                      style={[
+                        styles.number,
+                        {
+                          backgroundColor: withAlpha(
+                            colors.primary,
+                            isDark ? 0.22 : 0.12,
+                          ),
+                          color: colors.primary,
+                        },
+                      ]}
+                    >
+                      {index + 1}
+                    </AppText>
 
-                <VStack flex={1} gap="xxs">
-                  <AppText variant="bodyStrong">{rule.title}</AppText>
-                  <AppText variant="micro" color="textSecondary">
-                    {rule.detail}
-                  </AppText>
-                </VStack>
-              </HStack>
-            </Fragment>
-          ))}
+                    <VStack flex={1} gap="xxs">
+                      <AppText variant="bodyStrong">{rule.title}</AppText>
+                      <AppText variant="micro" color="textSecondary">
+                        {rule.detail}
+                      </AppText>
+                    </VStack>
+                  </HStack>
+                </Fragment>
+              ))}
+            </VStack>
+          </BottomSheetScrollView>
 
           <VStack gap="sm" pt="xs">
             {onPressEarn ? (
@@ -190,7 +214,12 @@ CoinExpirySheet.displayName = 'CoinExpirySheet';
  * digit's own line box and stays centred as the OS font scale is raised —
  * the same disc the leaderboard's rules use.
  */
+/** The buttons and the gap between them, which stay out of the scroll. */
+const BUTTONS_HEIGHT = moderateScale(112);
+
 const styles = StyleSheet.create({
+  /** Grows with the content until the sheet runs out of room, then scrolls. */
+  body: { flexShrink: 1 },
   number: {
     width: 22,
     height: 22,

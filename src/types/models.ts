@@ -2105,7 +2105,11 @@ export const walletSchema = z.object({
    */
   pendingReleaseAt: z.string().nullable().default(null),
   lifetimeEarned: z.number().nonnegative(),
-  /** ISO-8601, or null when there is nothing to expire (RULES E11). */
+  /**
+   * When the coins in hand lapse, or null when there is nothing to expire
+   * (RULES E11). The window runs from the member's newest step sync, not
+   * their newest credit (RULES E9), so it cannot be worked out here.
+   */
   expiresAt: z.string().nullable(),
   expiryDaysLeft: z.number().int().nonnegative(),
   /**
@@ -3187,6 +3191,74 @@ export const contentTipSchema = z.object({
   text: z.string(),
 });
 export type ContentTip = z.infer<typeof contentTipSchema>;
+
+/** The screens the server may put a referral card on. */
+export const referralScreenSchema = z.enum([
+  'home',
+  'wallet',
+  'shop',
+  'challenges',
+  'nutrition',
+  'health',
+  'hydration',
+  'streak',
+  'analytics',
+  'account',
+]);
+export type ReferralScreen = z.infer<typeof referralScreenSchema>;
+
+/** Which of the app's tints the card is drawn in. A name; the palette is the app's. */
+export const referralAccentSchema = z.enum([
+  'brand',
+  'primary',
+  'success',
+  'gold',
+]);
+export type ReferralAccent = z.infer<typeof referralAccentSchema>;
+
+/**
+ * Where down the screen the banner sits. Three anchors, because each is a gap
+ * the screen was built to open — not a free coordinate.
+ */
+export const referralPositionSchema = z.enum(['top', 'middle', 'bottom']);
+export type ReferralPosition = z.infer<typeof referralPositionSchema>;
+
+/**
+ * One invite card, as the screen it belongs to should draw it.
+ *
+ * Every word is the server's and its placeholders are already filled, so the
+ * app cannot promise a reward the economy is not paying. The accent is a
+ * token name rather than a colour: the server decides *which* of the app's
+ * tints, the app decides what that tint is in each theme.
+ */
+export const referralCardSchema = z.object({
+  id: z.string(),
+  screen: referralScreenSchema,
+  title: z.string(),
+  message: z.string(),
+  ctaLabel: z.string().default('Invite friends'),
+  accent: referralAccentSchema.default('brand'),
+  /** Defaulted, so a server from before this shipped still puts it at the foot. */
+  position: referralPositionSchema.default('bottom'),
+  emoji: z.string().default('\u{1F381}'),
+  /** Coins per friend who qualifies, as the server is paying them. */
+  inviterCoins: z.number().nonnegative().default(0),
+  inviteeCoins: z.number().nonnegative().default(0),
+});
+export type ReferralCard = z.infer<typeof referralCardSchema>;
+
+/**
+ * `GET /content/referral-cards`: every screen's card in one answer.
+ *
+ * One read for the whole app rather than one per screen — the cards change
+ * once a day, and ten screens asking ten times would be ten round trips to
+ * say the same thing. A screen with no card is absent from the map, and the
+ * screen then draws nothing.
+ */
+export const referralCardsSchema = z.object({
+  cards: z.record(z.string(), referralCardSchema),
+});
+export type ReferralCards = z.infer<typeof referralCardsSchema>;
 
 // ─── Nutrition ─────────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@ import { setPushTransport, type PushMessage } from '../src/lib/push.js';
 import { DeviceModel } from '../src/modules/devices/models.js';
 import { CoinBalanceModel } from '../src/modules/economy/models.js';
 import { credit } from '../src/modules/economy/service.js';
-import { expireIdleWallets, warnExpiringWallets } from '../src/modules/economy/wallet.service.js';
+import { expireIdleWallets, stampStepSync, warnExpiringWallets } from '../src/modules/economy/wallet.service.js';
 import { NotificationPreferencesModel, UserModel } from '../src/modules/identity/models.js';
 import { NotificationModel } from '../src/modules/notifications/models.js';
 import { flushDeferredPushes, notify, quietHoursDelayMs } from '../src/modules/notifications/service.js';
@@ -183,7 +183,7 @@ describe('coin expiry reminders (RULES E10)', () => {
     expect(after.body.data).toHaveLength(3);
   });
 
-  it('earning in between resets the stretch, so the warnings start over from the new credit', async () => {
+  it('for a wallet that has never synced, earning in between resets the stretch (the fallback clock)', async () => {
     const session = await signUpAndRegister();
     await credit({ userId: session.userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day', localDay: DAY });
     const first = new Date('2026-06-01T10:00:00Z');
@@ -196,6 +196,30 @@ describe('coin expiry reminders (RULES E10)', () => {
     expect((await warnExpiringWallets(new Date(second.getTime() + 10 * DAYS))).warned).toBe(0);
     expect(await warnExpiringWallets(new Date(second.getTime() + 76 * DAYS + 60_000))).toEqual({ warned: 1, repeated: 0 });
     expect(await NotificationModel.countDocuments({ userId: session.userId })).toBe(2);
+  });
+
+  it('counts the warn days off the newest step sync, and says so', async () => {
+    const session = await signUpAndRegister();
+    await credit({ userId: session.userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day', localDay: DAY });
+    const synced = new Date('2026-06-01T10:00:00Z');
+    await CoinBalanceModel.updateOne({ _id: session.userId }, { $set: { lastStepSyncAt: synced, lastCreditAt: synced } });
+    const at = (daysIdle: number) => new Date(synced.getTime() + daysIdle * DAYS + 60_000);
+
+    expect(await warnExpiringWallets(at(76))).toEqual({ warned: 1, repeated: 0 });
+    const feed = await request(app).get('/v1/notifications').set(authed(session));
+    expect(feed.body.data[0].title).toBe('Your coins expire in 14 days');
+    expect(feed.body.data[0].message).toContain('your steps have not synced for 76 days');
+
+    // A credit on day 80 does not restart the stretch: the second warning
+    // still lands on the sync's calendar, not the credit's.
+    await CoinBalanceModel.updateOne({ _id: session.userId }, { $set: { lastCreditAt: at(80) } });
+    expect(await warnExpiringWallets(at(87))).toEqual({ warned: 1, repeated: 0 });
+
+    // A sync does restart it, and the old stretch's warnings go with it.
+    await stampStepSync(session.userId, at(88));
+    expect(await warnExpiringWallets(at(88 + 10))).toEqual({ warned: 0, repeated: 0 });
+    expect(await warnExpiringWallets(at(88 + 76))).toEqual({ warned: 1, repeated: 0 });
+    expect(await NotificationModel.countDocuments({ userId: session.userId })).toBe(3);
   });
 });
 

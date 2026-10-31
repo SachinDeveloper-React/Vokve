@@ -1,72 +1,18 @@
-import React, { memo, useCallback } from 'react';
-import { StyleSheet } from 'react-native';
-import { radius, useTheme } from '../../theme';
+import React, { memo } from 'react';
 import type { IsoDate } from '../../utils/date';
 import { HStack } from '../layout/Stack';
-import { AppText } from '../ui/AppText';
-import { Pressable } from '../form/Pressable';
 import { DateChip } from '../streak/DateChip';
+import { ChipTrack, type Chip } from './ChipTrack';
 
 /** The period the overview chart is drawn over. */
 export type AnalyticsRange = 'day' | 'week' | 'month' | 'year';
 
-const RANGES: readonly { value: AnalyticsRange; label: string; name: string }[] =
-  [
-    { value: 'day', label: 'D', name: 'Day' },
-    { value: 'week', label: 'W', name: 'Week' },
-    { value: 'month', label: 'M', name: 'Month' },
-    { value: 'year', label: 'Y', name: 'Year' },
-  ];
-
-interface ChipProps {
-  value: AnalyticsRange;
-  label: string;
-  name: string;
-  selected: boolean;
-  onPress: (value: AnalyticsRange) => void;
-}
-
-/**
- * One letter of the range control.
- *
- * A letter is all the design gives it, so the accessibility label carries the
- * word: "D" announced on its own is a letter, not a period of time.
- */
-const RangeChip = memo(({ value, label, name, selected, onPress }: ChipProps) => {
-  const { colors } = useTheme();
-  const press = useCallback(() => onPress(value), [onPress, value]);
-
-  return (
-    <Pressable
-      onPress={press}
-      feedback="opacity"
-      visualSize={28}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      accessibilityLabel={name}
-    >
-      <HStack
-        align="center"
-        justify="center"
-        px="md"
-        py="xs"
-        style={[styles.chip, selected && { backgroundColor: colors.text }]}
-      >
-        <AppText
-          variant="micro"
-          style={[
-            styles.label,
-            { color: selected ? colors.card : colors.textSecondary },
-          ]}
-        >
-          {label}
-        </AppText>
-      </HStack>
-    </Pressable>
-  );
-});
-
-RangeChip.displayName = 'RangeChip';
+const RANGES: readonly Chip<AnalyticsRange>[] = [
+  { value: 'day', label: 'D', name: 'Day' },
+  { value: 'week', label: 'W', name: 'Week' },
+  { value: 'month', label: 'M', name: 'Month' },
+  { value: 'year', label: 'Y', name: 'Year' },
+];
 
 interface Props {
   date?: IsoDate;
@@ -80,47 +26,24 @@ interface Props {
  *
  * The same shape as the challenge board's filter row, and small for the same
  * reason: it qualifies everything under it rather than being a section of its
- * own.
+ * own. These are the *calendar* periods — the week, month or year the chosen
+ * day falls in. The rolling ones ("the last 30 days") belong to the period
+ * overview further down, which is why that card carries a track of its own
+ * rather than this one growing to seven chips.
  */
 export const AnalyticsRangeFilter = memo(
-  ({ date, value, onChange, onPressDate }: Props) => {
-    const { colors } = useTheme();
+  ({ date, value, onChange, onPressDate }: Props) => (
+    <HStack align="center" justify="between" gap="sm">
+      <DateChip
+        date={date}
+        size="sm"
+        onPress={onPressDate}
+        accessibilityHint="Change the day"
+      />
 
-    return (
-      <HStack align="center" justify="between" gap="sm">
-        <DateChip
-          date={date}
-          size="sm"
-          onPress={onPressDate}
-          accessibilityHint="Change the day"
-        />
-
-        <HStack
-          align="center"
-          gap="xxs"
-          p="xxs"
-          style={[styles.track, { backgroundColor: colors.muted }]}
-        >
-          {RANGES.map(range => (
-            <RangeChip
-              key={range.value}
-              value={range.value}
-              label={range.label}
-              name={range.name}
-              selected={range.value === value}
-              onPress={onChange}
-            />
-          ))}
-        </HStack>
-      </HStack>
-    );
-  },
+      <ChipTrack chips={RANGES} value={value} onChange={onChange} />
+    </HStack>
+  ),
 );
 
 AnalyticsRangeFilter.displayName = 'AnalyticsRangeFilter';
-
-const styles = StyleSheet.create({
-  track: { borderRadius: radius.pill },
-  chip: { borderRadius: radius.pill },
-  label: { fontWeight: '700' },
-});

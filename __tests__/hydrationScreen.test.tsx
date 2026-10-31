@@ -61,6 +61,7 @@ jest.mock('../src/services/api/endpoints', () => {
       stats: jest.fn(() => api.mockHydrationApi.stats()),
     },
     contentApi: {
+      referralCards: jest.fn(() => api.mockContentApi.referralCards()),
       tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
     },
   };

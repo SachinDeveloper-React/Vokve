@@ -11,8 +11,9 @@ import { HydrationTipCard } from '../../components/hydration/HydrationTipCard';
 import { WaterGuardSheet } from '../../components/hydration/WaterGuardSheet';
 import { QuickAddRow } from '../../components/hydration/QuickAddRow';
 import { LoadState } from '../../components/ui/LoadState';
+import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
-import { useTip } from '../../hooks/useContent';
+import { useReferralCard, useTip } from '../../hooks/useContent';
 import { useHydrationStats } from '../../hooks/useHydration';
 import { useLogWater } from '../../hooks/useLogWater';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
@@ -49,6 +50,16 @@ export const HydrationScreen = () => {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const navigation = useNavigation();
+
+  /**
+   * The invite card for this screen, as the server wrote it — null where the
+   * operator has not put one here, and then nothing is drawn.
+   */
+  const referralCard = useReferralCard('hydration');
+  const onOpenReferral = useCallback(
+    () => navigation.navigate('Referral'),
+    [navigation],
+  );
 
   const today = useTodayHydrationView();
   const goalMl = useDailyWaterGoalMl();
@@ -120,6 +131,12 @@ export const HydrationScreen = () => {
 
         {caution ? <HydrationCautionCard caution={caution} /> : null}
 
+        <ReferralPromoCard
+          card={referralCard}
+          at="top"
+          onPress={onOpenReferral}
+        />
+
         {today.synced ? (
           <HydrationProgressCard
             consumedMl={today.consumedMl}
@@ -135,6 +152,12 @@ export const HydrationScreen = () => {
         )}
 
         <QuickAddRow onAdd={guard.logWater} onPressCustom={openCustom} />
+
+        <ReferralPromoCard
+          card={referralCard}
+          at="middle"
+          onPress={onOpenReferral}
+        />
 
         {stats.data ? (
           <HydrationStatsCard
@@ -161,6 +184,7 @@ export const HydrationScreen = () => {
         ) : null}
 
         {tip ? <HydrationTipCard tip={tip.text} /> : null}
+        <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
       <CustomAmountSheet

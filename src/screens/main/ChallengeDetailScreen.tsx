@@ -1,5 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
+import {
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { ArrowRight } from 'lucide-react-native';
 import {
@@ -151,7 +157,7 @@ export const ChallengeDetailScreen = () => {
   const { challenge, period, cta } = detail.data;
 
   return (
-    <Screen edges={['top','bottom']}>
+    <Screen edges={['top', 'bottom']}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -217,11 +223,7 @@ export const ChallengeDetailScreen = () => {
             fullWidth
             onPress={onPressCta}
             icon={
-              <Icon
-                as={ArrowRight}
-                size="sm"
-                tint={colors.primaryForeground}
-              />
+              <Icon as={ArrowRight} size="sm" tint={colors.primaryForeground} />
             }
             iconPosition="trailing"
           />

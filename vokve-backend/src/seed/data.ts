@@ -398,7 +398,7 @@ export const SUPPORT_FAQS = [
     answer: 'Step coins are held briefly while we check the day looks real, and appear as "pending" in your wallet until then. If you have hit the daily cap, anything further that day pays nothing — the cap resets at midnight in your timezone. Coin History shows every credit with its reason.',
     tags: ['missing', 'pending', 'not credited', 'cap'] },
   { _id: 'faq-coins-expiry', category: 'coins', question: 'Do my coins expire?', sort: 3,
-    answer: 'Coins expire after 90 days without earning anything. Earning even one coin resets the whole window — spending does not. We warn you 14 days and 3 days before.',
+    answer: 'Coins expire after 90 days without a step sync. Every time your phone sends its steps the whole window starts again — however many steps were in it. Earning coins another way, and spending them, do not reset it. We warn you 14 days and 3 days before.',
     tags: ['expire', 'expiry', 'lost coins'] },
   { _id: 'faq-orders-pay', category: 'payments', question: 'How much can I pay with coins?', sort: 1,
     answer: 'Coins cover up to 30% of the items in an order, at ₹0.25 a coin; the rest, and delivery, is paid by card or UPI. The checkout shows the exact split before you pay and you can use fewer coins if you want to save them.',
@@ -611,3 +611,130 @@ export const DIET_PLANS = [
   {"_id": "plan-high-protein-nonveg", "name": "High-Protein Non-Veg", "description": "Two days with eggs, chicken or fish at the main meals, and protein in every slot.", "emoji": "🍗", "dietTypes": ["non_vegetarian"], "mealPlans": ["balanced", "high_protein", "low_carb"], "sort": 2, "days": [{"label": "", "meals": [{"slot": "breakfast", "time": "08:00", "calories": 320, "proteinG": 18, "carbsG": 42, "fatsG": 9, "items": [{"name": "Oats with banana", "quantity": "1 bowl (200g)"}, {"name": "Boiled eggs", "quantity": "2 eggs"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 450, "proteinG": 26, "carbsG": 58, "fatsG": 14, "items": [{"name": "Brown rice", "quantity": "1 cup (150g)"}, {"name": "Dal", "quantity": "1 bowl (150g)"}, {"name": "Mixed salad", "quantity": "1 bowl"}, {"name": "Paneer curry", "quantity": "100g"}]}, {"slot": "snack", "time": "17:00", "calories": 180, "proteinG": 6, "carbsG": 18, "fatsG": 11, "items": [{"name": "Mixed nuts", "quantity": "30g"}, {"name": "Apple", "quantity": "1 medium"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 300, "proteinG": 32, "carbsG": 32, "fatsG": 11, "items": [{"name": "Grilled chicken", "quantity": "100g"}, {"name": "Steamed veggies", "quantity": "1 bowl"}, {"name": "Quinoa", "quantity": "1 cup (100g)"}]}]}, {"label": "", "meals": [{"slot": "breakfast", "time": "08:00", "calories": 350, "proteinG": 20, "carbsG": 44, "fatsG": 10, "items": [{"name": "Poha with peanuts", "quantity": "1 plate (200g)"}, {"name": "Curd", "quantity": "1 bowl"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 470, "proteinG": 28, "carbsG": 60, "fatsG": 13, "items": [{"name": "Roti", "quantity": "3"}, {"name": "Rajma", "quantity": "1 bowl (150g)"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 160, "proteinG": 12, "carbsG": 14, "fatsG": 5, "items": [{"name": "Sprouts chaat", "quantity": "1 bowl"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 320, "proteinG": 30, "carbsG": 30, "fatsG": 12, "items": [{"name": "Grilled fish", "quantity": "120g"}, {"name": "Sautéed spinach", "quantity": "1 bowl"}, {"name": "Millet khichdi", "quantity": "1 cup"}]}]}]},
   {"_id": "plan-plant-based", "name": "Plant-Based", "description": "Two fully plant-based days — tofu, soya and millets, with no dairy.", "emoji": "🌱", "dietTypes": ["vegan"], "mealPlans": ["balanced", "low_carb"], "sort": 3, "days": [{"label": "", "meals": [{"slot": "breakfast", "time": "08:00", "calories": 330, "proteinG": 22, "carbsG": 38, "fatsG": 10, "items": [{"name": "Besan chilla", "quantity": "2"}, {"name": "Mint chutney", "quantity": "2 tbsp"}, {"name": "Lemon water", "quantity": "1 glass"}]}, {"slot": "lunch", "time": "13:00", "calories": 440, "proteinG": 25, "carbsG": 56, "fatsG": 12, "items": [{"name": "Vegetable pulao", "quantity": "1 bowl (180g)"}, {"name": "Soya chunk curry", "quantity": "100g"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 170, "proteinG": 8, "carbsG": 20, "fatsG": 7, "items": [{"name": "Roasted chana", "quantity": "40g"}, {"name": "Orange", "quantity": "1 medium"}]}, {"slot": "dinner", "time": "20:00", "calories": 310, "proteinG": 28, "carbsG": 34, "fatsG": 10, "items": [{"name": "Tofu tikka", "quantity": "120g"}, {"name": "Stir-fried veggies", "quantity": "1 bowl"}, {"name": "Jowar roti", "quantity": "2"}]}]}, {"label": "", "meals": [{"slot": "breakfast", "time": "08:00", "calories": 350, "proteinG": 20, "carbsG": 44, "fatsG": 10, "items": [{"name": "Poha with peanuts", "quantity": "1 plate (200g)"}, {"name": "Soy yogurt", "quantity": "1 bowl"}, {"name": "Black coffee", "quantity": "1 cup"}]}, {"slot": "lunch", "time": "13:00", "calories": 470, "proteinG": 28, "carbsG": 60, "fatsG": 13, "items": [{"name": "Roti", "quantity": "3"}, {"name": "Rajma", "quantity": "1 bowl (150g)"}, {"name": "Cucumber salad", "quantity": "1 bowl"}]}, {"slot": "snack", "time": "17:00", "calories": 160, "proteinG": 12, "carbsG": 14, "fatsG": 5, "items": [{"name": "Sprouts chaat", "quantity": "1 bowl"}, {"name": "Green tea", "quantity": "1 cup"}]}, {"slot": "dinner", "time": "20:00", "calories": 320, "proteinG": 30, "carbsG": 30, "fatsG": 12, "items": [{"name": "Tofu stir-fry", "quantity": "120g"}, {"name": "Sautéed spinach", "quantity": "1 bowl"}, {"name": "Millet khichdi", "quantity": "1 cup"}]}]}]},
 ];
+
+/**
+ * The invite card each screen opens with.
+ *
+ * One per screen so every place that earns coins carries the invite from day
+ * one; the wording, the colour and the glyph are the seed's to start and the
+ * operator's to own from there (`/v1/admin/referral-cards`). `{coins}` and
+ * `{friendCoins}` are filled by the server from `coins.referral` as it is
+ * paying, which is why no number is written out here.
+ *
+ * The positions vary on purpose. A banner always at the foot of the scroll is
+ * a banner nobody reaches, and one always under the headline is in the way of
+ * the figures somebody opened the screen for — so each of these starts where
+ * it reads best on that screen, and the operator moves it from there.
+ */
+export const REFERRAL_PROMOS = [
+  {
+    _id: 'home-invite-1',
+    screen: 'home',
+    title: 'Walk together, earn together',
+    message: 'Invite a friend and you each get {coins} coins once they log their first workout.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'middle',
+    emoji: '\u{1F91D}',
+    sort: 1,
+  },
+  {
+    _id: 'wallet-invite-1',
+    screen: 'wallet',
+    title: 'The quickest {coins} coins here',
+    message: 'No walking needed. Share your code and collect {coins} coins for every friend who joins.',
+    ctaLabel: 'Share your code',
+    accent: 'gold',
+    position: 'middle',
+    emoji: '\u{1FA99}',
+    sort: 1,
+  },
+  {
+    _id: 'shop-invite-1',
+    screen: 'shop',
+    title: 'Short of coins?',
+    message: 'Every friend who joins is {coins} coins towards whatever is in your basket.',
+    ctaLabel: 'Invite friends',
+    accent: 'primary',
+    position: 'middle',
+    emoji: '\u{1F6CD}',
+    sort: 1,
+  },
+  {
+    _id: 'challenges-invite-1',
+    screen: 'challenges',
+    title: 'Challenges are better with company',
+    message: 'Bring a friend in and you both pick up {coins} coins before the week even starts.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'bottom',
+    emoji: '\u{1F3C6}',
+    sort: 1,
+  },
+  {
+    _id: 'nutrition-invite-1',
+    screen: 'nutrition',
+    title: 'Eating well is easier shared',
+    message: 'Invite a friend to track theirs too and you each earn {coins} coins.',
+    ctaLabel: 'Invite friends',
+    accent: 'success',
+    position: 'bottom',
+    emoji: '\u{1F96C}',
+    sort: 1,
+  },
+  {
+    _id: 'health-invite-1',
+    screen: 'health',
+    title: 'Keep each other honest',
+    message: 'A friend logging their own numbers earns you both {coins} coins.',
+    ctaLabel: 'Invite friends',
+    accent: 'primary',
+    position: 'middle',
+    emoji: '\u{1FAC2}',
+    sort: 1,
+  },
+  {
+    _id: 'hydration-invite-1',
+    screen: 'hydration',
+    title: 'Drink up, and bring a friend',
+    message: 'Invite someone to Vokve and {coins} coins land in both wallets.',
+    ctaLabel: 'Invite friends',
+    accent: 'primary',
+    position: 'bottom',
+    emoji: '\u{1F4A7}',
+    sort: 1,
+  },
+  {
+    _id: 'streak-invite-1',
+    screen: 'streak',
+    title: 'Streaks love a rival',
+    message: 'Invite a friend, earn {coins} coins each, then see who breaks first.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'bottom',
+    emoji: '\u{1F525}',
+    sort: 1,
+  },
+  {
+    _id: 'analytics-invite-1',
+    screen: 'analytics',
+    title: 'Numbers worth comparing',
+    message: 'Get a friend on board and you each collect {coins} coins to start with.',
+    ctaLabel: 'Invite friends',
+    accent: 'brand',
+    position: 'bottom',
+    emoji: '\u{1F4C8}',
+    sort: 1,
+  },
+  {
+    _id: 'account-invite-1',
+    screen: 'account',
+    title: 'Invite friends, earn {coins} coins',
+    message: 'They get {friendCoins} coins to start and you get {coins} once they log a workout.',
+    ctaLabel: 'Share your code',
+    accent: 'gold',
+    position: 'top',
+    emoji: '\u{1F381}',
+    sort: 1,
+  },
+] as const;

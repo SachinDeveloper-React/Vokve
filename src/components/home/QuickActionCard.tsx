@@ -1,9 +1,11 @@
 import React, { memo } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { ChevronRight } from 'lucide-react-native';
 import { spacing } from '../../theme';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { Emoji } from '../media/Emoji';
+import { Icon } from '../media/Icon';
 import { VStack } from '../layout/Stack';
 import { Pressable } from '../form/Pressable';
 
@@ -47,6 +49,10 @@ const FIT_LABEL = {
  * An emoji rather than a tinted line icon: at this size a stroked glyph in a
  * single colour is close to unreadable, while the emoji's own colours carry the
  * shape — and it ships no asset.
+ *
+ * The chevron is the one mark that says the tile opens a screen. Four emoji in
+ * a row read as a legend — a key to what is on the dashboard — rather than as
+ * four doors, and nothing else on the tile says otherwise.
  */
 export const QuickActionCard = memo(
   ({ emoji, tint, title, detail, uppercaseDetail = true, onPress }: Props) => (
@@ -57,6 +63,17 @@ export const QuickActionCard = memo(
       accessibilityLabel={detail ? `${title} ${detail}` : title}
     >
       <Card elevation="low" radius="xl" style={styles.card}>
+        {/*
+          Laid over the tile rather than set beside the label, because the
+          label has no width to give: four tiles share the screen, `FIT_LABEL`
+          does not shrink the type, and "achievements" with a chevron after it
+          is "achievemen…". Out of the way of taps, so the whole tile stays
+          one target rather than a target with a hole in it.
+        */}
+        <View style={styles.chevron} pointerEvents="none">
+          <Icon as={ChevronRight} size="xs" color="textTertiary" />
+        </View>
+
         <VStack align="center" gap="sm">
           <Emoji size="md">{emoji}</Emoji>
 
@@ -90,5 +107,18 @@ const styles = StyleSheet.create({
    * screen, every point spent on padding comes straight out of the label.
    */
   card: { paddingVertical: spacing.md, paddingHorizontal: spacing.xs },
+  /**
+   * Top right, above the labels rather than beside them.
+   *
+   * Centred down the edge it would sit at the height of the two label lines,
+   * and the longest of them — "Challenges &", "achievements" — reaches
+   * within a few points of it on a 375pt phone. Up here there is nothing to
+   * crowd: the emoji is centred and the corner is empty.
+   *
+   * Inset by a whole `sm` rather than the card's own `xs` padding, because
+   * the `xl` radius is still bending the edge four points in and a glyph
+   * tucked that far into the curve reads as falling off the tile.
+   */
+  chevron: { position: 'absolute', top: spacing.sm, right: spacing.sm },
   asWritten: { textTransform: 'none' },
 });

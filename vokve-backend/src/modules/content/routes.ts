@@ -4,7 +4,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { Errors } from '../../lib/errors.js';
 import { CONTENT_TOPICS } from './models.js';
-import { tipOfTheDay } from './service.js';
+import { referralCards, tipOfTheDay } from './service.js';
 
 export const contentRouter = Router();
 contentRouter.use('/content', requireAuth, requireDevice);
@@ -16,4 +16,13 @@ contentRouter.get('/content/tips/:topic', async (req, res) => {
   const parsed = topic.safeParse(req.params.topic);
   if (!parsed.success) throw Errors.notFound('That topic');
   res.json(await tipOfTheDay(parsed.data, req.ctx.timezone));
+});
+
+/**
+ * Every screen's invite card at once (BACKEND §6.15). One request, because
+ * ten screens asking separately for a thing that changes once a day is ten
+ * round trips to say the same thing.
+ */
+contentRouter.get('/content/referral-cards', async (req, res) => {
+  res.json(await referralCards(req.ctx.timezone));
 });

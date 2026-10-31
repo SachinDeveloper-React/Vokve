@@ -412,7 +412,6 @@ export const CheckoutScreen = () => {
                     </AppText>
                   </HStack>
                 ) : null}
-
               </CheckoutCard>
             ) : null}
 
@@ -436,10 +435,7 @@ export const CheckoutScreen = () => {
                       size="md"
                     />
                   ) : (
-                    <AppText
-                      variant="h3"
-                      style={{ color: colors.brandAccent }}
-                    >
+                    <AppText variant="h3" style={{ color: colors.brandAccent }}>
                       {formatMoney(figures.payable, quote.currency)}
                     </AppText>
                   )
@@ -459,12 +455,7 @@ export const CheckoutScreen = () => {
       </ScrollView>
 
       {quote && figures && lines.length > 0 ? (
-        <View
-          style={[
-            styles.bar,
-            { paddingBottom: bottomRoom },
-          ]}
-        >
+        <View style={[styles.bar, { paddingBottom: bottomRoom }]}>
           {soldOut ? (
             <AppText variant="micro" color="warning" center>
               {`${soldOut.title} is sold out — remove it to continue.`}

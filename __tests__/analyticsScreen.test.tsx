@@ -49,6 +49,12 @@ const mockActivityApi = {
 };
 
 jest.mock('../src/services/api/endpoints', () => ({
+  /**
+   * The invite card the screens now carry. Left on its way, like the tips
+   * beside it: a promo is never worth a spinner, so a card that has not
+   * arrived is simply not drawn — which keeps these tests about the screen.
+   */
+  contentApi: { referralCards: jest.fn(() => new Promise(() => {})) },
   get activityApi() {
     return mockActivityApi;
   },
@@ -287,35 +293,201 @@ describe('AnalyticsScreen', () => {
     );
   });
 
-  test('the week highlights its best day, not its last', async () => {
+  test('the trend card says which week it is drawing, whatever the range', async () => {
     const text = allText(await render());
 
-    expect(text).toContain('Best Day This Week');
-    expect(text).toContain('10,245 steps');
-    expect(text).toContain(
-      `${formatWeekdayDate(
-        addDays(monday, 2),
-      )} — your highest count of the week`,
-    );
-    // The trend card draws the same week whatever the range is, so it says
-    // which week that is.
     expect(text).toContain(`This week · ${formatDateRange(monday, sunday)}`);
     expect(text).toContain(formatWeekdayDay(monday));
   });
 
-  test('a week with no steps says so rather than crowning a day', async () => {
-    mockActivityApi.range.mockImplementation(
-      async (query: ActivityRangeQuery) => ({
-        ...range(query),
-        points: range(query).points.map(point => ({
-          ...point,
-          steps: 0,
-          verifiedSteps: 0,
-        })),
-      }),
-    );
+  describe('period overview', () => {
+    test('asks for a rolling window of days, and re-asks when it is widened', async () => {
+      const tree = await render();
 
-    expect(allText(await render())).toContain('No steps counted this week yet');
+      // Seven days ending on the day being read, not the calendar week.
+      expect(mockActivityApi.range).toHaveBeenCalledWith({
+        from: addDays(today, -6),
+        to: today,
+        granularity: 'day',
+      });
+      // And the same length of time before it, for the comparison.
+      expect(mockActivityApi.range).toHaveBeenCalledWith({
+        from: addDays(today, -13),
+        to: addDays(today, -7),
+        granularity: 'day',
+      });
+
+      await press(tree, '30 days');
+
+      expect(mockActivityApi.range).toHaveBeenCalledWith({
+        from: addDays(today, -29),
+        to: today,
+        granularity: 'day',
+      });
+      expect(allText(tree)).toContain(
+        `${formatDateRange(addDays(today, -29), today)} · active on`,
+      );
+    });
+
+    test('totals the window to the verified share, never the raw count', async () => {
+      // Half of each day verified: the steps *and* the kilometres halve, or
+      // the card states a distance its own step count could not cover.
+      mockActivityApi.range.mockImplementation(
+        async (query: ActivityRangeQuery) => {
+          const answer = range(query);
+          return {
+            ...answer,
+            totals: { ...answer.totals, verifiedSteps: answer.totals.steps / 2 },
+          };
+        },
+      );
+
+      const text = allText(await render());
+
+      expect(text).toContain('26,321'); // 52,642 verified down to half
+      expect(text).toContain('14.7 km'); // and 29.4 km with it
+    });
+
+    test('counts the days of the window that reached the goal', async () => {
+      // One of the seven mocked days clears 10,000.
+      expect(allText(await render())).toContain('1 / 7');
+    });
+  });
+
+  describe('most active', () => {
+    test('names the busiest day of the window and the busiest hour of the day', async () => {
+      const text = allText(await render());
+
+      expect(text).toContain('Busiest day of the last 7 days');
+      expect(text).toContain(formatWeekdayDate(addDays(today, -4)));
+      expect(text).toContain('10,245 steps');
+      // The hourly series puts every step in the 9 AM hour.
+      expect(text).toContain('Busiest hour on');
+      expect(text).toContain('9 AM – 10 AM');
+    });
+
+    test('a window with no steps crowns no day', async () => {
+      mockActivityApi.range.mockImplementation(
+        async (query: ActivityRangeQuery) => {
+          const answer = range(query);
+          return {
+            ...answer,
+            points: answer.points.map(point => ({
+              ...point,
+              steps: 0,
+              verifiedSteps: 0,
+            })),
+            totals: { ...answer.totals, steps: 0, verifiedSteps: 0 },
+          };
+        },
+      );
+
+      expect(allText(await render())).toContain('Nothing counted yet');
+    });
+
+    test('the busiest day opens that day in full', async () => {
+      const tree = await render();
+
+      await press(tree, 'Busiest day of the last 7 days');
+
+      const text = allText(tree);
+      expect(text).toContain(formatLongDate(addDays(today, -4)));
+      expect(text).toContain('Busiest hour');
+    });
+  });
+
+  describe('activity calendar', () => {
+    test('asks for the whole month a day at a time, and labels its days', async () => {
+      const text = allText(await render());
+      const month = today.slice(0, 7);
+
+      expect(mockActivityApi.range).toHaveBeenCalledWith({
+        from: `${month}-01`,
+        to: expect.stringContaining(month),
+        granularity: 'day',
+      });
+      expect(text).toContain('Activity Calendar');
+      expect(text).toContain('Mon');
+      expect(text).toContain('Goal met');
+    });
+
+    test('a day in the grid opens that day in full', async () => {
+      const tree = await render();
+      const picked = `${today.slice(0, 7)}-02`;
+
+      await press(tree, formatLongDate(picked));
+
+      expect(allText(tree)).toContain(formatLongDate(picked));
+      expect(mockActivityApi.day).toHaveBeenCalledWith(picked);
+    });
+
+    test('opening a day leaves the rest of the screen where it was', async () => {
+      // The bug this covers: opening a day used to move the screen's anchor,
+      // which emptied every card behind the sheet while five reads were in
+      // flight — and the sheet opened on a day of zeros for the same reason.
+      const tree = await render();
+      const picked = `${today.slice(0, 7)}-02`;
+
+      await press(tree, formatLongDate(picked));
+
+      const text = allText(tree);
+      // The sheet has the day it was asked for …
+      expect(text).toContain('9,125');
+      // … and the summary behind it is still today's.
+      expect(text).toContain('6,245');
+      expect(text).toContain(`Today · ${formatLongDate(today)}, hour by hour`);
+    });
+
+    test('"Show this day" is what moves the whole screen onto it', async () => {
+      const tree = await render();
+      const picked = `${today.slice(0, 7)}-02`;
+
+      await press(tree, formatLongDate(picked));
+      await press(tree, 'Show this day');
+
+      const text = allText(tree);
+      expect(text).toContain(`${formatLongDate(picked)}, hour by hour`);
+      expect(text).not.toContain(`Today · ${formatLongDate(today)}`);
+    });
+
+    test('a day the screen is already on is not offered "Show this day"', async () => {
+      const tree = await render();
+
+      await press(tree, formatLongDate(today));
+
+      // The sheet is open on today, which is where the screen already is.
+      expect(allText(tree)).toContain('Busiest hour');
+      expect(
+        tree.root.findAll(n => n.props?.label === 'Show this day'),
+      ).toHaveLength(0);
+    });
+
+    test('a day still on its way says so rather than drawing zeros', async () => {
+      const picked = `${today.slice(0, 7)}-02`;
+      mockActivityApi.day.mockImplementation(async (date: string) => {
+        if (date === picked) return new Promise(() => {}) as Promise<never>;
+        return day(date, date === today ? 6245 : 9125);
+      });
+
+      const tree = await render();
+      await press(tree, formatLongDate(picked));
+
+      const text = allText(tree);
+      expect(text).toContain('Fetching this day');
+      // Nothing is asserted about the walk until the server has answered.
+      expect(text).not.toContain('steps short of the goal');
+    });
+  });
+
+  test('the AI report control is gone from the summary', async () => {
+    const tree = await render();
+
+    expect(allText(tree)).not.toContain('Report');
+    expect(
+      tree.root.findAll(
+        n => n.props?.accessibilityLabel === 'AI report',
+      ),
+    ).toHaveLength(0);
   });
 
   test('the closing line says how far there is left to go today', async () => {

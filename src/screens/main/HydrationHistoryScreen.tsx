@@ -54,7 +54,8 @@ function boundsFor(
   if (range === 'custom') {
     // Drawn either way round, so a user who sets the ends backwards gets
     // their range rather than an error.
-    const ordered = daysBetween(from, to) >= 0 ? { from, to } : { from: to, to: from };
+    const ordered =
+      daysBetween(from, to) >= 0 ? { from, to } : { from: to, to: from };
     const span = Math.abs(daysBetween(from, to)) + 1;
     return span <= MAX_CUSTOM_DAYS
       ? ordered
@@ -248,4 +249,3 @@ export const HydrationHistoryScreen = () => {
     </Screen>
   );
 };
-

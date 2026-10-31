@@ -62,6 +62,8 @@ import { StreakHistoryScreen } from '../screens/main/StreakHistoryScreen';
 import { StreakScreen } from '../screens/main/StreakScreen';
 import { StepGoalScreen } from '../screens/main/StepGoalScreen';
 import { StepSourcesScreen } from '../screens/main/StepSourcesScreen';
+import { VitalsHistoryScreen } from '../screens/main/VitalsHistoryScreen';
+import { VitalsTrendsScreen } from '../screens/main/VitalsTrendsScreen';
 import { StepTrackingScreen } from '../screens/main/StepTrackingScreen';
 import { VerifyOtpScreen } from '../screens/auth/VerifyOtpScreen';
 import { ConnectionErrorScreen } from '../screens/system/ConnectionErrorScreen';
@@ -537,6 +539,16 @@ export const RootNavigator = () => {
               <Stack.Screen
                 name="StepGoal"
                 component={StepGoalScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="VitalsHistory"
+                component={VitalsHistoryScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="VitalsTrends"
+                component={VitalsTrendsScreen}
                 options={{ animation: 'slide_from_right' }}
               />
               <Stack.Screen

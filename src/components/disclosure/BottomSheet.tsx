@@ -28,6 +28,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { duration as durations, radius, spacing, useTheme } from '../../theme';
+import { moderateScale } from '../../theme/responsive';
 import { AppText } from '../ui/AppText';
 
 interface Props {
@@ -41,6 +42,44 @@ interface Props {
 
 /** Drag further than this and releasing closes the sheet. */
 const DISMISS_THRESHOLD = 90;
+
+/** The most of the screen a sheet may take, so the page behind it still shows. */
+const MAX_HEIGHT_SHARE = 0.9;
+
+/**
+ * The sheet's own furniture above a scrolling body: the drag handle, the
+ * title, and the padding around them.
+ *
+ * An estimate, and deliberately a generous one — it is subtracted from the
+ * room a body may have, so being a few points over costs a few points of
+ * scrolling and being under costs the thing below the body.
+ */
+const CHROME_HEIGHT = moderateScale(96);
+
+/**
+ * How tall a scrolling body may be in a sheet that pins something under it.
+ *
+ * Every tall sheet in the app needs this number and none of them can work it
+ * out alone: the cap is this file's (`MAX_HEIGHT_SHARE`), the chrome is this
+ * file's, and only the caller knows what it is keeping below the scroll.
+ *
+ * It has to be measured rather than fixed. A sheet's children do not shrink
+ * by default — `flexShrink` is 0 in Yoga, unlike on the web — so content
+ * taller than the cap is simply clipped, and on a 568pt phone that clips
+ * whatever sits at the bottom, which is usually the buttons. A hard 380 is
+ * right on a large phone and still too tall on a small one; nine tenths of
+ * *this* screen, less what is around the body, is right on both.
+ *
+ * `reserved` is what the caller keeps outside the scroll view, in points.
+ */
+export function useSheetBodyMaxHeight(reserved: number): number {
+  const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  return Math.max(
+    moderateScale(180),
+    height * MAX_HEIGHT_SHARE - CHROME_HEIGHT - insets.bottom - reserved,
+  );
+}
 
 /**
  * How a scrollable child tells the sheet whether a downward drag is its own.
@@ -222,7 +261,7 @@ export const BottomSheet = memo(
                 backgroundColor: colors.popover,
                 borderColor: colors.border,
                 paddingBottom: insets.bottom + spacing.base,
-                maxHeight: screenHeight * 0.9,
+                maxHeight: screenHeight * MAX_HEIGHT_SHARE,
               },
             ]}
             onTouchStartCapture={claimGesture}

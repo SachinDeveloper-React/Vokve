@@ -7,6 +7,7 @@ import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { sha256Hex, verifyEcdsaSha256 } from '../../lib/signatures.js';
 import { DeviceModel } from '../devices/models.js';
+import { stampStepSync } from '../economy/wallet.service.js';
 import { needsFreshVerdict, playIntegrityProjectNumber, recordPlayIntegrity } from '../integrity/service.js';
 import { AuditLogModel } from '../platform/models.js';
 import {
@@ -204,6 +205,12 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
     { _id: ctx.deviceId },
     { $set: { 'stepSync.uploadedAt': now, 'stepSync.nudgedAt': null, 'stepSync.remindedAt': null } },
   );
+  // And the member's coin clock with it (RULES E9). The wallet's window runs
+  // from the newest sync, not the newest credit, so this is the one stamp
+  // that keeps a balance alive — before the rollup, for the same reason, and
+  // regardless of how many steps were in the snapshot: the window asks
+  // whether the phone is reporting, not whether the member walked.
+  await stampStepSync(ctx.userId, now);
 
   const result = await rollupDay(ctx.userId, localDay, now);
   const response: IngestResponse = { ...result, duplicate: false };

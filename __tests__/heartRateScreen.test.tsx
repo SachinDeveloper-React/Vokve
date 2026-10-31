@@ -53,7 +53,10 @@ jest.mock('../src/services/api/endpoints', () => {
       ),
       score: jest.fn(() => api.mockVitalsApi.score()),
     },
-    contentApi: { tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)) },
+    contentApi: {
+      tip: jest.fn((topic: string) => api.mockContentApi.tip(topic)),
+      referralCards: jest.fn(() => api.mockContentApi.referralCards()),
+    },
   };
 });
 
@@ -217,6 +220,14 @@ describe('HeartRateScreen', () => {
     expect(labels.some(label => label.startsWith('72 beats per minute, Normal'))).toBe(
       true,
     );
+  });
+
+  test('"View all" opens the archive, already filtered to this vital', async () => {
+    press(await render(), 'View all heart rate readings');
+
+    expect(mockNavigate).toHaveBeenCalledWith('VitalsHistory', {
+      kind: 'heart_rate',
+    });
   });
 
   test('the chevron returns to whatever opened the screen', async () => {

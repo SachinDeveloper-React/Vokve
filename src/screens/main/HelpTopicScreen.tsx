@@ -97,7 +97,8 @@ export const HelpTopicScreen = () => {
   }, [navigation]);
 
   const onReport = useCallback(
-    () => navigation.navigate('ReportIssue', { category: category ?? undefined }),
+    () =>
+      navigation.navigate('ReportIssue', { category: category ?? undefined }),
     [category, navigation],
   );
 

@@ -356,6 +356,8 @@ export async function userOverview(userId: string) {
       pending: toCoins(balance?.pendingMc ?? 0),
       lifetimeEarned: toCoins(balance?.lifetimeEarnedMc ?? 0),
       lastCreditAt: iso(balance?.lastCreditAt),
+      /** What the expiry window actually runs from (RULES E9). */
+      lastStepSyncAt: iso(balance?.lastStepSyncAt),
     },
     orders: {
       count: orderTotals?.orders ?? 0,

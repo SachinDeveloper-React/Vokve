@@ -54,6 +54,12 @@ jest.mock('../src/services/api/endpoints', () => {
       board: jest.fn((date: string) => mockChallengeApi.board(date)),
       achievements: jest.fn(() => mockChallengeApi.achievements()),
     },
+    /**
+     * The invite card the screen now carries. Left on its way: a promo is
+     * never worth a spinner, so a card that has not arrived is simply not
+     * drawn — which keeps these tests about the board.
+     */
+    contentApi: { referralCards: jest.fn(() => new Promise(() => {})) },
   };
 });
 

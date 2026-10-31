@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Sparkles, TrendingDown, TrendingUp } from 'lucide-react-native';
+import { TrendingDown, TrendingUp } from 'lucide-react-native';
 import { darkColors, radius, spacing, useTheme } from '../../theme';
 import { withAlpha } from '../../utils/color';
 import { formatActiveTime, formatGrouped } from '../../utils/format';
@@ -8,7 +8,6 @@ import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
-import { Pressable } from '../form/Pressable';
 
 interface FigureProps {
   value: string;
@@ -56,7 +55,6 @@ interface Props {
   caloriesBurned: number;
   distanceKm: number;
   activeMinutes: number;
-  onPressReport: () => void;
 }
 
 /**
@@ -67,6 +65,12 @@ interface Props {
  * card that only ever said "more than yesterday" would be wrong half the time,
  * and the arrow beside it carries the direction for a reader who cannot tell
  * the green from the red.
+ *
+ * The three figures underneath share the row evenly. There was a fourth slot
+ * holding an "AI Report" control wired to nothing, which has gone: a button
+ * that does nothing is worse than no button, and the analysis it promised is
+ * on the screen now — the period overview, the calendar and the busiest day
+ * are all below.
  */
 export const StepsSummaryCard = memo(
   ({
@@ -77,7 +81,6 @@ export const StepsSummaryCard = memo(
     caloriesBurned,
     distanceKm,
     activeMinutes,
-    onPressReport,
   }: Props) => {
     const { colors } = useTheme();
     const foreground = darkColors.tierForeground;
@@ -162,34 +165,6 @@ export const StepsSummaryCard = memo(
             value={formatActiveTime(activeMinutes)}
             label="Active Time"
           />
-
-          <Pressable
-            onPress={onPressReport}
-            feedback="opacity"
-            accessibilityRole="button"
-            accessibilityLabel="AI report"
-            style={styles.report}
-          >
-            <VStack align="center" gap="xxs">
-              <HStack align="center" gap="xxs">
-                <Icon as={Sparkles} size="xs" tint={colors.brandAccent} />
-                <AppText
-                  variant="bodyStrong"
-                  numberOfLines={1}
-                  style={{ color: colors.brandAccent }}
-                >
-                  AI
-                </AppText>
-              </HStack>
-              <AppText
-                variant="miniMicro"
-                numberOfLines={1}
-                style={{ color: withAlpha(foreground, 0.64) }}
-              >
-                Report
-              </AppText>
-            </VStack>
-          </Pressable>
         </HStack>
       </View>
     );
@@ -200,5 +175,4 @@ StepsSummaryCard.displayName = 'StepsSummaryCard';
 
 const styles = StyleSheet.create({
   panel: { borderRadius: radius.xl, padding: spacing.base, gap: spacing.base },
-  report: { flex: 1 },
 });

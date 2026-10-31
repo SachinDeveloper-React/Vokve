@@ -10,25 +10,83 @@ import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel } f
 
 const MS_PER_DAY = 86_400_000;
 
+/** The two dates a wallet's window can run from, as the sweep reads them. */
+interface Anchored {
+  balanceMc?: number;
+  lastCreditAt?: Date | null;
+  lastStepSyncAt?: Date | null;
+}
+
+/**
+ * When this wallet's idle window last restarted, or null when it never has.
+ *
+ * Steps first (RULES E9). The window asks whether the member's phone is still
+ * reporting, not whether they are still earning, so an accepted snapshot is
+ * what keeps coins alive and a credit — a workout, a streak, a referral, an
+ * operator's grant — does not. An upload with no steps in it counts: the
+ * question is whether the install is reporting at all.
+ *
+ * `lastCreditAt` is the fallback, and only for a wallet that has never synced
+ * once. Without it an account that earns by referral alone, or one whose
+ * owner refused the activity permission, would be swept the day this ships.
+ */
+function anchorOf(bal: Anchored | null): Date | null {
+  return bal?.lastStepSyncAt ?? bal?.lastCreditAt ?? null;
+}
+
 /**
  * When a wallet's coins lapse, or null when there is nothing to lapse.
  *
  * Only a balance can expire: a wallet that has never earned, or whose coins
  * were already swept, has no date — it reports the full window instead of a
  * countdown against coins it does not hold (RULES E11). Pending step coins
- * are not counted; they are not the user's yet, and releasing them resets
- * the clock like any other credit.
+ * are not counted; they are not the user's yet, and the upload that brought
+ * them in has already restarted the clock.
  */
-function expiryOf(bal: { balanceMc?: number; lastCreditAt?: Date | null } | null, expiryDays: number) {
-  const lastCredit = bal?.lastCreditAt ?? null;
+function expiryOf(bal: Anchored | null, expiryDays: number) {
+  const since = anchorOf(bal);
   const hasCoins = (bal?.balanceMc ?? 0) > 0;
-  const expiresAt = hasCoins && lastCredit ? new Date(lastCredit.getTime() + expiryDays * MS_PER_DAY) : null;
+  const expiresAt = hasCoins && since ? new Date(since.getTime() + expiryDays * MS_PER_DAY) : null;
   // Counted as whole days idle, subtracted from the window — the same
-  // arithmetic the client used when it derived this itself — so a credit a
+  // arithmetic the client used when it derived this itself — so a sync a
   // minute ago reads as the full window, not as one day already gone.
-  const daysIdle = lastCredit ? Math.floor((Date.now() - lastCredit.getTime()) / MS_PER_DAY) : 0;
+  const daysIdle = since ? Math.floor((Date.now() - since.getTime()) / MS_PER_DAY) : 0;
   const daysLeft = expiresAt ? Math.min(expiryDays, Math.max(0, expiryDays - daysIdle)) : expiryDays;
   return { expiresAt, daysLeft };
+}
+
+/**
+ * The query both jobs run: wallets holding coins whose window opened on or
+ * before `cutoff`, on whichever of the two clocks applies to them.
+ *
+ * Written as an `$or` rather than resolved in code because the alternative is
+ * reading every wallet with a balance into the process once a night and
+ * throwing most of them away.
+ */
+function idleBefore(cutoff: Date) {
+  return {
+    balanceMc: { $gt: 0 },
+    $or: [
+      { lastStepSyncAt: { $ne: null, $lte: cutoff } },
+      { lastStepSyncAt: null, lastCreditAt: { $ne: null, $lte: cutoff } },
+    ],
+  };
+}
+
+/** What both jobs need off a wallet to decide and to explain itself. */
+const ANCHOR_FIELDS = { balanceMc: 1, lastCreditAt: 1, lastStepSyncAt: 1 } as const;
+
+/**
+ * An install has reported: this member's idle window starts again (RULES E9).
+ *
+ * Called from the ingest path for every accepted snapshot, stamped with the
+ * receipt rather than the day walked — a member who syncs ten days of backfill
+ * today has reported today, and "is this phone still reporting?" is the only
+ * question the window asks. Upserted because a member can sync before they
+ * have ever earned a coin, and that wallet is the one the sweep will read.
+ */
+export async function stampStepSync(userId: string, now = new Date()): Promise<void> {
+  await CoinBalanceModel.updateOne({ _id: userId }, { $set: { lastStepSyncAt: now } }, { upsert: true });
 }
 
 export async function getWallet(userId: string, timeZone: string): Promise<Wallet> {
@@ -81,15 +139,15 @@ export interface ExpirySweepResult {
 
 /**
  * The idle-expiry sweep (RULES E9, BACKEND §8.4): every wallet with coins
- * and no credit for `coins.expiryDays` is zeroed with one compensating
- * `refund` row, so the ledger still explains the balance.
+ * whose phone has not reported steps for `coins.expiryDays` is zeroed with
+ * one compensating `refund` row, so the ledger still explains the balance.
  *
- * Idempotent two ways. The row's reference is the credit the window ran
- * from, and the ledger's unique index refuses a second row for it; and the
- * balance is only zeroed when it is still what was read, so a credit that
- * lands between the read and the write keeps its coins and its fresh clock.
- * `lastCreditAt` is left alone — it is the evidence — so the wallet keeps
- * reporting the full window until the user earns again (`expiryOf`).
+ * Idempotent two ways. The row's reference is the sync the window ran from,
+ * and the ledger's unique index refuses a second row for it; and the balance
+ * is only zeroed when it is still what was read, so a credit that lands
+ * between the read and the write keeps its coins. Neither anchor is touched
+ * — they are the evidence — so the wallet keeps reporting the full window
+ * until it holds coins again (`expiryOf`).
  *
  * `now` is a parameter so a test, or the dev route, can move the calendar.
  */
@@ -98,13 +156,12 @@ export async function expireIdleWallets(now = new Date()): Promise<ExpirySweepRe
   const cutoff = new Date(now.getTime() - config.coins.expiryDays * MS_PER_DAY);
   const title = `Coins expired after ${config.coins.expiryDays} days of inactivity`;
 
-  const idle = await CoinBalanceModel.find(
-    { balanceMc: { $gt: 0 }, lastCreditAt: { $ne: null, $lte: cutoff } },
-    { balanceMc: 1, lastCreditAt: 1 },
-  ).lean();
+  const idle = await CoinBalanceModel.find(idleBefore(cutoff), ANCHOR_FIELDS).lean();
 
   const result: ExpirySweepResult = { expired: 0, coins: 0, skipped: 0 };
   for (const bal of idle) {
+    // Non-null: `idleBefore` only matches a wallet with one of the two set.
+    const since = anchorOf(bal)!;
     const swept = await withTransaction(async session => {
       const zeroed = await CoinBalanceModel.updateOne(
         { _id: bal._id, balanceMc: bal.balanceMc },
@@ -114,7 +171,7 @@ export async function expireIdleWallets(now = new Date()): Promise<ExpirySweepRe
       if (zeroed.modifiedCount === 0) return 0;
       await CoinLedgerModel.create([{
         _id: newId('led'), userId: bal._id, amountMc: -bal.balanceMc, source: 'refund', title,
-        referenceType: 'expiry', referenceId: bal.lastCreditAt!.toISOString(), actor: 'system:expiry',
+        referenceType: 'expiry', referenceId: since.toISOString(), actor: 'system:expiry',
       }], { session });
       return bal.balanceMc;
     }).catch((err: unknown) => {
@@ -126,13 +183,13 @@ export async function expireIdleWallets(now = new Date()): Promise<ExpirySweepRe
     if (swept > 0) {
       result.expired += 1;
       result.coins += toCoins(swept);
-      // Told after the fact, keyed to the credit the window ran from, so a
+      // Told after the fact, keyed to the sync the window ran from, so a
       // re-run that finds nothing to sweep also has nothing to repeat.
       await notify({
         userId: bal._id, topic: 'coins', now,
         title: 'Your coins have expired',
-        message: `${fmtCoins(swept)} coins lapsed after ${config.coins.expiryDays} days without earning. Earn again and the clock starts fresh.`,
-        dedupeKey: `coin-expired:${bal.lastCreditAt!.toISOString()}`,
+        message: `${fmtCoins(swept)} coins lapsed after ${config.coins.expiryDays} days without a step sync. Open the app to sync your steps and the clock starts fresh.`,
+        dedupeKey: `coin-expired:${since.toISOString()}`,
       });
     } else {
       result.skipped += 1;
@@ -153,10 +210,10 @@ export interface ExpiryWarnResult {
 /**
  * The reminders before the sweep (RULES E10, BACKEND §8.4): a wallet with
  * coins is told on each of `coins.expiryWarnDays` days-before that its clock
- * is running out. Keyed to the credit the window runs from *and* the
+ * is running out. Keyed to the sync the window runs from *and* the
  * threshold, so a user gets each warning once per idle stretch — and none at
- * all if they earn in between, because the key then names a credit that no
- * longer has a window.
+ * all if their phone reports in between, because the key then names a sync
+ * that no longer has a window.
  *
  * Runs as a daily job, so it uses the same whole-days arithmetic as the
  * wallet's countdown: the day the panel shows "14 days left" is the day the
@@ -171,12 +228,13 @@ export async function warnExpiringWallets(now = new Date()): Promise<ExpiryWarnR
   // Only wallets idle long enough to be inside the outermost warn day.
   const oldestIdle = config.coins.expiryDays - Math.max(...warnDays);
   const candidates = await CoinBalanceModel.find(
-    { balanceMc: { $gt: 0 }, lastCreditAt: { $ne: null, $lte: new Date(now.getTime() - oldestIdle * MS_PER_DAY) } },
-    { balanceMc: 1, lastCreditAt: 1 },
+    idleBefore(new Date(now.getTime() - oldestIdle * MS_PER_DAY)),
+    ANCHOR_FIELDS,
   ).lean();
 
   for (const bal of candidates) {
-    const daysIdle = Math.floor((now.getTime() - bal.lastCreditAt!.getTime()) / MS_PER_DAY);
+    const since = anchorOf(bal)!;
+    const daysIdle = Math.floor((now.getTime() - since.getTime()) / MS_PER_DAY);
     const daysLeft = config.coins.expiryDays - daysIdle;
     if (!warnDays.includes(daysLeft)) continue;
 
@@ -184,8 +242,8 @@ export async function warnExpiringWallets(now = new Date()): Promise<ExpiryWarnR
     const outcome = await notify({
       userId: bal._id, topic: 'coins', now,
       title: `Your coins expire ${when}`,
-      message: `You have ${fmtCoins(bal.balanceMc)} coins and nothing earned for ${daysIdle} days. Walk, train or finish a challenge to keep them for another ${config.coins.expiryDays} days.`,
-      dedupeKey: `coin-expiry-warn:${bal.lastCreditAt!.toISOString()}:${daysLeft}`,
+      message: `You have ${fmtCoins(bal.balanceMc)} coins and your steps have not synced for ${daysIdle} days. Open the app to sync and keep them for another ${config.coins.expiryDays} days.`,
+      dedupeKey: `coin-expiry-warn:${since.toISOString()}:${daysLeft}`,
     });
     if (outcome.status === 'created') result.warned += 1;
     else result.repeated += 1;

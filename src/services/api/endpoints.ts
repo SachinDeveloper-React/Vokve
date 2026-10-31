@@ -18,6 +18,7 @@ import {
   checkoutResultSchema,
   coinTransactionSchema,
   contentTipSchema,
+  referralCardsSchema,
   notificationCountsSchema,
   notificationPreferencesSchema,
   nutritionDaySchema,
@@ -759,6 +760,8 @@ const realContentApi: ContentApi = {
     request(contentTipSchema, client =>
       client.get(`/content/tips/${encodeURIComponent(topic)}`),
     ),
+  referralCards: () =>
+    request(referralCardsSchema, client => client.get('/content/referral-cards')),
 };
 
 const realNutritionApi: NutritionApi = {
@@ -1121,6 +1124,7 @@ export const hydrationApi: HydrationApi = {
 
 export const contentApi: ContentApi = {
   tip: topic => pick(mockContentApi, realContentApi).tip(topic),
+  referralCards: () => pick(mockContentApi, realContentApi).referralCards(),
 };
 
 export const nutritionApi: NutritionApi = {

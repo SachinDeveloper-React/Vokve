@@ -5,6 +5,7 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { Text } from 'react-native';
+import Svg from 'react-native-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf as collectText } from './helpers/text';
 import { waterDay } from './helpers/hydration';
@@ -192,6 +193,32 @@ describe('hydration store', () => {
 });
 
 describe('HydrationCard', () => {
+  /** `WaterGlass`'s inner box, which its water rectangle is measured against. */
+  const GLASS_INNER = 76;
+
+  /** Every glass the card draws water in, by the height it is drawn at. */
+  const glassesOf = (tree: ReactTestRenderer.ReactTestRenderer) =>
+    tree.root.findAllByType(Svg);
+
+  const waterIn = (node: ReactTestRenderer.ReactTestInstance) =>
+    node
+      .findAll(
+        n =>
+          n.props?.fill === 'url(#glassWater)' &&
+          typeof n.props?.height === 'number',
+      )
+      .map(n => Number(((n.props.height as number) / GLASS_INNER).toFixed(2)));
+
+  /** How full each glass of the intake row is, 0–1, left to right. */
+  const rowLevels = (tree: ReactTestRenderer.ReactTestRenderer) =>
+    waterIn(
+      tree.root.findAll(
+        n =>
+          typeof n.props?.accessibilityLabel === 'string' &&
+          (n.props.accessibilityLabel as string).includes('glasses'),
+      )[0],
+    );
+
   test('shows the amount, the goal and the percentage', async () => {
     const tree = await render(
       <HydrationCard consumedMl={1600} goalMl={2500} onAdd={() => {}} />,
@@ -240,6 +267,50 @@ describe('HydrationCard', () => {
     );
 
     expect(allText(tree)).not.toMatch(/NaN|Infinity/);
+  });
+
+  test('the row is glasses that fill, and the one being drunk shows part full', async () => {
+    // 1.6 of 2.5 L over ten glasses: six drunk, the seventh two fifths up.
+    const tree = await render(
+      <HydrationCard consumedMl={1600} goalMl={2500} onAdd={() => {}} />,
+    );
+
+    expect(rowLevels(tree)).toEqual([1, 1, 1, 1, 1, 1, 0.4, 0, 0, 0]);
+  });
+
+  test('a glass part way is not yet a glass drunk, to a screen reader', async () => {
+    const tree = await render(
+      <HydrationCard consumedMl={1600} goalMl={2500} onAdd={() => {}} />,
+    );
+
+    const label = tree.root
+      .findAll(n => typeof n.props?.accessibilityLabel === 'string')
+      .map(n => n.props.accessibilityLabel as string)
+      .find(l => l.includes('glasses'));
+
+    expect(label).toBe('6 of 10 glasses');
+  });
+
+  test('the card is headed by a glass that fills with the day, not a droplet', async () => {
+    const tree = await render(
+      <HydrationCard consumedMl={1250} goalMl={2500} onAdd={() => {}} />,
+    );
+
+    const glasses = glassesOf(tree);
+    // The hero, the ten counting the day out, and the one in front of each
+    // of the two quick-adds.
+    expect(glasses).toHaveLength(13);
+
+    // The hero is the only one drawn large, and it stands at half the goal.
+    const tallest = Math.max(...glasses.map(g => g.props.height as number));
+    const hero = glasses.filter(g => g.props.height === tallest);
+    expect(hero).toHaveLength(1);
+    expect(waterIn(hero[0])).toEqual([0.5]);
+
+    // Nothing on the card is still drawing the old droplet.
+    expect(
+      tree.root.findAll(n => n.props?.fill === 'url(#dropletFill)'),
+    ).toHaveLength(0);
   });
 
   test('over-drinking caps the glasses instead of overflowing the row', async () => {

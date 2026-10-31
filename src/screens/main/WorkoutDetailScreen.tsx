@@ -42,7 +42,8 @@ export const WorkoutDetailScreen = ({
             {template.description}
           </AppText>
           <AppText variant="label" color="textTertiary">
-            {template.estimatedMinutes} min · {template.exercises.length} exercises
+            {template.estimatedMinutes} min · {template.exercises.length}{' '}
+            exercises
           </AppText>
         </View>
 
@@ -57,7 +58,12 @@ export const WorkoutDetailScreen = ({
           </Card>
         ))}
 
-        <Button label="Start workout" size="lg" fullWidth onPress={handleStart} />
+        <Button
+          label="Start workout"
+          size="lg"
+          fullWidth
+          onPress={handleStart}
+        />
       </ScrollView>
     </Screen>
   );

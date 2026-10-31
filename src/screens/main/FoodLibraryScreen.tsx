@@ -1,15 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { ChevronLeft, Plus, Search, X } from 'lucide-react-native';
-import { CustomFoodSheet, type CustomFood } from '../../components/meal/CustomFoodSheet';
+import {
+  CustomFoodSheet,
+  type CustomFood,
+} from '../../components/meal/CustomFoodSheet';
 import { FoodLibraryRow } from '../../components/meal/FoodLibraryRow';
 import { useToast } from '../../components/feedback/Toast';
 import { Pressable } from '../../components/form/Pressable';
@@ -38,7 +36,11 @@ import type { FoodItem } from '../../types/models';
 const makeStyles = ({ spacing, colors }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingHorizontal: spacing.base, paddingBottom: spacing.xxxl },
-    header: { gap: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md },
+    header: {
+      gap: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+    },
     field: {
       minHeight: 48,
       borderRadius: radius.pill,
@@ -47,7 +49,12 @@ const makeStyles = ({ spacing, colors }: ThemeShape) =>
       backgroundColor: colors.card,
       paddingHorizontal: spacing.md,
     },
-    input: { flex: 1, ...typography.body, color: colors.text, paddingVertical: 0 },
+    input: {
+      flex: 1,
+      ...typography.body,
+      color: colors.text,
+      paddingVertical: 0,
+    },
     row: { paddingBottom: spacing.sm },
     footer: { paddingVertical: spacing.lg, gap: spacing.sm },
     empty: { paddingVertical: spacing.xl },
@@ -241,7 +248,9 @@ export const FoodLibraryScreen = () => {
       <Card radius="xl" style={styles.empty}>
         <EmptyState
           title={
-            query.trim().length > 0 ? `Nothing for "${query.trim()}"` : 'No foods yet'
+            query.trim().length > 0
+              ? `Nothing for "${query.trim()}"`
+              : 'No foods yet'
           }
           message="Add it yourself and it is kept for next time."
           actionLabel="Add a food"
@@ -346,10 +355,7 @@ export const FoodLibraryScreen = () => {
 
       {foods.length > 0 ? (
         <View
-          style={[
-            styles.bar,
-            { paddingBottom: Math.max(insets.bottom, 16) },
-          ]}
+          style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 16) }]}
         >
           <HStack align="center" gap="md">
             <VStack flex={1} gap="xxs">

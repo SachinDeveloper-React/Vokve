@@ -1,10 +1,16 @@
 import React, { memo } from 'react';
+import { StyleSheet } from 'react-native';
 import { ShieldCheck, Sunrise } from 'lucide-react-native';
 import { useTheme } from '../../theme';
+import { moderateScale } from '../../theme/responsive';
 import type { EarnRule } from '../../types/models';
 import { withAlpha } from '../../utils/color';
 import { formatCoins, formatDaysUntil } from '../../utils/format';
-import { BottomSheet } from '../disclosure/BottomSheet';
+import {
+  BottomSheet,
+  BottomSheetScrollView,
+  useSheetBodyMaxHeight,
+} from '../disclosure/BottomSheet';
 import { Box } from '../layout/Box';
 import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
@@ -36,6 +42,11 @@ interface Props {
  * into the app), how much a day can earn (the cap, and today's headroom, so a
  * user who hits it learns about it here rather than from a ledger row that
  * paid less than expected), and why some coins say "pending".
+ *
+ * Those three scroll and the two buttons do not. All of it together is taller
+ * than a sheet may be on a small phone, and a sheet's children do not shrink
+ * to fit — so laid out as one column the buttons went off the bottom edge on
+ * exactly the screens least able to spare the room.
  */
 export const CoinsInfoSheet = memo(
   ({
@@ -51,72 +62,82 @@ export const CoinsInfoSheet = memo(
   }: Props) => {
     const { colors, isDark } = useTheme();
     const capReached = remainingToday <= 0 && dailyCap > 0;
+    const maxBody = useSheetBodyMaxHeight(BUTTONS_HEIGHT);
 
     return (
       <BottomSheet visible={visible} onClose={onClose} title="Your coins">
         <VStack gap="base" pb="base">
-          <AppText variant="body" color="textSecondary">
-            Coins are what moving earns you. Walk, train, keep a streak, finish
-            a challenge or bring a friend, and coins land in this wallet to
-            spend in the shop.
-          </AppText>
-
-          <EarnCoinsCard rules={rules} />
-
-          <Box
-            radius="xl"
-            p="base"
-            style={{
-              backgroundColor: withAlpha(
-                capReached ? colors.warning : colors.primary,
-                isDark ? 0.14 : 0.08,
-              ),
-            }}
+          <BottomSheetScrollView
+            style={[styles.body, { maxHeight: maxBody }]}
+            showsVerticalScrollIndicator={false}
           >
-            <HStack align="start" gap="md">
-              <Icon
-                as={Sunrise}
-                size="lg"
-                tint={capReached ? colors.warning : colors.primary}
-              />
-              <VStack flex={1} gap="xxs">
-                <AppText variant="bodyStrong">
-                  {capReached
-                    ? 'Daily limit reached'
-                    : `Up to ${formatCoins(dailyCap)} coins a day`}
-                </AppText>
-                <AppText variant="caption" color="textSecondary">
-                  {capReached
-                    ? `You have earned today's ${formatCoins(
-                        dailyCap,
-                      )}. The limit resets at midnight.`
-                    : `${formatCoins(
-                        earnedToday,
-                      )} earned so far today, ${formatCoins(
-                        remainingToday,
-                      )} still to go. The limit resets at midnight.`}
-                </AppText>
-              </VStack>
-            </HStack>
-          </Box>
+            <VStack gap="base">
+              <AppText variant="body" color="textSecondary">
+                Coins are what moving earns you. Walk, train, keep a streak,
+                finish a challenge or bring a friend, and coins land in this
+                wallet to spend in the shop.
+              </AppText>
 
-          <HStack align="start" gap="md" px="xs">
-            <Icon as={ShieldCheck} size="lg" tint={colors.success} />
-            <VStack flex={1} gap="xxs">
-              <AppText variant="bodyStrong">
-                Step coins are checked first
-              </AppText>
-              <AppText variant="caption" color="textSecondary">
-                {pending > 0
-                  ? `${formatCoins(pending)} coins from your steps are being verified${
-                      pendingReleaseAt
-                        ? ` and clear ${formatDaysUntil(pendingReleaseAt)}`
-                        : ' and will be added once they clear'
-                    }. Checking first is what keeps the shop's prices honest.`
-                  : 'Coins from steps show as pending until they are verified, usually within a day or two, then join your balance.'}
-              </AppText>
+              <EarnCoinsCard rules={rules} />
+
+              <Box
+                radius="xl"
+                p="base"
+                style={{
+                  backgroundColor: withAlpha(
+                    capReached ? colors.warning : colors.primary,
+                    isDark ? 0.14 : 0.08,
+                  ),
+                }}
+              >
+                <HStack align="start" gap="md">
+                  <Icon
+                    as={Sunrise}
+                    size="lg"
+                    tint={capReached ? colors.warning : colors.primary}
+                  />
+                  <VStack flex={1} gap="xxs">
+                    <AppText variant="bodyStrong">
+                      {capReached
+                        ? 'Daily limit reached'
+                        : `Up to ${formatCoins(dailyCap)} coins a day`}
+                    </AppText>
+                    <AppText variant="caption" color="textSecondary">
+                      {capReached
+                        ? `You have earned today's ${formatCoins(
+                            dailyCap,
+                          )}. The limit resets at midnight.`
+                        : `${formatCoins(
+                            earnedToday,
+                          )} earned so far today, ${formatCoins(
+                            remainingToday,
+                          )} still to go. The limit resets at midnight.`}
+                    </AppText>
+                  </VStack>
+                </HStack>
+              </Box>
+
+              <HStack align="start" gap="md" px="xs">
+                <Icon as={ShieldCheck} size="lg" tint={colors.success} />
+                <VStack flex={1} gap="xxs">
+                  <AppText variant="bodyStrong">
+                    Step coins are checked first
+                  </AppText>
+                  <AppText variant="caption" color="textSecondary">
+                    {pending > 0
+                      ? `${formatCoins(
+                          pending,
+                        )} coins from your steps are being verified${
+                          pendingReleaseAt
+                            ? ` and clear ${formatDaysUntil(pendingReleaseAt)}`
+                            : ' and will be added once they clear'
+                        }. Checking first is what keeps the shop's prices honest.`
+                      : 'Coins from steps show as pending until they are verified, usually within a day or two, then join your balance.'}
+                  </AppText>
+                </VStack>
+              </HStack>
             </VStack>
-          </HStack>
+          </BottomSheetScrollView>
 
           <VStack gap="sm" pt="xs">
             <Button
@@ -139,3 +160,11 @@ export const CoinsInfoSheet = memo(
 );
 
 CoinsInfoSheet.displayName = 'CoinsInfoSheet';
+
+/** The two buttons and the gap between them, which stay out of the scroll. */
+const BUTTONS_HEIGHT = moderateScale(100);
+
+const styles = StyleSheet.create({
+  /** Grows with the content until the sheet runs out of room, then scrolls. */
+  body: { flexShrink: 1 },
+});
