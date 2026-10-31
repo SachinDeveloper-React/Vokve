@@ -2139,6 +2139,16 @@ export const walletSchema = z.object({
   expiryWindowDays: z.number().int().positive(),
   /** Days-before-expiry at which the user is warned (⚙ `coins.expiryWarnDays`, RULES E10). */
   expiryWarnDays: z.array(z.number().int().nonnegative()),
+  /**
+   * Which sources the coin history offers as filter chips, in this order
+   * (⚙ `coins.historyFilters`).
+   *
+   * The filtering itself is already the server's — `GET /wallet/transactions`
+   * takes a `source` and every source still answers. This is the *row of
+   * chips*, which the app used to build from the whole `CoinSource` enum, so
+   * taking one off meant a release.
+   */
+  historyFilters: z.array(coinSourceSchema),
   monthSummary: z.object({
     earned: z.number().nonnegative(),
     spent: z.number().nonnegative(),

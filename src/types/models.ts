@@ -2120,6 +2120,19 @@ export const walletSchema = z.object({
    */
   expiryWindowDays: z.number().int().positive().default(90),
   expiryWarnDays: z.array(z.number().int().nonnegative()).default([14, 3]),
+  /**
+   * Which sources the history offers as filter chips, in this order
+   * (⚙ `coins.historyFilters`).
+   *
+   * The filtering was always the server's — the screen sends `?source=` and
+   * the server answers — but the row of chips was built here from the whole
+   * `CoinSource` enum, so taking one off meant a release. Defaulted rather
+   * than required so a server from before this still draws a row, and
+   * defaulted *without* `workout`: it is the one the owner took off.
+   */
+  historyFilters: z
+    .array(coinSourceSchema)
+    .default(['steps', 'streak', 'challenge', 'referral', 'purchase', 'refund']),
   monthSummary: z.object({
     earned: z.number().nonnegative(),
     spent: z.number().nonnegative(),

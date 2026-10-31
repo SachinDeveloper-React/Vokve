@@ -23,7 +23,10 @@ import {
   groupCoinTransactionsByDay,
   useCoinHistory,
 } from '../../hooks/useCoinHistory';
-import { useCoinBalance } from '../../stores/coinsStore';
+import {
+  useCoinBalance,
+  useCoinHistoryFilters,
+} from '../../stores/coinsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { RootStackScreenProps } from '../../types/navigation';
 
@@ -74,6 +77,12 @@ export const CoinHistoryScreen = () => {
   );
   const balance = useCoinBalance();
   const history = useCoinHistory(source);
+  /**
+   * Which chips the row offers, the operator's call (⚙ `coins.historyFilters`).
+   * The filtering itself is the server's either way — a source with no chip
+   * still shows its coins under "All".
+   */
+  const historyFilters = useCoinHistoryFilters();
 
   const groups = useMemo(
     () => groupCoinTransactionsByDay(history.transactions),
@@ -110,10 +119,14 @@ export const CoinHistoryScreen = () => {
           title="Coin History"
           subtitle="Every coin earned and spent"
         />
-        <CoinSourceFilters value={source} onChange={setSource} />
+        <CoinSourceFilters
+          sources={historyFilters}
+          value={source}
+          onChange={setSource}
+        />
       </View>
     ),
-    [balance, onPressBack, source, styles.header],
+    [balance, historyFilters, onPressBack, source, styles.header],
   );
 
   /**

@@ -60,6 +60,20 @@ export const CONFIG_DEFAULTS = {
      * `monthlyInviterCap` referrals a calendar month (F4).
      */
     referral: { inviter: 20, invitee: 20, monthlyInviterCap: 10, applyWindowDays: 7 },
+    /**
+     * Which sources the coin history offers as filter chips, in this order.
+     *
+     * A presentation list, not a rule: filtering by source has always been
+     * the server's job (`GET /wallet/transactions?source=`) and every source
+     * still answers. This is only *which chips the app draws*, which used to
+     * be the whole `CoinSource` enum hardcoded in the app — so taking one
+     * off the row meant a release.
+     *
+     * `workout` is deliberately absent: workouts still pay and their rows
+     * still show under "All", they are simply not worth a chip of their own.
+     * Put it back by adding it here.
+     */
+    historyFilters: ['steps', 'streak', 'challenge', 'referral', 'purchase', 'refund'],
     /** Idle window; resets on every step sync, and on nothing else (RULES E9). */
     expiryDays: 90,
     expiryWarnDays: [14, 3],

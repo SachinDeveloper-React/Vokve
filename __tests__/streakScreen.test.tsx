@@ -85,6 +85,19 @@ const user = {
 
 const TODAY = todayIso();
 const d = (daysAgo: number) => addDays(TODAY, -daysAgo);
+
+/**
+ * Pages the calendar back when `date` is not in the month it opens on.
+ *
+ * The grid draws one month, so on the 1st of a month yesterday is simply not
+ * in it — and a test that went looking for yesterday's cell would fail on
+ * twelve days of the year for a reason that has nothing to do with streaks.
+ */
+const showMonthOf = async (tree: ReactTestRenderer.ReactTestRenderer, date: string) => {
+  if (date.slice(0, 7) !== TODAY.slice(0, 7)) {
+    await press(tree, 'Previous month');
+  }
+};
 const run = (from: number, to: number) =>
   Array.from({ length: from - to + 1 }, (_, i) => d(from - i));
 
@@ -320,6 +333,7 @@ describe('StreakScreen', () => {
   test('a day on the calendar opens that day, and a day still to come does not', async () => {
     showStreak(summaryOf(run(2, 0)));
     const tree = await render();
+    await showMonthOf(tree, d(1));
 
     await press(tree, `${formatLongDate(d(1))}, completed, current streak`);
     expect(mockNavigate).toHaveBeenCalledWith('StreakDay', { date: d(1) });

@@ -211,6 +211,10 @@ describe('economy: idle expiry, the never-synced fallback (RULES E9–E11)', () 
     // Never earned: nothing to expire, so the full window and no date (E11).
     const empty = await request(app).get('/v1/wallet').set(authed(session));
     expect(empty.body).toMatchObject({ expiresAt: null, expiryDaysLeft: 90, expiryWindowDays: 90, expiryWarnDays: [14, 3] });
+    // The history's filter chips are the operator's (⚙ `coins.historyFilters`),
+    // not the whole source enum the app used to hardcode. Workout is off the
+    // row by default — its coins still answer a `?source=workout` query.
+    expect(empty.body.historyFilters).toEqual(['steps', 'streak', 'challenge', 'referral', 'purchase', 'refund']);
 
     // Earned 10 days ago: 80 days left, and a date 90 days after the credit.
     await credit({ userId: session.userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day', localDay: DAY });
@@ -294,6 +298,42 @@ describe('economy: idle expiry, the never-synced fallback (RULES E9–E11)', () 
  * it — however many steps were in it, and whoever walked them — and nothing
  * else does.
  */
+describe('economy: which sources the history offers as chips', () => {
+  it('serves the configured row, and still filters by a source that is off it', async () => {
+    const session = await signUpAndRegister();
+    await setCoinConfig({ historyFilters: ['steps', 'refund'] });
+    await credit({ userId: session.userId, source: 'workout', referenceType: 'workout', referenceId: 'w1', amount: 100, title: 'Push Day', localDay: DAY });
+
+    const wallet = await request(app).get('/v1/wallet').set(authed(session));
+    expect(wallet.body.historyFilters).toEqual(['steps', 'refund']);
+
+    // Off the row is not hidden: the row is a list of chips, the filtering
+    // is the server's and every source still answers.
+    const workouts = await request(app)
+      .get('/v1/wallet/transactions?source=workout')
+      .set(authed(session));
+    expect(workouts.body.data).toHaveLength(1);
+    expect(workouts.body.data[0]).toMatchObject({ source: 'workout', amount: 100 });
+  });
+
+  it('refuses a row naming something that is not a coin source', async () => {
+    const session = await signUpAndRegister();
+    await setCoinConfig({ historyFilters: ['steps', 'bonus'] });
+
+    // The config is validated on read, so the bad value fails the next read
+    // rather than reaching a phone as a chip the app cannot draw.
+    const wallet = await request(app).get('/v1/wallet').set(authed(session));
+    expect(wallet.status).toBe(500);
+  });
+
+  it('refuses the same chip twice', async () => {
+    const session = await signUpAndRegister();
+    await setCoinConfig({ historyFilters: ['steps', 'steps'] });
+
+    expect((await request(app).get('/v1/wallet').set(authed(session))).status).toBe(500);
+  });
+});
+
 describe('economy: the expiry clock runs on step syncs (RULES E9)', () => {
   const DAYS = 86_400_000;
   const walletOf = (session: Session) => request(app).get('/v1/wallet').set(authed(session));

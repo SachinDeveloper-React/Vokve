@@ -76,6 +76,9 @@ import {
   subcategoryPatchBody,
   updateCategory,
   updateSubcategory,
+  reorderBody,
+  reorderCategory,
+  reorderSubcategory,
 } from './categories.service.js';
 import {
   couponBody,
@@ -722,6 +725,39 @@ adminUsersRouter.post('/admin/shop/categories/move', validate('body', recategori
 adminUsersRouter.put('/admin/shop/categories/:slug', validate('body', categoryPatch), async (req, res) => {
   res.json(await updateCategory(req.ctx.adminActor!, String(req.params.slug), req.body));
 });
+
+/**
+ * Moves a shelf one place along the row the member sees.
+ *
+ * `sort` has been settable on the shelf since the shop opened and the app has
+ * always drawn by it; this is the control that makes it usable — "put this
+ * one first" rather than "work out which number does that". The whole row is
+ * renumbered `1 … n` on each move, so the positions stay the numbers and two
+ * shelves cannot tie.
+ */
+adminUsersRouter.post(
+  '/admin/shop/categories/:slug/reorder',
+  validate('body', reorderBody),
+  async (req, res) => {
+    res.json(await reorderCategory(req.ctx.adminActor!, String(req.params.slug), req.body));
+  },
+);
+
+/** The same, for one name inside a shelf's own list. */
+adminUsersRouter.post(
+  '/admin/shop/categories/:slug/subcategories/:name/reorder',
+  validate('body', reorderBody),
+  async (req, res) => {
+    res.json(
+      await reorderSubcategory(
+        req.ctx.adminActor!,
+        String(req.params.slug),
+        decodeURIComponent(String(req.params.name)),
+        req.body,
+      ),
+    );
+  },
+);
 
 /**
  * Deletes a shelf. `moveTo` is where its items go and is required while any

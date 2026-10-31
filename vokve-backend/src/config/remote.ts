@@ -1,5 +1,6 @@
 import { offeredMethods, PAYMENT_METHODS } from '../lib/payments.js';
 import { supportCategorySchema, supportIconSchema, supportTintSchema, supportTopicKindSchema } from '../contracts/index.js';
+import { COIN_SOURCES } from '../modules/economy/models.js';
 import { AppConfigModel } from '../modules/platform/models.js';
 import { CONFIG_DEFAULTS, type AppConfig } from './defaults.js';
 
@@ -77,6 +78,21 @@ function validate(config: AppConfig): void {
       throw new Error(`coins.sourceCaps.${source} (${cap}) exceeds coins.dailyCap (${config.coins.dailyCap})`);
     }
   }
+  // The history's chips are source names the app has a glyph and a label
+  // for, so a typo here is a chip the app cannot draw. Caught on the way in
+  // rather than on the phone, and the message names what is allowed.
+  const notSources = config.coins.historyFilters.filter(
+    source => !(COIN_SOURCES as readonly string[]).includes(source),
+  );
+  if (notSources.length > 0) {
+    throw new Error(
+      `coins.historyFilters: ${notSources.join(', ')} — not a coin source. One of ${COIN_SOURCES.join(', ')}.`,
+    );
+  }
+  if (new Set(config.coins.historyFilters).size !== config.coins.historyFilters.length) {
+    throw new Error('coins.historyFilters: the same source twice would draw the same chip twice');
+  }
+
   const { min, max, increment } = config.activity.goal;
   if (!(min > 0 && min < max && increment > 0)) {
     throw new Error(`activity.goal: ${min}–${max} by ${increment} is not a range a goal can be set in`);

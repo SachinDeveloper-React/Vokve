@@ -4,7 +4,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { walletApi } from '../services/api/endpoints';
 import { toApiError } from '../services/api/errors';
 import { logger } from '../utils/logger';
-import type { CoinTransaction, EarnRule } from '../types/models';
+import type { CoinSource, CoinTransaction, EarnRule } from '../types/models';
 import { mmkvStorage } from './index';
 
 /**
@@ -66,6 +66,12 @@ interface CoinsState {
   expiryWindowDays: number | null;
   expiryWarnDays: number[] | null;
   /**
+   * Which sources the history offers as filter chips, in the server's order
+   * (⚙ `coins.historyFilters`). Null before the first sync, and then the
+   * screen draws no chips rather than a row the operator never chose.
+   */
+  historyFilters: CoinSource[] | null;
+  /**
    * The rate card, as the server serves it (RULES E14) — never written into
    * the app, because the rates are config the owner can change. Null until
    * the first sync.
@@ -121,6 +127,7 @@ const EMPTY_WALLET = {
   expiresAt: null,
   expiryWindowDays: null,
   expiryWarnDays: null,
+  historyFilters: null,
   earnRules: null,
   stepUpThreshold: null,
   syncedAt: null,
@@ -168,6 +175,7 @@ export const useCoinsStore = create<CoinsState>()(
             expiresAt: wallet.expiresAt,
             expiryWindowDays: wallet.expiryWindowDays,
             expiryWarnDays: wallet.expiryWarnDays,
+            historyFilters: wallet.historyFilters,
             earnRules,
             stepUpThreshold: wallet.stepUpThreshold,
             syncedAt: new Date().toISOString(),
@@ -222,6 +230,7 @@ export const useCoinsStore = create<CoinsState>()(
         expiresAt: state.expiresAt,
         expiryWindowDays: state.expiryWindowDays,
         expiryWarnDays: state.expiryWarnDays,
+        historyFilters: state.historyFilters,
         earnRules: state.earnRules,
         stepUpThreshold: state.stepUpThreshold,
         syncedAt: state.syncedAt,
@@ -315,3 +324,17 @@ export const useCoinExpiry = (): CoinExpiry => {
 };
 
 export const useCoinExpiryDaysLeft = (): number => useCoinExpiry().daysLeft;
+
+/**
+ * The sources the history's filter row offers, in the server's order
+ * (⚙ `coins.historyFilters`).
+ *
+ * Empty before the first sync, which draws no chips at all — the alternative
+ * is guessing a row from the `CoinSource` enum, which is exactly the hardcoded
+ * row this replaced, and it would flicker into a different one a beat later.
+ */
+export const useCoinHistoryFilters = (): CoinSource[] =>
+  useCoinsStore(s => s.historyFilters) ?? NO_FILTERS;
+
+/** Stable, so the selector above never returns a fresh array. */
+const NO_FILTERS: CoinSource[] = [];

@@ -23,6 +23,7 @@ import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { ProgressBar } from '../ui/ProgressBar';
 import { Pressable } from '../form/Pressable';
+import { config } from '../../constants/config';
 import { LevelBadge } from './LevelBadge';
 import { ProfileStatStrip } from './ProfileStatStrip';
 
@@ -53,6 +54,12 @@ interface Props {
  * many members have earned more. Nothing is computed here, so the card can
  * never disagree with the profile screen it leads to.
  *
+ * The level, its rank title and the bar are behind `config.showProfileLevel`
+ * and currently off — they are coming back, so the card still reads the
+ * server's figures and simply does not draw them. The rank is not part of
+ * that: it answers "how many have earned more", which stands on its own, so
+ * it stays whichever way the flag is set.
+ *
  * The whole panel is one press target rather than a card with a button in the
  * corner. Everything on it — name, level, rank, join date, every figure in the
  * strip — leads to the same place, so splitting it into a readable part and a
@@ -76,6 +83,7 @@ export const ProfileSummaryCard = memo(
     const foreground = colors.tierForeground;
     const secondary = withAlpha(foreground, 0.72);
     const level = summary?.level ?? 1;
+    const showLevel = config.showProfileLevel;
     const memberSince = summary ? formatMonthYear(summary.memberSince) : '—';
 
     return (
@@ -83,8 +91,10 @@ export const ProfileSummaryCard = memo(
         onPress={onPress}
         feedback="scale"
         accessibilityRole="button"
-        accessibilityLabel={`${name ?? 'Your account'}, level ${level}${
-          summary ? `, ${summary.tierTitle}` : ''
+        accessibilityLabel={`${name ?? 'Your account'}${
+          showLevel
+            ? `, level ${level}${summary ? `, ${summary.tierTitle}` : ''}`
+            : ''
         }. Open profile`}
       >
         <LinearGradient
@@ -111,19 +121,21 @@ export const ProfileSummaryCard = memo(
                   >
                     {name ?? 'Your account'}
                   </AppText>
-                  <LevelBadge level={level} />
+                  {showLevel ? <LevelBadge level={level} /> : null}
                 </HStack>
 
-                <HStack align="center" gap="xs">
-                  <Icon as={Medal} size="xs" tint={secondary} />
-                  <AppText
-                    variant="caption"
-                    numberOfLines={1}
-                    style={{ color: secondary }}
-                  >
-                    {summary?.tierTitle ?? 'Getting started'}
-                  </AppText>
-                </HStack>
+                {showLevel ? (
+                  <HStack align="center" gap="xs">
+                    <Icon as={Medal} size="xs" tint={secondary} />
+                    <AppText
+                      variant="caption"
+                      numberOfLines={1}
+                      style={{ color: secondary }}
+                    >
+                      {summary?.tierTitle ?? 'Getting started'}
+                    </AppText>
+                  </HStack>
+                ) : null}
 
                 <HStack align="center" gap="xs">
                   <Icon as={CalendarDays} size="xs" tint={secondary} />
@@ -144,14 +156,22 @@ export const ProfileSummaryCard = memo(
               />
             </HStack>
 
-            {summary ? (
+            {/*
+              With the level off, the row that held the bar still holds the
+              rank: it is the one figure here that is not about levels, and
+              dropping it with them would take a real number off the card for
+              a reason that has nothing to do with it.
+            */}
+            {summary && (showLevel || summary.rank !== null) ? (
               <VStack gap="xs">
                 <HStack align="center" justify="between" gap="sm">
-                  <AppText variant="micro" style={{ color: secondary }}>
-                    {`${formatCoins(summary.xpIntoLevel)} / ${formatCoins(
-                      summary.xpForNextLevel,
-                    )} to level ${summary.level + 1}`}
-                  </AppText>
+                  {showLevel ? (
+                    <AppText variant="micro" style={{ color: secondary }}>
+                      {`${formatCoins(summary.xpIntoLevel)} / ${formatCoins(
+                        summary.xpForNextLevel,
+                      )} to level ${summary.level + 1}`}
+                    </AppText>
+                  ) : null}
                   {summary.rank !== null ? (
                     <HStack align="center" gap="xxs">
                       <Icon as={TrendingUp} size="xs" tint={secondary} />
@@ -163,10 +183,12 @@ export const ProfileSummaryCard = memo(
                     </HStack>
                   ) : null}
                 </HStack>
-                <ProgressBar
-                  progress={summary.levelProgress}
-                  tint={darkColors.gold}
-                />
+                {showLevel ? (
+                  <ProgressBar
+                    progress={summary.levelProgress}
+                    tint={darkColors.gold}
+                  />
+                ) : null}
               </VStack>
             ) : null}
 
@@ -191,7 +213,7 @@ ProfileSummaryCard.displayName = 'ProfileSummaryCard';
  * The two things the primitives cannot express: `Box` has no gradient, so the
  * panel's own padding and rounding have to be given to `LinearGradient`
  * directly; and the name has to be allowed to shrink so a long one truncates
- * instead of pushing the level badge off the row.
+ * instead of pushing the level badge off the row (when it is drawn).
  */
 const styles = StyleSheet.create({
   panel: { borderRadius: radius.xl, overflow: 'hidden' },

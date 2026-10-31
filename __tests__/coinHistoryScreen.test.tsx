@@ -82,7 +82,14 @@ beforeEach(() => {
   mockGoBack.mockClear();
   mockRouteParams = undefined;
   walletApi.transactions.mockReset();
-  useCoinsStore.setState({ transactions: [], balance: 0 });
+  // The chips are the server's now (⚙ `coins.historyFilters`), so the store
+  // has to carry them or the row is correctly empty — the screen draws no
+  // chips rather than guessing a row from the `CoinSource` enum.
+  useCoinsStore.setState({
+    transactions: [],
+    balance: 0,
+    historyFilters: ['steps', 'streak', 'challenge', 'referral', 'purchase', 'refund'],
+  });
 });
 
 afterEach(async () => {
@@ -135,6 +142,40 @@ const list = (tree: ReactTestRenderer.ReactTestRenderer) =>
   tree.root.findAll(n => typeof n.props?.onEndReached === 'function')[0];
 
 describe('CoinHistoryScreen', () => {
+  test('the chips are the ones the server offers, and workout is not among them', async () => {
+    walletApi.transactions.mockResolvedValue(page([]));
+    const text = allText(await render());
+
+    // ⚙ `coins.historyFilters`: taking a chip off the row is a config change
+    // now, not a release. Workout is the one the owner took off.
+    expect(text).toContain('Steps');
+    expect(text).toContain('Streaks');
+    expect(text).toContain('Refunds');
+    expect(text).not.toContain('Workouts');
+  });
+
+  test('a source the row does not offer is still filterable, and still shows under All', async () => {
+    // The filtering is the server's and always was: a workout row is not
+    // hidden by having no chip — it is in the unfiltered list like any other.
+    walletApi.transactions.mockResolvedValue(page([]));
+    const tree = await render();
+
+    expect(walletApi.transactions).toHaveBeenCalledWith(
+      expect.objectContaining({ source: undefined }),
+    );
+    expect(allText(tree)).not.toContain('Workouts');
+  });
+
+  test('before the first sync the row is empty rather than guessed', async () => {
+    useCoinsStore.setState({ historyFilters: null });
+    walletApi.transactions.mockResolvedValue(page([]));
+
+    const text = allText(await render());
+
+    expect(text).not.toContain('Steps');
+    expect(text).not.toContain('All');
+  });
+
   test('asks the server for the first page and files the rows under their days', async () => {
     walletApi.transactions.mockResolvedValue(
       page([
@@ -209,13 +250,13 @@ describe('CoinHistoryScreen', () => {
     const tree = await render();
     expect(allText(tree)).toContain('Entry all');
 
-    press(tree, 'Workouts');
+    press(tree, 'Streaks');
     await settle();
 
     expect(walletApi.transactions).toHaveBeenLastCalledWith({
       cursor: undefined,
       limit: COIN_HISTORY_PAGE_SIZE,
-      source: 'workout',
+      source: 'streak',
     });
     const text = allText(tree);
     expect(text).toContain('Entry w');
@@ -229,7 +270,7 @@ describe('CoinHistoryScreen', () => {
       .mockResolvedValueOnce(page([tx('w', 100, daysAgo(0), 'workout')]));
 
     const tree = await render();
-    press(tree, 'Workouts');
+    press(tree, 'Streaks');
     await settle();
     expect(allText(tree)).toContain('Entry w');
 

@@ -548,6 +548,48 @@ describe('admin: the whole config, key by key', () => {
     expect(after.overrides.some((row: { path: string }) => row.path === 'commerce.shippingFeePaise')).toBe(false);
   });
 
+  it('sets which sources the coin history offers, and names the valid ones on a typo', async () => {
+    const session = await member();
+
+    const set = await request(app)
+      .put('/v1/admin/config')
+      .set(ADMIN)
+      .send({
+        set: { 'coins.historyFilters': ['steps', 'workout', 'refund'] },
+        note: 'workouts back on the row',
+      });
+    expect(set.status).toBe(200);
+
+    // The member's own wallet carries the row, so the chips move without an
+    // app release — and the cache was invalidated, so it is this read.
+    const wallet = await request(app).get('/v1/wallet').set(authed(session));
+    expect(wallet.body.historyFilters).toEqual(['steps', 'workout', 'refund']);
+
+    // A name that is not a coin source is refused here rather than reaching a
+    // phone as a chip it cannot draw, and the message says what is allowed.
+    const typo = await request(app)
+      .put('/v1/admin/config')
+      .set(ADMIN)
+      .send({ set: { 'coins.historyFilters': ['steps', 'bonus'] } });
+    expect(typo.status).toBe(422);
+    expect(typo.body.error.details.config).toMatch(/not a coin source/);
+    expect(typo.body.error.details.config).toMatch(/steps, workout/);
+
+    // And the same chip twice, which would draw it twice.
+    const twice = await request(app)
+      .put('/v1/admin/config')
+      .set(ADMIN)
+      .send({ set: { 'coins.historyFilters': ['steps', 'steps'] } });
+    expect(twice.status).toBe(422);
+
+    // A list of the wrong kind is caught by the shape check before that.
+    const numbers = await request(app)
+      .put('/v1/admin/config')
+      .set(ADMIN)
+      .send({ set: { 'coins.historyFilters': [1, 2] } });
+    expect(numbers.status).toBe(422);
+  });
+
   it('refuses a path that does not exist, rather than writing a key nothing reads', async () => {
     const typo = await request(app)
       .put('/v1/admin/config')

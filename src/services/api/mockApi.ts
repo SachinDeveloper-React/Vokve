@@ -883,6 +883,16 @@ export const mockWalletApi: WalletApi = {
       expiryDaysLeft: 90,
       expiryWindowDays: 90,
       expiryWarnDays: [14, 3],
+      // Workout is deliberately off the row (⚙ `coins.historyFilters`): its
+      // coins still show under "All", it just has no chip of its own.
+      historyFilters: [
+        'steps',
+        'streak',
+        'challenge',
+        'referral',
+        'purchase',
+        'refund',
+      ],
       monthSummary: monthSummaryOf(seedCoinTransactions),
       dailyCap: 300,
       earnedToday: 60,

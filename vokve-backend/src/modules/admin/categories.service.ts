@@ -337,6 +337,101 @@ export async function deleteCategory(actor: string, slug: string, body: Category
   };
 }
 
+// ─── Putting them in order ─────────────────────────────────────────────────
+
+export const reorderBody = z
+  .object({
+    direction: z.enum(['up', 'down']),
+    note: z.string().trim().max(300).optional(),
+  })
+  .strict();
+export type ReorderBody = z.infer<typeof reorderBody>;
+
+/**
+ * The sequence `1 … n` with the item at `index` moved one place.
+ *
+ * Renumbering the whole row rather than swapping two numbers, because the
+ * numbers are what the next shelf is inserted against: a row that has been
+ * nudged a dozen times otherwise ends up `-3, 0, 0, 7, 7, 41`, where "one
+ * place up" stops meaning anything and two shelves tie. After this the
+ * numbers are the positions, which is also what the panel can show.
+ *
+ * A move off either end is the identity, so the first shelf's "up" is a
+ * no-op rather than an error — the control is disabled there anyway, and a
+ * 422 for pressing it twice quickly would be the wrong answer.
+ */
+function reordered<T>(all: readonly T[], index: number, direction: 'up' | 'down'): T[] {
+  const to = direction === 'up' ? index - 1 : index + 1;
+  const next = [...all];
+  if (to < 0 || to >= all.length) return next;
+  [next[index], next[to]] = [next[to], next[index]];
+  return next;
+}
+
+/**
+ * Moves a shelf one place along the row the member sees.
+ *
+ * The order is already the operator's — `sort` has been on the row and in
+ * the form since the shop opened, and `ensureShelves` serves by it. What was
+ * missing is this: a way to say "put this one first" without working out
+ * which number does it, which is the only way anybody actually thinks about
+ * the order of four shelves.
+ */
+export async function reorderCategory(actor: string, slug: string, body: ReorderBody) {
+  const shelves = await ensureShelves();
+  const index = shelves.findIndex(shelf => shelf._id === slug);
+  if (index === -1) throw Errors.notFound(`A “${slug}” shelf`);
+
+  const order = reordered(shelves, index, body.direction);
+  // Only the rows whose number actually changed, so an audit row and a write
+  // are not spent on four shelves to move one.
+  const writes = order
+    .map((shelf, position) => ({ shelf, sort: position + 1 }))
+    .filter(entry => entry.shelf.sort !== entry.sort);
+  await Promise.all(
+    writes.map(entry => ShopCategoryModel.updateOne({ _id: entry.shelf._id }, { $set: { sort: entry.sort } })),
+  );
+
+  await AuditLogModel.create({
+    actorType: 'admin', actorId: actor, action: 'shop.category_reordered', subjectType: 'shop_category', subjectId: slug,
+    before: { position: index + 1, order: shelves.map(shelf => shelf._id) },
+    after: { position: order.findIndex(shelf => shelf._id === slug) + 1, order: order.map(shelf => shelf._id), note: body.note ?? null },
+  });
+
+  return listCategories();
+}
+
+/** The same, for a name inside one shelf's own list of subcategories. */
+export async function reorderSubcategory(actor: string, slug: string, name: string, body: ReorderBody) {
+  const shelf = await shelfOr404(slug);
+  const index = shelf.subcategories.findIndex(sub => sameName(sub.name, name));
+  if (index === -1) throw Errors.notFound(`A “${name}” under ${shelf.name}`);
+
+  const order = reordered(shelf.subcategories, index, body.direction);
+  await Promise.all(
+    order.map((sub, position) =>
+      sub.sort === position + 1
+        ? null
+        : ShopCategoryModel.updateOne(
+            { _id: slug, 'subcategories.name': sub.name },
+            { $set: { 'subcategories.$.sort': position + 1 } },
+          ),
+    ),
+  );
+
+  await AuditLogModel.create({
+    actorType: 'admin', actorId: actor, action: 'shop.subcategory_reordered', subjectType: 'shop_category', subjectId: slug,
+    before: { name: shelf.subcategories[index].name, position: index + 1 },
+    after: {
+      position: order.findIndex(sub => sameName(sub.name, name)) + 1,
+      order: order.map(sub => sub.name),
+      note: body.note ?? null,
+    },
+  });
+
+  return listCategories();
+}
+
 // ─── The subcategories under them ──────────────────────────────────────────
 
 export const subcategoryCreateBody = z

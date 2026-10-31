@@ -120,6 +120,7 @@ export async function getWallet(userId: string, timeZone: string): Promise<Walle
     expiryDaysLeft: daysLeft,
     expiryWindowDays: config.coins.expiryDays,
     expiryWarnDays: config.coins.expiryWarnDays,
+    historyFilters: config.coins.historyFilters,
     monthSummary: month,
     dailyCap: config.coins.dailyCap,
     earnedToday: toCoins(earnedTodayMc),

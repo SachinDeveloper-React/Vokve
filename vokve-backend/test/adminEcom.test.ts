@@ -12,6 +12,7 @@ import {
   WishlistModel,
 } from '../src/modules/commerce/models.js';
 import { UserModel } from '../src/modules/identity/models.js';
+import { AuditLogModel } from '../src/modules/platform/models.js';
 import { seed } from '../src/seed/seed.js';
 import { app, authed, signUpAndRegister, type Session } from './helpers.js';
 
@@ -330,6 +331,95 @@ describe('admin: the shelf by category', () => {
     expect(moved.status).toBe(200);
     expect(moved.body).toMatchObject({ moved: 2, missing: ['not-a-thing'] });
     expect(await ShopItemModel.findById('tee').lean()).toMatchObject({ category: 'sports', subcategory: 'Kit' });
+  });
+});
+
+describe('admin: the order the shelves are drawn in (RULES R9)', () => {
+  /** The shelves in the order the app would draw them. */
+  const order = (body: { data: { category: string }[] }) => body.data.map(row => row.category);
+
+  it('moves a shelf one place and renumbers the row, and the app reads the new order', async () => {
+    await seed();
+    const session = await signUpAndRegister();
+
+    const before = await request(app).get('/v1/admin/shop/categories').set(ADMIN);
+    const shelves = order(before.body);
+    expect(shelves.length).toBeGreaterThan(2);
+    const second = shelves[1];
+
+    const moved = await request(app)
+      .post(`/v1/admin/shop/categories/${second}/reorder`)
+      .set(ADMIN)
+      .send({ direction: 'up', note: 'leading with it this week' });
+
+    expect(moved.status).toBe(200);
+    expect(order(moved.body)[0]).toBe(second);
+    // Renumbered 1..n, so "one place up" keeps meaning something and no two
+    // shelves tie.
+    expect(moved.body.data.map((row: { sort: number }) => row.sort)).toEqual(
+      moved.body.data.map((_: unknown, index: number) => index + 1),
+    );
+
+    // The member's own list is the same order, without an app release.
+    const app_ = await request(app).get('/v1/shop/categories').set(authed(session));
+    expect(app_.body.data.map((row: { category: string }) => row.category)[0]).toBe(second);
+
+    expect(
+      await AuditLogModel.countDocuments({ action: 'shop.category_reordered', subjectId: second }),
+    ).toBe(1);
+  });
+
+  it('a move off either end leaves the row alone', async () => {
+    await seed();
+    const before = await request(app).get('/v1/admin/shop/categories').set(ADMIN);
+    const first = order(before.body)[0];
+
+    const up = await request(app)
+      .post(`/v1/admin/shop/categories/${first}/reorder`)
+      .set(ADMIN)
+      .send({ direction: 'up' });
+
+    expect(up.status).toBe(200);
+    expect(order(up.body)).toEqual(order(before.body));
+  });
+
+  it('orders the names under one shelf too', async () => {
+    await seed();
+    const session = await signUpAndRegister();
+    const before = await request(app).get('/v1/admin/shop/categories').set(ADMIN);
+    const shelf = before.body.data.find(
+      (row: { subcategories: unknown[] }) => row.subcategories.length > 1,
+    );
+    expect(shelf).toBeTruthy();
+    const second = shelf.subcategories[1].name;
+
+    const moved = await request(app)
+      .post(
+        `/v1/admin/shop/categories/${shelf.category}/subcategories/${encodeURIComponent(second)}/reorder`,
+      )
+      .set(ADMIN)
+      .send({ direction: 'up' });
+
+    expect(moved.status).toBe(200);
+    const after = moved.body.data.find((row: { category: string }) => row.category === shelf.category);
+    expect(after.subcategories[0].name).toBe(second);
+
+    // And the chips the member sees follow, where that name has items on it.
+    const chips = await request(app).get('/v1/shop/categories').set(authed(session));
+    const live = chips.body.data.find((row: { category: string }) => row.category === shelf.category);
+    if (live && live.subcategories.length > 1) {
+      expect(live.subcategories[0].name).toBe(second);
+    }
+  });
+
+  it('refuses a shelf that is not there', async () => {
+    await seed();
+    const res = await request(app)
+      .post('/v1/admin/shop/categories/not-a-shelf/reorder')
+      .set(ADMIN)
+      .send({ direction: 'up' });
+
+    expect(res.status).toBe(404);
   });
 });
 

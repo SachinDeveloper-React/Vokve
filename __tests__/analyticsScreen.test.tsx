@@ -25,8 +25,11 @@ import {
   formatLongDate,
   formatWeekdayDate,
   formatWeekdayDay,
+  fromIsoDate,
   mondayOf,
+  toIsoDate,
   todayIso,
+  type IsoDate,
 } from '../src/utils/date';
 
 const mockNavigate = jest.fn();
@@ -67,6 +70,25 @@ jest.mock('../src/services/api/endpoints', () => ({
 const metrics = {
   frame: { x: 0, y: 0, width: 400, height: 800 },
   insets: { top: 20, left: 0, right: 0, bottom: 0 },
+};
+
+/**
+ * The second of *last* month, and the grid paged back to find it.
+ *
+ * Last month rather than this one because these tests need a day that has
+ * happened and is not today: a day still to come is correctly unpressable in
+ * the grid, and on the 1st of a month every other day of it is still to
+ * come. Paging back moves the calendar only — the screen stays anchored to
+ * today, which is the thing half of these tests are checking.
+ */
+const pastDay = (): IsoDate => {
+  const now = fromIsoDate(todayIso());
+  return toIsoDate(new Date(now.getFullYear(), now.getMonth() - 1, 2));
+};
+
+const pageBack = async (tree: ReactTestRenderer.ReactTestRenderer) => {
+  await press(tree, 'Previous month');
+  return pastDay();
 };
 
 /** Monday to Sunday of this calendar week. */
@@ -413,7 +435,7 @@ describe('AnalyticsScreen', () => {
 
     test('a day in the grid opens that day in full', async () => {
       const tree = await render();
-      const picked = `${today.slice(0, 7)}-02`;
+      const picked = await pageBack(tree);
 
       await press(tree, formatLongDate(picked));
 
@@ -426,7 +448,7 @@ describe('AnalyticsScreen', () => {
       // which emptied every card behind the sheet while five reads were in
       // flight — and the sheet opened on a day of zeros for the same reason.
       const tree = await render();
-      const picked = `${today.slice(0, 7)}-02`;
+      const picked = await pageBack(tree);
 
       await press(tree, formatLongDate(picked));
 
@@ -440,7 +462,7 @@ describe('AnalyticsScreen', () => {
 
     test('"Show this day" is what moves the whole screen onto it', async () => {
       const tree = await render();
-      const picked = `${today.slice(0, 7)}-02`;
+      const picked = await pageBack(tree);
 
       await press(tree, formatLongDate(picked));
       await press(tree, 'Show this day');
@@ -463,13 +485,14 @@ describe('AnalyticsScreen', () => {
     });
 
     test('a day still on its way says so rather than drawing zeros', async () => {
-      const picked = `${today.slice(0, 7)}-02`;
+      const picked = pastDay();
       mockActivityApi.day.mockImplementation(async (date: string) => {
         if (date === picked) return new Promise(() => {}) as Promise<never>;
         return day(date, date === today ? 6245 : 9125);
       });
 
       const tree = await render();
+      await press(tree, 'Previous month');
       await press(tree, formatLongDate(picked));
 
       const text = allText(tree);

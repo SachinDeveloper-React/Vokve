@@ -242,12 +242,15 @@ describe('AccountScreen', () => {
     const text = allText(await render());
 
     expect(text).toContain('Rana Jay');
-    expect(text).toContain('Level 18');
-    expect(text).toContain('Athlo Warrior');
     expect(text).toContain('Member since May 2025');
-    // The level bar reads from the band, and the rank from the whole field.
-    expect(text).toContain('1,000 / 3,700 to level 19');
+    // The rank is read from the whole field and is not part of the level, so
+    // it stays on the card while the level is behind
+    // `config.showProfileLevel` — see `profileSummaryCard.test.tsx` for the
+    // level itself, drawn with the flag on.
     expect(text).toContain('#412 of 18.9k');
+    expect(text).not.toContain('Level 18');
+    expect(text).not.toContain('Athlo Warrior');
+    expect(text).not.toContain('to level 19');
     expect(text).toContain('2,450'); // the wallet's balance, grouped
     expect(text).toContain('32'); // the server's current streak
     expect(text).toContain('3'); // badges earned, off the achievement shelf
@@ -394,9 +397,10 @@ describe('AccountScreen', () => {
     expect(text).toContain('Manage your profile and preferences');
     // The panel draws without a summary rather than vanishing, so the screen
     // does not reflow the moment the first sync lands — but nothing that is
-    // only meaningful with one (the level bar, the badge shelf, the
-    // completeness card) is drawn from placeholders.
-    expect(text).toContain('Getting started');
+    // only meaningful with one (the badge shelf, the completeness card) is
+    // drawn from placeholders. The level's own placeholder went with the
+    // level: `config.showProfileLevel` is off.
+    expect(text).not.toContain('Getting started');
     expect(text).not.toContain('to level');
     expect(text).not.toContain('earned');
     expect(text).not.toContain('Finish your profile');

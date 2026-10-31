@@ -47,6 +47,23 @@ export const config = {
   useMockApi: false,
 
   /**
+   * Whether the account card shows the member's level.
+   *
+   * Off for now, on the owner's call: the level, its rank title and the bar
+   * under them are coming back, so the card still *reads* the server's
+   * figures and simply does not draw them — rather than the JSX being
+   * commented out, which would stop being typechecked the moment
+   * `ProfileSummary` next changed shape and would be dead the day it was
+   * uncommented.
+   *
+   * Nothing on the server changed: `/account/summary` still works the level
+   * out from lifetime coins (RULES P4), so turning this back on shows the
+   * level everybody has been accruing all along rather than starting it from
+   * one. The rank beside it is a separate figure and stays on.
+   */
+  showProfileLevel: false,
+
+  /**
    * Writes today's steps as the phone sees them to the console on every
    * foreground and every "sync now": the tracker's set-up, Health Connect's
    * grants, every app and raw record there, which number is shown and why,
