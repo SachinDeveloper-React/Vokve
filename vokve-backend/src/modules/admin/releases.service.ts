@@ -4,6 +4,7 @@ import { Errors } from '../../lib/errors.js';
 import { compareVersions } from '../../middleware/version.js';
 import { AppReleaseModel } from '../devices/models.js';
 import { AppConfigModel, AuditLogModel } from '../platform/models.js';
+import { pageFields } from './paging.js';
 
 /**
  * The releases, and the line below which a build is refused (RULES DV12).
@@ -41,15 +42,80 @@ export const releaseBody = z.object({
 });
 export type ReleaseBody = z.infer<typeof releaseBody>;
 
-export async function listReleases(platform?: 'ios' | 'android') {
-  const rows = await AppReleaseModel.find(platform ? { platform } : {})
-    .sort({ platform: 1, releasedAt: -1 })
-    .lean();
-  const config = await getConfig();
+export const releaseQuery = z.object({
+  platform: z.enum(PLATFORMS).optional(),
+  status: z.enum(['any', 'current', 'supported', 'deprecated', 'blocked']).default('any'),
+  ...pageFields(25, 100),
+});
+export type ReleaseQuery = z.infer<typeof releaseQuery>;
+
+/**
+ * Every known build with its status, the minimum in force, and which builds
+ * it refuses.
+ *
+ * Paged, because this collection only ever grows: a row is written for each
+ * build either platform ships and nothing ever removes one, so the list a
+ * year in is every release of that year. The counts above it are of the
+ * whole collection rather than of the page — "3 blocked" has to mean three
+ * blocked builds, not three on this screen.
+ */
+export async function listReleases(query: ReleaseQuery) {
+  const filter: Record<string, unknown> = {};
+  if (query.platform) filter.platform = query.platform;
+  if (query.status !== 'any') filter.status = query.status;
+
+  const [rows, total, byStatus, versions, serving, config] = await Promise.all([
+    AppReleaseModel.find(filter)
+      .sort({ platform: 1, releasedAt: -1 })
+      .skip(query.offset)
+      .limit(query.limit)
+      .lean(),
+    AppReleaseModel.countDocuments(filter),
+    AppReleaseModel.aggregate<{ _id: string; releases: number }>([
+      ...(query.platform ? [{ $match: { platform: query.platform } }] : []),
+      { $group: { _id: '$status', releases: { $sum: 1 } } },
+    ]),
+    /**
+     * Two fields of every build, to count the ones the gate refuses.
+     *
+     * "Below the minimum" is a version comparison, not a field — `1.10.0`
+     * is above `1.9.0` and sorts below it as a string — so this one figure
+     * cannot be a `countDocuments`. It is the versions alone rather than the
+     * documents, which is a few tens of bytes a release: bounded by how
+     * often the app has ever shipped, and the one read here that is.
+     */
+    AppReleaseModel.find({}, { platform: 1, version: 1 }).lean(),
+    /** What each store is serving, which is one row per platform by status. */
+    AppReleaseModel.find({ status: 'current' }, { platform: 1, version: 1, build: 1 }).lean(),
+    getConfig(),
+  ]);
+  const countOf = (status: string) => byStatus.find(row => row._id === status)?.releases ?? 0;
+  const currentOf = (platform: 'ios' | 'android') => {
+    const row = serving.find(entry => entry.platform === platform);
+    return row ? { version: row.version, build: row.build } : null;
+  };
+
   return {
     minVersion: config.app.minVersion,
     storeUrl: config.app.storeUrl,
     nudgeOnNewer: config.app.update.nudgeOnNewer,
+    /** What each store is serving, whichever page of the list this is. */
+    current: { ios: currentOf('ios'), android: currentOf('android') },
+    total,
+    limit: query.limit,
+    offset: query.offset,
+    /** Of every build on this platform, not of this page. */
+    totals: {
+      releases: byStatus.reduce((sum, row) => sum + row.releases, 0),
+      current: countOf('current'),
+      supported: countOf('supported'),
+      deprecated: countOf('deprecated'),
+      blocked: countOf('blocked'),
+      /** Builds the version gate would refuse today — every request answers 426. */
+      refused: versions.filter(
+        row => compareVersions(row.version, config.app.minVersion[row.platform as 'ios' | 'android']) < 0,
+      ).length,
+    },
     data: rows.map(row => ({
       id: String(row._id),
       platform: row.platform,

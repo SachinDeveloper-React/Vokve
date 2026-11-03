@@ -12,6 +12,7 @@ import { credit } from '../economy/service.js';
 import { UserModel } from '../identity/models.js';
 import { notify } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
+import { page, pageFields } from './paging.js';
 
 /**
  * The things an operator may change about an account, kept in their own file
@@ -394,7 +395,8 @@ export async function grantBadge(actor: string, userId: string, body: GrantBadge
 
 // ─── What has been done to this account ────────────────────────────────────
 
-export const auditQuery = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
+export const auditQuery = z.object(pageFields(50, 200));
+export type AuditQuery = z.infer<typeof auditQuery>;
 
 /**
  * Every operator action on this member, newest first.
@@ -403,13 +405,14 @@ export const auditQuery = z.object({ limit: z.coerce.number().int().min(1).max(2
  * sent, a freeze, an adjustment. Shown on the account it was done to,
  * because that is where the next person asks "who did this".
  */
-export async function memberAudit(userId: string, limit: number) {
-  const rows = await AuditLogModel.find({ subjectType: 'user', subjectId: userId })
-    .sort({ at: -1 })
-    .limit(limit)
-    .lean();
-  return {
-    data: rows.map(row => ({
+export async function memberAudit(userId: string, query: AuditQuery) {
+  const filter = { subjectType: 'user', subjectId: userId };
+  const [rows, total] = await Promise.all([
+    AuditLogModel.find(filter).sort({ at: -1 }).skip(query.offset).limit(query.limit).lean(),
+    AuditLogModel.countDocuments(filter),
+  ]);
+  return page(
+    rows.map(row => ({
       id: String(row._id),
       action: row.action,
       actorType: row.actorType,
@@ -418,5 +421,7 @@ export async function memberAudit(userId: string, limit: number) {
       after: row.after ?? null,
       at: iso((row as { at?: Date }).at),
     })),
-  };
+    total,
+    query,
+  );
 }

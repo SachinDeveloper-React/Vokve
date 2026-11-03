@@ -9,6 +9,7 @@ import {
   LeaderboardScoreModel,
 } from '../leaderboard/models.js';
 import { countryNameOf, rulesFor, weekOf, zoneOf } from '../leaderboard/service.js';
+import { limitField, offsetField, pageFields } from './paging.js';
 
 /**
  * The weekly board as the operator needs it (RULES §L).
@@ -41,8 +42,11 @@ import { countryNameOf, rulesFor, weekOf, zoneOf } from '../leaderboard/service.
 export const adminLeaderboardQuery = z.object({
   /** ISO-3166-1 alpha-2. Left out, the shop's own country. */
   country: z.string().trim().length(2).toUpperCase().optional(),
-  /** How many of the live standings to show. */
-  limit: z.coerce.number().int().min(1).max(100).default(25),
+  /** A page of the live standings — `offset` is places, so rank survives it. */
+  ...pageFields(25, 100),
+  /** And a page of the last closed week's winners, which is its own list. */
+  winnerLimit: limitField(20, 100),
+  winnerOffset: offsetField(),
 });
 export type AdminLeaderboardQuery = z.infer<typeof adminLeaderboardQuery>;
 
@@ -64,7 +68,7 @@ export async function adminLeaderboard(query: AdminLeaderboardQuery) {
   const scored = { periodId: week.id, country, score: { $gt: 0 } };
 
   const [top, ranked, closedPeriod] = await Promise.all([
-    LeaderboardScoreModel.find(scored).sort(RANKED).limit(query.limit).lean(),
+    LeaderboardScoreModel.find(scored).sort(RANKED).skip(query.offset).limit(query.limit).lean(),
     LeaderboardScoreModel.countDocuments(scored),
     LeaderboardPeriodModel.find({ country }).sort({ periodId: -1 }).limit(1).lean(),
   ]);
@@ -82,7 +86,9 @@ export async function adminLeaderboard(query: AdminLeaderboardQuery) {
   const lastPaid = Math.max(0, ...board.tiers.map(t => t.toRank));
 
   const standings = top.map((row, index) => {
-    const rank = index + 1;
+    // The place, not the row's position on this page: the sort is the rank,
+    // so page two starts at `offset + 1` rather than at 1 again.
+    const rank = query.offset + index + 1;
     const tier = tierFor(rank);
     const person = people.get(row.userId);
     return {
@@ -105,9 +111,52 @@ export async function adminLeaderboard(query: AdminLeaderboardQuery) {
   });
 
   const last = closedPeriod[0] ?? null;
-  const lastResults = last
-    ? await LeaderboardResultModel.find({ periodId: last.periodId, country }).sort({ rank: 1 }).lean()
-    : [];
+  /**
+   * The closed week, two reads rather than one.
+   *
+   * This used to load every result row of the week to add three numbers up
+   * and then show the first twenty — on a week with fifty thousand people
+   * scoring, that is fifty thousand documents through the process to render
+   * a table of twenty. The sums are what the database is for, and the
+   * winners are a page like any other.
+   *
+   * A result row exists for everyone who scored, so the table's own filter
+   * moves into the query: a winner is a place the tiers paid something to,
+   * in coins or in a perk.
+   */
+  const winnerFilter = last
+    ? {
+        periodId: last.periodId,
+        country,
+        $or: [{ coins: { $gt: 0 } }, { 'perks.0': { $exists: true } }],
+      }
+    : null;
+  const [paidUp, lastResults, winnersTotal] = last
+    ? await Promise.all([
+        LeaderboardResultModel.aggregate<{ _id: null; coinsPaid: number; coinsOwed: number; excluded: number }>([
+          { $match: { periodId: last.periodId, country } },
+          {
+            $group: {
+              _id: null,
+              coinsPaid: { $sum: { $ifNull: ['$granted', 0] } },
+              coinsOwed: {
+                $sum: {
+                  $cond: ['$excluded', 0, { $subtract: ['$coins', { $ifNull: ['$granted', 0] }] }],
+                },
+              },
+              excluded: { $sum: { $cond: ['$excluded', 1, 0] } },
+            },
+          },
+        ]),
+        LeaderboardResultModel.find(winnerFilter!)
+          .sort({ rank: 1 })
+          .skip(query.winnerOffset)
+          .limit(query.winnerLimit)
+          .lean(),
+        LeaderboardResultModel.countDocuments(winnerFilter!),
+      ])
+    : [[], [], 0];
+  const paid = paidUp[0] ?? null;
   // Names for the winners too: an operator reading "usr_8f2c…" cannot tell
   // whether a prize went to the person who complained about it.
   const winners = new Map(
@@ -162,6 +211,9 @@ export async function adminLeaderboard(query: AdminLeaderboardQuery) {
       /** Everyone scoring this week, paid or not. */
       ranked,
     },
+    total: ranked,
+    limit: query.limit,
+    offset: query.offset,
     standings,
     lastClosed: last
       ? {
@@ -170,14 +222,16 @@ export async function adminLeaderboard(query: AdminLeaderboardQuery) {
           end: last.end,
           closedAt: iso(last.closedAt),
           ranked: last.ranked,
-          coinsPaid: lastResults.reduce((sum, row) => sum + (row.granted ?? 0), 0),
+          coinsPaid: paid?.coinsPaid ?? 0,
           /** Owed by the tiers but not credited — the step-rewards switch again. */
-          coinsOwed: lastResults.reduce((sum, row) => sum + (row.excluded ? 0 : row.coins - (row.granted ?? 0)), 0),
+          coinsOwed: paid?.coinsOwed ?? 0,
           /** Places skipped for an open fraud flag (L9); nobody moved up into them. */
-          excluded: lastResults.filter(row => row.excluded).length,
+          excluded: paid?.excluded ?? 0,
+          /** How many places the week paid anything to, of which `winners` is a page. */
+          winnersTotal,
+          winnerLimit: query.winnerLimit,
+          winnerOffset: query.winnerOffset,
           winners: lastResults
-            .filter(row => row.coins > 0 || row.perks.length > 0)
-            .slice(0, 20)
             .map(row => ({
               rank: row.rank,
               userId: row.userId,

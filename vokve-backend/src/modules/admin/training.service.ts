@@ -3,6 +3,7 @@ import { equipmentSchema, muscleGroupSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
 import { AuditLogModel } from '../platform/models.js';
 import { ExerciseModel, WorkoutModel, WorkoutTemplateModel } from '../training/models.js';
+import { limitField, offsetField } from './paging.js';
 
 /**
  * The gym's own content, for the operator: the exercise list and the
@@ -28,6 +29,9 @@ const MUSCLE_GROUPS = muscleGroupSchema.options;
 const EQUIPMENT = equipmentSchema.options;
 
 const iso = (at: Date | null | undefined): string | null => at?.toISOString() ?? null;
+
+/** What somebody typed into a search box, as a literal rather than a pattern. */
+const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** `Barbell Bench Press` → `barbell-bench-press`. */
 function slugify(name: string): string {
@@ -90,13 +94,108 @@ const audit = (actor: string, action: string, subjectType: string, subjectId: st
  * an exercise in no template and in nobody's workouts is one that was typed
  * and forgotten.
  */
-export async function listTraining() {
-  const [exercises, templates, logged] = await Promise.all([
-    ExerciseModel.find().sort({ muscleGroup: 1, name: 1 }).lean(),
-    WorkoutTemplateModel.find().sort({ sort: 1, _id: 1 }).lean(),
+export const trainingQuery = z.object({
+  /**
+   * Two lists in one answer, so two of everything.
+   *
+   * The gym is exercises *and* the templates built out of them, read
+   * together because each decides what can be done to the other — a
+   * template naming a missing exercise is one the app drops, and an
+   * exercise a template uses is not deleted without saying so. One
+   * `offset` cannot mean both, so each list has its own, and a link an
+   * operator was sent still says which page of which.
+   */
+  exerciseQ: z.string().max(120).default(''),
+  muscleGroup: z.enum(MUSCLE_GROUPS).optional(),
+  equipment: z.enum(EQUIPMENT).optional(),
+  exerciseState: z.enum(['any', 'unused', 'logged']).default('any'),
+  exerciseLimit: limitField(25, 100),
+  exerciseOffset: offsetField(),
+
+  templateQ: z.string().max(120).default(''),
+  templateState: z.enum(['any', 'broken']).default('any'),
+  templateLimit: limitField(25, 100),
+  templateOffset: offsetField(),
+});
+export type TrainingQuery = z.infer<typeof trainingQuery>;
+
+const WHOLE_GYM: TrainingQuery = {
+  exerciseQ: '',
+  exerciseState: 'any',
+  exerciseLimit: 25,
+  exerciseOffset: 0,
+  templateQ: '',
+  templateState: 'any',
+  templateLimit: 25,
+  templateOffset: 0,
+};
+
+export async function listTraining(query: TrainingQuery = WHOLE_GYM) {
+  const exerciseFilter: Record<string, unknown> = {};
+  const exerciseWords = query.exerciseQ.trim();
+  if (exerciseWords) {
+    const like = new RegExp(escape(exerciseWords), 'i');
+    exerciseFilter.$or = [{ _id: like }, { name: like }];
+  }
+  if (query.muscleGroup) exerciseFilter.muscleGroup = query.muscleGroup;
+  if (query.equipment) exerciseFilter.equipment = query.equipment;
+
+  const templateFilter: Record<string, unknown> = {};
+  const templateWords = query.templateQ.trim();
+  if (templateWords) {
+    const like = new RegExp(escape(templateWords), 'i');
+    templateFilter.$or = [{ _id: like }, { title: like }, { description: like }];
+  }
+
+  /**
+   * The three id sets both halves of this answer need, read once.
+   *
+   * "Unused", "logged" and "broken" are each a question about the *other*
+   * collection, and each is asked both by a filter and by a tally above the
+   * table. Asked once here and reused rather than twice: the logged set is
+   * a pass over every workout ever finished, which is the one read on this
+   * page that grows with the members rather than with the catalogue.
+   */
+  const [known, inTemplates, everLogged] = await Promise.all([
+    ExerciseModel.distinct('_id'),
+    WorkoutTemplateModel.distinct('exerciseIds'),
+    WorkoutModel.distinct('exercises.exerciseId', { deletedAt: null }),
+  ]);
+  const touched = [...new Set([...inTemplates, ...everLogged])];
+
+  if (query.exerciseState !== 'any') {
+    exerciseFilter._id = query.exerciseState === 'logged' ? { $in: everLogged } : { $nin: touched };
+  }
+  if (query.templateState === 'broken') {
+    templateFilter.exerciseIds = { $elemMatch: { $nin: known } };
+  }
+
+  const [exercises, exerciseTotal, templates, templateTotal, totals] = await Promise.all([
+    ExerciseModel.find(exerciseFilter)
+      .sort({ muscleGroup: 1, name: 1 })
+      .skip(query.exerciseOffset)
+      .limit(query.exerciseLimit)
+      .lean(),
+    ExerciseModel.countDocuments(exerciseFilter),
+    WorkoutTemplateModel.find(templateFilter)
+      .sort({ sort: 1, _id: 1 })
+      .skip(query.templateOffset)
+      .limit(query.templateLimit)
+      .lean(),
+    WorkoutTemplateModel.countDocuments(templateFilter),
+    gymTotals(known, touched),
+  ]);
+
+  const exerciseIds = exercises.map(row => String(row._id));
+  const templateIds = [...new Set(templates.flatMap(row => row.exerciseIds ?? []))];
+
+  const [logged, usingThem, namesForTemplates] = await Promise.all([
+    // Logged sets, for the exercises on this page. Unwinding every workout
+    // ever finished to decorate twenty-five rows is the read this replaces.
     WorkoutModel.aggregate<{ _id: string; sessions: number; members: string[]; lastAt: Date }>([
-      { $match: { deletedAt: null } },
+      { $match: { deletedAt: null, 'exercises.exerciseId': { $in: exerciseIds } } },
       { $unwind: '$exercises' },
+      { $match: { 'exercises.exerciseId': { $in: exerciseIds } } },
       {
         $group: {
           _id: '$exercises.exerciseId',
@@ -106,13 +205,18 @@ export async function listTraining() {
         },
       },
     ]),
+    // The templates that include them, by name — the column that decides
+    // whether an exercise can be deleted.
+    WorkoutTemplateModel.find({ exerciseIds: { $in: exerciseIds } }, { title: 1, exerciseIds: 1 }).lean(),
+    // And the names the templates on *their* page need, in their order.
+    ExerciseModel.find({ _id: { $in: templateIds } }, { name: 1 }).lean(),
   ]);
 
   const loggedOf = new Map(logged.map(row => [row._id, row]));
-  const nameOf = new Map(exercises.map(row => [row._id, row.name]));
+  const nameOf = new Map(namesForTemplates.map(row => [String(row._id), row.name]));
 
   const exerciseRows = exercises.map(row => {
-    const used = templates.filter(template => (template.exerciseIds ?? []).includes(row._id));
+    const used = usingThem.filter(template => (template.exerciseIds ?? []).includes(row._id));
     const use = loggedOf.get(row._id);
     return {
       id: row._id,
@@ -156,17 +260,66 @@ export async function listTraining() {
   return {
     muscleGroups: MUSCLE_GROUPS,
     equipment: EQUIPMENT,
-    totals: {
-      exercises: exerciseRows.length,
-      templates: templateRows.length,
-      /** Templates the app will refuse: they name an exercise that is not there. */
-      broken: templateRows.filter(row => row.missing.length > 0).length,
-      unused: exerciseRows.filter(row => row.templates.length === 0 && row.logged.sessions === 0).length,
-      sessions: logged.reduce((sum, row) => sum + row.sessions, 0),
-    },
+    /** Of the whole gym, whatever these two pages are showing. */
+    totals,
+    /** How many each filter matches, of which each list is one page. */
+    exercisePage: { total: exerciseTotal, limit: query.exerciseLimit, offset: query.exerciseOffset },
+    templatePage: { total: templateTotal, limit: query.templateLimit, offset: query.templateOffset },
     exercises: exerciseRows,
     templates: templateRows,
     nextCursor: null,
+  };
+}
+
+/**
+ * Every exercise by name alone, for the picker.
+ *
+ * A template is built by choosing exercises in order, so that form needs
+ * the whole list — the one thing a paged list cannot give it. This is the
+ * same collection with four fields per row and no joins, which is a few
+ * kilobytes where the full list is two reads per row.
+ */
+export async function exercisePicker() {
+  const rows = await ExerciseModel.find({}, { name: 1, muscleGroup: 1, equipment: 1, isTimed: 1 })
+    .sort({ muscleGroup: 1, name: 1 })
+    .lean();
+  return {
+    total: rows.length,
+    data: rows.map(row => ({
+      id: String(row._id),
+      name: row.name ?? String(row._id),
+      muscleGroup: row.muscleGroup ?? 'full_body',
+      equipment: row.equipment ?? 'none',
+      isTimed: row.isTimed === true,
+    })),
+  };
+}
+
+/**
+ * The five figures above the two tables, each of the whole gym.
+ *
+ * "6 broken templates" has to mean six templates the app will refuse, not
+ * six on this screen. `known` and `touched` come from the caller because
+ * the filters above need the same two sets, and reading them twice would
+ * mean two passes over every workout ever finished.
+ */
+async function gymTotals(known: string[], touched: string[]) {
+  const [exercises, templates, broken, unused, sessions] = await Promise.all([
+    ExerciseModel.countDocuments({}),
+    WorkoutTemplateModel.countDocuments({}),
+    WorkoutTemplateModel.countDocuments({ exerciseIds: { $elemMatch: { $nin: known } } }),
+    ExerciseModel.countDocuments({ _id: { $nin: touched } }),
+    WorkoutModel.countDocuments({ deletedAt: null }),
+  ]);
+
+  return {
+    exercises,
+    templates,
+    /** Templates the app will refuse: they name an exercise that is not there. */
+    broken,
+    /** Typed and forgotten: in no template, and in nobody's workouts. */
+    unused,
+    sessions,
   };
 }
 

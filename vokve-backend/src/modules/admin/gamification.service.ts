@@ -12,6 +12,7 @@ import {
   UserAchievementModel,
 } from '../challenges/models.js';
 import { AuditLogModel } from '../platform/models.js';
+import { pageFields } from './paging.js';
 
 /**
  * The gamification catalogue (RULES C1–C7), for the operator.
@@ -41,6 +42,9 @@ import { AuditLogModel } from '../platform/models.js';
 
 const iso = (at: Date | null | undefined): string | null => at?.toISOString() ?? null;
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'A date looks like 2026-10-19');
+
+/** What somebody typed into a search box, as a literal rather than a pattern. */
+const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // ─── Challenges (RULES C1–C5) ──────────────────────────────────────────────
 
@@ -101,6 +105,114 @@ function windowStateOf(row: { startsOn?: string | null; endsOn?: string | null; 
   return 'live' as const;
 }
 
+export const challengeQuery = z.object({
+  /** Words in the title, the description, or the id. */
+  q: z.string().max(160).default(''),
+  /** The state a member's board would put it in today. */
+  state: z.enum(['any', 'live', 'upcoming', 'ended', 'retired']).default('any'),
+  cadence: z.enum(CHALLENGE_CADENCES).optional(),
+  ...pageFields(25, 100),
+  sort: z.enum(['shelf', 'newest', 'title']).default('shelf'),
+});
+export type ChallengeQuery = z.infer<typeof challengeQuery>;
+
+/** The whole shelf, for the reads that answer with a page after a write. */
+const WHOLE_SHELF: ChallengeQuery = { q: '', state: 'any', limit: 25, offset: 0, sort: 'shelf' };
+
+/**
+ * `state` as a query rather than as a filter over rows already read.
+ *
+ * The same four cases `windowStateOf` decides in memory, written against
+ * the dates: a page of the live ones has to be cut by the database, or
+ * "live" means "live, among the twenty-five this page happened to fetch".
+ *
+ * `$ne: null` is doing real work in `ended`: BSON sorts null before every
+ * string, so a bare `endsOn: { $lt: today }` matches every challenge that
+ * runs forever — the exact opposite of ended.
+ */
+function windowFilter(state: ChallengeQuery['state'], today: string): Record<string, unknown> {
+  if (state === 'retired') return { active: false };
+  const open = { active: { $ne: false } };
+  if (state === 'upcoming') return { ...open, startsOn: { $gt: today } };
+  if (state === 'ended') return { ...open, endsOn: { $ne: null, $lt: today } };
+  if (state === 'live') {
+    return {
+      ...open,
+      $and: [
+        { $or: [{ startsOn: null }, { startsOn: { $lte: today } }] },
+        { $or: [{ endsOn: null }, { endsOn: { $gte: today } }] },
+      ],
+    };
+  }
+  return {};
+}
+
+type ChallengeDoc = {
+  _id: string;
+  title: string;
+  description?: string | null;
+  emoji?: string | null;
+  metric: string;
+  cadence: string;
+  goal: number;
+  rewardCoins: number;
+  rewardsBadge?: boolean | null;
+  badgeId?: string | null;
+  startsOn?: string | null;
+  endsOn?: string | null;
+  active?: boolean;
+  sort?: number | null;
+  updatedAt?: Date;
+};
+
+/**
+ * One stored challenge as the panel reads it.
+ *
+ * Its own row and the lookups beside it, kept apart so that reading one
+ * challenge costs one challenge: the list hands in the page's badge names
+ * and completion rollup, and `getChallenge` hands in just its own.
+ */
+function challengeRowOf(
+  row: ChallengeDoc,
+  today: string,
+  badgeOf: Map<string, { label: string }>,
+  statOf: Map<string, CompletionStat>,
+) {
+  const stat = statOf.get(row._id);
+  return {
+    id: row._id,
+    title: row.title,
+    description: row.description ?? '',
+    emoji: row.emoji ?? '🏅',
+    metric: row.metric,
+    cadence: row.cadence,
+    goal: row.goal,
+    rewardCoins: row.rewardCoins,
+    rewardsBadge: row.rewardsBadge === true,
+    badgeId: row.badgeId ?? null,
+    /** The badge's own name, so a list never shows a bare id. */
+    badgeLabel: row.badgeId ? (badgeOf.get(row.badgeId)?.label ?? null) : null,
+    /** Set when `badgeId` names an achievement that is not there any more. */
+    badgeMissing: Boolean(row.badgeId) && !badgeOf.has(row.badgeId as string),
+    startsOn: row.startsOn ?? null,
+    endsOn: row.endsOn ?? null,
+    active: row.active !== false,
+    sort: row.sort ?? 0,
+    /** `live`, `upcoming`, `ended` or `retired` — what a member's board does with it today. */
+    state: windowStateOf(row, today),
+    completions: {
+      total: stat?.completions ?? 0,
+      members: stat?.members.length ?? 0,
+      /** Coins actually paid out, which the ceiling and the switch can make less than the reward. */
+      granted: stat?.granted ?? 0,
+      /** Completions the economy has not paid: capped by the daily ceiling, or waiting on the switch. */
+      unpaid: stat?.unpaid ?? 0,
+      lastAt: iso(stat?.lastAt ?? null),
+    },
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
 /**
  * Every challenge, with what it has actually paid.
  *
@@ -108,14 +220,60 @@ function windowStateOf(row: { startsOn?: string | null; endsOn?: string | null; 
  * nobody has ever finished is either too hard or broken, and one paying
  * `unpaid` completions is the daily ceiling or the coins switch (D-46)
  * rather than the challenge.
+ *
+ * A page at a time, and two things follow from that:
+ *
+ *   - **The rollup is of the page, not of the shelf.** The completion
+ *     aggregate used to group every completion row ever written — one per
+ *     member per period — to decorate a list of twenty-five. It is matched
+ *     to the challenges on the page now, and the figures above the table
+ *     come from counts of their own.
+ *   - **The tallies stay whole-collection.** "4 live" has to mean four live
+ *     challenges, not four on this screen, so each is counted in the
+ *     database against the same window the rows were cut by.
  */
-export async function listChallenges() {
+export async function listChallenges(query: ChallengeQuery = WHOLE_SHELF) {
   const config = await getConfig();
   const today = localDayOf(new Date(), config.locale.timezone);
 
-  const [rows, stats, badges] = await Promise.all([
-    ChallengeDefinitionModel.find().sort({ sort: 1, _id: 1 }).lean(),
+  const filter: Record<string, unknown> = windowFilter(query.state, today);
+  const trimmed = query.q.trim();
+  if (trimmed) {
+    const like = new RegExp(escape(trimmed), 'i');
+    filter.$or = [{ _id: like }, { title: like }, { description: like }];
+  }
+  if (query.cadence) filter.cadence = query.cadence;
+
+  const order: Record<string, 1 | -1> =
+    query.sort === 'newest' ? { createdAt: -1, _id: 1 } : query.sort === 'title' ? { title: 1 } : { sort: 1, _id: 1 };
+
+  const [rows, total, tallies, paid] = await Promise.all([
+    ChallengeDefinitionModel.find(filter).sort(order).skip(query.offset).limit(query.limit).lean(),
+    ChallengeDefinitionModel.countDocuments(filter),
+    // Every tally the page's own header shows, each of the whole shelf.
+    Promise.all([
+      ChallengeDefinitionModel.countDocuments({}),
+      ChallengeDefinitionModel.countDocuments(windowFilter('live', today)),
+      ChallengeDefinitionModel.countDocuments(windowFilter('upcoming', today)),
+      ChallengeDefinitionModel.countDocuments(windowFilter('retired', today)),
+    ]),
+    ChallengeCompletionModel.aggregate<{ _id: null; completions: number; granted: number; unpaid: number }>([
+      {
+        $group: {
+          _id: null,
+          completions: { $sum: 1 },
+          granted: { $sum: { $ifNull: ['$granted', 0] } },
+          unpaid: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, 0, 1] } },
+        },
+      },
+    ]),
+  ]);
+
+  const ids = rows.map(row => String(row._id));
+  const badgeIds = rows.map(row => row.badgeId).filter((id): id is string => Boolean(id));
+  const [stats, badges] = await Promise.all([
     ChallengeCompletionModel.aggregate<CompletionStat>([
+      { $match: { challengeId: { $in: ids } } },
       {
         $group: {
           _id: '$challengeId',
@@ -127,47 +285,16 @@ export async function listChallenges() {
         },
       },
     ]),
-    AchievementDefinitionModel.find({}, { label: 1, title: 1 }).lean(),
+    // Only the badges this page names, for the names beside them.
+    AchievementDefinitionModel.find({ _id: { $in: badgeIds } }, { label: 1, title: 1 }).lean(),
   ]);
 
   const statOf = new Map(stats.map(stat => [stat._id, stat]));
   const badgeOf = new Map(badges.map(badge => [badge._id, badge]));
+  const [written, live, upcoming, retired] = tallies;
+  const grand = paid[0] ?? null;
 
-  const data = rows.map(row => {
-    const stat = statOf.get(row._id);
-    return {
-      id: row._id,
-      title: row.title,
-      description: row.description ?? '',
-      emoji: row.emoji ?? '🏅',
-      metric: row.metric,
-      cadence: row.cadence,
-      goal: row.goal,
-      rewardCoins: row.rewardCoins,
-      rewardsBadge: row.rewardsBadge === true,
-      badgeId: row.badgeId ?? null,
-      /** The badge's own name, so a list never shows a bare id. */
-      badgeLabel: row.badgeId ? (badgeOf.get(row.badgeId)?.label ?? null) : null,
-      /** Set when `badgeId` names an achievement that is not there any more. */
-      badgeMissing: Boolean(row.badgeId) && !badgeOf.has(row.badgeId as string),
-      startsOn: row.startsOn ?? null,
-      endsOn: row.endsOn ?? null,
-      active: row.active !== false,
-      sort: row.sort ?? 0,
-      /** `live`, `upcoming`, `ended` or `retired` — what a member's board does with it today. */
-      state: windowStateOf(row, today),
-      completions: {
-        total: stat?.completions ?? 0,
-        members: stat?.members.length ?? 0,
-        /** Coins actually paid out, which the ceiling and the switch can make less than the reward. */
-        granted: stat?.granted ?? 0,
-        /** Completions the economy has not paid: capped by the daily ceiling, or waiting on the switch. */
-        unpaid: stat?.unpaid ?? 0,
-        lastAt: iso(stat?.lastAt ?? null),
-      },
-      updatedAt: iso((row as { updatedAt?: Date }).updatedAt),
-    };
-  });
+  const data = rows.map(row => challengeRowOf(row, today, badgeOf, statOf));
 
   return {
     metrics: CHALLENGE_METRICS,
@@ -180,25 +307,129 @@ export async function listChallenges() {
       timezone: config.locale.timezone,
       today,
     },
+    /** How many these filters match, of which `data` is one page. */
+    total,
+    limit: query.limit,
+    offset: query.offset,
+    /** Of the whole shelf, whatever this page is showing. */
     totals: {
-      challenges: data.length,
-      live: data.filter(entry => entry.state === 'live').length,
-      upcoming: data.filter(entry => entry.state === 'upcoming').length,
-      retired: data.filter(entry => entry.state === 'retired').length,
-      completions: data.reduce((sum, entry) => sum + entry.completions.total, 0),
-      granted: data.reduce((sum, entry) => sum + entry.completions.granted, 0),
-      unpaid: data.reduce((sum, entry) => sum + entry.completions.unpaid, 0),
+      challenges: written,
+      live,
+      upcoming,
+      retired,
+      completions: grand?.completions ?? 0,
+      granted: grand?.granted ?? 0,
+      unpaid: grand?.unpaid ?? 0,
     },
+    /** The two lists the page reads out below the table, found by query. */
+    attention: await challengesNeedingAttention(),
     data,
     nextCursor: null,
   };
 }
 
+/**
+ * The two answers to "why has a completion not paid", which used to be a
+ * filter over the whole list and cannot be a filter over a page.
+ *
+ * Both are the sort of thing an operator wants named rather than counted —
+ * which challenge, which missing badge — so each is a handful of rows by
+ * query, capped: past a dozen of either, the sentence is "something is
+ * wrong with the economy" and the fix is not in this list.
+ */
+async function challengesNeedingAttention() {
+  const [unpaidBy, orphaned] = await Promise.all([
+    ChallengeCompletionModel.aggregate<{ _id: string; unpaid: number }>([
+      { $match: { status: { $ne: 'paid' } } },
+      { $group: { _id: '$challengeId', unpaid: { $sum: 1 } } },
+      { $sort: { unpaid: -1 } },
+      { $limit: 12 },
+    ]),
+    // A challenge pointing at a badge that is not there any more: the next
+    // completion would award nothing. Joined in the database rather than by
+    // reading both collections out and comparing them here.
+    ChallengeDefinitionModel.aggregate<{ _id: string; title: string; badgeId: string }>([
+      { $match: { badgeId: { $nin: [null, ''] } } },
+      {
+        $lookup: {
+          from: AchievementDefinitionModel.collection.name,
+          localField: 'badgeId',
+          foreignField: '_id',
+          as: 'badge',
+        },
+      },
+      { $match: { badge: { $size: 0 } } },
+      { $project: { title: 1, badgeId: 1 } },
+      { $limit: 12 },
+    ]),
+  ]);
+
+  const titles = new Map(
+    (
+      await ChallengeDefinitionModel.find({ _id: { $in: unpaidBy.map(row => row._id) } }, { title: 1 }).lean()
+    ).map(row => [String(row._id), row.title]),
+  );
+
+  return {
+    /** Challenges with completions the economy has not paid, worst first. */
+    unpaid: unpaidBy.map(row => ({
+      id: row._id,
+      title: titles.get(row._id) ?? row._id,
+      unpaid: row.unpaid,
+    })),
+    /** Challenges awarding a badge that has been deleted. */
+    badgeMissing: orphaned.map(row => ({ id: String(row._id), title: row.title, badgeId: row.badgeId })),
+  };
+}
+
+/**
+ * One challenge, by id.
+ *
+ * Asked of the collection rather than found in a page: the list is paged
+ * now, so "the one I just saved" is not reliably on the first page of it —
+ * and reading the whole shelf to pick one row out was never the cheap way
+ * to answer this.
+ */
 export async function getChallenge(id: string) {
-  const page = await listChallenges();
-  const challenge = page.data.find(row => row.id === id);
-  if (!challenge) throw Errors.notFound('That challenge');
-  return { config: page.config, challenge };
+  const row = await ChallengeDefinitionModel.findById(id).lean();
+  if (!row) throw Errors.notFound('That challenge');
+  const config = await getConfig();
+  const today = localDayOf(new Date(), config.locale.timezone);
+
+  const [stats, badge] = await Promise.all([
+    ChallengeCompletionModel.aggregate<CompletionStat>([
+      { $match: { challengeId: id } },
+      {
+        $group: {
+          _id: '$challengeId',
+          completions: { $sum: 1 },
+          members: { $addToSet: '$userId' },
+          granted: { $sum: { $ifNull: ['$granted', 0] } },
+          unpaid: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, 0, 1] } },
+          lastAt: { $max: '$completedAt' },
+        },
+      },
+    ]),
+    row.badgeId
+      ? AchievementDefinitionModel.findById(row.badgeId, { label: 1 }).lean()
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    config: {
+      achievementCoinsEnabled: config.coins.achievements.enabled,
+      stepCoinsEnabled: config.coins.steps.enabled,
+      upcomingDays: config.challenges.upcomingDays,
+      timezone: config.locale.timezone,
+      today,
+    },
+    challenge: challengeRowOf(
+      row as ChallengeDoc,
+      today,
+      new Map(badge ? [[String(badge._id), { label: badge.label }]] : []),
+      new Map(stats.map(stat => [stat._id, stat])),
+    ),
+  };
 }
 
 /** A badge a challenge pays has to exist, or the next completion pays nothing. */
@@ -328,7 +559,7 @@ export async function deleteChallenge(actor: string, id: string, note?: string) 
     after: { deleted: true, note: note ?? null },
   });
 
-  return { deleted: true, id, ...(await listChallenges()) };
+  return { deleted: true, id, ...(await listChallenges(WHOLE_SHELF)) };
 }
 
 // ─── Achievements (RULES C7) ───────────────────────────────────────────────
@@ -375,14 +606,69 @@ function achievementIdOf(label: string): string {
  * spotting: nothing can ever unlock it, and it sits on the shelf looking
  * like something to aim for.
  */
-export async function listAchievements() {
+export const achievementQuery = z.object({
+  /** Words in the label, the title, or the id. */
+  q: z.string().max(160).default(''),
+  metric: z.enum(CHALLENGE_METRICS).optional(),
+  /**
+   * `unreachable` is the one worth filtering to: a badge with no rule of
+   * its own and no challenge paying it can never be unlocked, and it sits
+   * on the shelf looking like something to aim for.
+   */
+  state: z.enum(['any', 'held', 'unheld', 'unreachable']).default('any'),
+  ...pageFields(25, 100),
+  sort: z.enum(['shelf', 'newest', 'label']).default('shelf'),
+});
+export type AchievementQuery = z.infer<typeof achievementQuery>;
+
+const WHOLE_CASE: AchievementQuery = { q: '', state: 'any', limit: 25, offset: 0, sort: 'shelf' };
+
+export async function listAchievements(query: AchievementQuery = WHOLE_CASE) {
   const config = await getConfig();
-  const [rows, held, challenges] = await Promise.all([
-    AchievementDefinitionModel.find().sort({ sort: 1, _id: 1 }).lean(),
+
+  const filter: Record<string, unknown> = {};
+  const trimmed = query.q.trim();
+  if (trimmed) {
+    const like = new RegExp(escape(trimmed), 'i');
+    filter.$or = [{ _id: like }, { label: like }, { title: like }];
+  }
+  if (query.metric) filter.metric = query.metric;
+  // Unreachable is half a query: "no rule of its own" is a field, and "no
+  // challenge pays it" is the other collection. The ids that *are* paid are
+  // asked for first, which is a short list by nature — a challenge names at
+  // most one badge, and there are as many of those as there are challenges.
+  if (query.state === 'unreachable') {
+    const paying = await ChallengeDefinitionModel.distinct('badgeId', { badgeId: { $nin: [null, ''] } });
+    filter.rule = null;
+    filter._id = { $nin: paying };
+  }
+  if (query.state === 'held' || query.state === 'unheld') {
+    const unlocked = await UserAchievementModel.distinct('achievementId');
+    filter._id = query.state === 'held' ? { $in: unlocked } : { $nin: unlocked };
+  }
+
+  const order: Record<string, 1 | -1> =
+    query.sort === 'newest'
+      ? { createdAt: -1, _id: 1 }
+      : query.sort === 'label'
+        ? { label: 1 }
+        : { sort: 1, _id: 1 };
+
+  const [rows, total, shelf] = await Promise.all([
+    AchievementDefinitionModel.find(filter).sort(order).skip(query.offset).limit(query.limit).lean(),
+    AchievementDefinitionModel.countDocuments(filter),
+    achievementShelfTotals(),
+  ]);
+
+  const ids = rows.map(row => String(row._id));
+  const [held, challenges] = await Promise.all([
+    // Who holds the badges on this page. Grouping every unlock ever written
+    // to decorate twenty-five rows is the read this used to do.
     UserAchievementModel.aggregate<{ _id: string; members: number; lastAt: Date }>([
+      { $match: { achievementId: { $in: ids } } },
       { $group: { _id: '$achievementId', members: { $sum: 1 }, lastAt: { $max: '$achievedAt' } } },
     ]),
-    ChallengeDefinitionModel.find({ badgeId: { $ne: null } }, { title: 1, badgeId: 1, active: 1 }).lean(),
+    ChallengeDefinitionModel.find({ badgeId: { $in: ids } }, { title: 1, badgeId: 1, active: 1 }).lean(),
   ]);
 
   const heldOf = new Map(held.map(row => [row._id, row]));
@@ -417,19 +703,68 @@ export async function listAchievements() {
       /** Badge coins are held until this is on (D-46), exactly as step coins are. */
       achievementCoinsEnabled: config.coins.achievements.enabled,
     },
-    totals: {
-      achievements: data.length,
-      unlocked: data.reduce((sum, entry) => sum + entry.members, 0),
-      unreachable: data.filter(entry => entry.unreachable).length,
-      coinsOnOffer: data.reduce((sum, entry) => sum + entry.rewardCoins, 0),
-    },
+    /** How many these filters match, of which `data` is one page. */
+    total,
+    limit: query.limit,
+    offset: query.offset,
+    /** Of the whole shelf, whatever this page is showing. */
+    totals: shelf,
     data,
     nextCursor: null,
   };
 }
 
+/**
+ * The four figures above the table, each of the whole shelf.
+ *
+ * "3 unreachable" has to mean three badges nobody can ever get, not three
+ * on this screen — which is the one number here that cannot be a count,
+ * because it is a question about two collections at once.
+ */
+async function achievementShelfTotals() {
+  const paying = await ChallengeDefinitionModel.distinct('badgeId', { badgeId: { $nin: [null, ''] } });
+  const [achievements, unlocked, unreachable, offered] = await Promise.all([
+    AchievementDefinitionModel.countDocuments({}),
+    UserAchievementModel.estimatedDocumentCount(),
+    AchievementDefinitionModel.countDocuments({ rule: null, _id: { $nin: paying } }),
+    AchievementDefinitionModel.aggregate<{ _id: null; coins: number }>([
+      { $group: { _id: null, coins: { $sum: { $ifNull: ['$rewardCoins', 0] } } } },
+    ]),
+  ]);
+  return {
+    achievements,
+    /** Every unlock anybody holds, across the shelf. */
+    unlocked,
+    unreachable,
+    coinsOnOffer: offered[0]?.coins ?? 0,
+  };
+}
+
+/**
+ * Every badge by name alone, for the pickers.
+ *
+ * A challenge's badge dropdown and the grant-by-hand form need the whole
+ * shelf to choose from, which is the one thing a paged list cannot give
+ * them. So they get this instead: two fields per badge and no joins, which
+ * is a few kilobytes where the full list is a read per row.
+ */
+export async function achievementPicker() {
+  const rows = await AchievementDefinitionModel.find({}, { label: 1, title: 1, rewardCoins: 1 })
+    .sort({ sort: 1, _id: 1 })
+    .lean();
+  return {
+    total: rows.length,
+    data: rows.map(row => ({
+      id: String(row._id),
+      label: row.label,
+      title: row.title || row.label,
+      rewardCoins: row.rewardCoins ?? 0,
+    })),
+  };
+}
+
 export async function getAchievement(id: string) {
-  const page = await listAchievements();
+  const page = await listAchievements({ ...WHOLE_CASE, q: id, limit: 100 });
   const achievement = page.data.find(row => row.id === id);
   if (!achievement) throw Errors.notFound('That achievement');
   return { config: page.config, achievement };
@@ -538,5 +873,5 @@ export async function deleteAchievement(actor: string, id: string, note?: string
     after: { deleted: true, note: note ?? null },
   });
 
-  return { deleted: true, id, ...(await listAchievements()) };
+  return { deleted: true, id, ...(await listAchievements(WHOLE_CASE)) };
 }

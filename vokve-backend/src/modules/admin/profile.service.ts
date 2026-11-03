@@ -11,6 +11,7 @@ import { DeviceModel } from '../devices/models.js';
 import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel } from '../economy/models.js';
 import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { streakFigures } from '../streak/service.js';
+import { limitField, offsetField, pageFields } from './paging.js';
 
 /**
  * The rest of one member, for the operator's profile (RULES P15).
@@ -420,19 +421,90 @@ export async function memberLedger(userId: string, query: LedgerQuery) {
  * is the question support is usually asked about, and a list of the ones they
  * have cannot answer it.
  */
-export async function memberAchievements(userId: string) {
+export const memberAchievementsQuery = z.object({
+  /** A page of the shelf: every badge there is, held or not. */
+  ...pageFields(24, 100),
+  /** `held` and `unheld` are the two questions support is actually asked. */
+  state: z.enum(['any', 'held', 'unheld']).default('any'),
+  /** And a page of the challenge periods they finished, which is its own list. */
+  challengeLimit: limitField(25, 100),
+  challengeOffset: offsetField(),
+});
+export type MemberAchievementsQuery = z.infer<typeof memberAchievementsQuery>;
+
+/**
+ * The whole shelf, not only what they hold: a badge they have *not* unlocked
+ * is the question support is usually asked about, and a list of the ones they
+ * have cannot answer it.
+ *
+ * Both lists here are paged, and the second one is why. The shelf grows with
+ * the badge catalogue, but the completions grow with the *member*: one row
+ * per challenge period they have ever finished, which on a two-year account
+ * doing a daily challenge is seven hundred rows. It used to read the first
+ * hundred of them with no way to reach the rest.
+ */
+export async function memberAchievements(userId: string, query: MemberAchievementsQuery) {
   const user = await UserModel.findById(userId).select({ _id: 1 }).lean();
   if (!user) throw Errors.notFound('That member');
   const config = await getConfig();
 
-  const [definitions, unlocked, completions, challenges] = await Promise.all([
-    AchievementDefinitionModel.find().sort({ sort: 1, _id: 1 }).lean(),
-    UserAchievementModel.find({ userId }).sort({ achievedAt: -1 }).lean(),
-    ChallengeCompletionModel.find({ userId }).sort({ completedAt: -1 }).limit(100).lean(),
-    ChallengeDefinitionModel.find().lean(),
+  const theirs = await UserAchievementModel.find({ userId }, { achievementId: 1, achievedAt: 1, via: 1 })
+    .sort({ achievedAt: -1 })
+    .lean();
+  const unlockedOf = new Map(theirs.map(row => [row.achievementId, row]));
+  const held = theirs.map(row => row.achievementId);
+
+  const shelfFilter: Record<string, unknown> =
+    query.state === 'held' ? { _id: { $in: held } } : query.state === 'unheld' ? { _id: { $nin: held } } : {};
+
+  const [definitions, shelfTotal, shelf, completions, completionTotal, paidUp, locked] = await Promise.all([
+    AchievementDefinitionModel.find(shelfFilter).sort({ sort: 1, _id: 1 }).skip(query.offset).limit(query.limit).lean(),
+    AchievementDefinitionModel.countDocuments(shelfFilter),
+    AchievementDefinitionModel.countDocuments({}),
+    ChallengeCompletionModel.find({ userId })
+      .sort({ completedAt: -1 })
+      .skip(query.challengeOffset)
+      .limit(query.challengeLimit)
+      .lean(),
+    ChallengeCompletionModel.countDocuments({ userId }),
+    // What every period they finished actually paid, added up where the rows
+    // are rather than over the hundred that happened to be fetched.
+    ChallengeCompletionModel.aggregate<{ _id: null; granted: number }>([
+      { $match: { userId } },
+      { $group: { _id: null, granted: { $sum: { $ifNull: ['$granted', 0] } } } },
+    ]),
+    /**
+     * The badges they do not hold, by name alone.
+     *
+     * The grant-by-hand form offers only these — a badge is never taken
+     * back, so the ones they have are not on offer — and it needs all of
+     * them rather than the ones on this page. Three fields and no joins.
+     */
+    AchievementDefinitionModel.find({ _id: { $nin: held } }, { label: 1, title: 1, rewardCoins: 1 })
+      .sort({ sort: 1, _id: 1 })
+      .lean(),
   ]);
 
-  const unlockedOf = new Map(unlocked.map(row => [row.achievementId, row]));
+  /**
+   * The coins their unlocked badges are still owed.
+   *
+   * Only asked while badge coins are off (D-46) — with the switch on there
+   * is nothing waiting — and asked of every badge they hold rather than of
+   * the page, because "₹0 owed" on page two of a shelf would be a lie.
+   */
+  const owed = config.coins.achievements.enabled
+    ? []
+    : await AchievementDefinitionModel.aggregate<{ _id: null; coins: number }>([
+        { $match: { _id: { $in: held } } },
+        { $group: { _id: null, coins: { $sum: { $ifNull: ['$rewardCoins', 0] } } } },
+      ]);
+  const coinsWaiting = owed[0]?.coins ?? 0;
+
+  // Only the challenges this page of completions names, for their titles.
+  const challenges = await ChallengeDefinitionModel.find(
+    { _id: { $in: [...new Set(completions.map(row => row.challengeId))] } },
+    { title: 1 },
+  ).lean();
   const challengeOf = new Map(challenges.map(row => [String(row._id), row]));
 
   const badges = definitions.map(definition => {
@@ -457,17 +529,33 @@ export async function memberAchievements(userId: string) {
 
   return {
     summary: {
-      unlocked: badges.filter(badge => badge.unlocked).length,
-      total: badges.length,
+      /** Of the whole shelf, not of this page of it. */
+      unlocked: theirs.length,
+      total: shelf,
       rewardsEnabled: config.coins.achievements.enabled,
       /** What they would have been paid if badge coins were on. */
-      coinsWaiting: badges
-        .filter(badge => badge.unlocked && !config.coins.achievements.enabled)
-        .reduce((sum, badge) => sum + badge.rewardCoins, 0),
-      challengesCompleted: completions.length,
-      challengeCoinsPaid: completions.reduce((sum, row) => sum + (row.granted ?? 0), 0),
+      coinsWaiting,
+      challengesCompleted: completionTotal,
+      challengeCoinsPaid: paidUp[0]?.granted ?? 0,
     },
+    /** A page of the shelf: how many these filters match, and where it starts. */
+    total: shelfTotal,
+    limit: query.limit,
+    offset: query.offset,
     badges,
+    /** Every badge they do not hold, for the grant-by-hand form. */
+    locked: locked.map(row => ({
+      id: String(row._id),
+      label: row.label,
+      title: row.title || row.label,
+      rewardCoins: row.rewardCoins ?? 0,
+    })),
+    /** A page of the periods they finished, newest first. */
+    challengePage: {
+      total: completionTotal,
+      limit: query.challengeLimit,
+      offset: query.challengeOffset,
+    },
     /** Every challenge period they finished, and what it actually paid. */
     challenges: completions.map(row => {
       const definition = challengeOf.get(row.challengeId);

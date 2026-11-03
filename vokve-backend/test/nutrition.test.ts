@@ -321,7 +321,7 @@ describe('nutrition: the admin diet plan API (RULES N10)', () => {
 
     // The operator still sees it, and can put it back.
     const all = (await request(app).get('/v1/admin/diet-plans').set(ADMIN)).body;
-    expect(all.find((p: { id: string }) => p.id === id)).toMatchObject({ active: false });
+    expect(all.data.find((p: { id: string }) => p.id === id)).toMatchObject({ active: false });
     await request(app).put(`/v1/admin/diet-plans/${id}`).set(ADMIN).send({ active: true });
     expect((await request(app).put('/v1/nutrition/profile').set(authed(session)).send({ selectedPlanId: id })).status).toBe(200);
   });
@@ -500,8 +500,12 @@ describe('nutrition: the seed and the operator', () => {
   it('a re-seed restores the shipped plans but never an operator’s own edit', async () => {
     const session = await signUpAndRegister(); // seeds
     const shipped = (await request(app).get('/v1/admin/diet-plans').set(ADMIN)).body;
-    expect(shipped.map((p: { id: string }) => p.id)).toContain('plan-everyday-veg');
-    expect(shipped.every((p: { updatedBy: string }) => p.updatedBy === 'seed')).toBe(true);
+    // A page of the library, with the whole of it counted beside the rows: a
+    // plan carries every meal of every day, so this list is paged like the
+    // rest of the operator surface rather than read whole.
+    expect(shipped.total).toBe(shipped.totals.plans);
+    expect(shipped.data.map((p: { id: string }) => p.id)).toContain('plan-everyday-veg');
+    expect(shipped.data.every((p: { updatedBy: string }) => p.updatedBy === 'seed')).toBe(true);
 
     // The operator rewrites one of them, and retires another.
     await request(app).put('/v1/admin/diet-plans/plan-everyday-veg').set(ADMIN)
@@ -512,7 +516,7 @@ describe('nutrition: the seed and the operator', () => {
     await seed();
 
     const after = (await request(app).get('/v1/admin/diet-plans').set(ADMIN)).body;
-    const byId = new Map(after.map((p: { id: string }) => [p.id, p]));
+    const byId = new Map(after.data.map((p: { id: string }) => [p.id, p]));
     // Theirs stands.
     expect(byId.get('plan-everyday-veg')).toMatchObject({
       name: 'Our Veg Week', description: 'Written by us.', updatedBy: 'admin',

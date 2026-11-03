@@ -14,6 +14,7 @@ import {
   adminListFoods,
   adminListPlans,
   adminNutritionOverview,
+  adminPlanQuery,
   adminRetireFood,
   adminRetirePlan,
   adminUpdateFood,
@@ -40,9 +41,9 @@ adminNutritionRouter.get('/admin/nutrition/overview', async (_req, res) => {
   res.json(await adminNutritionOverview());
 });
 
-/** Every plan, retired ones included. */
-adminNutritionRouter.get('/admin/diet-plans', async (_req, res) => {
-  res.json(await adminListPlans());
+/** Every plan, retired ones included — a page at a time. */
+adminNutritionRouter.get('/admin/diet-plans', validate('query', adminPlanQuery), async (req, res) => {
+  res.json(await adminListPlans(req.query as unknown as z.infer<typeof adminPlanQuery>));
 });
 
 adminNutritionRouter.post('/admin/diet-plans', validate('body', adminPlanBody), async (req, res) => {

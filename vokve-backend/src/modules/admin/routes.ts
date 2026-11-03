@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { notificationPreferenceSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
+import { pageFields } from './paging.js';
 import { requireAdmin } from '../../middleware/admin.js';
 import { validate } from '../../middleware/validate.js';
 import { confirmFlag, dismissFlag, fraudCase, fraudQueue, rescoreDay } from './fraud.service.js';
 import {
   listReleases,
   releaseBody,
+  releaseQuery,
   saveRelease,
   setUpdatePolicy,
   updatePolicyBody,
@@ -35,8 +37,10 @@ import {
   deleteTemplate,
   exerciseBody,
   exercisePatch,
+  exercisePicker,
   listTraining,
   templateBody,
+  trainingQuery,
   templatePatch,
   updateExercise,
   updateTemplate,
@@ -44,8 +48,11 @@ import {
 import {
   achievementBody,
   achievementPatch,
+  achievementPicker,
+  achievementQuery,
   challengeBody,
   challengePatch,
+  challengeQuery,
   createAchievement,
   createChallenge,
   deleteAchievement,
@@ -134,6 +141,7 @@ import {
 import {
   ledgerQuery,
   memberAchievements,
+  memberAchievementsQuery,
   memberLedger,
   memberOrders,
   memberSteps,
@@ -152,6 +160,7 @@ import {
 } from './config.service.js';
 import {
   broadcastHistory,
+  broadcastQuery,
   deleteNotification,
   deleteNotificationBody,
   listNotifications,
@@ -277,12 +286,11 @@ adminUsersRouter.get('/admin/users/:userId', async (req, res) => {
   res.json(await userOverview(String(req.params.userId)));
 });
 
-const loginsQuery = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
+const loginsQuery = z.object(pageFields(50, 200));
 
 /** Every sign-in, newest first: when, on which phone, on which build. */
 adminUsersRouter.get('/admin/users/:userId/logins', validate('query', loginsQuery), async (req, res) => {
-  const { limit } = req.query as unknown as z.infer<typeof loginsQuery>;
-  res.json(await loginHistory(String(req.params.userId), limit));
+  res.json(await loginHistory(String(req.params.userId), req.query as unknown as z.infer<typeof loginsQuery>));
 });
 
 const activityQuery = z.object({
@@ -403,7 +411,7 @@ const queueQuery = z.object({
   status: z.enum(['open', 'confirmed', 'dismissed', 'any']).default('open'),
   severity: z.enum(['hard', 'soft', 'any']).default('any'),
   days: z.coerce.number().int().min(1).max(365).default(30),
-  limit: z.coerce.number().int().min(1).max(200).default(25),
+  ...pageFields(25, 200),
 });
 
 /** Who has something to answer for, worst first. */
@@ -510,9 +518,18 @@ adminUsersRouter.get('/admin/users/:userId/ledger', validate('query', ledgerQuer
  * The whole badge shelf with their own unlocks on it, and every challenge
  * period they finished with what it actually paid.
  */
-adminUsersRouter.get('/admin/users/:userId/achievements', async (req, res) => {
-  res.json(await memberAchievements(String(req.params.userId)));
-});
+adminUsersRouter.get(
+  '/admin/users/:userId/achievements',
+  validate('query', memberAchievementsQuery),
+  async (req, res) => {
+    res.json(
+      await memberAchievements(
+        String(req.params.userId),
+        req.query as unknown as z.infer<typeof memberAchievementsQuery>,
+      ),
+    );
+  },
+);
 
 /** What they have bought, newest first. */
 adminUsersRouter.get('/admin/users/:userId/orders', validate('query', ordersQuery), async (req, res) => {
@@ -526,8 +543,7 @@ adminUsersRouter.get('/admin/orders/:orderId', async (req, res) => {
 
 /** Every operator action on this account, newest first — the panel's receipt. */
 adminUsersRouter.get('/admin/users/:userId/audit', validate('query', auditQuery), async (req, res) => {
-  const { limit } = req.query as unknown as z.infer<typeof auditQuery>;
-  res.json(await memberAudit(String(req.params.userId), limit));
+  res.json(await memberAudit(String(req.params.userId), req.query as unknown as z.infer<typeof auditQuery>));
 });
 
 // ─── The two things an operator may change about an account ────────────────
@@ -806,8 +822,8 @@ adminUsersRouter.delete(
  * coins granted, and the ones the economy has not paid because the daily
  * ceiling or ⚙ `coins.achievements.enabled` held them (D-46).
  */
-adminUsersRouter.get('/admin/challenges', async (_req, res) => {
-  res.json(await listChallenges());
+adminUsersRouter.get('/admin/challenges', validate('query', challengeQuery), async (req, res) => {
+  res.json(await listChallenges(req.query as unknown as z.infer<typeof challengeQuery>));
 });
 
 adminUsersRouter.post('/admin/challenges', validate('body', challengeBody), async (req, res) => {
@@ -845,8 +861,20 @@ adminUsersRouter.delete(
 );
 
 /** Every badge, who holds it, and what pays it out. */
-adminUsersRouter.get('/admin/achievements', async (_req, res) => {
-  res.json(await listAchievements());
+adminUsersRouter.get('/admin/achievements', validate('query', achievementQuery), async (req, res) => {
+  res.json(await listAchievements(req.query as unknown as z.infer<typeof achievementQuery>));
+});
+
+/**
+ * The shelf by name alone, for the pickers.
+ *
+ * The badge dropdown on a challenge and the grant-by-hand form need every
+ * badge to choose from, which the paged list above cannot give them. This
+ * is the same shelf with two fields per row and no joins — cheap enough to
+ * read whole, which is the point.
+ */
+adminUsersRouter.get('/admin/achievements/picker', async (_req, res) => {
+  res.json(await achievementPicker());
 });
 
 adminUsersRouter.post('/admin/achievements', validate('body', achievementBody), async (req, res) => {
@@ -880,8 +908,19 @@ adminUsersRouter.delete(
  * exercise is in, the sets members have logged of it, and the ids a
  * template names that no exercise answers to.
  */
-adminUsersRouter.get('/admin/training', async (_req, res) => {
-  res.json(await listTraining());
+adminUsersRouter.get('/admin/training', validate('query', trainingQuery), async (req, res) => {
+  res.json(await listTraining(req.query as unknown as z.infer<typeof trainingQuery>));
+});
+
+/**
+ * The exercise list by name alone, for the picker.
+ *
+ * A template is built by choosing exercises in order, so that form needs
+ * the whole list rather than a page of it. Four fields per row and no
+ * joins, which is what makes reading it whole reasonable.
+ */
+adminUsersRouter.get('/admin/training/exercises/picker', async (_req, res) => {
+  res.json(await exercisePicker());
 });
 
 adminUsersRouter.post('/admin/training/exercises', validate('body', exerciseBody), async (req, res) => {
@@ -1140,14 +1179,9 @@ adminUsersRouter.post('/admin/users/:userId/sync-nudge', validate('body', nudgeB
 // ─── Releases and the update wall (RULES DV12) ─────────────────────────────
 
 /** Every known build with its status, the minimum in force, and which builds it refuses. */
-adminUsersRouter.get(
-  '/admin/releases',
-  validate('query', z.object({ platform: z.enum(['ios', 'android']).optional() })),
-  async (req, res) => {
-    const { platform } = req.query as unknown as { platform?: 'ios' | 'android' };
-    res.json(await listReleases(platform));
-  },
-);
+adminUsersRouter.get('/admin/releases', validate('query', releaseQuery), async (req, res) => {
+  res.json(await listReleases(req.query as unknown as z.infer<typeof releaseQuery>));
+});
 
 /**
  * Records the build the store is now serving. A knock at most: it never
@@ -1181,9 +1215,9 @@ adminUsersRouter.get('/admin/notifications', validate('query', notificationQuery
  */
 adminUsersRouter.get(
   '/admin/notifications/broadcasts',
-  validate('query', z.object({ limit: z.coerce.number().int().min(1).max(100).default(25) })),
+  validate('query', broadcastQuery),
   async (req, res) => {
-    res.json(await broadcastHistory(Number(req.query.limit ?? 25)));
+    res.json(await broadcastHistory(req.query as unknown as z.infer<typeof broadcastQuery>));
   },
 );
 

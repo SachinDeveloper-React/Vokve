@@ -32,6 +32,7 @@ export interface QueueQuery {
   severity: 'hard' | 'soft' | 'any';
   days: number;
   limit: number;
+  offset: number;
 }
 
 /**
@@ -49,9 +50,19 @@ export async function fraudQueue(query: QueueQuery) {
   if (query.severity !== 'any') match.severity = query.severity;
   else match.severity = { $in: ['hard', 'soft'] };
 
-  const rows = await FraudFlagModel.aggregate<{
-    _id: string; hard: number; soft: number; info: number; open: number;
-    kinds: string[]; days: string[]; lastSeenAt: Date; devices: string[];
+  /**
+   * Both halves in one pass: the page itself, and how many accounts the
+   * filters match. The count has to be of *accounts* rather than flags —
+   * one afternoon of shaking a phone writes a dozen flags that all mean the
+   * same thing — so it is the grouping that gets counted, which a `$facet`
+   * can do without grouping twice.
+   */
+  const [faceted] = await FraudFlagModel.aggregate<{
+    rows: {
+      _id: string; hard: number; soft: number; info: number; open: number;
+      kinds: string[]; days: string[]; lastSeenAt: Date; devices: string[];
+    }[];
+    counted: { total: number }[];
   }>([
     { $match: match },
     {
@@ -67,9 +78,19 @@ export async function fraudQueue(query: QueueQuery) {
         lastSeenAt: { $max: '$lastSeenAt' },
       },
     },
-    { $sort: { hard: -1, soft: -1, lastSeenAt: -1 } },
-    { $limit: query.limit },
+    {
+      $facet: {
+        rows: [
+          { $sort: { hard: -1, soft: -1, lastSeenAt: -1 } },
+          { $skip: query.offset },
+          { $limit: query.limit },
+        ],
+        counted: [{ $count: 'total' }],
+      },
+    },
   ]);
+  const rows = faceted?.rows ?? [];
+  const total = faceted?.counted[0]?.total ?? 0;
 
   const userIds = rows.map(row => row._id);
   const [users, held, steps] = await Promise.all([
@@ -91,6 +112,9 @@ export async function fraudQueue(query: QueueQuery) {
 
   return {
     days: query.days,
+    total,
+    limit: query.limit,
+    offset: query.offset,
     data: rows.map(row => {
       const user = byUser.get(row._id);
       const activity = bySteps.get(row._id);

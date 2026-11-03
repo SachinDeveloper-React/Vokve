@@ -8,6 +8,7 @@ import { CoinBalanceModel } from '../economy/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel } from '../identity/models.js';
 import { AppErrorModel, DeviceHealthModel, DevicePermissionsModel, EventModel } from '../telemetry/models.js';
 import { toPermissionStatus, type StoredPermission } from '../telemetry/service.js';
+import { page, slice, type PageQuery } from './paging.js';
 
 /**
  * The operator's read of one member (BACKEND §14.14, RULES P15).
@@ -407,7 +408,7 @@ function permissionSummary(permissions: StoredPermission[] | undefined, reported
  * rather than a second log that could disagree with it — and it is why a
  * period still open is "signed in now", not a missing sign-out.
  */
-export async function loginHistory(userId: string, limit: number) {
+export async function loginHistory(userId: string, query: PageQuery) {
   const devices = await DeviceModel.find({ userId })
     .select({ platform: 1, info: 1, app: 1, counting: 1, firstSeenAt: 1, lastSeenAt: 1 })
     .lean();
@@ -428,8 +429,11 @@ export async function loginHistory(userId: string, limit: number) {
   );
 
   logins.sort((a, b) => b.at.localeCompare(a.at));
-  const page = logins.slice(0, limit);
-  return { data: page, total: logins.length, nextCursor: null };
+  // Paged here rather than in the query: a sign-in is a period inside a
+  // device, not a row of its own, so the page can only be cut once every
+  // install's periods have been laid end to end. Bounded by how many phones
+  // one account has ever had, which is the only part of this that is small.
+  return page(slice(logins, query), logins.length, query);
 }
 
 // ─── The trail (RULES P13) ─────────────────────────────────────────────────

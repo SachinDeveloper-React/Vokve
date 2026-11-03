@@ -6,6 +6,7 @@ import { NotificationPreferencesModel } from '../identity/models.js';
 import { NotificationModel } from '../notifications/models.js';
 import { PREFERENCE_SWITCHES, preferencesInUse } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
+import { page, pageFields } from './paging.js';
 
 /**
  * What the app has actually told everybody (ARCHITECTURE §5.7).
@@ -304,11 +305,15 @@ export async function listNotifications(query: NotificationQuery) {
  * `dedupeKey` are the live state. Joining them is the only way to answer
  * "did anybody read it", which the tally at send time cannot know.
  */
-export async function broadcastHistory(limit = 25) {
-  const sends = await AuditLogModel.find({ action: 'notifications.broadcast' })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean();
+export const broadcastQuery = z.object(pageFields(25, 100));
+export type BroadcastQuery = z.infer<typeof broadcastQuery>;
+
+export async function broadcastHistory(query: BroadcastQuery) {
+  const filter = { action: 'notifications.broadcast' };
+  const [sends, total] = await Promise.all([
+    AuditLogModel.find(filter).sort({ createdAt: -1 }).skip(query.offset).limit(query.limit).lean(),
+    AuditLogModel.countDocuments(filter),
+  ]);
 
   const keys = sends.map(send => String(send.subjectId));
   const live = await NotificationModel.aggregate<{ _id: string; rows: number; read: number; pushed: number; pending: number }>([
@@ -325,8 +330,8 @@ export async function broadcastHistory(limit = 25) {
   ]);
   const liveOf = new Map(live.map(row => [row._id, row]));
 
-  return {
-    data: sends.map(send => {
+  return page(
+    sends.map(send => {
       const after = (send.after ?? {}) as Record<string, unknown>;
       const now = liveOf.get(String(send.subjectId));
       const rows = now?.rows ?? 0;
@@ -361,8 +366,9 @@ export async function broadcastHistory(limit = 25) {
         retractable: rows - (now?.read ?? 0),
       };
     }),
-    nextCursor: null,
-  };
+    total,
+    query,
+  );
 }
 
 export const deleteNotificationBody = z.object({ reason: z.string().trim().min(3).max(300) }).strict();

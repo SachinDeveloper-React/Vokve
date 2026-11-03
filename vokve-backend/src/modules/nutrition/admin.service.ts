@@ -1,7 +1,9 @@
+import { z } from 'zod';
 import { plannedMealSchema, type PlannedMeal } from '../../contracts/index.js';
 import { getConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
+import { pageFields } from '../admin/paging.js';
 import { AuditLogModel } from '../platform/models.js';
 import { DIET_TYPES, DietPlanModel, FoodEntryModel, FoodItemModel, MEAL_PLANS, NUTRITION_GOALS, NutritionProfileModel } from './models.js';
 
@@ -121,10 +123,69 @@ const audit = (actor: string, action: string, planId: string, before: unknown, a
     after,
   });
 
-/** Every plan, retired ones included — the operator's list, not the member's. */
-export async function adminListPlans(): Promise<AdminPlan[]> {
-  const rows = await DietPlanModel.find().sort({ sort: 1, _id: 1 }).lean<PlanRow[]>();
-  return rows.map(toAdminPlan);
+export const adminPlanQuery = z.object({
+  /** Words in the name, the description, or the id. */
+  q: z.string().max(160).default(''),
+  state: z.enum(['any', 'active', 'retired']).default('any'),
+  ...pageFields(10, 50),
+  sort: z.enum(['shelf', 'newest', 'name']).default('shelf'),
+});
+export type AdminPlanQuery = z.infer<typeof adminPlanQuery>;
+
+/**
+ * Every plan, retired ones included — the operator's list, not the member's.
+ *
+ * Paged, and this is the list on the panel where that matters most: a plan
+ * carries every day of itself with every meal inside it, so a plan document
+ * is kilobytes rather than bytes and twenty of them are a payload a browser
+ * has to parse before it draws anything. The default page is ten for the
+ * same reason.
+ */
+export async function adminListPlans(query: AdminPlanQuery) {
+  const filter: Record<string, unknown> = {};
+  const trimmed = query.q.trim();
+  if (trimmed) {
+    const like = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filter.$or = [{ _id: like }, { name: like }, { description: like }];
+  }
+  if (query.state === 'active') filter.active = { $ne: false };
+  if (query.state === 'retired') filter.active = false;
+
+  const order: Record<string, 1 | -1> =
+    query.sort === 'newest' ? { _id: -1 } : query.sort === 'name' ? { name: 1 } : { sort: 1, _id: 1 };
+
+  const [rows, total, shelf] = await Promise.all([
+    DietPlanModel.find(filter).sort(order).skip(query.offset).limit(query.limit).lean<PlanRow[]>(),
+    DietPlanModel.countDocuments(filter),
+    // The three figures above the table, each of the whole library and each
+    // counted where the documents are: `days` is a `$size`, not a plan read
+    // out and measured here.
+    DietPlanModel.aggregate<{ _id: null; plans: number; active: number; days: number }>([
+      {
+        $group: {
+          _id: null,
+          plans: { $sum: 1 },
+          active: { $sum: { $cond: [{ $eq: ['$active', false] }, 0, 1] } },
+          days: { $sum: { $size: { $ifNull: ['$days', []] } } },
+        },
+      },
+    ]),
+  ]);
+
+  return {
+    total,
+    limit: query.limit,
+    offset: query.offset,
+    /** Of every plan there is, whatever this page is showing. */
+    totals: {
+      plans: shelf[0]?.plans ?? 0,
+      active: shelf[0]?.active ?? 0,
+      /** Days written across every plan, which run in rotation. */
+      days: shelf[0]?.days ?? 0,
+    },
+    data: rows.map(toAdminPlan),
+    nextCursor: null,
+  };
 }
 
 export async function adminGetPlan(planId: string): Promise<AdminPlan> {
@@ -249,7 +310,17 @@ export async function adminNutritionOverview() {
         },
       },
     ]),
-    DietPlanModel.find({}, { name: 1, active: 1, days: 1, dietTypes: 1, mealPlans: 1 }).lean<PlanRow[]>(),
+    /**
+     * The plans, counted rather than read.
+     *
+     * This used to fetch every plan *with its days* to show a name and a
+     * day count — and a plan's days carry every meal of every day, so it
+     * was the heaviest read on a page that only draws a table of names.
+     * `$size` does the counting where the documents already are.
+     */
+    DietPlanModel.aggregate<{ _id: string; name: string; active: boolean; days: number }>([
+      { $project: { name: 1, active: 1, days: { $size: { $ifNull: ['$days', []] } } } },
+    ]),
     NutritionProfileModel.countDocuments({}),
     NutritionProfileModel.aggregate<{ _id: string | null; members: number }>([
       { $group: { _id: '$selectedPlanId', members: { $sum: 1 } } },
@@ -287,15 +358,22 @@ export async function adminNutritionOverview() {
       /** Members who picked a plan by hand; the rest take the server's choice (N10). */
       chosen: planCounts.filter(row => row._id !== null).reduce((sum, row) => sum + row.members, 0),
       serverChoice: countOf(planCounts, null as unknown as string),
+      /**
+       * The ten plans members are actually on, most chosen first — an
+       * overview's worth of it. The whole list, paged and editable, is the
+       * Diet plans page; this one is here to say which of them is carrying
+       * the members.
+       */
       data: plans
         .map(plan => ({
           id: plan._id,
           name: plan.name,
           active: plan.active !== false,
-          days: (plan.days ?? []).length,
+          days: plan.days,
           members: planCounts.find(row => row._id === plan._id)?.members ?? 0,
         }))
-        .sort((a, b) => b.members - a.members || a.name.localeCompare(b.name)),
+        .sort((a, b) => b.members - a.members || a.name.localeCompare(b.name))
+        .slice(0, 10),
     },
     members: {
       /** Members who have a nutrition profile at all — everyone else is on the defaults. */

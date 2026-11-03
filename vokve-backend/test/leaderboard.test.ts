@@ -321,6 +321,38 @@ describe('admin: the board and what it pays', () => {
     expect(res.body.totals.paidPlacesFilled).toBe(2);
   });
 
+  /**
+   * Both lists on the page are paged, and the standings one is the reason
+   * `offset` had to be places rather than rows: the sort *is* the rank, so
+   * page two starts at place three and has to say so. The closed week's
+   * sums moved into the database at the same time — reading one document
+   * per person who scored, to add three numbers up and then show the first
+   * twenty, is the cost that grows with the members.
+   */
+  it('pages the standings by place, and the closed week’s winners apart from them', async () => {
+    const first = await member('Asha Rao');
+    const second = await member('Vikram Shah');
+    const third = await member('Meera Iyer');
+    const week = weekOf(today());
+    await scored(first, week.id, 900);
+    await scored(second, week.id, 600);
+    await scored(third, week.id, 300);
+
+    const page = await request(app).get('/v1/admin/leaderboard?limit=2').set(ADMIN);
+    expect(page.body).toMatchObject({ total: 3, limit: 2, offset: 0 });
+    expect(page.body.standings.map((row: { rank: number }) => row.rank)).toEqual([1, 2]);
+
+    const next = await request(app).get('/v1/admin/leaderboard?limit=2&offset=2').set(ADMIN);
+    expect(next.body).toMatchObject({ total: 3, limit: 2, offset: 2 });
+    // The place, not the row's position on the page: third is third.
+    expect(next.body.standings).toHaveLength(1);
+    expect(next.body.standings[0]).toMatchObject({ rank: 3, name: 'Meera Iyer', score: 300 });
+
+    // The winners of the closed week carry a window of their own, because
+    // one `offset` cannot mean this week's places and last week's both.
+    expect(page.body.lastClosed === null || typeof page.body.lastClosed.winnersTotal === 'number').toBe(true);
+  });
+
   it('says when a prize would not actually be paid', async () => {
     // Prizes are step-derived, so they wait on ⚙ `coins.steps.enabled`
     // (D-46): a board can look perfect and pay nobody.
