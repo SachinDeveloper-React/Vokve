@@ -129,11 +129,6 @@ export const HealthCheckupScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The two ⓘ explainers have no screens yet. Wired as no-ops rather than
-  // left off, so each control keeps the shape it will ship with and only the
-  // handler changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -171,7 +166,6 @@ export const HealthCheckupScreen = () => {
             outOf={score.data.outOf}
             band={score.data.band}
             name={user?.name}
-            onPressInfo={notImplemented}
           />
         ) : (
           <LoadState
@@ -193,7 +187,6 @@ export const HealthCheckupScreen = () => {
             <VitalsCard
               latest={latest}
               onPressAdd={openAdd}
-              onPressBmiInfo={notImplemented}
               onPressHeartRate={onOpenHeartRate}
               onPressBloodPressure={onOpenBloodPressure}
             />

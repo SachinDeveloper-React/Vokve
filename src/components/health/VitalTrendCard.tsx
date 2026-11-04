@@ -62,7 +62,10 @@ export const VitalTrendCard = memo(({ kind, readings }: Props) => {
   const change = newest.value - oldest.value;
   // Rounded the way the figure itself is written, so a card never says a
   // change of 0.0 beside two numbers that visibly differ.
-  const moved = kind === 'weight' || kind === 'bmi' ? Math.abs(change) >= 0.05 : Math.round(Math.abs(change)) >= 1;
+  const moved =
+    kind === 'weight' || kind === 'bmi'
+      ? Math.abs(change) >= 0.05
+      : Math.round(Math.abs(change)) >= 1;
   const written =
     kind === 'weight' || kind === 'bmi'
       ? Math.abs(change).toFixed(1)

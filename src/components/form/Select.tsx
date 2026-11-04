@@ -1,23 +1,21 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Check, ChevronDown } from 'lucide-react-native';
+import { StyleSheet } from 'react-native';
+import { ChevronDown } from 'lucide-react-native';
 import { radius, spacing, useTheme } from '../../theme';
 import { AppText } from '../ui/AppText';
 import { Icon } from '../media/Icon';
-import {
-  BottomSheet,
-  BottomSheetScrollView,
-} from '../disclosure/BottomSheet';
+import { VStack } from '../layout/Stack';
+import { BottomSheet, BottomSheetScrollView } from '../disclosure/BottomSheet';
+import { OptionRow, type SheetOption } from '../disclosure/OptionRow';
 import { FormControl, type FormControlProps } from './FormControl';
 import { INPUT_MIN_HEIGHT } from './Input';
 import { Pressable } from './Pressable';
 
-export interface SelectOption<T extends string> {
-  value: T;
-  label: string;
-  helper?: string;
-  disabled?: boolean;
-}
+/**
+ * A field's options are a picker's options: the same row draws both, so a
+ * form's sheet and a screen's own `OptionSheet` cannot drift apart.
+ */
+export type SelectOption<T extends string> = SheetOption<T>;
 
 interface Props<T extends string> extends Omit<FormControlProps, 'children'> {
   options: SelectOption<T>[];
@@ -55,7 +53,7 @@ function SelectInner<T extends string>({
   const close = useCallback(() => setIsOpen(false), []);
 
   const select = useCallback(
-    (next: T) => () => {
+    (next: T) => {
       onChange(next);
       close();
     },
@@ -102,33 +100,16 @@ function SelectInner<T extends string>({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {options.map(option => {
-            const isSelected = option.value === value;
-            return (
-              <Pressable
+          <VStack gap="sm" pb="base" accessibilityRole="radiogroup">
+            {options.map(option => (
+              <OptionRow
                 key={option.value}
-                onPress={select(option.value)}
-                disabled={option.disabled}
-                feedback="highlight"
-                accessibilityRole="button"
-                accessibilityState={{ selected: isSelected }}
-                accessibilityLabel={option.label}
-                style={styles.option}
-              >
-                <View style={styles.optionText}>
-                  <AppText variant="body">{option.label}</AppText>
-                  {option.helper ? (
-                    <AppText variant="caption" color="textSecondary">
-                      {option.helper}
-                    </AppText>
-                  ) : null}
-                </View>
-                {isSelected ? (
-                  <Icon as={Check} size="md" color="primary" />
-                ) : null}
-              </Pressable>
-            );
-          })}
+                option={option}
+                selected={option.value === value}
+                onSelect={select}
+              />
+            ))}
+          </VStack>
         </BottomSheetScrollView>
       </BottomSheet>
     </>
@@ -149,14 +130,4 @@ const styles = StyleSheet.create({
   },
   value: { flex: 1 },
   list: { maxHeight: 360 },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    minHeight: 52,
-  },
-  optionText: { flex: 1, gap: spacing.xxs },
 });

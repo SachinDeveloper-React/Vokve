@@ -80,22 +80,13 @@ export const BloodPressureScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The explainer has no screen yet. Wired as a no-op rather than left off,
-  // so the control keeps the shape it will ship with and only the handler
-  // changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <VitalHeader
-          title="Blood Pressure"
-          onPressBack={onPressBack}
-          onPressInfo={notImplemented}
-        />
+        <VitalHeader title="Blood Pressure" onPressBack={onPressBack} />
 
         {!synced ? (
           <LoadState
@@ -142,7 +133,6 @@ export const BloodPressureScreen = () => {
             title={tip.title ?? 'Tip'}
             message={tip.text}
             tint={colors.primary}
-            onPress={notImplemented}
           />
         ) : null}
       </ScrollView>

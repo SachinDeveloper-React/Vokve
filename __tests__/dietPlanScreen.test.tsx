@@ -82,7 +82,8 @@ const settle = () =>
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 
-const planFor = async (date: string) => (await mockNutritionApi.plan(date)).meals;
+const planFor = async (date: string) =>
+  (await mockNutritionApi.plan(date)).meals;
 
 afterEach(async () => {
   const tree = mounted;
@@ -157,7 +158,9 @@ describe('DietPlanScreen', () => {
 
     expect(text).toContain('Breakfast');
     expect(text).toContain('Dinner');
-    expect(text).toContain(String(calories).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+    expect(text).toContain(
+      String(calories).replace(/\B(?=(\d{3})+(?!\d))/g, ','),
+    );
   });
 
   test('the calorie line says how much room the plan has left', async () => {
@@ -216,6 +219,25 @@ describe('DietPlanScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('AddMeal', {
       date: addDays(todayIso(), 1),
     });
+  });
+
+  test('nothing on the plan is a control that does nothing', async () => {
+    const tree = await render();
+
+    // "Daily Summary" sat beside Add Meal, wired to a screen that was never
+    // built, and each meal card was a button to a meal page that does not
+    // exist. Both are gone; the cards still read out as what they are.
+    expect(allText(tree)).not.toContain('Daily Summary');
+
+    const meal = tree.root
+      .findAll(
+        node =>
+          typeof node.props?.accessibilityLabel === 'string' &&
+          (node.props.accessibilityLabel as string).startsWith('Breakfast,'),
+      )
+      .find(node => typeof node.props.onPress === 'function');
+
+    expect(meal).toBeUndefined();
   });
 
   test('the chevron returns to whatever opened the plan', async () => {

@@ -6,7 +6,12 @@ import { formatClockTime } from '../../utils/format';
 import { formatLongDate, toIsoDate } from '../../utils/date';
 import { HStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
-import { STATUS_STYLE, VITAL_STYLE, formatVitalValue, statusOf } from './vitals';
+import {
+  STATUS_STYLE,
+  VITAL_STYLE,
+  formatVitalValue,
+  statusOf,
+} from './vitals';
 
 /** "26 May, 9:30 AM" — the date without its year, which is almost always this one. */
 export function formatStamp(recordedAt: string): string {
@@ -53,9 +58,9 @@ export const VitalReadingRow = memo(({ reading, timeOnly = false }: Props) => {
       gap="sm"
       py="sm"
       accessible
-      accessibilityLabel={`${label}, ${formatVitalValue(
-        reading,
-      )} ${unit}, ${status.label}, ${formatStamp(reading.recordedAt)}`}
+      accessibilityLabel={`${label}, ${formatVitalValue(reading)} ${unit}, ${
+        status.label
+      }, ${formatStamp(reading.recordedAt)}`}
     >
       <AppText variant="micro" numberOfLines={1} style={styles.label}>
         {label}

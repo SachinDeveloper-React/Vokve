@@ -16,3 +16,4 @@ export {
   NUTRITION_GOAL_LABEL,
 } from './nutritionLabels';
 export { GoalEditorSheet } from './GoalEditorSheet';
+export { PREFERENCE_SHEET } from './preferenceOptions';

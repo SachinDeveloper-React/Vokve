@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ClipboardList, Plus } from 'lucide-react-native';
+import { Plus } from 'lucide-react-native';
 import { Icon } from '../../components/media/Icon';
 import { CurrentPlanCard } from '../../components/diet/CurrentPlanCard';
 import { DayPager } from '../../components/diet/DayPager';
@@ -15,7 +15,6 @@ import { PlanDayList } from '../../components/diet/PlanDayList';
 import { PlanNutritionCard } from '../../components/diet/PlanNutritionCard';
 import { PlannedMealCard } from '../../components/diet/PlannedMealCard';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
-import { HStack } from '../../components/layout/Stack';
 import { Button } from '../../components/ui/Button';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
@@ -32,7 +31,6 @@ import { addDays, todayIso, type IsoDate } from '../../utils/date';
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
-    action: { flex: 1 },
   });
 
 /** How many days either tab lists. */
@@ -128,11 +126,6 @@ export const DietPlanScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // A meal's own page and the daily summary have no screens yet. Wired as
-  // no-ops rather than left off, so each control keeps the shape it will ship
-  // with and only the handler changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -179,39 +172,21 @@ export const DietPlanScreen = () => {
                 />
 
                 {meals.map(meal => (
-                  <PlannedMealCard
-                    key={meal.id}
-                    meal={meal}
-                    onPress={notImplemented}
-                  />
+                  <PlannedMealCard key={meal.id} meal={meal} />
                 ))}
               </>
             )}
 
-            {/* `Button` sizes itself to its label, so the halves are set by
-                the views around it rather than by the buttons themselves. */}
-            <HStack align="stretch" gap="md">
-              <View style={styles.action}>
-                <Button
-                  label="Add Meal"
-                  icon={<Icon as={Plus} size="sm" color="primaryForeground" />}
-                  size="md"
-                  fullWidth
-                  onPress={openAdd}
-                />
-              </View>
-
-              <View style={styles.action}>
-                <Button
-                  label="Daily Summary"
-                  icon={<Icon as={ClipboardList} size="sm" color="text" />}
-                  variant="secondary"
-                  size="md"
-                  fullWidth
-                  onPress={notImplemented}
-                />
-              </View>
-            </HStack>
+            {/* "Daily Summary" sat beside this, wired to a screen that does
+                not exist; adding a meal is the one thing to do here, so it
+                takes the row. */}
+            <Button
+              label="Add Meal"
+              icon={<Icon as={Plus} size="sm" color="primaryForeground" />}
+              size="md"
+              fullWidth
+              onPress={openAdd}
+            />
           </>
         ) : null}
 

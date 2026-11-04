@@ -101,11 +101,6 @@ export const NotificationSettingsScreen = () => {
     [navigation],
   );
 
-  // The privacy policy has no screen yet. Wired as a no-op rather than left
-  // off, so the card keeps the shape it will ship with and only the handler
-  // changes when that screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -136,7 +131,7 @@ export const NotificationSettingsScreen = () => {
           onChangeEmail={setEmail}
         />
 
-        <PrivacyNoteCard onPress={notImplemented} />
+        <PrivacyNoteCard />
       </ScrollView>
 
       <QuietHoursSheet

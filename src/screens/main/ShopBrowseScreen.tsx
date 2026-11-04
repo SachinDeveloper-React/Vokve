@@ -7,7 +7,10 @@ import {
 } from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { ActionSheet } from '../../components/disclosure/ActionSheet';
+import {
+  OptionSheet,
+  type SheetOption,
+} from '../../components/disclosure/OptionSheet';
 import { HistoryHeader } from '../../components/history/HistoryHeader';
 import { VStack } from '../../components/layout/Stack';
 import { presentationOf } from '../../components/shop/categories';
@@ -145,14 +148,15 @@ export const ShopBrowseScreen = () => {
     (item: ShopItem) => navigation.navigate('ProductDetail', { id: item.id }),
     [navigation],
   );
-  const sortActions = useMemo(
-    () =>
-      SORTS.map(value => ({
-        label: SORT_LABEL[value],
-        disabled: value === sort,
-        onPress: () => setSort(value),
-      })),
-    [sort],
+  /**
+   * The sort list, with the one in force marked rather than greyed out. A
+   * disabled row was how this used to say "you are already on this", and
+   * disabled reads as "unavailable" — the one sort the user could not pick
+   * looked like the one sort the shop would not give them.
+   */
+  const sortOptions = useMemo<SheetOption<ShopSort>[]>(
+    () => SORTS.map(value => ({ value, label: SORT_LABEL[value] })),
+    [],
   );
 
   const renderItem = useCallback<ListRenderItem<ShopItem>>(
@@ -306,11 +310,13 @@ export const ShopBrowseScreen = () => {
         showsVerticalScrollIndicator={false}
       />
 
-      <ActionSheet
+      <OptionSheet
         visible={isSortOpen}
         onClose={closeSort}
         title="Sort by"
-        actions={sortActions}
+        options={sortOptions}
+        value={sort}
+        onSelect={setSort}
       />
 
       <ShopFilterSheet

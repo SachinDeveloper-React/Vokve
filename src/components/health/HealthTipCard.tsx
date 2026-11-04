@@ -23,7 +23,9 @@ export const HealthTipCard = memo(({ tip }: Props) => {
     <Box
       radius="xl"
       p="base"
-      style={{ backgroundColor: withAlpha(colors.success, isDark ? 0.16 : 0.1) }}
+      style={{
+        backgroundColor: withAlpha(colors.success, isDark ? 0.16 : 0.1),
+      }}
     >
       <VStack gap="xxs">
         <AppText variant="bodyStrong" style={{ color: colors.success }}>

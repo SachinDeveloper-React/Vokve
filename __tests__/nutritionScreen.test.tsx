@@ -192,10 +192,19 @@ describe('NutritionScreen', () => {
   });
 
   test("the day's tip and calories burned are the server's", async () => {
-    const text = allText(await render());
+    const tree = await render();
+    const text = allText(tree);
 
     expect(text).toContain('Add more protein to your dinner');
     expect(text).toContain('320');
+
+    // The line is the operator's, served by the content API, so the strip
+    // credits no model for it — and it offers no link to a tips library that
+    // does not exist, nor a "Learn More" to a screen that was never built.
+    expect(text).not.toContain('AI Nutrition Tip');
+    expect(text).not.toContain('View Tips');
+    expect(labels(tree)).not.toContain('View nutrition tips');
+    expect(labels(tree)).not.toContain('Learn more about calories');
   });
 
   test("the day's calories are the sum of what is on the plate", async () => {
@@ -214,6 +223,18 @@ describe('NutritionScreen', () => {
         'Carbs, 205 of 300 grams',
         'Protein, 85 of 120 grams',
         'Fats, 45 of 70 grams',
+      ]),
+    );
+  });
+
+  test('the three calorie figures each state their own total', async () => {
+    // Consumed, burned and remaining sit in one row across the card rather
+    // than three down one half of it, and each still answers for itself.
+    expect(labels(await render())).toEqual(
+      expect.arrayContaining([
+        'Consumed, 1,650 kcal',
+        'Burned, 320 kcal',
+        'Remaining, 550 kcal',
       ]),
     );
   });
@@ -260,7 +281,7 @@ describe('NutritionScreen', () => {
 
   test('the verdict turns once the goal is passed', async () => {
     const tree = await render();
-    expect(allText(tree)).toContain("within your daily calorie goal");
+    expect(allText(tree)).toContain('within your daily calorie goal');
 
     ReactTestRenderer.act(() => {
       useNutritionStore.getState().addEntries([
@@ -306,6 +327,28 @@ describe('NutritionScreen', () => {
     );
   });
 
+  test('the open picker marks the choice in force and says what each is', async () => {
+    const tree = await render();
+
+    press(tree, 'Diet Type, Vegetarian');
+
+    // The point of the sheet: the row already chosen reads as chosen — and it
+    // says so as a radio's *state*, which is what a screen reader announces,
+    // rather than by renaming the row.
+    const rows = tree.root.findAll(
+      node =>
+        node.props?.accessibilityRole === 'radio' &&
+        typeof node.props.onPress === 'function',
+    );
+    const stateOf = (label: string) =>
+      rows.find(node => node.props.accessibilityLabel === label)?.props
+        .accessibilityState;
+
+    expect(stateOf('Vegetarian')).toMatchObject({ selected: true });
+    expect(stateOf('Vegan')).toMatchObject({ selected: false });
+    expect(allText(tree)).toContain('No animal products at all');
+  });
+
   test('Manage opens the diet plan behind the preferences', async () => {
     press(await render(), 'Manage meal plan and preferences');
 
@@ -344,9 +387,8 @@ describe('the period chips', () => {
     expect(text).not.toContain('Calorie Summary');
     // Seven days, ending on the day the chip sits beside.
     expect(nutritionApi.days).toHaveBeenCalled();
-    const [from, to] = nutritionApi.days.mock.calls[
-      nutritionApi.days.mock.calls.length - 1
-    ];
+    const [from, to] =
+      nutritionApi.days.mock.calls[nutritionApi.days.mock.calls.length - 1];
     expect(to).toBe(todayIso());
     expect(from).toBe(addDays(todayIso(), -6));
   });
@@ -355,9 +397,8 @@ describe('the period chips', () => {
     const tree = await render();
 
     await pressAndSettle(tree, 'Month');
-    const [from, to] = nutritionApi.days.mock.calls[
-      nutritionApi.days.mock.calls.length - 1
-    ];
+    const [from, to] =
+      nutritionApi.days.mock.calls[nutritionApi.days.mock.calls.length - 1];
     expect(from).toBe(addDays(todayIso(), -29));
     expect(to).toBe(todayIso());
     expect(allText(tree)).toContain('The last 30 days');
@@ -427,7 +468,9 @@ describe('a meal that did not save', () => {
     // What the store does when the server refuses a change outright: it drops
     // it from the outbox, so the only trace left is this.
     await ReactTestRenderer.act(async () => {
-      useNutritionStore.setState({ syncError: 'Only the last 30 days can be logged.' });
+      useNutritionStore.setState({
+        syncError: 'Only the last 30 days can be logged.',
+      });
     });
 
     const text = allText(tree);

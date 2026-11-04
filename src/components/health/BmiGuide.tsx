@@ -1,16 +1,16 @@
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Info } from 'lucide-react-native';
 import { radius, useTheme } from '../../theme';
 import type { ThemeColors } from '../../constants/colors';
 import { HStack, VStack } from '../layout/Stack';
-import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
-import { Pressable } from '../form/Pressable';
 
 interface Band {
   label: string;
-  tint: Extract<keyof ThemeColors, 'primary' | 'success' | 'warning' | 'destructive'>;
+  tint: Extract<
+    keyof ThemeColors,
+    'primary' | 'success' | 'warning' | 'destructive'
+  >;
   /** What a screen reader should hear instead of a bare range. */
   name: string;
 }
@@ -29,10 +29,6 @@ const BANDS: readonly Band[] = [
   { label: '30+', tint: 'destructive', name: '30 and over, obese' },
 ];
 
-interface Props {
-  onPressInfo: () => void;
-}
-
 /**
  * The BMI scale, as four segments under the tiles.
  *
@@ -40,8 +36,11 @@ interface Props {
  * the tile beside it already states their figure and its verdict. Pointing at
  * a band as well would make the same statement twice, in the louder of the two
  * ways.
+ *
+ * The heading carried an ⓘ to an explainer that does not exist. The four bands
+ * and their ranges are the explanation, and they are already on the card.
  */
-export const BmiGuide = memo(({ onPressInfo }: Props) => {
+export const BmiGuide = memo(() => {
   const { colors } = useTheme();
 
   return (
@@ -51,18 +50,7 @@ export const BmiGuide = memo(({ onPressInfo }: Props) => {
       p="md"
       style={[styles.card, { borderColor: colors.border }]}
     >
-      <Pressable
-        onPress={onPressInfo}
-        feedback="opacity"
-        visualSize={20}
-        accessibilityRole="button"
-        accessibilityLabel="BMI guide, what is this?"
-      >
-        <HStack align="center" gap="xs">
-          <AppText variant="bodyStrong">BMI Guide</AppText>
-          <Icon as={Info} size="xs" color="textTertiary" />
-        </HStack>
-      </Pressable>
+      <AppText variant="bodyStrong">BMI Guide</AppText>
 
       <HStack align="center" gap="xs">
         {BANDS.map(band => (

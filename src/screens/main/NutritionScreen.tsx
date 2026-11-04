@@ -1,8 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Alert } from '../../components/feedback/Alert';
-import { ActionSheet } from '../../components/disclosure/ActionSheet';
+import { OptionSheet } from '../../components/disclosure/OptionSheet';
 import { CalendarSheet } from '../../components/form/CalendarSheet';
 import { DayTotalsCard } from '../../components/history/DayTotalsCard';
 import { RangeSummaryCard } from '../../components/history/RangeSummaryCard';
@@ -24,6 +24,7 @@ import {
   MEAL_PLAN_LABEL,
   NUTRITION_GOAL_LABEL,
 } from '../../components/nutrition/nutritionLabels';
+import { PREFERENCE_SHEET } from '../../components/nutrition/preferenceOptions';
 import { LoadState } from '../../components/ui/LoadState';
 import { Button } from '../../components/ui/Button';
 import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
@@ -62,11 +63,6 @@ const PERIOD_DAYS: Record<Exclude<NutritionPeriod, 'day'>, number> = {
   week: 7,
   month: 30,
 };
-
-/** What each preference tile offers, in the order the sheet lists them. */
-const DIET_OPTIONS = Object.keys(DIET_LABEL) as DietType[];
-const PLAN_OPTIONS = Object.keys(MEAL_PLAN_LABEL) as MealPlan[];
-const GOAL_OPTIONS = Object.keys(NUTRITION_GOAL_LABEL) as NutritionGoal[];
 
 /**
  * Nutrition: what has been eaten on a day, against what the day was meant to
@@ -178,37 +174,47 @@ export const NutritionScreen = () => {
   }, []);
 
   /**
-   * The picker's options, built from whichever preference was tapped. One
-   * sheet rather than three: they differ only in their list.
+   * Which preference the picker is about.
+   *
+   * It outlives `editing` on purpose: the sheet slides out rather than
+   * vanishing, and a sheet whose rows were emptied the instant it was asked to
+   * close spends that animation as a blank card. Kept in a ref rather than
+   * state because nothing should re-render on account of it — it only ever
+   * changes in the same pass that `editing` does.
    */
-  const preferenceActions = useMemo(() => {
-    if (editing === 'dietType') {
-      return DIET_OPTIONS.map(value => ({
-        label: DIET_LABEL[value],
-        onPress: () => setPreferences({ dietType: value }),
-      }));
-    }
-    if (editing === 'mealPlan') {
-      return PLAN_OPTIONS.map(value => ({
-        label: MEAL_PLAN_LABEL[value],
-        onPress: () => setPreferences({ mealPlan: value }),
-      }));
-    }
-    if (editing === 'goal') {
-      return GOAL_OPTIONS.map(value => ({
-        label: NUTRITION_GOAL_LABEL[value],
-        onPress: () => setPreferences({ goal: value }),
-      }));
-    }
-    return [];
-  }, [editing, setPreferences]);
+  const lastEdited = useRef<PreferenceKind>('dietType');
+  if (editing !== null) {
+    lastEdited.current = editing;
+  }
+  const sheetKind = editing ?? lastEdited.current;
+  const sheet = PREFERENCE_SHEET[sheetKind];
 
-  const preferenceTitle =
-    editing === 'dietType'
-      ? 'Diet type'
-      : editing === 'mealPlan'
-      ? 'Meal plan'
-      : 'Nutrition goal';
+  /**
+   * The choice in force, so the open sheet marks it. Null only before the
+   * profile has arrived, which is also when no tile exists to open it.
+   */
+  const selectedPreference = profile?.preferences[sheetKind] ?? null;
+
+  /**
+   * One sheet for all three preferences rather than three: they differ only in
+   * their rows. The value comes back as a string — a picker cannot be generic
+   * over three unrelated enums at once — and is narrowed by the field it was
+   * chosen for, which is the only place that knows which enum it belongs to.
+   */
+  const choosePreference = useCallback(
+    (value: string) => {
+      if (sheetKind === 'dietType') {
+        setPreferences({ dietType: value as DietType });
+        return;
+      }
+      if (sheetKind === 'mealPlan') {
+        setPreferences({ mealPlan: value as MealPlan });
+        return;
+      }
+      setPreferences({ goal: value as NutritionGoal });
+    },
+    [sheetKind, setPreferences],
+  );
 
   // The plan behind the preferences: "Manage" is the one control here that is
   // about the whole plan rather than one field of it.
@@ -251,11 +257,6 @@ export const NutritionScreen = () => {
       }),
     [navigation],
   );
-
-  // The goal editor, the full diary and the tips library have no screens yet.
-  // Wired as no-ops rather than left off, so each control keeps the shape it
-  // will ship with and only the handler changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
 
   return (
     <Screen edges={['top']}>
@@ -336,7 +337,6 @@ export const NutritionScreen = () => {
                 proteinGoalG={profile.goals.proteinG}
                 carbsGoalG={profile.goals.carbsG}
                 fatsGoalG={profile.goals.fatsG}
-                onPressLearnMore={notImplemented}
               />
             ) : periodDays.data ? (
               <RangeSummaryCard
@@ -393,7 +393,6 @@ export const NutritionScreen = () => {
             tip={tip?.text ?? null}
             onPressAdd={onAddToMeal}
             onPressViewAll={onOpenHistory}
-            onPressTips={notImplemented}
           />
         ) : (
           <LoadState
@@ -416,11 +415,14 @@ export const NutritionScreen = () => {
         <ReferralPromoCard card={referralCard} onPress={onOpenReferral} />
       </ScrollView>
 
-      <ActionSheet
+      <OptionSheet
         visible={editing !== null}
         onClose={closeEditing}
-        title={preferenceTitle}
-        actions={preferenceActions}
+        title={sheet.title}
+        message={sheet.message}
+        options={sheet.options}
+        value={selectedPreference}
+        onSelect={choosePreference}
       />
 
       <CalendarSheet

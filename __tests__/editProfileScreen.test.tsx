@@ -75,7 +75,7 @@ const member = (over: Partial<User> = {}): User =>
     emailVerifiedAt: null,
     trustTier: 'normal',
     ...over,
-  }) as unknown as User;
+  } as unknown as User);
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 
@@ -223,7 +223,39 @@ describe('EditProfileScreen', () => {
     await settle();
 
     expect(userApi.updateProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ heightCm: 172, weightKg: 68.4, units: 'metric' }),
+      expect.objectContaining({
+        heightCm: 172,
+        weightKg: 68.4,
+        units: 'metric',
+      }),
+    );
+  });
+
+  test('a select opens on the choice in force, and saves the one picked', async () => {
+    const tree = await render();
+
+    await press(tree, 'Goal');
+
+    const rows = tree.root.findAll(
+      node =>
+        node.props?.accessibilityRole === 'radio' &&
+        typeof node.props.onPress === 'function',
+    );
+    const stateOf = (label: string) =>
+      rows.find(node => node.props.accessibilityLabel === label)?.props
+        .accessibilityState;
+
+    // The member trains to stay active, and the sheet says so before they
+    // touch anything — the whole point of opening a picker on a saved value.
+    expect(stateOf('Stay active')).toMatchObject({ selected: true });
+    expect(stateOf('Lose weight')).toMatchObject({ selected: false });
+
+    await press(tree, 'Lose weight');
+    await press(tree, 'Save changes');
+    await settle();
+
+    expect(userApi.updateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ goal: 'lose_weight' }),
     );
   });
 

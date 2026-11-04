@@ -1,17 +1,14 @@
 import React, { memo } from 'react';
-import { ChevronRight } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import { formatGrouped } from '../../utils/format';
 import type { MacroTotals as NutritionTotals } from '../../stores/nutritionStore';
 import type { NutritionGoals } from '../../types/models';
 import { HStack, VStack } from '../layout/Stack';
-import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { ProgressBar } from '../ui/ProgressBar';
 import { ProgressRing } from '../fitness/ProgressRing';
-import { Pressable } from '../form/Pressable';
 
 interface MacroProps {
   label: string;
@@ -46,7 +43,6 @@ MacroFigure.displayName = 'MacroFigure';
 interface Props {
   totals: NutritionTotals;
   goals: NutritionGoals;
-  onPressInsights: () => void;
 }
 
 /**
@@ -60,95 +56,79 @@ interface Props {
  * the ring has already said — and turns into how far over the day went once
  * the goal is passed, because that is the day worth noticing.
  */
-export const DailySummaryCard = memo(
-  ({ totals, goals, onPressInsights }: Props) => {
-    const { colors } = useTheme();
-    const share = totals.calories / Math.max(1, goals.calories);
-    const remaining = goals.calories - totals.calories;
+export const DailySummaryCard = memo(({ totals, goals }: Props) => {
+  const { colors } = useTheme();
+  const share = totals.calories / Math.max(1, goals.calories);
+  const remaining = goals.calories - totals.calories;
 
-    return (
-      <Card radius="xl" padding="base">
-        <VStack gap="base">
+  return (
+    <Card radius="xl" padding="base">
+      <VStack gap="base">
+        <HStack align="center" justify="between" gap="sm">
+          <AppText variant="h3" numberOfLines={1}>
+            Daily Nutrition Summary
+          </AppText>
+        </HStack>
+
+        <HStack align="center" gap="base">
+          <ProgressRing
+            progress={share}
+            size={moderateScale(104)}
+            strokeWidth={moderateScale(9)}
+            tint={remaining >= 0 ? colors.success : colors.destructive}
+          >
+            <VStack align="center" gap="none">
+              <AppText variant="h2" numberOfLines={1}>
+                {formatGrouped(totals.calories)}
+              </AppText>
+              <AppText variant="miniMicro" color="textSecondary">
+                {`of ${formatGrouped(goals.calories)}`}
+              </AppText>
+              <AppText variant="miniMicro" color="textTertiary">
+                kcal
+              </AppText>
+            </VStack>
+          </ProgressRing>
+
+          <HStack flex={1} align="start" gap="sm">
+            <MacroFigure
+              label="Protein"
+              value={totals.proteinG}
+              goal={goals.proteinG}
+              tint={colors.success}
+            />
+            <MacroFigure
+              label="Carbs"
+              value={totals.carbsG}
+              goal={goals.carbsG}
+              tint={colors.primary}
+            />
+            <MacroFigure
+              label="Fats"
+              value={totals.fatsG}
+              goal={goals.fatsG}
+              tint={colors.brandAccent}
+            />
+          </HStack>
+        </HStack>
+
+        <VStack gap="xs">
+          <ProgressBar progress={share} tint={colors.success} height={8} />
+
           <HStack align="center" justify="between" gap="sm">
-            <AppText variant="h3" numberOfLines={1}>
-              Daily Nutrition Summary
+            <AppText variant="miniMicro" color="textSecondary">
+              {`${Math.round(share * 100)}% of daily goal`}
             </AppText>
-
-            <Pressable
-              onPress={onPressInsights}
-              feedback="opacity"
-              accessibilityRole="link"
-              accessibilityLabel="View insights"
-            >
-              <HStack align="center" gap="xxs">
-                <AppText variant="micro" style={{ color: colors.success }}>
-                  View Insights
-                </AppText>
-                <Icon as={ChevronRight} size="xs" tint={colors.success} />
-              </HStack>
-            </Pressable>
+            <AppText variant="miniMicro" color="textSecondary">
+              {remaining >= 0
+                ? `${formatGrouped(remaining)} kcal remaining`
+                : `${formatGrouped(-remaining)} kcal over`}
+            </AppText>
           </HStack>
-
-          <HStack align="center" gap="base">
-            <ProgressRing
-              progress={share}
-              size={moderateScale(104)}
-              strokeWidth={moderateScale(9)}
-              tint={remaining >= 0 ? colors.success : colors.destructive}
-            >
-              <VStack align="center" gap="none">
-                <AppText variant="h2" numberOfLines={1}>
-                  {formatGrouped(totals.calories)}
-                </AppText>
-                <AppText variant="miniMicro" color="textSecondary">
-                  {`of ${formatGrouped(goals.calories)}`}
-                </AppText>
-                <AppText variant="miniMicro" color="textTertiary">
-                  kcal
-                </AppText>
-              </VStack>
-            </ProgressRing>
-
-            <HStack flex={1} align="start" gap="sm">
-              <MacroFigure
-                label="Protein"
-                value={totals.proteinG}
-                goal={goals.proteinG}
-                tint={colors.success}
-              />
-              <MacroFigure
-                label="Carbs"
-                value={totals.carbsG}
-                goal={goals.carbsG}
-                tint={colors.primary}
-              />
-              <MacroFigure
-                label="Fats"
-                value={totals.fatsG}
-                goal={goals.fatsG}
-                tint={colors.brandAccent}
-              />
-            </HStack>
-          </HStack>
-
-          <VStack gap="xs">
-            <ProgressBar progress={share} tint={colors.success} height={8} />
-
-            <HStack align="center" justify="between" gap="sm">
-              <AppText variant="miniMicro" color="textSecondary">
-                {`${Math.round(share * 100)}% of daily goal`}
-              </AppText>
-              <AppText variant="miniMicro" color="textSecondary">
-                {remaining >= 0
-                  ? `${formatGrouped(remaining)} kcal remaining`
-                  : `${formatGrouped(-remaining)} kcal over`}
-              </AppText>
-            </HStack>
-          </VStack>
         </VStack>
-      </Card>
-    );
-  },
-);
+      </VStack>
+    </Card>
+  );
+});
 
 DailySummaryCard.displayName = 'DailySummaryCard';

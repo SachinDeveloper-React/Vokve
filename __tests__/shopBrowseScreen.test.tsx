@@ -268,6 +268,37 @@ describe('ShopBrowseScreen', () => {
     expect(allText(tree)).toContain('in stock');
   });
 
+  test('the sort sheet marks the sort in force rather than greying it out', async () => {
+    mockRouteParams = { category: 'gym' };
+    shopApi.items.mockResolvedValue(page(gym));
+    const tree = await render(<ShopBrowseScreen />);
+
+    await press(tree, 'Sort by, Popular');
+
+    const rows = tree.root.findAll(
+      node =>
+        node.props?.accessibilityRole === 'radio' &&
+        typeof node.props.onPress === 'function',
+    );
+    const stateOf = (label: string) =>
+      rows.find(node => node.props.accessibilityLabel === label)?.props
+        .accessibilityState;
+
+    // A disabled row was how this used to say "you are already on this", and
+    // disabled reads as "unavailable".
+    expect(stateOf('Popular')).toMatchObject({
+      selected: true,
+      disabled: false,
+    });
+    expect(stateOf('Newest')).toMatchObject({ selected: false });
+
+    // So the row in force is still a real target: it just changes nothing.
+    await press(tree, 'Popular');
+    expect(shopApi.items).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sort: 'popular' }),
+    );
+  });
+
   test('reaching the end fetches the next page with the cursor and appends it', async () => {
     mockRouteParams = { category: 'gym' };
     shopApi.items

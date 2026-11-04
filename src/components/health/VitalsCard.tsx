@@ -14,7 +14,6 @@ interface Props {
   /** The newest reading of each kind. A kind with none is simply not drawn. */
   latest: Partial<Record<VitalKind, VitalReading>>;
   onPressAdd: () => void;
-  onPressBmiInfo: () => void;
   /** Heart rate and blood pressure are the vitals with screens of their own. */
   onPressHeartRate: () => void;
   onPressBloodPressure: () => void;
@@ -37,17 +36,15 @@ interface Props {
  * nowhere.
  */
 export const VitalsCard = memo(
-  ({
-    latest,
-    onPressAdd,
-    onPressBmiInfo,
-    onPressHeartRate,
-    onPressBloodPressure,
-  }: Props) => {
+  ({ latest, onPressAdd, onPressHeartRate, onPressBloodPressure }: Props) => {
     const { colors } = useTheme();
 
-    const { heart_rate: heartRate, blood_pressure: bloodPressure, bmi, weight } =
-      latest;
+    const {
+      heart_rate: heartRate,
+      blood_pressure: bloodPressure,
+      bmi,
+      weight,
+    } = latest;
 
     return (
       <Card radius="xl" padding="base">
@@ -87,7 +84,7 @@ export const VitalsCard = memo(
 
           <HStack align="stretch" gap="sm">
             {weight ? <VitalTile reading={weight} /> : null}
-            <BmiGuide onPressInfo={onPressBmiInfo} />
+            <BmiGuide />
           </HStack>
         </VStack>
       </Card>

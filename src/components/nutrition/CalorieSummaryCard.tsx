@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Check, ChevronRight } from 'lucide-react-native';
+import { Check } from 'lucide-react-native';
 import { darkColors, radius, spacing, useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import { withAlpha } from '../../utils/color';
@@ -10,40 +10,60 @@ import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { ProgressRing } from '../fitness/ProgressRing';
-import { Pressable } from '../form/Pressable';
 import { MacroBar } from './MacroBar';
 
 interface LegendProps {
   label: string;
-  value: string;
+  value: number;
   tint: string;
   foreground: string;
   secondary: string;
 }
 
-const LegendRow = memo(
+/**
+ * One of the day's three calorie figures, as a column in a row of three.
+ *
+ * Across rather than down: the three together are one reading of the day, and
+ * stacked they cost three lines of a card that already carries a ring and
+ * three macro bars. Side by side they take one, and the eye compares them
+ * without having to travel.
+ *
+ * The unit is said once per figure but a step smaller than the number, so the
+ * three numbers line up as a row of numbers rather than a row of sentences.
+ */
+const LegendFigure = memo(
   ({ label, value, tint, foreground, secondary }: LegendProps) => (
-    <HStack
+    <VStack
+      flex={1}
       align="center"
-      gap="sm"
+      gap="xxs"
       accessible
-      accessibilityLabel={`${label}, ${value}`}
+      accessibilityLabel={`${label}, ${formatGrouped(value)} kcal`}
     >
-      <View style={[styles.dot, { backgroundColor: tint }]} />
-
-      <VStack gap="none">
-        <AppText variant="miniMicro" style={{ color: secondary }}>
+      <HStack align="center" gap="xs">
+        <View style={[styles.dot, { backgroundColor: tint }]} />
+        <AppText variant="micro" numberOfLines={1} style={{ color: secondary }}>
           {label}
         </AppText>
-        <AppText variant="bodyStrong" numberOfLines={1} style={{ color: foreground }}>
-          {value}
+      </HStack>
+
+      <HStack align="baseline" gap="xxs">
+        <AppText
+          variant="bodyStrong"
+          numberOfLines={1}
+          style={{ color: foreground }}
+        >
+          {formatGrouped(value)}
         </AppText>
-      </VStack>
-    </HStack>
+        <AppText variant="miniMicro" style={{ color: secondary }}>
+          kcal
+        </AppText>
+      </HStack>
+    </VStack>
   ),
 );
 
-LegendRow.displayName = 'LegendRow';
+LegendFigure.displayName = 'LegendFigure';
 
 interface Props {
   consumed: number;
@@ -55,7 +75,6 @@ interface Props {
   proteinGoalG: number;
   carbsGoalG: number;
   fatsGoalG: number;
-  onPressLearnMore: () => void;
 }
 
 /**
@@ -64,8 +83,8 @@ interface Props {
  * The ring draws what has been eaten against the goal and nothing else. A
  * multi-segment ring covering eaten, burned and remaining is three statements
  * on one circle, and the three of them do not sum to it — burning 500 calories
- * does not shrink the plate. The legend beside it states each figure plainly
- * instead, which is the honest version of the same picture.
+ * does not shrink the plate. The three figures are stated plainly in a band
+ * under the ring instead, which is the honest version of the same picture.
  *
  * The verdict line at the foot follows the figures: over the goal it says so,
  * because a card that congratulated a user either way would be worth nothing
@@ -82,11 +101,11 @@ export const CalorieSummaryCard = memo(
     proteinGoalG,
     carbsGoalG,
     fatsGoalG,
-    onPressLearnMore,
   }: Props) => {
     const { colors } = useTheme();
     const foreground = darkColors.tierForeground;
     const secondary = withAlpha(foreground, 0.68);
+    const rule = withAlpha(foreground, 0.14);
 
     const remaining = Math.max(0, goal - consumed);
     const isWithinGoal = consumed <= goal;
@@ -104,11 +123,17 @@ export const CalorieSummaryCard = memo(
                 progress={consumed / Math.max(1, goal)}
                 size={moderateScale(124)}
                 strokeWidth={moderateScale(10)}
-                tint={isWithinGoal ? darkColors.success : darkColors.destructive}
+                tint={
+                  isWithinGoal ? darkColors.success : darkColors.destructive
+                }
                 trackColor={withAlpha(foreground, 0.16)}
               >
                 <VStack align="center" gap="none">
-                  <AppText variant="h2" numberOfLines={1} style={{ color: foreground }}>
+                  <AppText
+                    variant="h2"
+                    numberOfLines={1}
+                    style={{ color: foreground }}
+                  >
                     {formatGrouped(consumed)}
                   </AppText>
                   <AppText variant="miniMicro" style={{ color: secondary }}>
@@ -117,30 +142,6 @@ export const CalorieSummaryCard = memo(
                 </VStack>
               </ProgressRing>
             </HStack>
-
-            <VStack gap="sm">
-              <LegendRow
-                label="Consumed"
-                value={`${formatGrouped(consumed)} kcal`}
-                tint={darkColors.destructive}
-                foreground={foreground}
-                secondary={secondary}
-              />
-              <LegendRow
-                label="Burned"
-                value={`${formatGrouped(burned)} kcal`}
-                tint={darkColors.brandAccent}
-                foreground={foreground}
-                secondary={secondary}
-              />
-              <LegendRow
-                label="Remaining"
-                value={`${formatGrouped(remaining)} kcal`}
-                tint={darkColors.success}
-                foreground={foreground}
-                secondary={secondary}
-              />
-            </VStack>
           </VStack>
 
           <VStack flex={1} gap="md">
@@ -175,41 +176,60 @@ export const CalorieSummaryCard = memo(
           </VStack>
         </HStack>
 
-        <Divider tint={withAlpha(foreground, 0.14)} />
+        <Divider tint={rule} />
 
-        <HStack align="center" justify="between" gap="sm">
-          <HStack flex={1} align="center" gap="xs">
-            <Icon
-              as={Check}
-              size="xs"
-              tint={isWithinGoal ? darkColors.success : darkColors.destructive}
-            />
-            <AppText
-              variant="micro"
-              numberOfLines={2}
-              style={[styles.verdict, { color: secondary }]}
-            >
-              {isWithinGoal
-                ? "Great! You're within your daily calorie goal."
-                : `That's ${formatGrouped(
-                    consumed - goal,
-                  )} kcal over today's goal.`}
-            </AppText>
-          </HStack>
+        {/* The three figures across the full width of the card rather than
+            down one half of it: a third of the card is room enough for a
+            four-figure number, and half a card's width was never the
+            constraint on reading them — the three lines were. */}
+        <HStack align="start" gap="xs">
+          <LegendFigure
+            label="Consumed"
+            value={consumed}
+            tint={darkColors.destructive}
+            foreground={foreground}
+            secondary={secondary}
+          />
+          <Divider orientation="vertical" tint={rule} />
+          <LegendFigure
+            label="Burned"
+            value={burned}
+            tint={darkColors.brandAccent}
+            foreground={foreground}
+            secondary={secondary}
+          />
+          <Divider orientation="vertical" tint={rule} />
+          <LegendFigure
+            label="Remaining"
+            value={remaining}
+            tint={darkColors.success}
+            foreground={foreground}
+            secondary={secondary}
+          />
+        </HStack>
 
-          <Pressable
-            onPress={onPressLearnMore}
-            feedback="opacity"
-            accessibilityRole="link"
-            accessibilityLabel="Learn more about calories"
+        <Divider tint={rule} />
+
+        {/* The verdict had a "Learn More" link beside it, wired to a screen
+            that does not exist. A control that does nothing costs more than
+            the space it saves, so the sentence has the width instead. */}
+        <HStack align="center" gap="xs">
+          <Icon
+            as={Check}
+            size="xs"
+            tint={isWithinGoal ? darkColors.success : darkColors.destructive}
+          />
+          <AppText
+            variant="micro"
+            numberOfLines={2}
+            style={[styles.verdict, { color: secondary }]}
           >
-            <HStack align="center" gap="xxs">
-              <AppText variant="micro" style={{ color: foreground }}>
-                Learn More
-              </AppText>
-              <Icon as={ChevronRight} size="xs" tint={foreground} />
-            </HStack>
-          </Pressable>
+            {isWithinGoal
+              ? "Great! You're within your daily calorie goal."
+              : `That's ${formatGrouped(
+                  consumed - goal,
+                )} kcal over today's goal.`}
+          </AppText>
         </HStack>
       </View>
     );
@@ -219,7 +239,7 @@ export const CalorieSummaryCard = memo(
 CalorieSummaryCard.displayName = 'CalorieSummaryCard';
 
 const styles = StyleSheet.create({
-  panel: { borderRadius: radius.xl, padding: spacing.base, gap: spacing.base },
-  dot: { width: 8, height: 8, borderRadius: 4 },
+  panel: { borderRadius: radius.xl, padding: spacing.base, gap: spacing.md },
+  dot: { width: 6, height: 6, borderRadius: 3 },
   verdict: { flexShrink: 1 },
 });

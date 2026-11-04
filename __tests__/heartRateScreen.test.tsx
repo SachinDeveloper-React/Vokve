@@ -82,7 +82,6 @@ const settle = () =>
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 
-
 afterEach(async () => {
   const tree = mounted;
   mounted = null;
@@ -214,12 +213,12 @@ describe('HeartRateScreen', () => {
       .findAll(n => typeof n.props?.accessibilityLabel === 'string')
       .map(n => n.props.accessibilityLabel as string);
 
-    expect(labels.some(label => label.startsWith('118 beats per minute, Elevated'))).toBe(
-      true,
-    );
-    expect(labels.some(label => label.startsWith('72 beats per minute, Normal'))).toBe(
-      true,
-    );
+    expect(
+      labels.some(label => label.startsWith('118 beats per minute, Elevated')),
+    ).toBe(true);
+    expect(
+      labels.some(label => label.startsWith('72 beats per minute, Normal')),
+    ).toBe(true);
   });
 
   test('"View all" opens the archive, already filtered to this vital', async () => {
@@ -228,6 +227,22 @@ describe('HeartRateScreen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('VitalsHistory', {
       kind: 'heart_rate',
     });
+  });
+
+  test('the masthead has no ⓘ to an explainer that does not exist', async () => {
+    const tree = await render();
+    const labels = tree.root
+      .findAll(n => typeof n.props?.accessibilityLabel === 'string')
+      .map(n => n.props.accessibilityLabel as string);
+
+    expect(labels).not.toContain('About heart rate readings');
+
+    // The standing advice at the foot is still drawn — it just is not a
+    // button to nowhere any more.
+    expect(allText(tree)).toContain('Keep Your Heart Healthy');
+    expect(
+      labels.some(label => label.startsWith('Keep Your Heart Healthy')),
+    ).toBe(false);
   });
 
   test('the chevron returns to whatever opened the screen', async () => {

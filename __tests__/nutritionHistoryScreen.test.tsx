@@ -258,6 +258,19 @@ describe('NutritionHistoryScreen', () => {
     });
   });
 
+  test('the history offers no link to a screen beyond itself', async () => {
+    const text = allText(await render());
+
+    // "View Insights" went to a breakdown that was never built, and the
+    // "View All" beside Previous Days pointed at the archive — which is this
+    // screen.
+    expect(text).not.toContain('View Insights');
+    expect(text).not.toContain('View All');
+    // What the links sat beside is still here.
+    expect(text).toContain('Daily Nutrition Summary');
+    expect(text).toContain('Previous Days');
+  });
+
   test('the chevron returns to whatever opened the history', async () => {
     await press(await render(), 'Back');
 

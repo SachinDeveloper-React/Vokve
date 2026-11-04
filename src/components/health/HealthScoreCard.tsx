@@ -1,12 +1,11 @@
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Heart, Info } from 'lucide-react-native';
+import { Heart } from 'lucide-react-native';
 import { darkColors, radius, spacing, useTheme } from '../../theme';
 import { withAlpha } from '../../utils/color';
 import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
-import { Pressable } from '../form/Pressable';
 
 interface Band {
   label: string;
@@ -39,7 +38,6 @@ interface Props {
   band?: string;
   /** Null while the profile is loading — the line drops the name. */
   name?: string | null;
-  onPressInfo: () => void;
 }
 
 /**
@@ -49,11 +47,13 @@ interface Props {
  * a hundred with nothing next to it invites the reader to compare themselves
  * with a stranger; the line turns it back into something about them.
  *
- * The ⓘ is wired rather than decorative: a health score the user did not
- * choose the rules for has to be able to explain itself.
+ * The label used to carry an ⓘ to an explainer that was never built. A
+ * control that does nothing is worse than no control, so what is left is the
+ * label — and the band word beside the figure, which is the server's own
+ * reading of it and the nearest thing to an explanation the app has.
  */
 export const HealthScoreCard = memo(
-  ({ score, outOf, band: word, name, onPressInfo }: Props) => {
+  ({ score, outOf, band: word, name }: Props) => {
     const { colors } = useTheme();
     const foreground = darkColors.tierForeground;
     const secondary = withAlpha(foreground, 0.68);
@@ -66,20 +66,9 @@ export const HealthScoreCard = memo(
           <Icon as={Heart} size="xl" tint={foreground} />
 
           <VStack gap="xxs">
-            <Pressable
-              onPress={onPressInfo}
-              feedback="opacity"
-              visualSize={20}
-              accessibilityRole="button"
-              accessibilityLabel="Health score, what is this?"
-            >
-              <HStack align="center" gap="xs">
-                <AppText variant="micro" style={{ color: secondary }}>
-                  Health Score
-                </AppText>
-                <Icon as={Info} size="xs" tint={secondary} />
-              </HStack>
-            </Pressable>
+            <AppText variant="micro" style={{ color: secondary }}>
+              Health Score
+            </AppText>
 
             <HStack align="baseline" gap="xxs">
               <AppText variant="metric" style={{ color: foreground }}>
@@ -90,7 +79,10 @@ export const HealthScoreCard = memo(
               </AppText>
             </HStack>
 
-            <AppText variant="bodyStrong" style={{ color: darkColors[band.tint] }}>
+            <AppText
+              variant="bodyStrong"
+              style={{ color: darkColors[band.tint] }}
+            >
               {band.label}
             </AppText>
           </VStack>

@@ -1,13 +1,10 @@
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ChevronRight } from 'lucide-react-native';
 import { radius, spacing, useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import { withAlpha } from '../../utils/color';
 import { HStack, VStack } from '../layout/Stack';
-import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
-import { Pressable } from '../form/Pressable';
 
 const DISC = moderateScale(34);
 
@@ -16,7 +13,6 @@ interface Props {
   message: string;
   /** The vital's colour. Pass a theme colour. */
   tint: string;
-  onPress: () => void;
 }
 
 /**
@@ -26,46 +22,38 @@ interface Props {
  * figure should not follow it with advice that reads as a response to *this*
  * reading — the app has no business doing that — and putting it after the
  * history makes plain that it is the same line for everyone.
+ *
+ * It is a card and not a button. The whole thing used to be pressable, with a
+ * chevron promising somewhere to go, and it went nowhere. The advice is the
+ * content, not a door to it — so the chevron is gone, and the line itself is
+ * set at a size somebody can actually read it at.
  */
-export const VitalTipCard = memo(({ title, message, tint, onPress }: Props) => {
+export const VitalTipCard = memo(({ title, message, tint }: Props) => {
   const { isDark } = useTheme();
 
   return (
-    <Pressable
-      onPress={onPress}
-      feedback="scale"
-      accessibilityRole="button"
-      accessibilityLabel={`${title}. ${message}`}
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: withAlpha(tint, isDark ? 0.12 : 0.07),
+          borderColor: withAlpha(tint, isDark ? 0.28 : 0.18),
+        },
+      ]}
     >
-      <View
-        style={[
-          styles.card,
-          {
-            backgroundColor: withAlpha(tint, isDark ? 0.12 : 0.07),
-            borderColor: withAlpha(tint, isDark ? 0.28 : 0.18),
-          },
-        ]}
-      >
-        <HStack align="center" gap="md">
-          <View
-            style={[styles.disc, { backgroundColor: withAlpha(tint, 0.24) }]}
-          >
-            <View style={[styles.dot, { backgroundColor: tint }]} />
-          </View>
+      <HStack align="center" gap="md">
+        <View style={[styles.disc, { backgroundColor: withAlpha(tint, 0.24) }]}>
+          <View style={[styles.dot, { backgroundColor: tint }]} />
+        </View>
 
-          <VStack flex={1} gap="xxs">
-            <AppText variant="bodyStrong" numberOfLines={1}>
-              {title}
-            </AppText>
-            <AppText variant="miniMicro" color="textSecondary" numberOfLines={2}>
-              {message}
-            </AppText>
-          </VStack>
-
-          <Icon as={ChevronRight} size="sm" tint={tint} />
-        </HStack>
-      </View>
-    </Pressable>
+        <VStack flex={1} gap="xxs">
+          <AppText variant="bodyStrong">{title}</AppText>
+          <AppText variant="caption" color="textSecondary">
+            {message}
+          </AppText>
+        </VStack>
+      </HStack>
+    </View>
   );
 });
 

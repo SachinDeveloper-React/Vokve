@@ -80,22 +80,13 @@ export const HeartRateScreen = () => {
     navigation.navigate('Main', { screen: 'Home' });
   }, [navigation]);
 
-  // The explainer has no screen yet. Wired as a no-op rather than left off,
-  // so the control keeps the shape it will ship with and only the handler
-  // changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <VitalHeader
-          title="Heart Rate"
-          onPressBack={onPressBack}
-          onPressInfo={notImplemented}
-        />
+        <VitalHeader title="Heart Rate" onPressBack={onPressBack} />
 
         {!synced ? (
           <LoadState
@@ -138,7 +129,6 @@ export const HeartRateScreen = () => {
             title={tip.title ?? 'Tip'}
             message={tip.text}
             tint={colors.destructive}
-            onPress={notImplemented}
           />
         ) : null}
       </ScrollView>

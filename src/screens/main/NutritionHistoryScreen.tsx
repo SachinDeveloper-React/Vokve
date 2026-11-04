@@ -155,11 +155,6 @@ export const NutritionHistoryScreen = () => {
     [date, navigation],
   );
 
-  // The insights breakdown and the full archive have no screens yet. Wired as
-  // no-ops rather than left off, so each link keeps the shape it will ship
-  // with and only the handler changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -195,11 +190,7 @@ export const NutritionHistoryScreen = () => {
           />
         ) : range === 'daily' && goals !== null ? (
           <>
-            <DailySummaryCard
-              totals={totals}
-              goals={goals}
-              onPressInsights={notImplemented}
-            />
+            <DailySummaryCard totals={totals} goals={goals} />
 
             <HStack align="center" justify="between" gap="sm">
               <AppText variant="h3">{`Meals (${
@@ -222,12 +213,12 @@ export const NutritionHistoryScreen = () => {
               />
             ))}
 
+            {/* No "View All" beside the card's title: this screen *is* the
+                archive, so the link had nowhere further to go. */}
             {previous.data ? (
               <DayTotalsCard
                 title="Previous Days"
                 days={previous.data}
-                actionLabel="View All"
-                onPressAction={notImplemented}
                 onPressDay={openDay}
               />
             ) : null}

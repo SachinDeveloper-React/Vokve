@@ -344,11 +344,6 @@ export const HydrationReminderScreen = () => {
     [navigation],
   );
 
-  // The full preset list has no screen yet. Wired as a no-op rather than
-  // left off, so the control keeps the shape it will ship with and only the
-  // handler changes when its screen lands.
-  const notImplemented = useCallback(() => {}, []);
-
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -414,7 +409,6 @@ export const HydrationReminderScreen = () => {
               onToggle={toggleReminder}
               onPressAdd={openPicker}
               onEdit={openEditor}
-              onPressViewAll={notImplemented}
               rules={slotRules}
             />
 

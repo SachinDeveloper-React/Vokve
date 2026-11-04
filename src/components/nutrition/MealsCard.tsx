@@ -15,7 +15,6 @@ interface Props {
   tip: string | null;
   onPressAdd: (slot: MealSlot) => void;
   onPressViewAll: () => void;
-  onPressTips: () => void;
 }
 
 /**
@@ -26,7 +25,7 @@ interface Props {
  * the day depend on how much of it had happened.
  */
 export const MealsCard = memo(
-  ({ meals, tip, onPressAdd, onPressViewAll, onPressTips }: Props) => (
+  ({ meals, tip, onPressAdd, onPressViewAll }: Props) => (
     <Card radius="xl" padding="base">
       <VStack gap="sm">
         <HStack align="center" justify="between" gap="sm">
@@ -61,7 +60,7 @@ export const MealsCard = memo(
           ))}
         </VStack>
 
-        {tip ? <NutritionTipStrip tip={tip} onPressTips={onPressTips} /> : null}
+        {tip ? <NutritionTipStrip tip={tip} /> : null}
       </VStack>
     </Card>
   ),
