@@ -24,11 +24,35 @@ export function formatHeight(cm: number, units: UnitSystem): string {
   return `${Math.round(cm)} cm`;
 }
 
-/** `4 520` kg of volume reads better than `4520`. */
+/**
+ * One decimal place, floored, with a whole number left whole — `2.5`, `2`.
+ *
+ * Floored rather than rounded because every caller is reporting something that
+ * has already happened, and rounding up reports a little more of it than has:
+ * `2,999` written as `3.0k` is a thousand that was not reached. On a coin
+ * figure the same rounding is worse than untidy — it tells somebody they can
+ * afford what they cannot.
+ */
+function toOneDecimal(value: number): string {
+  const floored = Math.floor(value * 10) / 10;
+  return Number.isInteger(floored) ? String(floored) : floored.toFixed(1);
+}
+
+/**
+ * A large figure at a glance — `4.5k`, `12k`, `1.2M`.
+ *
+ * For figures nobody acts on a digit at a time: a volume lifted, a step
+ * total, how many people joined a challenge. Not for anything spendable —
+ * see `formatCoinBalance` for why.
+ *
+ * A whole thousand drops its `.0`: `12k`, not `12.0k`. The decimal is there
+ * to separate `4.5k` from `4.1k`, and on a round figure it separates nothing
+ * while reading as precision the number does not have.
+ */
 export function formatCompactNumber(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(Math.round(value));
+  if (value >= 1_000_000) return `${toOneDecimal(value / 1_000_000)}M`;
+  if (value >= 1_000) return `${toOneDecimal(value / 1_000)}k`;
+  return formatGrouped(Math.floor(value));
 }
 
 /**
@@ -62,6 +86,34 @@ export function formatCoins(value: number): string {
   const [whole, fraction] = fixed.split('.');
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return `${value < 0 ? '-' : ''}${grouped}.${fraction}`;
+}
+
+/**
+ * The spendable balance, as a screen's headline figure.
+ *
+ * Three decisions, and each one is about the same thing — a balance is money,
+ * and the user is reading it to answer "can I buy this".
+ *
+ * **Floored to whole coins.** The fraction costs a third of the figure's width
+ * and settles nothing: nobody chooses between a 1,250-coin item and a
+ * 1,250.09 one. Floored rather than rounded so the app never states a balance
+ * the wallet cannot pay out — which is also what the checkout already does
+ * when it says "you have 6,362" beside a price.
+ *
+ * **Exact below a hundred thousand.** Real balances are four and five digits,
+ * and `6.4k` beside a price of `1,250` turns an affordability question into
+ * arithmetic. Compacting there would cost precision on every balance in the
+ * app to tidy one nobody has.
+ *
+ * **Compact above it**, on the same threshold the challenge figures use, so a
+ * balance that would otherwise run out of its card still fits.
+ *
+ * The exact figure is not lost: the places that draw this give a screen reader
+ * `formatCoins` instead, and the ledger states every coin of every movement.
+ */
+export function formatCoinBalance(value: number): string {
+  const whole = Math.floor(value);
+  return whole >= 100_000 ? formatCompactNumber(whole) : formatGrouped(whole);
 }
 
 /** Seconds to `m:ss`, or `h:mm:ss` once a session passes an hour. */

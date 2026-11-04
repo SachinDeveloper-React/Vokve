@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { Coins } from 'lucide-react-native';
 import { useTheme, type TypographyVariant } from '../../theme';
-import { formatCoins } from '../../utils/format';
+import { formatCoins, formatCompactNumber } from '../../utils/format';
 import { HStack } from '../layout/Stack';
 import { Icon, type IconSize } from '../media/Icon';
 import { AppText } from '../ui/AppText';
@@ -36,6 +36,14 @@ interface Props {
    * number counts.
    */
   withUnit?: boolean;
+  /**
+   * Draws the figure as `18.3k` rather than `18,350`. Only for a total nobody
+   * spends — a lifetime earned, a running tally — never for a balance, a
+   * price or a ledger row, where the coins have to add up.
+   *
+   * The screen reader still hears the exact figure either way.
+   */
+  compact?: boolean;
 }
 
 /**
@@ -47,11 +55,21 @@ interface Props {
  * edit.
  */
 export const CoinAmount = memo(
-  ({ amount, size = 'md', signed = false, tint, withUnit = false }: Props) => {
+  ({
+    amount,
+    size = 'md',
+    signed = false,
+    tint,
+    withUnit = false,
+    compact = false,
+  }: Props) => {
     const { colors } = useTheme();
     const color = tint ?? colors.gold;
     const { text, icon } = SIZES[size];
     const prefix = signed && amount > 0 ? '+' : '';
+    const written = compact
+      ? formatCompactNumber(Math.floor(amount))
+      : formatCoins(amount);
 
     return (
       <HStack align="center" gap="xxs">
@@ -62,7 +80,7 @@ export const CoinAmount = memo(
           accessibilityLabel={`${formatCoins(amount)} coins`}
         >
           {prefix}
-          {formatCoins(amount)}
+          {written}
           {withUnit ? ' Coins' : ''}
         </AppText>
       </HStack>

@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { StyleSheet } from 'react-native';
 import { formatLongDate } from '../../utils/date';
-import { formatCoins } from '../../utils/format';
+import { formatCompactNumber } from '../../utils/format';
 import { HStack, VStack } from '../layout/Stack';
 import { Emoji } from '../media/Emoji';
 import { AppText } from '../ui/AppText';
@@ -68,7 +68,7 @@ export const BestRankingsCard = memo(
           <RankingStatTile
             emoji="⭐"
             label="Total Rewards"
-            value={formatCoins(rewardCoinsEarned)}
+            value={formatCompactNumber(Math.floor(rewardCoinsEarned))}
             caption="Coins Earned"
           />
           <RankingStatTile

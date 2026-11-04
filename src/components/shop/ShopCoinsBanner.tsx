@@ -4,7 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { ChevronRight, Gem } from 'lucide-react-native';
 import { darkColors, radius, spacing, useTheme } from '../../theme';
 import { withAlpha } from '../../utils/color';
-import { formatCoins } from '../../utils/format';
+import { formatCoinBalance, formatCoins } from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { Icon } from '../media/Icon';
@@ -51,15 +51,18 @@ export const ShopCoinsBanner = memo(
               <CoinBadge tint={darkColors.gold} size={44} />
 
               <VStack gap="xxs">
-                <AppText variant="label" style={{ color: secondary }}>
+                <AppText variant="labelMicro" style={{ color: secondary }}>
                   Your Coins
                 </AppText>
+                {/* Written in whole coins; the exact figure, fraction and
+                    all, is what a screen reader hears. */}
                 <AppText
-                  variant="metric"
+                  variant="h2"
                   numberOfLines={1}
+                  accessibilityLabel={`${formatCoins(balance)} coins`}
                   style={{ color: foreground }}
                 >
-                  {formatCoins(balance)}
+                  {formatCoinBalance(balance)}
                 </AppText>
               </VStack>
             </HStack>

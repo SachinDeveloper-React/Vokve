@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Coins, Hourglass, UserPlus } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useTheme } from '../../theme';
-import { formatCoins } from '../../utils/format';
+import { formatCompactNumber } from '../../utils/format';
 import { HStack, VStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
@@ -79,7 +79,7 @@ export const ReferralStatsCard = memo(
           <Figure
             icon={Coins}
             tint={colors.avatarPurple}
-            value={formatCoins(coinsEarned)}
+            value={formatCompactNumber(Math.floor(coinsEarned))}
             label="Coins Earned"
             caption="Total Rewards"
           />

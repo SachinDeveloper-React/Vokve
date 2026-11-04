@@ -229,9 +229,12 @@ describe('WalletScreen', () => {
 
     const text = allText(await render());
 
-    expect(text).toContain('2,450'); // balance
-    expect(text).toContain('18,350'); // lifetime earned
-    expect(text).toContain('15,900'); // lifetime spent, earned less held
+    // The balance is what the member spends, so it is stated to the coin.
+    expect(text).toContain('2,450');
+    // The lifetime pair is a pair of totals nobody spends; they read at a
+    // glance, and the ledger under them still states every coin.
+    expect(text).toContain('18.3k'); // lifetime earned, 18,350
+    expect(text).toContain('15.9k'); // lifetime spent, earned less held
   });
 
   test("the countdown is the server's", async () => {
@@ -392,9 +395,7 @@ describe('WalletScreen', () => {
 
       const body = sheetBody(tree);
       expect(body).toHaveLength(1);
-      expect(
-        body[0].findAll(n => n.props?.label === 'Got it'),
-      ).toHaveLength(0);
+      expect(body[0].findAll(n => n.props?.label === 'Got it')).toHaveLength(0);
     });
 
     test('"About Coin Expiry" opens the explainer with the user\'s own numbers', async () => {
@@ -475,7 +476,8 @@ describe('WalletScreen', () => {
       expect(body).toHaveLength(1);
 
       const buttonsInBody = body[0].findAll(
-        n => n.props?.label === 'Got it' || n.props?.label === 'Spend in the shop',
+        n =>
+          n.props?.label === 'Got it' || n.props?.label === 'Spend in the shop',
       );
       expect(buttonsInBody).toHaveLength(0);
       // They are on the sheet, just not inside the part that scrolls.

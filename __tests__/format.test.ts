@@ -3,6 +3,8 @@
  */
 
 import {
+  formatCoinBalance,
+  formatCoins,
   formatCountdown,
   formatPhoneNumber,
   formatCompactNumber,
@@ -24,7 +26,7 @@ describe('formatWeight', () => {
 
 describe('formatHeight', () => {
   test('renders feet and inches for imperial users', () => {
-    expect(formatHeight(180, 'imperial')).toBe("5'11\"");
+    expect(formatHeight(180, 'imperial')).toBe('5\'11"');
   });
 
   test('rounds centimetres for metric users', () => {
@@ -51,7 +53,47 @@ describe('formatCompactNumber', () => {
   test('abbreviates thousands and millions', () => {
     expect(formatCompactNumber(950)).toBe('950');
     expect(formatCompactNumber(4520)).toBe('4.5k');
-    expect(formatCompactNumber(1_250_000)).toBe('1.3M');
+    expect(formatCompactNumber(1_250_000)).toBe('1.2M');
+  });
+
+  test('floors, so it never claims a figure that was not reached', () => {
+    // 2,999 written as "3.0k" is a thousand nobody counted; on a coin total
+    // it is a balance nobody has.
+    expect(formatCompactNumber(2_999)).toBe('2.9k');
+    expect(formatCompactNumber(999_999)).toBe('999.9k');
+  });
+
+  test('a whole thousand drops the decimal it has nothing to say with', () => {
+    expect(formatCompactNumber(2_000)).toBe('2k');
+    expect(formatCompactNumber(12_000)).toBe('12k');
+    expect(formatCompactNumber(1_000_000)).toBe('1M');
+  });
+});
+
+describe('formatCoinBalance', () => {
+  test('writes a real balance in whole coins, exactly', () => {
+    // Four and five figures are what members actually hold, and a price is
+    // quoted to the coin — so the balance it is read against stays exact.
+    expect(formatCoinBalance(6_362.09)).toBe('6,362');
+    expect(formatCoinBalance(2_450)).toBe('2,450');
+    expect(formatCoinBalance(99_999.9)).toBe('99,999');
+  });
+
+  test('floors the fraction rather than rounding it up', () => {
+    // The wallet cannot pay out what the card rounded up to.
+    expect(formatCoinBalance(0.9)).toBe('0');
+    expect(formatCoinBalance(1_999.99)).toBe('1,999');
+  });
+
+  test('compacts only past the threshold the rest of the app uses', () => {
+    expect(formatCoinBalance(100_000)).toBe('100k');
+    expect(formatCoinBalance(1_234_567.89)).toBe('1.2M');
+  });
+
+  test('leaves every other coin figure exact', () => {
+    // A price, a ledger row, "you need 1,250 more coins" — all unchanged.
+    expect(formatCoins(6_362.09)).toBe('6,362.09');
+    expect(formatCoins(1_250)).toBe('1,250');
   });
 });
 

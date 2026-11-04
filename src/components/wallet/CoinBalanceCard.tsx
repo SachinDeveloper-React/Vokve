@@ -3,7 +3,11 @@ import { StyleSheet } from 'react-native';
 import { useTheme } from '../../theme';
 import type { CoinExpiryUrgency } from '../../stores/coinsStore';
 import { withAlpha } from '../../utils/color';
-import { formatCoins, formatDaysUntil } from '../../utils/format';
+import {
+  formatCoinBalance,
+  formatCoins,
+  formatDaysUntil,
+} from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
@@ -89,12 +93,23 @@ export const CoinBalanceCard = memo(
             middle would wrap both while leaving the countdown half empty.
           */}
           <VStack flex={3} gap="md">
-            <InfoLabel label="Your Coins" emphasis onPressInfo={onPressBalanceInfo} />
+            <InfoLabel
+              label="Your Coins"
+              emphasis
+              onPressInfo={onPressBalanceInfo}
+            />
 
             <HStack align="center" gap="sm">
               <CoinBadge tint={colors.gold} size={42} />
-              <AppText variant="metric" numberOfLines={1} style={styles.balance}>
-                {formatCoins(balance)}
+              {/* Written in whole coins; the exact figure, fraction and
+                  all, is what a screen reader hears. */}
+              <AppText
+                variant="h2"
+                numberOfLines={1}
+                accessibilityLabel={`${formatCoins(balance)} coins`}
+                style={styles.balance}
+              >
+                {formatCoinBalance(balance)}
               </AppText>
             </HStack>
 
@@ -112,7 +127,10 @@ export const CoinBalanceCard = memo(
             <RewardPill />
 
             <HStack gap="sm">
-              <LifetimeCoinStat label="Lifetime Earned" amount={lifetimeEarned} />
+              <LifetimeCoinStat
+                label="Lifetime Earned"
+                amount={lifetimeEarned}
+              />
               <LifetimeCoinStat label="Lifetime Spent" amount={spent} />
             </HStack>
           </VStack>

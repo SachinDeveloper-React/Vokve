@@ -28,7 +28,10 @@ export const LifetimeCoinStat = memo(({ label, amount }: Props) => {
       <AppText variant="micro" color="textSecondary">
         {label}
       </AppText>
-      <CoinAmount amount={amount} size="md" tint={colors.text} />
+      {/* A total, not a balance: it says how much has happened, not how
+          much is left to spend, so it reads at a glance and every coin of it
+          stays in the ledger below. */}
+      <CoinAmount amount={amount} size="md" tint={colors.text} compact />
     </VStack>
   );
 });

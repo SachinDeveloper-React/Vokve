@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { Flame, Footprints, Star, Trophy } from 'lucide-react-native';
 import { darkColors, useTheme } from '../../theme';
-import { formatCoins, formatCompactNumber } from '../../utils/format';
+import { formatCoinBalance, formatCompactNumber } from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack } from '../layout/Stack';
 import { ProfileStat } from './ProfileStat';
@@ -38,7 +38,7 @@ export const ProfileStatStrip = memo(
         <ProfileStat
           icon={Star}
           tint={darkColors.gold}
-          value={formatCoins(coins)}
+          value={formatCoinBalance(coins)}
           label="Coins"
         />
 

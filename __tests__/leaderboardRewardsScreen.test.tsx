@@ -220,7 +220,8 @@ describe('LeaderboardRewardsScreen', () => {
     const text = allText(await render());
 
     expect(text).toContain('Your Best Rankings');
-    expect(text).toContain('2,350');
+    // A running total of what the board has paid out, not a balance.
+    expect(text).toContain('2.3k'); // 2,350 coins earned
   });
 
   test('the rules live behind the second tab, not on the prize page', async () => {
