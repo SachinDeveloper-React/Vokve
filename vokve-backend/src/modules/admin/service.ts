@@ -602,7 +602,7 @@ export async function deviceHealth(userId: string, errorLimit = 25) {
   const config = await getConfig();
   const [devices, health, errors, errorTotal] = await Promise.all([
     DeviceModel.find({ userId })
-      .select({ platform: 1, info: 1, app: 1, lastSeenAt: 1, revokedAt: 1, stepSync: 1, counting: 1 })
+      .select({ platform: 1, info: 1, app: 1, lastSeenAt: 1, revokedAt: 1, stepSync: 1, counting: 1, push: 1 })
       .sort({ lastSeenAt: -1 })
       .lean(),
     DeviceHealthModel.find({ userId }).lean(),
@@ -636,6 +636,27 @@ export async function deviceHealth(userId: string, errorLimit = 25) {
           nudgedAt: iso(device.stepSync?.nudgedAt),
           remindedAt: iso(device.stepSync?.remindedAt),
         },
+        /**
+         * Whether the last push actually landed (RULES P17).
+         *
+         * `delivered` is the whole point of the receipt: a push the
+         * provider accepted and the phone never saw is a force-stopped or
+         * offline install, which only the member can fix, while one that
+         * landed and changed nothing is this app's bug. Read against the
+         * send rather than reported on its own, because the question is
+         * never "has this phone ever heard us".
+         */
+        push: {
+          reachable: typeof device.push?.token === 'string' && !device.push?.invalidAt,
+          lastAckAt: iso(device.push?.lastAckAt),
+          lastAckType: device.push?.lastAckType ?? null,
+          lastAckState: device.push?.lastAckState ?? null,
+          lastDeliveryMs: device.push?.lastDeliveryMs ?? null,
+          delivered:
+            device.stepSync?.nudgedAt && device.push?.lastAckAt
+              ? device.push.lastAckAt.getTime() >= device.stepSync.nudgedAt.getTime()
+              : null,
+        },
         health: report
           ? {
               at: iso(report.at),
@@ -643,6 +664,9 @@ export async function deviceHealth(userId: string, errorLimit = 25) {
               tracking: report.tracking ?? null,
               healthConnect: report.healthConnect ?? null,
               sync: report.sync ?? null,
+              outbox: report.outbox ?? null,
+              clock: report.clock ?? null,
+              network: report.network ?? null,
             }
           : null,
       };

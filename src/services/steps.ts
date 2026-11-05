@@ -26,6 +26,7 @@ import type { IngestIntegrity } from './api/contracts';
 import { activityApi, deviceApi } from './api/endpoints';
 import { ApiError, toApiError } from './api/errors';
 import { getDeviceId } from './device';
+import { measure } from './perf';
 import { logStepDebug } from './stepsDebug';
 
 /**
@@ -1093,35 +1094,48 @@ export type BackgroundSyncOutcome =
  * sending the days anyway.
  */
 export async function syncStepsInBackground(): Promise<BackgroundSyncOutcome> {
-  // The app is up: its session owns the queue, and a second sender beside it
-  // would race it for the same days and the same nonces.
-  if (session) {
-    await syncStepsNow();
-    return 'session';
-  }
-  const { ownerId, signedOutAt } = steps();
-  if (!ownerId) {
-    return 'no_owner';
-  }
-  // Signed out: the days are kept for the same account coming back
-  // (`claimOwnership`), but there are no tokens left to send them with, and
-  // nothing walked since is anybody's. The server does not nudge an install
-  // in this state either; this is the phone's own half of that rule.
-  if (signedOutAt !== null) {
-    return 'signed_out';
-  }
-  backgroundOwner = ownerId;
-  backgroundSyncs += 1;
-  try {
-    scheduleSync(daysToCatchUp());
-    await flush();
-  } finally {
-    backgroundSyncs -= 1;
-    if (backgroundSyncs === 0) {
-      backgroundOwner = null;
+  // Traced end to end rather than at the request. "Sync is slow" is never
+  // one call: it is reading days off a native service, signing each one and
+  // posting them, and a p95 on the upload says nothing about the two thirds
+  // of the time spent before it. The day count rides along, because nine
+  // seconds for forty days is healthy and nine seconds for one is not.
+  return measure('steps_sync', async span => {
+    // The app is up: its session owns the queue, and a second sender beside
+    // it would race it for the same days and the same nonces.
+    if (session) {
+      span.attribute('path', 'session');
+      await syncStepsNow();
+      return 'session';
     }
-  }
-  return 'sent';
+    const { ownerId, signedOutAt } = steps();
+    if (!ownerId) {
+      span.attribute('path', 'no_owner');
+      return 'no_owner';
+    }
+    // Signed out: the days are kept for the same account coming back
+    // (`claimOwnership`), but there are no tokens left to send them with, and
+    // nothing walked since is anybody's. The server does not nudge an install
+    // in this state either; this is the phone's own half of that rule.
+    if (signedOutAt !== null) {
+      span.attribute('path', 'signed_out');
+      return 'signed_out';
+    }
+    span.attribute('path', 'headless');
+    backgroundOwner = ownerId;
+    backgroundSyncs += 1;
+    try {
+      const days = daysToCatchUp();
+      span.metric('days', days.length);
+      scheduleSync(days);
+      await flush();
+    } finally {
+      backgroundSyncs -= 1;
+      if (backgroundSyncs === 0) {
+        backgroundOwner = null;
+      }
+    }
+    return 'sent';
+  });
 }
 
 /**

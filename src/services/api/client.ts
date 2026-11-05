@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { config } from '../../constants/config';
 import { authTokensSchema, type AuthTokens } from '../../types/models';
 import { logger } from '../../utils/logger';
+import { noteServerTime } from '../clock';
 import { secureStorage } from '../secureStorage';
 import { ApiError, toApiError } from './errors';
 
@@ -143,7 +144,13 @@ function delay(ms: number): Promise<void> {
 }
 
 apiClient.interceptors.response.use(
-  response => response,
+  response => {
+    // Every reply carries the server's clock. Reading it here costs nothing
+    // and is the only place that sees one, which is why the measurement
+    // lives on the interceptor rather than in a request of its own.
+    noteServerTime(response.headers?.date as string | undefined);
+    return response;
+  },
   async (error: AxiosError) => {
     const original = error.config as RetryableConfig | undefined;
     const apiError = toApiError(error);

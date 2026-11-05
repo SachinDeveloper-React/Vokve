@@ -1,13 +1,30 @@
 import { Router } from 'express';
-import { appErrorBatchSchema, deviceHealthReportSchema, eventBatchSchema, permissionReportSchema } from '../../contracts/index.js';
+import {
+  appErrorBatchSchema,
+  deviceHealthReportSchema,
+  eventBatchSchema,
+  permissionReportSchema,
+  pushAckSchema,
+} from '../../contracts/index.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
-import { readPermissions, recordErrors, recordEvents, saveDeviceHealth, savePermissions } from './service.js';
+import {
+  readPermissions,
+  recordErrors,
+  recordEvents,
+  recordPushAck,
+  saveDeviceHealth,
+  savePermissions,
+} from './service.js';
 
 export const telemetryRouter = Router();
-telemetryRouter.use(['/events', '/me/permissions', '/me/errors', '/me/device-health'], requireAuth, requireDevice);
+telemetryRouter.use(
+  ['/events', '/me/permissions', '/me/errors', '/me/device-health', '/me/push-ack'],
+  requireAuth,
+  requireDevice,
+);
 
 /**
  * The analytics sink (PRD ADV2): a batch of what the member did, with the
@@ -87,5 +104,27 @@ telemetryRouter.put(
   validate('body', deviceHealthReportSchema),
   async (req, res) => {
     res.json(await saveDeviceHealth(req.ctx.userId!, req.ctx.deviceId!, req.ctx, req.body));
+  },
+);
+
+/**
+ * A push landed on this phone (RULES P17).
+ *
+ * The one thing the push pipeline could never tell anybody. A provider
+ * accepting a message is not delivery, and the gap between the two is where
+ * every "I pressed sync and nothing happened" lives: a force-stopped phone
+ * receives nothing at all, and looks from the server exactly like a phone
+ * that received the push and failed to act on it.
+ *
+ * Limited generously and by device: the app acks every push it sees, and a
+ * member on a busy day can be sent a handful. It is cheaper than the sync it
+ * is reporting on.
+ */
+telemetryRouter.post(
+  '/me/push-ack',
+  rateLimit({ name: 'push-ack', max: 120, windowSeconds: 600, by: 'device' }),
+  validate('body', pushAckSchema),
+  async (req, res) => {
+    res.status(202).json(await recordPushAck(req.ctx.userId!, req.ctx.deviceId!, req.body));
   },
 );

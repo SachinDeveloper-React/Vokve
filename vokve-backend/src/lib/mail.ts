@@ -81,3 +81,15 @@ export async function sendOtpEmail(to: string, code: string, purpose: OtpEmailPu
   await getTransporter().sendMail({ from: env.MAIL_FROM, to, subject, text, html });
   logger.info({ to: to.replace(/^(.).*(@.*)$/, '$1•••$2'), purpose }, 'mail.sent');
 }
+
+/**
+ * An operational message to whoever runs this, not to a member.
+ *
+ * Plain text and nothing else: it is read on a phone at an awkward hour by
+ * somebody deciding whether to get up, and the VOKVE letterhead above a
+ * crash rate would only be in the way.
+ */
+export async function sendOperationalEmail(to: string, subject: string, text: string): Promise<void> {
+  await getTransporter().sendMail({ from: env.MAIL_FROM, to, subject, text });
+  logger.info({ to, subject }, 'mail.ops_sent');
+}

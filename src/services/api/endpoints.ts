@@ -73,6 +73,7 @@ import {
   appUpdateSchema,
   appErrorIntakeSchema,
   deviceHealthSnapshotSchema,
+  pushAckResultSchema,
   eventIntakeSchema,
   permissionSnapshotSchema,
   userSchema,
@@ -286,6 +287,8 @@ const realTelemetryApi: TelemetryApi = {
     ),
   permissions: () =>
     request(permissionSnapshotSchema, client => client.get('/me/permissions')),
+  ackPush: ack =>
+    request(pushAckResultSchema, client => client.post('/me/push-ack', ack)),
 };
 
 const realWalletApi: WalletApi = {
@@ -982,6 +985,7 @@ export const telemetryApi: TelemetryApi = {
   reportPermissions: permissions =>
     pick(mockTelemetryApi, realTelemetryApi).reportPermissions(permissions),
   permissions: () => pick(mockTelemetryApi, realTelemetryApi).permissions(),
+  ackPush: ack => pick(mockTelemetryApi, realTelemetryApi).ackPush(ack),
 };
 
 export const walletApi: WalletApi = {

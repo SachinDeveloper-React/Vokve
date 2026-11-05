@@ -187,6 +187,12 @@ const deviceHealthSchema = new Schema(
     tracking: { type: Schema.Types.Mixed, default: undefined },
     healthConnect: { type: Schema.Types.Mixed, default: undefined },
     sync: { type: Schema.Types.Mixed, default: undefined },
+    /** Everything the app has written offline that is not steps. */
+    outbox: { type: Schema.Types.Mixed, default: undefined },
+    /** The phone's clock against this server's. */
+    clock: { type: Schema.Types.Mixed, default: undefined },
+    /** How reachable the phone has been since it last reported. */
+    network: { type: Schema.Types.Mixed, default: undefined },
     /** The phone's clock, when it put the report together. */
     at: { type: Date, required: true },
     receivedAt: { type: Date, required: true, default: Date.now },
@@ -196,4 +202,9 @@ const deviceHealthSchema = new Schema(
 deviceHealthSchema.index({ userId: 1, at: -1 });
 // The fleet read: every install whose service is dead, worst first.
 deviceHealthSchema.index({ 'tracking.looksDead': 1, at: -1 });
+// The two fleet reads that came with the wider report: phones whose clock
+// cannot be trusted, and queues that are not draining. Sparse, because an
+// install that never reported either is not an answer to those questions.
+deviceHealthSchema.index({ 'clock.skewMs': 1 }, { sparse: true });
+deviceHealthSchema.index({ 'outbox.oldestQueuedAt': 1 }, { sparse: true });
 export const DeviceHealthModel = model('DeviceHealth', deviceHealthSchema);

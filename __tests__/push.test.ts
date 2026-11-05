@@ -14,6 +14,9 @@
 
 jest.mock('../src/services/api/endpoints', () => ({
   deviceApi: { register: jest.fn(), setPushToken: jest.fn() },
+  // Every push the app sees is acknowledged, so the server can tell a push
+  // that never arrived from one that arrived and changed nothing.
+  telemetryApi: { ackPush: jest.fn(async () => ({ deliveryMs: 12 })) },
 }));
 jest.mock('../src/services/device', () => ({
   getDeviceId: jest.fn(),
@@ -48,8 +51,9 @@ import { takePendingNotificationRoute } from '../src/services/notifications';
 import { syncStepsInBackground } from '../src/services/steps';
 import { useNotificationsStore } from '../src/stores/notificationsStore';
 
-const { deviceApi } = jest.requireMock('../src/services/api/endpoints') as {
+const { deviceApi, telemetryApi } = jest.requireMock('../src/services/api/endpoints') as {
   deviceApi: { setPushToken: jest.Mock };
+  telemetryApi: { ackPush: jest.Mock };
 };
 
 beforeEach(async () => {
@@ -183,6 +187,49 @@ describe('the server’s silent “sync now” message (A28)', () => {
     await expect(
       handleBackgroundMessage({ data: { type: 'activity_sync' } }),
     ).resolves.toBeUndefined();
+  });
+
+  test('the phone says the push arrived, and what it came to', async () => {
+    const ack = telemetryApi.ackPush as jest.Mock;
+    ack.mockClear();
+
+    await handleBackgroundMessage({ messageId: 'm-1', data: { type: 'activity_sync' } });
+
+    // The receipt is the only thing that tells a push which never arrived
+    // from one that arrived and changed nothing — the first is a phone only
+    // its owner can fix, the second is this app's bug.
+    expect(ack).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'm-1',
+        type: 'activity_sync',
+        state: 'background',
+        outcome: 'sent',
+      }),
+    );
+  });
+
+  test('a sync that failed is still acknowledged, as a failure', async () => {
+    const ack = telemetryApi.ackPush as jest.Mock;
+    ack.mockClear();
+    sync.mockRejectedValue(new Error('offline'));
+
+    await handleBackgroundMessage({ data: { type: 'activity_sync' } });
+
+    expect(ack).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+  });
+
+  test('a receipt that cannot be sent does not take the sync down with it', async () => {
+    const ack = telemetryApi.ackPush as jest.Mock;
+    ack.mockClear().mockImplementation(() => {
+      throw new Error('no client');
+    });
+
+    await expect(
+      handleBackgroundMessage({ data: { type: 'activity_sync' } }),
+    ).resolves.toBeUndefined();
+    expect(sync).toHaveBeenCalled();
+
+    ack.mockImplementation(async () => ({ deliveryMs: 12 }));
   });
 });
 

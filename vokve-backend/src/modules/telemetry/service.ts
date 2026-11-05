@@ -7,11 +7,14 @@ import type {
   PermissionEntry,
   PermissionSnapshot,
   PermissionStatus,
+  PushAck,
+  PushAckResult,
 } from '../../contracts/index.js';
 import { getConfig } from '../../config/remote.js';
 import { newId } from '../../lib/ids.js';
 import { sha256Hex } from '../../lib/signatures.js';
 import { privacyAllows } from '../account/service.js';
+import { DeviceModel } from '../devices/models.js';
 import {
   AppErrorModel,
   DeviceHealthModel,
@@ -318,6 +321,9 @@ export async function saveDeviceHealth(
         tracking: report.tracking,
         healthConnect: report.healthConnect,
         sync: report.sync,
+        outbox: report.outbox,
+        clock: report.clock,
+        network: report.network,
         at: now,
         receivedAt: now,
       },
@@ -325,4 +331,58 @@ export async function saveDeviceHealth(
     { upsert: true },
   );
   return { ...report, deviceId, at: now.toISOString() };
+}
+
+/**
+ * A push arrived on a phone (RULES P17).
+ *
+ * The receipt is kept on the install rather than in a collection of its own.
+ * Every question anybody asks of it is "did *this* phone hear us lately" —
+ * the live-steps panel reads it against `stepSync.nudgedAt`, the fleet read
+ * asks which installs can be pushed and never answer — and none of them
+ * wants a history. A row per push would be the busiest write in the system
+ * for an answer that is one field.
+ *
+ * `deliveryMs` is measured from the server's own send, not from the `sentAt`
+ * a phone might claim, because a phone whose clock is wrong is exactly the
+ * phone this is trying to explain. It is null when nothing was sent to this
+ * install recently enough to be the message being acknowledged — an ack for
+ * a push from yesterday would otherwise report a day-long delivery.
+ */
+const DELIVERY_WINDOW_MS = 30 * 60_000;
+
+export async function recordPushAck(
+  userId: string,
+  deviceId: string,
+  ack: PushAck,
+): Promise<PushAckResult> {
+  const now = new Date();
+  const device = await DeviceModel.findOne(
+    { _id: deviceId, userId, revokedAt: null },
+    { 'stepSync.nudgedAt': 1, 'push.updatedAt': 1 },
+  ).lean();
+
+  // The only send the server has timed is the sync nudge's. Anything else
+  // acknowledges delivery without a round trip, which is still the answer
+  // the question was asked for.
+  const sentAt = device?.stepSync?.nudgedAt ?? null;
+  const since = sentAt ? now.getTime() - sentAt.getTime() : null;
+  const deliveryMs = since !== null && since >= 0 && since <= DELIVERY_WINDOW_MS ? since : null;
+
+  await DeviceModel.updateOne(
+    { _id: deviceId, userId, revokedAt: null },
+    {
+      $set: {
+        'push.lastAckAt': now,
+        'push.lastAckType': ack.type ?? null,
+        'push.lastAckState': ack.state,
+        ...(deliveryMs === null ? {} : { 'push.lastDeliveryMs': deliveryMs }),
+        // A token that answers is a token that works, whatever the provider
+        // said about it last time.
+        'push.invalidAt': null,
+      },
+    },
+  );
+
+  return { deliveryMs };
 }

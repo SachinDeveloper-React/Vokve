@@ -13,7 +13,7 @@ import {
 } from '@react-native-firebase/messaging';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { logger } from '../utils/logger';
-import { deviceApi } from './api/endpoints';
+import { deviceApi, telemetryApi } from './api/endpoints';
 import { toApiError } from './api/errors';
 import { getDeviceId } from './device';
 import {
@@ -190,8 +190,53 @@ export async function unregisterFromPush(): Promise<void> {
 
 /** What arrives from FCM, in the shape this module reads it. */
 interface PushMessage {
+  /** FCM's own id for the message, where it carried one. */
+  messageId?: string;
   notification?: { title?: string; body?: string };
   data?: Record<string, unknown>;
+}
+
+/**
+ * Tells the server this push landed (RULES P17).
+ *
+ * Until this existed the server knew only that FCM had *accepted* a
+ * message, and the two failures that hides want opposite answers: a push
+ * that never arrived means a force-stopped or offline phone, which only the
+ * member can fix by opening the app; a push that arrived and changed
+ * nothing is this app's bug. Support was giving one answer to both.
+ *
+ * Only data messages can say this. A notification drawn by the OS while the
+ * app is in the background never reaches JavaScript at all, so it is not
+ * acknowledged and is not counted as undelivered either — the fleet read
+ * asks only about the silent pings it timed.
+ *
+ * Never throws and is never awaited by anything that matters: a receipt is
+ * the least important thing happening on a phone that has just been woken
+ * to send a week of steps.
+ */
+function ackPush(
+  message: PushMessage,
+  state: 'foreground' | 'background',
+  outcome?: string,
+): void {
+  const type = message.data?.type;
+  // Wrapped, not just `.catch`ed: this runs inside a headless task where a
+  // synchronous throw — a client that is not built yet, a module that did
+  // not load — would take down the sync the push was sent to cause. The
+  // receipt is the least important thing happening here.
+  try {
+    telemetryApi
+      .ackPush({
+        ...(message.messageId ? { messageId: message.messageId } : {}),
+        ...(typeof type === 'string' ? { type } : {}),
+        receivedAt: new Date().toISOString(),
+        state,
+        ...(outcome ? { outcome } : {}),
+      })
+      .catch(error => logger.debug('push', 'The receipt did not send', error));
+  } catch (error) {
+    logger.debug('push', 'The receipt could not be built', error);
+  }
 }
 
 /** Whether a message is the server's silent "sync now" ping (RULES A28). */
@@ -226,9 +271,10 @@ export function startPushHandling(): () => void {
     stops.push(
       onMessage(messaging, async (message: PushMessage) => {
         if (isSyncPing(message)) {
-          await handleBackgroundMessage(message);
+          await handleBackgroundMessage(message, 'foreground');
           return;
         }
+        ackPush(message, 'foreground', 'shown');
         await displayPushNotification(message);
         refreshFeed();
       }),
@@ -281,7 +327,10 @@ function refreshFeed(): void {
  * Nothing here may throw: a handler that rejects is logged by Firebase as a
  * failed background task and counts against the app's standing with the OS.
  */
-export async function handleBackgroundMessage(message: PushMessage): Promise<void> {
+export async function handleBackgroundMessage(
+  message: PushMessage,
+  state: 'foreground' | 'background' = 'background',
+): Promise<void> {
   if (!isSyncPing(message)) {
     // Anything with text in it was drawn by the OS before this ran; the
     // tap, not the delivery, is what this app does about those.
@@ -290,7 +339,12 @@ export async function handleBackgroundMessage(message: PushMessage): Promise<voi
   try {
     const outcome = await syncStepsInBackground();
     logger.info('push', `Background step sync: ${outcome}`);
+    // After the work, with what it came to: a receipt that says "arrived
+    // and the sync still failed" is the one that stops an operator chasing
+    // the phone's network for a bug that is ours.
+    ackPush(message, state, outcome);
   } catch (error) {
     logger.warn('push', 'Background step sync failed', error);
+    ackPush(message, state, 'failed');
   }
 }

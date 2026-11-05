@@ -1,10 +1,15 @@
 import StepTracker from 'react-native-step-tracker-pro';
 import { getMMKV } from '../stores';
+import { useHydrationStore } from '../stores/hydrationStore';
+import { useNutritionStore } from '../stores/nutritionStore';
 import { useStepsStore } from '../stores/stepsStore';
+import { useVitalsStore } from '../stores/vitalsStore';
 import type { DeviceHealthReport } from '../types/models';
 import { logger } from '../utils/logger';
 import { telemetryApi } from './api/endpoints';
 import { toApiError } from './api/errors';
+import { clearConnectivityWindow, connectivitySnapshot } from './connectivity';
+import { clockSkewMs } from './clock';
 import { getDeviceId } from './device';
 
 /**
@@ -27,8 +32,38 @@ import { getDeviceId } from './device';
  * reports twice a day and a phone whose service just died reports at once.
  */
 const SENT_KEY = 'vokve.deviceHealth.sent';
+/** When the outbox stopped being empty, remembered across launches. */
+const QUEUED_SINCE_KEY = 'vokve.deviceHealth.queuedSince';
 /** How long a report stands before it is sent again unchanged. */
 const RECHECK_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * When the phone's non-step queues stopped being empty.
+ *
+ * A count on its own cannot tell the two cases apart, and they want
+ * opposite answers: forty items queued on a phone that has been offline
+ * since lunch is the app working exactly as designed, while four items
+ * queued since Tuesday is a phone that will never drain on its own. The
+ * instant is kept here rather than on each store, because no store needs
+ * it for anything of its own — it is a fact about the queues together.
+ */
+function queuedSince(depth: number): string | null {
+  const store = storage();
+  if (depth === 0) {
+    store?.remove(QUEUED_SINCE_KEY);
+    return null;
+  }
+  const held = store?.getString(QUEUED_SINCE_KEY);
+  if (held) return held;
+  const now = new Date().toISOString();
+  try {
+    store?.set(QUEUED_SINCE_KEY, now);
+  } catch {
+    // Then the next report starts the clock again, which understates the
+    // age rather than inventing one.
+  }
+  return now;
+}
 
 interface Sent {
   signature: string;
@@ -81,6 +116,19 @@ export async function collectDeviceHealth(): Promise<DeviceHealthReport> {
     return null;
   });
 
+  // Read from the stores rather than counted by them: an outbox is a detail
+  // of how each feature survives a tunnel, and none of them should have to
+  // know that somebody is keeping score.
+  const outbox = {
+    nutrition: useNutritionStore.getState().outbox.length,
+    hydration: useHydrationStore.getState().outbox.length,
+    vitals: useVitalsStore.getState().outbox.length,
+  };
+  const depth = outbox.nutrition + outbox.hydration + outbox.vitals;
+  const network = connectivitySnapshot();
+  const skew = clockSkewMs();
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+
   return {
     tracking: {
       state: state.trackingState ?? undefined,
@@ -117,6 +165,17 @@ export async function collectDeviceHealth(): Promise<DeviceHealthReport> {
       error: state.syncError,
       todaySteps: state.today?.steps ?? undefined,
     },
+    outbox: { ...outbox, oldestQueuedAt: queuedSince(depth) },
+    clock: {
+      ...(skew === null ? {} : { skewMs: skew }),
+      timezone: zone,
+    },
+    network: {
+      type: network.type,
+      reachable: network.reachable,
+      offlineMs: network.offlineMs,
+      offlineSince: network.offlineSince,
+    },
   };
 }
 
@@ -143,6 +202,9 @@ export async function reportDeviceHealth({
     }
     await telemetryApi.reportDeviceHealth(report);
     rememberSent(signature);
+    // Only now: a window cleared before the send would throw away the very
+    // evidence that explains a send which then failed.
+    clearConnectivityWindow();
   } catch (error) {
     logger.debug('deviceHealth', 'Health not reported', toApiError(error));
   }
@@ -150,7 +212,10 @@ export async function reportDeviceHealth({
 
 /** The parts whose change is worth a request of its own. */
 function signatureOf(report: DeviceHealthReport): string {
-  const { tracking, healthConnect, sync } = report;
+  const { tracking, healthConnect, sync, outbox, clock, network } = report;
+  // The queue's *depth* is left out and its age is not: a queue draining
+  // normally would otherwise report on every item, while a queue that has
+  // been stuck since Tuesday is the thing worth a request.
   return JSON.stringify([
     tracking?.state ?? null,
     tracking?.wanted ?? null,
@@ -163,5 +228,12 @@ function signatureOf(report: DeviceHealthReport): string {
     healthConnect?.canWrite ?? null,
     sync?.status ?? null,
     sync?.error ?? null,
+    outbox?.oldestQueuedAt ?? null,
+    // Rounded to the minute: the question is whether this phone is minutes
+    // out, and a skew reported to the millisecond would differ on every
+    // reading and make the diff useless.
+    clock?.skewMs === undefined ? null : Math.round(clock.skewMs / 60_000),
+    network?.reachable ?? null,
+    network?.type ?? null,
   ]);
 }

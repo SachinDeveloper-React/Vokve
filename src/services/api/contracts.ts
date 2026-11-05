@@ -16,6 +16,8 @@ import type {
   DeliveryPreferences,
   DeviceHealthReport,
   DeviceHealthSnapshot,
+  PushAck,
+  PushAckResult,
   EventIntake,
   PaymentMethod,
   PermissionEntry,
@@ -921,4 +923,13 @@ export interface TelemetryApi {
   ): Promise<PermissionSnapshot>;
   /** The same snapshot back, as the server holds it. */
   permissions(): Promise<PermissionSnapshot>;
+  /**
+   * A push arrived (`POST /me/push-ack`, RULES P17).
+   *
+   * The server knows only that a provider accepted the message. Whether it
+   * reached the phone is the difference between "open the app yourself" and
+   * "this is our bug", and nothing else in the system can tell the two
+   * apart. Sent for every push the app sees, silent or not.
+   */
+  ackPush(ack: PushAck): Promise<PushAckResult>;
 }

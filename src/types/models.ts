@@ -3611,7 +3611,61 @@ export interface DeviceHealthReport {
     error?: string | null;
     todaySteps?: number;
   };
+  /**
+   * Work waiting to leave the phone that is not steps (RULES P17).
+   *
+   * `sync.queued` has always covered the step snapshots, because those are
+   * the ones that age out of the ingest window and cost somebody their day.
+   * Everything else written offline — a meal, a glass, a reading — sits in
+   * its own store's outbox, and a phone with forty stuck meals used to
+   * report itself in perfect health.
+   */
+  outbox?: {
+    nutrition?: number;
+    hydration?: number;
+    vitals?: number;
+    /** When the queue stopped being empty. A deep queue is not a stuck one. */
+    oldestQueuedAt?: string | null;
+  };
+  /** This phone's clock against the server's, measured on an ordinary reply. */
+  clock?: {
+    /** Phone minus server. Positive means the phone is ahead. */
+    skewMs?: number;
+    timezone?: string | null;
+  };
+  /** How reachable this phone has been since its last accepted report. */
+  network?: {
+    type?: string | null;
+    reachable?: boolean | null;
+    offlineMs?: number;
+    offlineSince?: string | null;
+  };
 }
+
+/**
+ * A push arrived on this phone (RULES P17).
+ *
+ * Sent for every push the app sees. Until it existed the server knew only
+ * that a provider had accepted a message, and the two failures that hides
+ * want opposite answers: a push that never arrived is a force-stopped or
+ * offline phone, which only the member can fix; one that arrived and
+ * changed nothing is this app's bug.
+ */
+export interface PushAck {
+  messageId?: string;
+  /** The `data.type` the push carried, where it carried one. */
+  type?: string;
+  receivedAt: string;
+  /** Where the app was when it landed. `quit` is the headless handler. */
+  state: 'foreground' | 'background' | 'quit';
+  outcome?: string;
+}
+
+export const pushAckResultSchema = z.object({
+  /** The round trip the server measured, or null when it could not. */
+  deliveryMs: z.number().nullable(),
+});
+export type PushAckResult = z.infer<typeof pushAckResultSchema>;
 
 /** The same report back, with when the server took it. */
 export const deviceHealthSnapshotSchema = z.object({

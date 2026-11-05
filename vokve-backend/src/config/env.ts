@@ -87,6 +87,20 @@ const envSchema = z.object({
   MAIL_FROM: z.string().optional(),
 
   /**
+   * Where the fleet's alarms go (RULES P17).
+   *
+   * Two channels, both optional, because an operator who gets neither still
+   * has the panel — the alarms exist so that nobody has to be *watching* the
+   * panel for the app to be broken for an afternoon without anyone knowing.
+   * The webhook takes a Slack-shaped `{ text }`, which Slack, Discord and
+   * most of the rest accept; the email goes through the same SMTP the OTPs
+   * use. With neither set the checks still run and still log, and nothing is
+   * sent.
+   */
+  OPS_WEBHOOK_URL: z.string().url().optional(),
+  OPS_EMAIL: z.string().email().optional(),
+
+  /**
    * Who collects the money side of an order. `mock` captures every payment
    * at once (dev and test); `razorpay` creates a gateway order and verifies
    * the checkout signature, and needs both keys. Refused in production

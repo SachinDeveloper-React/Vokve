@@ -1,6 +1,7 @@
 import { getKV } from '../db/redis.js';
 import { logger } from '../lib/logger.js';
 import { purgeScheduledDeletions } from '../modules/account/service.js';
+import { sweepFleetAlerts } from '../modules/telemetry/alerts.job.js';
 import { nudgeStaleSyncs } from '../modules/activity/nudge.job.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { releaseDueHolds } from '../modules/economy/holds.service.js';
@@ -81,6 +82,10 @@ const HOURLY_JOBS: readonly DailyJob[] = [
   // Last week's board, frozen and paid a few hours into Monday in each
   // country's zone (RULES L6, L10). A week already closed is skipped.
   { name: 'leaderboard-close', run: () => closeDueWeeks() },
+  // Whether the app is working, for everybody (RULES P17). Last, because it
+  // reads what the jobs above have just written — a nudge sent this tick is
+  // part of the push-delivery figure on the next one.
+  { name: 'fleet-alerts', run: () => sweepFleetAlerts() },
 ];
 
 /** `YYYY-MM-DD` in UTC — the calendar the claim keys live on. */

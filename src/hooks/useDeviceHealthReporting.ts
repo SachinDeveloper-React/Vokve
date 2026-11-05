@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
+import { startConnectivityWatch } from '../services/connectivity';
 import { reportDeviceHealth } from '../services/deviceHealth';
 import { useAuthStatus } from '../stores/authStore';
 import { useStepsStore } from '../stores/stepsStore';
@@ -24,6 +25,12 @@ import { useStepsStore } from '../stores/stepsStore';
  */
 export function useDeviceHealthReporting(): void {
   const signedIn = useAuthStatus() === 'authenticated';
+
+  // Watched whether or not anybody is signed in, and never torn down: the
+  // stretch of time a phone spent unreachable is the explanation for the
+  // report that comes after it, and a watcher that only ran while signed in
+  // would miss the sign-in that failed because there was no network.
+  useEffect(() => startConnectivityWatch(), []);
 
   useEffect(() => {
     if (!signedIn) return;

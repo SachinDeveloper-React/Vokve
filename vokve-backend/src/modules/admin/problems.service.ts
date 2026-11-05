@@ -450,6 +450,18 @@ export interface FleetReport {
     errorGroups: number;
     fatalGroups: number;
     affectedUsers: number;
+    /** Members whose app died on this build — a native crash, an ANR, a kill. */
+    crashedUsers: number;
+    /**
+     * The share of this build's installs that did *not* crash (RULES P17).
+     *
+     * The number a rollback is decided on, and the reason native crashes
+     * are filed as ordinary faults on the next launch rather than left in
+     * Crashlytics: a console that holds the crashes and a panel that holds
+     * the installs cannot divide one by the other. Null under a handful of
+     * installs, where the figure would swing on a single phone.
+     */
+    crashFreeShare: number | null;
   }[];
   /** The faults themselves, worst first — the fix list. */
   topErrors: {
@@ -477,6 +489,14 @@ export interface FleetReport {
  * hundred thousand reads, and the shape of the answer — a count per problem,
  * a count per OEM, a count per build — is exactly what a database does well.
  */
+/**
+ * Installs a build needs before its crash-free share means anything.
+ *
+ * Below it the figure swings by whole percentage points on one phone, and a
+ * rollout decision taken on that is a coin toss with a decimal place.
+ */
+const CRASH_FREE_FLOOR = 20;
+
 export async function fleetHealth(days: number, now = new Date()): Promise<FleetReport> {
   const config = await getConfig();
   const quietBefore = new Date(now.getTime() - config.telemetry.problems.noUploadHours * HOUR_MS);
@@ -527,7 +547,13 @@ export async function fleetHealth(days: number, now = new Date()): Promise<Fleet
       { $match: { revokedAt: null } },
       { $group: { _id: '$app.version', installs: { $sum: 1 } } },
     ]),
-    AppErrorModel.aggregate<{ _id: string | null; groups: number; fatalGroups: number; users: string[] }>([
+    AppErrorModel.aggregate<{
+      _id: string | null;
+      groups: number;
+      fatalGroups: number;
+      users: string[];
+      crashedUsers: string[];
+    }>([
       { $match: { lastAt: { $gte: since } } },
       {
         $group: {
@@ -535,6 +561,14 @@ export async function fleetHealth(days: number, now = new Date()): Promise<Fleet
           groups: { $sum: 1 },
           fatalGroups: { $sum: { $cond: ['$fatal', 1, 0] } },
           users: { $addToSet: '$userId' },
+          // A crash is the app dying, not a handled fault: `native` is the
+          // layer below JavaScript, reported on the launch after it, and
+          // it is the only kind a crash-free rate may count.
+          crashedUsers: {
+            $addToSet: {
+              $cond: [{ $and: ['$fatal', { $eq: ['$kind', 'native'] }] }, '$userId', '$noSuchField'],
+            },
+          },
         },
       },
     ]),
@@ -628,12 +662,18 @@ export async function fleetHealth(days: number, now = new Date()): Promise<Fleet
       .filter(row => row._id)
       .map(row => {
         const errors = errorsOf.get(row._id ?? '');
+        const crashed = errors?.crashedUsers.filter(Boolean).length ?? 0;
         return {
           appVersion: row._id as string,
           installs: row.installs,
           errorGroups: errors?.groups ?? 0,
           fatalGroups: errors?.fatalGroups ?? 0,
           affectedUsers: errors?.users.length ?? 0,
+          crashedUsers: crashed,
+          crashFreeShare:
+            row.installs >= CRASH_FREE_FLOOR
+              ? Math.max(0, 1 - crashed / row.installs)
+              : null,
         };
       })
       .sort((a, b) => b.fatalGroups - a.fatalGroups || b.installs - a.installs),

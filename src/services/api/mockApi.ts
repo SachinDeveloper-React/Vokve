@@ -5980,6 +5980,12 @@ export const mockAppApi: AppApi = {
  * logged instead, which is what anyone running against mocks wants to see.
  */
 export const mockTelemetryApi: TelemetryApi = {
+  async ackPush(ack) {
+    await delay();
+    logger.debug('push', `Acked ${ack.type ?? 'a notification'} (${ack.state})`);
+    // Nothing to measure against: the mock backend never sent it.
+    return { deliveryMs: null };
+  },
   async sendEvents(events) {
     await delay();
     for (const event of events) {

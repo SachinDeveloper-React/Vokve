@@ -980,6 +980,38 @@ export const CONFIG_DEFAULTS = {
       /** How many days back the unverified ones are counted. */
       unverifiedDays: 7,
     },
+    /**
+     * When the fleet is unwell enough to wake somebody (RULES P17).
+     *
+     * Everything the panel can show about a broken release, it could
+     * already show — what it could not do is make anybody look. A tracker
+     * that stops counting on one OEM does not announce itself: the members
+     * walk, lose their days, and some of them leave, and support hears it
+     * in words a week later.
+     *
+     * Shares rather than counts, so a threshold set on a thousand installs
+     * still means the same thing on ten thousand. Each check also has a
+     * floor: a fleet of four installs where one is unwell is 25% and means
+     * nothing, and an alarm that cries at noise is an alarm people learn to
+     * ignore — which is worse than having none.
+     */
+    alerts: {
+      enabled: true,
+      /** Installs a check needs to have looked at before it will speak. */
+      minInstalls: 25,
+      /** Fatal faults from one build in an hour before it is a crash wave. */
+      fatalErrorsPerVersion: 25,
+      /** Share of reporting installs whose step service is dead. */
+      deadTrackerShare: 0.15,
+      /** Share of signed-in, pushable installs that have stopped uploading. */
+      staleSyncShare: 0.25,
+      /** Share of pushed installs that never acknowledged the push. */
+      undeliveredPushShare: 0.5,
+      /** A phone's clock this far out makes its days and its reminders wrong. */
+      clockSkewMs: 300_000,
+      /** Installs out by that much before it is the fleet's problem. */
+      clockSkewInstalls: 10,
+    },
   },
 };
 

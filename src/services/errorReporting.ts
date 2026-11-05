@@ -1,5 +1,6 @@
 import { AppState } from 'react-native';
 import {
+  didCrashOnPreviousExecution,
   getCrashlytics,
   recordError,
   setAttributes,
@@ -246,6 +247,7 @@ export function setErrorScreen(name: string | null): void {
  * arrive, without a single call site changing.
  */
 export function startErrorReporting(): () => void {
+  reportPreviousCrash();
   setLoggerErrorSink((scopeName, message, data) => {
     reportError({
       kind: 'js',
@@ -293,4 +295,46 @@ function clean(
     if (value !== undefined) out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Whether the run before this one ended in a native crash (RULES P17).
+ *
+ * The one fault this app could never report on its own. A Java or ObjC
+ * crash, an ANR, an out-of-memory kill — by the time any of them happen
+ * there is no JavaScript left to send anything, so the error pipeline below
+ * has always been blind to exactly the failures that hurt most. Crashlytics
+ * catches them, but in a console of its own: an operator reading a member's
+ * account could see every handled fault and no crashes at all, and the
+ * panel could not answer the one question that decides a rollback — does
+ * this build crash more than the last one.
+ *
+ * So the *next* launch reports it. Crashlytics is asked whether the last
+ * run died, and the answer is filed as an ordinary fault with `kind:
+ * 'native'`, carrying the build it happened on. It groups, counts and ages
+ * out like everything else, and the fleet read can divide crashes by
+ * version without a second data source.
+ *
+ * Deliberately not exact about *what* crashed: that is in Crashlytics, with
+ * the symbolicated stack, and duplicating it here would be a worse copy of
+ * a better record. What this adds is that it happened, to whom, and on
+ * which build.
+ */
+function reportPreviousCrash(): void {
+  const crash = crashlytics();
+  if (!crash) return;
+  didCrashOnPreviousExecution(crash)
+    .then(crashed => {
+      if (!crashed) return;
+      reportError({
+        kind: 'native',
+        message: 'The app closed unexpectedly on its previous run',
+        scope: 'app',
+        fatal: true,
+        context: { source: 'crashlytics' },
+      });
+    })
+    .catch(error =>
+      logger.debug('errors', 'Crashlytics would not say', error),
+    );
 }

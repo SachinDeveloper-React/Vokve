@@ -78,6 +78,23 @@ jest.mock('@react-native-firebase/crashlytics', () => ({
   setUserId: jest.fn().mockResolvedValue(null),
   setAttributes: jest.fn().mockResolvedValue(null),
   setAttribute: jest.fn().mockResolvedValue(null),
+  // The app asks this once a launch, to file the crash the previous run
+  // died of. A suite that wants the crash path says so for itself.
+  didCrashOnPreviousExecution: jest.fn().mockResolvedValue(false),
+}));
+
+// Performance monitoring is a native module whose traces answer nothing:
+// every call is fire-and-forget telemetry, and a test that waited on one
+// would be waiting on a console it cannot see. The double keeps the shape
+// so `startSpan` returns something with the methods on it.
+jest.mock('@react-native-firebase/perf', () => ({
+  getPerformance: jest.fn(() => ({})),
+  trace: jest.fn(() => ({
+    start: jest.fn(),
+    stop: jest.fn(),
+    putMetric: jest.fn(),
+    putAttribute: jest.fn(),
+  })),
 }));
 
 // Notifee is a native module. Its shipped mock answers every call and keeps

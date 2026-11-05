@@ -18,7 +18,29 @@ const deviceSchema = new Schema(
       locale: String, timezone: String, screen: { w: Number, h: Number, scale: Number }, hasBiometrics: Boolean,
     },
     app: { version: String, build: String, bundleId: String, firstVersion: String },
-    push: { token: String, provider: { type: String, default: 'fcm' }, updatedAt: Date, invalidAt: Date },
+    push: {
+      token: String,
+      provider: { type: String, default: 'fcm' },
+      updatedAt: Date,
+      invalidAt: Date,
+      /**
+       * When this install last told us a push had arrived (RULES P17).
+       *
+       * A provider accepting a message says nothing about the phone getting
+       * it, and the two failures that hides want opposite answers: a push
+       * that never arrived is a force-stopped or offline phone, which only
+       * the member can fix by opening the app; a push that arrived and
+       * changed nothing is this app's bug. Stamped by `POST /me/push-ack`,
+       * and read against `stepSync.nudgedAt` to tell the two apart.
+       */
+      lastAckAt: { type: Date, default: null },
+      /** The `data.type` of that message, so a silent ping is told from a feed row. */
+      lastAckType: { type: String, default: null },
+      /** Where the app was when it arrived: foreground, background, quit. */
+      lastAckState: { type: String, default: null },
+      /** The round trip the server measured, last time it could. */
+      lastDeliveryMs: { type: Number, default: null },
+    },
     /**
      * When this install last said it had the hydration plan scheduled with
      * the OS itself (RULES Y6).
@@ -122,6 +144,9 @@ deviceSchema.index({ vendorId: 1 }, { sparse: true });
 deviceSchema.index({ 'integrity.keyId': 1 }, { sparse: true });
 deviceSchema.index({ 'attestation.keyId': 1 }, { sparse: true });
 deviceSchema.index({ 'push.token': 1 }, { sparse: true });
+// "Which installs can be pushed but never answer" — the fleet read behind a
+// push channel that has quietly stopped working.
+deviceSchema.index({ 'push.lastAckAt': -1 }, { sparse: true });
 deviceSchema.index({ lastSeenAt: -1 });
 // The nudge job's own read: installs with a live push token, oldest upload
 // first (RULES A28). Sparse on the token, so the installs that could never

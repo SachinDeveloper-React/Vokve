@@ -3697,8 +3697,106 @@ export const deviceHealthReportSchema = z.object({
       todaySteps: z.number().int().nonnegative().max(500_000).optional(),
     })
     .optional(),
+  /**
+   * Work waiting to leave the phone that is not steps.
+   *
+   * `sync.queued` has always covered the step snapshots, because those are
+   * the ones that age out of the ingest window and cost a member their day.
+   * Everything else the app writes offline — a meal, a glass of water, a
+   * blood pressure reading — sits in a store's own outbox, and until now a
+   * phone with forty stuck meals reported itself in perfect health.
+   *
+   * `oldestQueuedAt` is the one that matters. A deep queue on a phone that
+   * has been offline all afternoon is the app working; a queue whose oldest
+   * item is four days old is a phone that will never drain on its own.
+   */
+  outbox: z
+    .object({
+      nutrition: z.number().int().nonnegative().max(10_000).optional(),
+      hydration: z.number().int().nonnegative().max(10_000).optional(),
+      vitals: z.number().int().nonnegative().max(10_000).optional(),
+      oldestQueuedAt: z.string().datetime({ offset: true }).nullable().optional(),
+    })
+    .optional(),
+  /**
+   * The phone's own clock, against the one the server keeps.
+   *
+   * Steps are scored into local days and a reminder fires on a local clock,
+   * so a phone whose time is wrong produces a class of complaint that looks
+   * like a server bug from every angle — a day credited to yesterday, a
+   * reminder at the wrong hour, a snapshot the ingest window refuses. It is
+   * also the cheapest step fraud there is: move the clock, walk a day twice.
+   *
+   * Measured by the app against the `Date` header of a real response, so it
+   * costs no request of its own.
+   */
+  clock: z
+    .object({
+      /** Phone minus server. Positive means the phone is ahead. */
+      skewMs: z.number().int().min(-31_536_000_000).max(31_536_000_000).optional(),
+      timezone: z.string().trim().max(60).nullable().optional(),
+      /** Whether the OS is keeping the time itself, where the phone will say. */
+      automatic: z.boolean().nullable().optional(),
+    })
+    .optional(),
+  /**
+   * How reachable this phone has been since its last report.
+   *
+   * The server can see that an install has gone quiet; it cannot see why,
+   * and "no network" and "the app is broken" are the same silence from
+   * here. This is the phone answering that question on its way back: how
+   * long it spent unreachable, and whether it is unreachable now.
+   *
+   * `reachable: false` with a live interface is the captive portal — a gym's
+   * wifi that joins and then drops every request — which is otherwise one of
+   * the hardest supports calls there is.
+   */
+  network: z
+    .object({
+      /** The interface as the OS names it: `wifi`, `cellular`, `none`. */
+      type: z.string().trim().max(20).nullable().optional(),
+      reachable: z.boolean().nullable().optional(),
+      /** Milliseconds spent offline since the last accepted report. */
+      offlineMs: z.number().int().nonnegative().max(2_592_000_000).optional(),
+      /** Set while it is offline right now, which a report can still say later. */
+      offlineSince: z.string().datetime({ offset: true }).nullable().optional(),
+    })
+    .optional(),
 });
 export type DeviceHealthReport = z.infer<typeof deviceHealthReportSchema>;
+
+/**
+ * A push arrived (RULES P17, A28).
+ *
+ * Until this existed the server knew only that a provider had *accepted* a
+ * message. Whether it reached the phone was unknowable, and the two failures
+ * it hides want opposite answers: a push that never arrived means the phone
+ * is force stopped or off the network and the member has to open the app
+ * themselves, while a push that arrived and changed nothing is a bug in this
+ * app. Support was giving one answer to both.
+ *
+ * Sent for every push the app sees, silent or not, and deliberately cheap:
+ * no body beyond what identifies the message and when it landed.
+ */
+export const pushAckSchema = z.object({
+  /** The provider's own id for the message, where it carried one. */
+  messageId: z.string().trim().max(200).optional(),
+  /** The `data.type` the push carried — `activity_sync`, or absent for a notification. */
+  type: z.string().trim().max(40).optional(),
+  /** When the phone saw it, on the phone's clock. */
+  receivedAt: z.string().datetime({ offset: true }),
+  /** Where the app was when it arrived. `quit` is the headless handler. */
+  state: z.enum(['foreground', 'background', 'quit']),
+  /** What the app did about it, where it knows by the time it acks. */
+  outcome: z.string().trim().max(40).optional(),
+});
+export type PushAck = z.infer<typeof pushAckSchema>;
+
+export const pushAckResultSchema = z.object({
+  /** The round trip the server measured: from its send to this ack. */
+  deliveryMs: z.number().int().nonnegative().nullable(),
+});
+export type PushAckResult = z.infer<typeof pushAckResultSchema>;
 
 export const deviceHealthSnapshotSchema = deviceHealthReportSchema.extend({
   deviceId: z.string(),
