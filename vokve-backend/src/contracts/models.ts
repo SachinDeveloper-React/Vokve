@@ -3735,8 +3735,6 @@ export const deviceHealthReportSchema = z.object({
       /** Phone minus server. Positive means the phone is ahead. */
       skewMs: z.number().int().min(-31_536_000_000).max(31_536_000_000).optional(),
       timezone: z.string().trim().max(60).nullable().optional(),
-      /** Whether the OS is keeping the time itself, where the phone will say. */
-      automatic: z.boolean().nullable().optional(),
     })
     .optional(),
   /**

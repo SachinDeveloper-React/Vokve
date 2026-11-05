@@ -215,7 +215,10 @@ function signatureOf(report: DeviceHealthReport): string {
   const { tracking, healthConnect, sync, outbox, clock, network } = report;
   // The queue's *depth* is left out and its age is not: a queue draining
   // normally would otherwise report on every item, while a queue that has
-  // been stuck since Tuesday is the thing worth a request.
+  // been stuck since Tuesday is the thing worth a request. The network's
+  // *interface* is left out for the same reason — a commuter moves between
+  // wifi and cellular several times a day and none of it is a fault —
+  // while whether the phone can reach anything at all is exactly a fault.
   return JSON.stringify([
     tracking?.state ?? null,
     tracking?.wanted ?? null,
@@ -234,6 +237,5 @@ function signatureOf(report: DeviceHealthReport): string {
     // reading and make the diff useless.
     clock?.skewMs === undefined ? null : Math.round(clock.skewMs / 60_000),
     network?.reachable ?? null,
-    network?.type ?? null,
   ]);
 }

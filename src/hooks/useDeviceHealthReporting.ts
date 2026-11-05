@@ -26,10 +26,12 @@ import { useStepsStore } from '../stores/stepsStore';
 export function useDeviceHealthReporting(): void {
   const signedIn = useAuthStatus() === 'authenticated';
 
-  // Watched whether or not anybody is signed in, and never torn down: the
-  // stretch of time a phone spent unreachable is the explanation for the
-  // report that comes after it, and a watcher that only ran while signed in
-  // would miss the sign-in that failed because there was no network.
+  // Watched whether or not anybody is signed in, and for as long as this
+  // hook is mounted — which is the app's own lifetime, since it is mounted
+  // at the root. Not gated on being signed in: the stretch a phone spent
+  // unreachable is the explanation for the report that comes after it, and
+  // a watcher that only ran while signed in would miss the sign-in that
+  // failed because there was no network.
   useEffect(() => startConnectivityWatch(), []);
 
   useEffect(() => {

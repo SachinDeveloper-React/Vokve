@@ -5,6 +5,20 @@ import { z } from 'zod';
  * Environment, validated once at boot. A missing or malformed value fails the
  * process immediately rather than surfacing as a confusing runtime error.
  */
+/**
+ * An optional value that a blank line in `.env` means "unset", not "invalid".
+ *
+ * `.env.example` ships every optional key with nothing after the `=`, and a
+ * copied example is how most of these files start life. Plain `z.string()`
+ * never noticed, because `''` is a string — but a checked format does, so
+ * `OPS_WEBHOOK_URL=` on its own line refused to parse and took the whole
+ * server down at boot over a variable whose entire purpose is to be
+ * skippable. Blank is the same as absent; anything else is still checked.
+ */
+function unsetWhenBlank<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(value => (value === '' ? undefined : value), schema.optional());
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -97,8 +111,8 @@ const envSchema = z.object({
    * use. With neither set the checks still run and still log, and nothing is
    * sent.
    */
-  OPS_WEBHOOK_URL: z.string().url().optional(),
-  OPS_EMAIL: z.string().email().optional(),
+  OPS_WEBHOOK_URL: unsetWhenBlank(z.string().url()),
+  OPS_EMAIL: unsetWhenBlank(z.string().email()),
 
   /**
    * Who collects the money side of an order. `mock` captures every payment
