@@ -1,14 +1,15 @@
 import React, { Fragment, memo, useCallback } from 'react';
 import { Plus } from 'lucide-react-native';
 import { useTheme } from '../../theme';
+import { moderateScale } from '../../theme/responsive';
 import type { FoodItem } from '../../types/models';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
-import { Emoji } from '../media/Emoji';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { Pressable } from '../form/Pressable';
+import { FoodGlyph } from './FoodGlyph';
 
 interface RowProps {
   item: FoodItem;
@@ -27,7 +28,7 @@ const ResultRow = memo(({ item, onAdd }: RowProps) => {
       accessibilityLabel={`Add ${item.name}, ${item.portion}, ${item.calories} calories`}
     >
       <HStack align="center" gap="md" py="sm">
-        <Emoji size="sm">{item.emoji}</Emoji>
+        <FoodGlyph imageUrl={item.imageUrl} emoji={item.emoji} size={moderateScale(32)} />
 
         <VStack flex={1} gap="xxs">
           <AppText variant="bodyStrong" numberOfLines={1}>

@@ -3,6 +3,7 @@ import { getConfig } from '../../config/remote.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { shopBadgeSchema } from '../../contracts/index.js';
 import { CartModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel, WishlistModel } from '../commerce/models.js';
+import { mediaByFilename } from './media.service.js';
 import { UserModel } from '../identity/models.js';
 import { AuditLogModel } from '../platform/models.js';
 import { assertShelf } from './categories.service.js';
@@ -178,6 +179,10 @@ export async function importItems(
   const dryRun = options.dryRun === true;
   const existing = await ShopItemModel.find({}, { _id: 1 }).lean<{ _id: string }[]>();
   const known = new Set(existing.map(row => row._id));
+  // One read for the whole sheet. A two-thousand-row import would otherwise
+  // be two thousand round trips to answer a question the library can answer
+  // once (RULES R19).
+  const library = await mediaByFilename();
 
   const failed: ItemImportResult['failed'] = [];
   const ids: string[] = [];
@@ -201,17 +206,34 @@ export async function importItems(
     if (seen.has(id)) duplicates += 1;
     seen.add(id);
 
+    // A spreadsheet carries filenames, not pictures. Embedding the bytes is
+    // what a spreadsheet is worst at — an image in a sheet is anchored to a
+    // position rather than to a row, so it drifts the moment anybody sorts,
+    // and five hundred products would make a file nobody can open. So the
+    // images column holds what the operator called the file, and the names
+    // are resolved against what they have already uploaded.
+    const resolved = resolveImages(item, library);
+    if (resolved.missing.length > 0) {
+      failed.push({
+        line,
+        title,
+        reason: `No uploaded image called ${resolved.missing.join(', ')}. Upload it in Images first, or put a full URL in the column.`,
+      });
+      continue;
+    }
+    const withImages = { ...item, ...resolved.patch };
+
     try {
       if (dryRun) {
         // The shelf is checked even on a dry run: it is the refusal an
         // operator is most likely to hit, and finding out on the second
         // press would defeat the point of the first.
-        await assertShelf(item.category, item.subcategory ?? null);
+        await assertShelf(withImages.category, withImages.subcategory ?? null);
         if (known.has(id)) updated += 1;
         else created += 1;
         continue;
       }
-      const result = await saveItem(actor, { ...item, id, title });
+      const result = await saveItem(actor, { ...withImages, id, title });
       if (result.created) created += 1;
       else updated += 1;
       // A sheet that names the same product twice is one product: the
@@ -670,4 +692,42 @@ export async function deleteItem(actor: string, id: string, note?: string) {
     savesRemoved: saves.deletedCount ?? 0,
     reviewsRemoved: reviews.deletedCount ?? 0,
   };
+}
+
+/**
+ * Turns an import row's image column into URLs.
+ *
+ * Three things may be in that column and all three are reasonable: a full
+ * URL (somebody is already hosting it), a filename of something uploaded to
+ * the library, or nothing. A filename that matches nothing is the one case
+ * that must *stop* the row — writing the product without its picture would
+ * leave an operator to discover the gap on a shelf, item by item, rather
+ * than in the dry run that exists precisely to tell them first.
+ *
+ * Matched without case, because `Bottle.JPG` on a Mac and `bottle.jpg` in
+ * the sheet are the same file to everybody except a computer.
+ */
+function resolveImages(
+  item: { imageUrl?: string | null; images?: string[] },
+  library: Map<string, string>,
+): { patch: { imageUrl?: string | null; images?: string[] }; missing: string[] } {
+  const missing: string[] = [];
+
+  const resolve = (value: string): string | null => {
+    const entry = value.trim();
+    if (!entry) return null;
+    if (/^https?:\/\//i.test(entry)) return entry;
+    const found = library.get(entry.toLowerCase());
+    if (found) return found;
+    missing.push(entry);
+    return null;
+  };
+
+  const patch: { imageUrl?: string | null; images?: string[] } = {};
+  if (item.imageUrl != null) patch.imageUrl = resolve(item.imageUrl);
+  if (item.images) {
+    patch.images = item.images.map(resolve).filter((url): url is string => url !== null);
+  }
+
+  return { patch, missing };
 }

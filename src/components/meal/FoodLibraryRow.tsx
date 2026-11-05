@@ -7,12 +7,12 @@ import type { FoodItem } from '../../types/models';
 import { formatGrouped } from '../../utils/format';
 import { Box } from '../layout/Box';
 import { HStack, VStack } from '../layout/Stack';
-import { Emoji } from '../media/Emoji';
 import { Icon } from '../media/Icon';
 import { AppText } from '../ui/AppText';
 import { Card } from '../ui/Card';
 import { Chip } from '../ui/Chip';
 import { Pressable } from '../form/Pressable';
+import { FoodGlyph } from './FoodGlyph';
 
 const DISC = moderateScale(40);
 const ADD = moderateScale(34);
@@ -53,12 +53,7 @@ export const FoodLibraryRow = memo(({ item, added, onAdd }: Props) => {
     >
       <Card radius="lg" padding="md">
         <HStack align="center" gap="md">
-          <Box
-            radius="pill"
-            style={[styles.disc, { backgroundColor: colors.muted }]}
-          >
-            <Emoji size="sm">{item.emoji}</Emoji>
-          </Box>
+          <FoodGlyph imageUrl={item.imageUrl} emoji={item.emoji} size={DISC} />
 
           <VStack flex={1} gap="xxs">
             <AppText variant="bodyStrong" numberOfLines={1}>

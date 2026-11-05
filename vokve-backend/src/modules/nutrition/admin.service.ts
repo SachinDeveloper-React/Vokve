@@ -35,6 +35,7 @@ export interface AdminPlanInput {
   name: string;
   description?: string;
   emoji?: string;
+  imageUrl?: string | null;
   dietTypes: string[];
   mealPlans: string[];
   days: AdminPlanDayInput[];
@@ -48,6 +49,8 @@ export interface AdminPlan {
   name: string;
   description: string;
   emoji: string;
+  /** A library image, or null where the emoji still stands in for it. */
+  imageUrl: string | null;
   dietTypes: string[];
   mealPlans: string[];
   days: { label: string; meals: PlannedMeal[] }[];
@@ -62,6 +65,7 @@ type PlanRow = {
   name: string;
   description?: string | null;
   emoji?: string | null;
+  imageUrl?: string | null;
   dietTypes: string[];
   mealPlans: string[];
   days: unknown[];
@@ -99,6 +103,7 @@ function toAdminPlan(row: PlanRow): AdminPlan {
     name: row.name,
     description: row.description ?? '',
     emoji: row.emoji ?? '🥗',
+    imageUrl: row.imageUrl ?? null,
     dietTypes: row.dietTypes,
     mealPlans: row.mealPlans,
     days: (row.days ?? []).map(day => {
@@ -202,6 +207,7 @@ export async function adminCreatePlan(actor: string, input: AdminPlanInput): Pro
     name,
     description: input.description?.trim() ?? '',
     emoji: input.emoji ?? '🥗',
+    imageUrl: input.imageUrl ?? null,
     dietTypes: input.dietTypes,
     mealPlans: input.mealPlans,
     days: normaliseDays(input.days),
@@ -227,6 +233,7 @@ export async function adminUpdatePlan(actor: string, planId: string, patch: Part
   }
   if (patch.description !== undefined) next.description = patch.description.trim();
   if (patch.emoji !== undefined) next.emoji = patch.emoji;
+  if (patch.imageUrl !== undefined) next.imageUrl = patch.imageUrl;
   if (patch.dietTypes !== undefined) next.dietTypes = patch.dietTypes;
   if (patch.mealPlans !== undefined) next.mealPlans = patch.mealPlans;
   if (patch.days !== undefined) next.days = normaliseDays(patch.days);
@@ -414,6 +421,7 @@ export interface AdminFoodInput {
   name: string;
   portion: string;
   emoji?: string;
+  imageUrl?: string | null;
   calories: number;
   proteinG?: number;
   carbsG?: number;
@@ -425,9 +433,11 @@ export interface AdminFoodInput {
   active?: boolean;
 }
 
-export interface AdminFood extends Required<Omit<AdminFoodInput, 'emoji'>> {
+export interface AdminFood extends Required<Omit<AdminFoodInput, 'emoji' | 'imageUrl'>> {
   id: string;
   emoji: string;
+  /** A library image, or null where the emoji still stands in for it. */
+  imageUrl: string | null;
   updatedBy: string;
   updatedAt: string | null;
 }
@@ -437,6 +447,7 @@ type FoodRow = {
   name: string;
   portion: string;
   emoji?: string | null;
+  imageUrl?: string | null;
   calories: number;
   proteinG?: number | null;
   carbsG?: number | null;
@@ -455,6 +466,7 @@ function toAdminFood(row: FoodRow): AdminFood {
     name: row.name,
     portion: row.portion,
     emoji: row.emoji ?? '🍽️',
+    imageUrl: row.imageUrl ?? null,
     calories: row.calories,
     proteinG: row.proteinG ?? 0,
     carbsG: row.carbsG ?? 0,
@@ -541,6 +553,7 @@ export async function adminCreateFood(actor: string, input: AdminFoodInput): Pro
     name,
     portion: input.portion.trim() || '1 serving',
     emoji: input.emoji ?? '🍽️',
+    imageUrl: input.imageUrl ?? null,
     ...foodFigures({ ...input, calories: input.calories }),
     ownerUserId: null,
     quickAdd: input.quickAdd === true,
@@ -574,6 +587,7 @@ export async function adminUpdateFood(actor: string, foodId: string, patch: Part
   }
   if (patch.portion !== undefined) next.portion = patch.portion.trim() || '1 serving';
   if (patch.emoji !== undefined) next.emoji = patch.emoji;
+  if (patch.imageUrl !== undefined) next.imageUrl = patch.imageUrl;
   if (patch.quickAdd !== undefined) next.quickAdd = patch.quickAdd;
   if (patch.sort !== undefined) next.sort = patch.sort;
   if (patch.active !== undefined) next.active = patch.active;

@@ -1658,6 +1658,15 @@ export const foodItemSchema = z.object({
   /** The serving its figures describe — "1 Medium (118 g)". */
   portion: z.string(),
   emoji: z.string().default('🍽️'),
+  /**
+   * A photograph of the food, where one has been uploaded (RULES R19).
+   *
+   * Null is the ordinary case and not a gap: an emoji is a perfectly good
+   * label for a boiled egg, and the app falls back to it. A picture earns
+   * its bandwidth on the foods somebody is choosing *between* — a plate
+   * from a plan, a recommendation — not on every row of a search.
+   */
+  imageUrl: z.string().nullable().default(null),
   calories: z.number().nonnegative(),
   proteinG: z.number().nonnegative().default(0),
   carbsG: z.number().nonnegative().default(0),

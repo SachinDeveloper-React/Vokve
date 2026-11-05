@@ -247,9 +247,9 @@ export async function getNutritionDays(userId: string, from: IsoDate, to: IsoDat
 
 // ─── The library (RULES N8) ────────────────────────────────────────────────
 
-function toFood(row: { _id: string; name: string; portion: string; emoji?: string | null; calories: number; proteinG?: number | null; carbsG?: number | null; fatsG?: number | null; fiberG?: number | null }): FoodItem {
+function toFood(row: { _id: string; name: string; portion: string; emoji?: string | null; imageUrl?: string | null; calories: number; proteinG?: number | null; carbsG?: number | null; fatsG?: number | null; fiberG?: number | null }): FoodItem {
   return foodItemSchema.parse({
-    id: row._id, name: row.name, portion: row.portion, emoji: row.emoji ?? '🍽️', calories: row.calories,
+    id: row._id, name: row.name, portion: row.portion, emoji: row.emoji ?? '🍽️', imageUrl: row.imageUrl ?? null, calories: row.calories,
     proteinG: row.proteinG ?? 0, carbsG: row.carbsG ?? 0, fatsG: row.fatsG ?? 0, fiberG: row.fiberG ?? 0,
   });
 }

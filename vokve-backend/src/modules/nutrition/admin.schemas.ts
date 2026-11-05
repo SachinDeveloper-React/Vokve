@@ -36,6 +36,8 @@ export const adminPlanBody = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().trim().max(400).optional(),
   emoji: z.string().max(8).optional(),
+  /** A library image's URL, or null to go back to the emoji (RULES R19). */
+  imageUrl: z.string().trim().max(500).nullable().optional(),
   dietTypes: z.array(z.enum(DIET_TYPES)).min(1),
   mealPlans: z.array(z.enum(MEAL_PLANS)).min(1),
   days: z.array(adminPlanDay).min(1).max(31),
@@ -54,6 +56,8 @@ export const adminFoodBody = z.object({
   name: z.string().trim().min(1).max(120),
   portion: z.string().trim().min(1).max(80),
   emoji: z.string().max(8).optional(),
+  /** A library image's URL, or null to go back to the emoji (RULES R19). */
+  imageUrl: z.string().trim().max(500).nullable().optional(),
   calories: z.number().min(0).max(5000),
   proteinG: grams.optional(),
   carbsG: grams.optional(),

@@ -1238,7 +1238,17 @@ function at(days: number, hours: number, minutes: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
   date.setHours(hours, minutes, 0, 0);
-  return new Date(Math.min(date.getTime(), Date.now() - 60_000)).toISOString();
+
+  // Never in the future — a lunch logged at 13:00 cannot exist at nine in
+  // the morning — and never dragged out of the day it was asked for. The
+  // second clamp is the one that is easy to miss: a minute after midnight,
+  // `now - 60s` is *yesterday*, so every one of today's seeded meals would
+  // land on the previous day and the diary would be empty for the first
+  // minute of every day.
+  const dayStart = new Date(date);
+  dayStart.setHours(0, 0, 0, 0);
+  const notFuture = Math.min(date.getTime(), Date.now() - 60_000);
+  return new Date(Math.max(dayStart.getTime(), notFuture)).toISOString();
 }
 
 /**
@@ -2310,6 +2320,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Oats (Cooked)',
     portion: '1 Cup (150 g)',
     emoji: '🥣',
+    imageUrl: null,
     calories: 150,
     proteinG: 5,
     carbsG: 27,
@@ -2321,6 +2332,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Banana',
     portion: '1 Medium (118 g)',
     emoji: '🍌',
+    imageUrl: null,
     calories: 89,
     proteinG: 1,
     carbsG: 23,
@@ -2332,6 +2344,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Boiled Egg',
     portion: '1 Large (50 g)',
     emoji: '🥚',
+    imageUrl: null,
     calories: 78,
     proteinG: 6,
     carbsG: 0.6,
@@ -2343,6 +2356,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Peanut Butter',
     portion: '1 Tbsp (16 g)',
     emoji: '🥜',
+    imageUrl: null,
     calories: 94,
     proteinG: 4,
     carbsG: 3,
@@ -2354,6 +2368,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Brown Rice',
     portion: '1 Cup (150 g)',
     emoji: '🍚',
+    imageUrl: null,
     calories: 215,
     proteinG: 5,
     carbsG: 45,
@@ -2365,6 +2380,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Dal',
     portion: '1 Bowl (150 g)',
     emoji: '🍲',
+    imageUrl: null,
     calories: 180,
     proteinG: 10,
     carbsG: 22,
@@ -2376,6 +2392,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Paneer',
     portion: '100 g',
     emoji: '🧀',
+    imageUrl: null,
     calories: 265,
     proteinG: 18,
     carbsG: 6,
@@ -2387,6 +2404,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Curd',
     portion: '1 Bowl (150 g)',
     emoji: '🥛',
+    imageUrl: null,
     calories: 98,
     proteinG: 6,
     carbsG: 8,
@@ -2398,6 +2416,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Roti',
     portion: '1 Piece (40 g)',
     emoji: '🫓',
+    imageUrl: null,
     calories: 104,
     proteinG: 3,
     carbsG: 20,
@@ -2409,6 +2428,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Grilled Chicken',
     portion: '100 g',
     emoji: '🍗',
+    imageUrl: null,
     calories: 165,
     proteinG: 31,
     carbsG: 0,
@@ -2420,6 +2440,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Mixed Salad',
     portion: '1 Bowl (120 g)',
     emoji: '🥗',
+    imageUrl: null,
     calories: 45,
     proteinG: 2,
     carbsG: 8,
@@ -2431,6 +2452,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Almonds',
     portion: '10 pieces (12 g)',
     emoji: '🌰',
+    imageUrl: null,
     calories: 70,
     proteinG: 3,
     carbsG: 2.5,
@@ -2442,6 +2464,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Apple',
     portion: '1 Medium (180 g)',
     emoji: '🍎',
+    imageUrl: null,
     calories: 95,
     proteinG: 0.5,
     carbsG: 25,
@@ -2453,6 +2476,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Black Coffee',
     portion: '1 Cup',
     emoji: '☕',
+    imageUrl: null,
     calories: 5,
     proteinG: 0.3,
     carbsG: 0,
@@ -2464,6 +2488,7 @@ export const foodLibrary: FoodItem[] = [
     name: 'Protein Shake',
     portion: '1 Scoop (30 g)',
     emoji: '🥤',
+    imageUrl: null,
     calories: 120,
     proteinG: 24,
     carbsG: 3,

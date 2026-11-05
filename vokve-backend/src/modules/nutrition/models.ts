@@ -67,6 +67,8 @@ const foodItemSchema = new Schema(
     name: { type: String, required: true },
     portion: { type: String, required: true },
     emoji: { type: String, default: '🍽️' },
+    /** A photograph, where one was uploaded. The emoji is the fallback. */
+    imageUrl: { type: String, default: null },
     calories: { type: Number, required: true, min: 0 },
     proteinG: { type: Number, default: 0, min: 0 },
     carbsG: { type: Number, default: 0, min: 0 },
@@ -111,6 +113,8 @@ const dietPlanSchema = new Schema(
     name: { type: String, required: true },
     description: { type: String, default: '' },
     emoji: { type: String, default: '🥗' },
+    /** A photograph of the plan, for the shelf a member chooses from. */
+    imageUrl: { type: String, default: null },
     dietTypes: { type: [String], enum: DIET_TYPES, default: [] },
     mealPlans: { type: [String], enum: MEAL_PLANS, default: [] },
     days: { type: [Schema.Types.Mixed], required: true },

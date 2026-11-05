@@ -127,6 +127,31 @@ const envSchema = z.object({
   OPS_EMAIL: unsetWhenBlank(z.string().email()),
 
   /**
+   * Where catalogue images live (RULES R19).
+   *
+   * Member avatars are kept in Mongo as bytes, which is fine for one small
+   * square per account that only that account's screens ask for. A product
+   * gallery is neither: ten photos an item, every one of them on a shelf
+   * that every member scrolls, and serving those out of the database means
+   * paying for the read, the memory and the bandwidth on every scroll. So
+   * the catalogue's images go to a bucket and are served from it.
+   *
+   * All four or none. A half-configured bucket is the worst of both — the
+   * panel would offer an upload that fails at the last step, after the
+   * operator has chosen the file.
+   */
+  AWS_REGION: unsetWhenBlank(z.string().min(1)),
+  AWS_S3_BUCKET: unsetWhenBlank(z.string().min(1)),
+  AWS_ACCESS_KEY_ID: unsetWhenBlank(z.string().min(1)),
+  AWS_SECRET_ACCESS_KEY: unsetWhenBlank(z.string().min(1)),
+  /**
+   * The host images are read back through — a CloudFront domain, or any
+   * CDN in front of the bucket. Unset serves straight from S3, which works
+   * and costs more per view than it needs to.
+   */
+  AWS_S3_PUBLIC_BASE: unsetWhenBlank(z.string().url()),
+
+  /**
    * Who collects the money side of an order. `mock` captures every payment
    * at once (dev and test); `razorpay` creates a gateway order and verifies
    * the checkout signature, and needs both keys. Refused in production

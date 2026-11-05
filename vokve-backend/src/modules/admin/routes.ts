@@ -151,6 +151,15 @@ import {
   stepsQuery,
 } from './profile.service.js';
 import {
+  confirmUploadBody,
+  confirmMediaUpload,
+  deleteMedia,
+  listMedia,
+  mediaQuery,
+  signUploadBody,
+  signMediaUpload,
+} from './media.service.js';
+import {
   appConfig,
   setAppConfig,
   setAppConfigBody,
@@ -648,6 +657,37 @@ const itemImportBody = z
 adminUsersRouter.post('/admin/shop/items/import', validate('body', itemImportBody), async (req, res) => {
   const body = req.body as z.infer<typeof itemImportBody>;
   res.json(await importItems(req.ctx.adminActor!, body.rows, { dryRun: body.dryRun }));
+});
+
+// ─── The catalogue's image library (RULES R19) ─────────────────────────────
+
+/**
+ * A URL the panel may put one image to.
+ *
+ * The bytes never come through here. The API runs on a platform with a
+ * four-and-a-half megabyte body limit, so a four megabyte photo base64'd
+ * into a request is refused before any of this code sees it — and an upload
+ * that did come through would spend the function's memory and wall clock on
+ * bytes it does nothing with. What the server keeps is the decision: it
+ * names the key and signs the content type in.
+ */
+adminUsersRouter.post('/admin/media/sign', validate('body', signUploadBody), async (req, res) => {
+  res.json(await signMediaUpload(req.body));
+});
+
+/** Records what the bucket confirms is there. Asked of S3, never believed. */
+adminUsersRouter.post('/admin/media', validate('body', confirmUploadBody), async (req, res) => {
+  res.status(201).json(await confirmMediaUpload(req.ctx.adminActor!, req.body));
+});
+
+/** The library, newest first, searched by the filename it was chosen under. */
+adminUsersRouter.get('/admin/media', validate('query', mediaQuery), async (req, res) => {
+  res.json(await listMedia(req.query as unknown as z.infer<typeof mediaQuery>));
+});
+
+/** Refused while a product still shows it — a broken picture is worse than none. */
+adminUsersRouter.delete('/admin/media/:mediaId', async (req, res) => {
+  res.json(await deleteMedia(req.ctx.adminActor!, String(req.params.mediaId)));
 });
 
 /** A patch, for the one field somebody came to change. */
