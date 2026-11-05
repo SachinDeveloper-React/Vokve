@@ -87,6 +87,22 @@ afterEach(async () => {
   }
 });
 
+/**
+ * Lets the board's own read land.
+ *
+ * Mounting inside `act` flushes the microtasks already queued, and the
+ * board's answer is not one of them: the read resolves a tick later, so the
+ * first commit is still the loading state. Without this the assertions race
+ * it — passing alone and failing perhaps one full run in three, which is the
+ * worst thing a test can do, because a suite that fails at random is a suite
+ * whose failures stop being read.
+ */
+const settle = () =>
+  ReactTestRenderer.act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
 const render = async () => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await ReactTestRenderer.act(async () => {
@@ -99,6 +115,7 @@ const render = async () => {
     );
   });
   mounted = tree;
+  await settle();
   return tree;
 };
 

@@ -19,6 +19,18 @@ function unsetWhenBlank<T extends z.ZodTypeAny>(schema: T) {
   return z.preprocess(value => (value === '' ? undefined : value), schema.optional());
 }
 
+/**
+ * The same rule for a key that falls back to a value rather than to nothing.
+ *
+ * `.default()` only fires on `undefined`, so a key emptied in `.env` reached
+ * the format check and took the boot down exactly as the optional ones did
+ * — a fault nobody would have found until the day somebody cleared a line
+ * instead of deleting it.
+ */
+function blankIsDefault(schema: z.ZodString, fallback: string) {
+  return z.preprocess(value => (value === '' ? undefined : value), schema.default(fallback));
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -26,13 +38,13 @@ const envSchema = z.object({
   REDIS_URL: z.string().optional(),
   JWT_SECRET: z.string().min(16).default('dev-only-secret-change-me-please'),
   /** Where a referral link points (RULES F6). The page redirects to the store until deep links exist. */
-  SHARE_URL_BASE: z.string().url().default('https://vokve.app/r'),
+  SHARE_URL_BASE: blankIsDefault(z.string().url(), 'https://vokve.app/r'),
   /**
    * This API's own origin, used to build the absolute URLs it hands out for
    * media it serves (RULES P10). Behind a proxy this is the public address,
    * not the port the process listens on.
    */
-  PUBLIC_BASE_URL: z.string().url().default('http://localhost:3000'),
+  PUBLIC_BASE_URL: blankIsDefault(z.string().url(), 'http://localhost:3000'),
   /**
    * The Firebase service account for push (FCM), as its three fields. Absent
    * means no push channel: feed rows only, and every send is logged as

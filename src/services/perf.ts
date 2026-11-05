@@ -24,13 +24,14 @@ import { logger } from '../utils/logger';
  * them is worth a line in front of a member.
  */
 
-/** The flows worth their own trace. Names are the ones in the console. */
-export type TraceName =
-  | 'steps_sync'
-  | 'steps_read_day'
-  | 'sign_in'
-  | 'nutrition_day'
-  | 'shop_browse';
+/**
+ * The flows worth their own trace. Names are the ones in the console.
+ *
+ * One, because one is instrumented. A union listing flows nobody measures
+ * reads as a plan, and a plan in a type is a promise the code does not keep
+ * — adding a name beside a `measure` call is a line when a flow earns one.
+ */
+export type TraceName = 'steps_sync';
 
 export interface Span {
   /** A number the console can aggregate — days in a batch, items in a queue. */
@@ -62,9 +63,10 @@ function performance() {
  *
  * The caller is not asked to handle a failure because there is nothing
  * useful it could do: a measurement that cannot be taken is not a reason to
- * skip the work being measured.
+ * skip the work being measured. Private: everything measured so far is
+ * async, and `measure` records how it ended as well as how long it took.
  */
-export function startSpan(name: TraceName): Span {
+function startSpan(name: TraceName): Span {
   const perf = performance();
   if (!perf) return NOTHING;
 
