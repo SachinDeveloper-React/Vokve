@@ -75,6 +75,7 @@ import {
   deviceHealthSnapshotSchema,
   foodSuggestionsSchema,
   pushAckResultSchema,
+  shopSuggestionsSchema,
   eventIntakeSchema,
   permissionSnapshotSchema,
   userSchema,
@@ -395,6 +396,8 @@ const cataloguePageSchema = pageSchema(shopItemSchema).extend({
 const flag = (value: boolean | undefined) => (value ? 'true' : undefined);
 
 const realShopApi: ShopApi = {
+  suggestions: () =>
+    request(shopSuggestionsSchema, client => client.get('/shop/suggestions')),
   items: (query = {}) =>
     request(cataloguePageSchema, client =>
       client.get('/shop/items', {
@@ -1033,6 +1036,7 @@ export const activityApi: ActivityApi = {
 };
 
 export const shopApi: ShopApi = {
+  suggestions: () => pick(mockShopApi, realShopApi).suggestions(),
   items: query => pick(mockShopApi, realShopApi).items(query),
   item: id => pick(mockShopApi, realShopApi).item(id),
   categories: () => pick(mockShopApi, realShopApi).categories(),

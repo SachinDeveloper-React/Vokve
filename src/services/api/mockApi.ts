@@ -32,6 +32,7 @@ import {
   foodItemSchema,
   foodLibraryPageSchema,
   foodSuggestionsSchema,
+  shopSuggestionsSchema,
   healthScoreSchema,
   nutritionDaySchema,
   nutritionProfileSchema,
@@ -4217,6 +4218,55 @@ const notFound = (what: string) =>
  * the last page ended — the same opaque `offset:` the server hands out.
  */
 export const mockShopApi: ShopApi = {
+  /**
+   * The same weighting the server applies (RULES R19), against the mock's
+   * own catalogue and wallet.
+   *
+   * Written out rather than stubbed with a fixed list, because the state
+   * worth reaching without a server is the one the rule is about: a shelf
+   * where the affordable things come first and the dear ones are still
+   * on it.
+   */
+  async suggestions() {
+    await delay();
+    const coins = Math.floor(currentBalance());
+
+    const data = shopItems
+      .map(item => {
+        const coinPrice = mockCoinsFor(item.price);
+        const affordable = coins >= coinPrice && coinPrice > 0;
+        let score = 0;
+        let reason = 'Picked for you';
+        if (affordable) {
+          score += 2;
+          reason = 'Your coins cover this';
+        }
+        if (item.isDeal) {
+          score += 1.5;
+          if (!affordable) reason = 'On offer right now';
+        }
+        if (item.featured) score += 1;
+        return {
+          suggestion: {
+            itemId: item.id,
+            title: item.title,
+            emoji: item.emoji ?? null,
+            imageUrl: item.images?.[0] ?? null,
+            price: item.price,
+            coinPrice,
+            category: item.category,
+            affordable,
+            reason,
+          },
+          score,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map(row => row.suggestion);
+
+    return shopSuggestionsSchema.parse({ data });
+  },
   async items(query = {}) {
     await delay();
     const words = (query.q ?? '')

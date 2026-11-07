@@ -9,6 +9,7 @@ import {
   ShopCategoryFilter,
   type ShopFilter,
 } from '../../components/shop/ShopCategoryFilter';
+import { PickedForYouRow } from '../../components/shop/PickedForYouRow';
 import { ShopCoinsBanner } from '../../components/shop/ShopCoinsBanner';
 import { ShopHeader } from '../../components/shop/ShopHeader';
 import { ShopSearchBar } from '../../components/shop/ShopSearchBar';
@@ -16,6 +17,8 @@ import { TopCategoriesGrid } from '../../components/shop/TopCategoriesGrid';
 import { LoadState } from '../../components/ui/LoadState';
 import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
+import { useServerRead } from '../../hooks/useServerRead';
+import { shopApi } from '../../services/api/endpoints';
 import { useReferralCard } from '../../hooks/useContent';
 import { useAfterTransition } from '../../hooks/useAfterTransition';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
@@ -154,6 +157,26 @@ export const ShopScreen = () => {
     (item: ShopItem) => navigation.navigate('ProductDetail', { id: item.id }),
     [navigation],
   );
+
+  /**
+   * The member's own shelf (RULES R19). Keyed on the coin balance, because
+   * affordability is half of what decides the order — a shelf that still
+   * greyed out a reward after the coins for it landed would be answering
+   * a question they had already closed.
+   */
+  const picks = useServerRead(
+    // Null until the tab transition has finished, so this read is not in
+    // the commit the press lands on. That frame is deliberately cheap —
+    // the shelf, the tiles and a hundred-item parse all used to land in
+    // it and the bar waited on them — and a recommendation is the least
+    // urgent thing on the screen.
+    ready ? `shop:suggestions:${Math.floor(balance)}` : null,
+    () => shopApi.suggestions(),
+  );
+  const onOpenSuggestion = useCallback(
+    (id: string) => navigation.navigate('ProductDetail', { id }),
+    [navigation],
+  );
   const onOpenSearch = useCallback(
     () => navigation.navigate('ShopSearch'),
     [navigation],
@@ -237,6 +260,15 @@ export const ShopScreen = () => {
               items={featured}
               onPressItem={onOpenItem}
               onPressViewAll={onViewAllShelf}
+            />
+
+            {/* Under the featured shelf: that one is what the shop is
+                proud of, this one is what it thinks *they* want, and the
+                second only reads as a recommendation once the first has
+                established what the shop sells. */}
+            <PickedForYouRow
+              suggestions={picks.data?.data ?? []}
+              onPressItem={onOpenSuggestion}
             />
 
             <DailyOffersCard onPressDailyOffers={onOpenDeals} />

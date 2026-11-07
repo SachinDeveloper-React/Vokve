@@ -52,6 +52,7 @@ jest.mock('../src/services/api/endpoints', () => ({
   },
   checkoutApi: { quote: jest.fn(), place: jest.fn(), pay: jest.fn() },
   shopApi: {
+    suggestions: jest.fn(async () => ({ data: [] })),
     items: jest.fn(),
     item: jest.fn(),
     categories: jest.fn(),

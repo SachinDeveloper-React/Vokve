@@ -54,6 +54,7 @@ jest.mock('../src/services/api/endpoints', () => ({
    */
   contentApi: { referralCards: jest.fn(() => new Promise(() => {})) },
   shopApi: {
+    suggestions: jest.fn(async () => ({ data: [] })),
     items: jest.fn(),
     item: jest.fn(),
     categories: jest.fn(),

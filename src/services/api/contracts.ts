@@ -18,6 +18,7 @@ import type {
   DeviceHealthSnapshot,
   FoodSuggestions,
   PushAck,
+  ShopSuggestions,
   PushAckResult,
   EventIntake,
   PaymentMethod,
@@ -409,6 +410,13 @@ export interface ReviewInput {
 
 export interface ShopApi {
   items(query?: ShopItemsQuery): Promise<CataloguePage>;
+  /**
+   * What the shop puts in front of this member (`GET /shop/suggestions`,
+   * RULES R19): their own orders, saved items and coins. Never what they
+   * already own, and what they cannot yet afford is sorted down rather
+   * than hidden.
+   */
+  suggestions(): Promise<ShopSuggestions>;
   item(id: string): Promise<ShopItem>;
   /** What each shelf holds: counts, in-stock counts, subcategories. */
   categories(): Promise<ShopCategorySummary[]>;

@@ -1736,6 +1736,33 @@ export const foodSuggestionsSchema = z.object({
 export type FoodSuggestions = z.infer<typeof foodSuggestionsSchema>;
 
 /**
+ * One item the shop suggests, and why (RULES R19).
+ *
+ * `affordable` sorts rather than hides. A coin shop makes that failure
+ * particular — the member can see exactly how short they are — and
+ * hiding what they cannot yet afford decides on their behalf that they
+ * never will.
+ */
+export const shopSuggestionSchema = z.object({
+  itemId: z.string(),
+  title: z.string(),
+  emoji: z.string().nullable(),
+  imageUrl: z.string().nullable(),
+  /** Paise. */
+  price: z.number(),
+  coinPrice: z.number(),
+  category: z.string(),
+  affordable: z.boolean(),
+  reason: z.string(),
+});
+export type ShopSuggestion = z.infer<typeof shopSuggestionSchema>;
+
+export const shopSuggestionsSchema = z.object({
+  data: z.array(shopSuggestionSchema),
+});
+export type ShopSuggestions = z.infer<typeof shopSuggestionsSchema>;
+
+/**
  * `GET /foods/library`: a page of the whole library, for browsing rather than
  * searching (RULES N8).
  *

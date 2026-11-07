@@ -72,6 +72,7 @@ jest.mock('@react-navigation/native', () => ({
 
 jest.mock('../src/services/api/endpoints', () => ({
   shopApi: {
+    suggestions: jest.fn(async () => ({ data: [] })),
     items: jest.fn(),
     item: jest.fn(),
     categories: jest.fn(),
