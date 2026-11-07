@@ -4,7 +4,13 @@ const userSchema = new Schema(
   {
     _id: { type: String, required: true },
     email: { type: String, required: true },
-    phone: { type: String, required: true },
+    /**
+     * Optional since Google sign-in (RULES O12): Google proves an email and
+     * knows nothing about a phone. An account can exist without one and
+     * sign in — it is two *verified* contacts that spending needs (O5),
+     * which `phoneVerifiedAt` already answers for.
+     */
+    phone: { type: String, default: undefined },
     passwordHash: { type: String, required: true },
     name: { type: String, default: '' },
     avatarUrl: { type: String, default: null },
@@ -21,6 +27,13 @@ const userSchema = new Schema(
     timezone: { type: String, default: 'Asia/Kolkata' },
     phoneVerifiedAt: { type: Date, default: null },
     emailVerifiedAt: { type: Date, default: null },
+    /**
+     * Google's stable id for this account (the token's `sub`), where the
+     * member has signed in with Google. Matched on in preference to the
+     * email: an address can be changed, given up and reissued, and `sub`
+     * cannot.
+     */
+    googleId: { type: String, default: undefined },
     profileCompletedAt: { type: Date, default: null },
     trust: { score: { type: Number, default: 60 }, tier: { type: String, default: 'normal' }, updatedAt: Date },
     flags: { frozen: { type: Boolean, default: false }, legalHold: { type: Boolean, default: false } },
@@ -41,7 +54,15 @@ const userSchema = new Schema(
   { timestamps: true, collection: 'users' },
 );
 userSchema.index({ email: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
-userSchema.index({ phone: 1 }, { unique: true });
+// Sparse, because an account that arrived through Google has no phone at
+// all: a plain unique index treats every one of them as the same missing
+// value and refuses the second. A phone that *is* there is still unique.
+userSchema.index({ phone: 1 }, { unique: true, sparse: true });
+// `default: undefined` above and sparse here are one decision: a sparse
+// index skips a *missing* field and happily indexes `null`, so a default
+// of null would put every password account in this unique index under the
+// same value and the second sign-up would collide.
+userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ country: 1 });
 userSchema.index({ 'trust.tier': 1 });
 userSchema.index({ 'deletion.purgeAt': 1 }, { sparse: true });

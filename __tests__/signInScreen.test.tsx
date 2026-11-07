@@ -155,12 +155,27 @@ describe('sign-in screen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('SignUp');
   });
 
-  test('says so rather than doing nothing for social sign-in, which is not wired up', async () => {
+  test('Google signs in rather than apologising, and the others still say so', async () => {
+    const signInWithGoogle = jest
+      .spyOn(useAuthStore.getState(), 'signInWithGoogle')
+      .mockResolvedValue(true);
+    useAuthStore.setState({ signInWithGoogle });
+
     const tree = await render();
     await ReactTestRenderer.act(() => {
       pressableFor(tree, 'Continue with Google').props.onPress();
     });
-    expect(textOf(tree, RNText)).toContain('Google sign-in is not connected');
+
+    expect(signInWithGoogle).toHaveBeenCalledTimes(1);
+    // And no apology for the one that works.
+    expect(textOf(tree, RNText)).not.toContain('Google sign-in is not connected');
+
+    // Apple and Facebook are not wired, and say so rather than doing
+    // nothing at all when pressed.
+    await ReactTestRenderer.act(() => {
+      pressableFor(tree, 'Continue with Apple').props.onPress();
+    });
+    expect(textOf(tree, RNText)).toContain('Apple sign-in is not connected');
   });
 
   test('forgot password leads to the reset flow rather than a dead-end notice', async () => {

@@ -152,6 +152,18 @@ const envSchema = z.object({
   AWS_S3_PUBLIC_BASE: unsetWhenBlank(z.string().url()),
 
   /**
+   * The **web** OAuth client id Google ID tokens are checked against
+   * (RULES O12).
+   *
+   * Web, even though the tokens come from Android and iOS: that is the
+   * audience the native SDKs put in a token when they are configured
+   * with `webClientId`, and it is the one value that says "this token
+   * was minted for us". Unset means the Google route answers 503 rather
+   * than accepting anything.
+   */
+  GOOGLE_WEB_CLIENT_ID: unsetWhenBlank(z.string().min(1)),
+
+  /**
    * Who collects the money side of an order. `mock` captures every payment
    * at once (dev and test); `razorpay` creates a gateway order and verifies
    * the checkout signature, and needs both keys. Refused in production

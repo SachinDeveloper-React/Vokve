@@ -343,10 +343,24 @@ describe('sign-up screen', () => {
     expect(mockGoBack).toHaveBeenCalled();
   });
 
-  test('says so rather than doing nothing for the flows that are not wired up', async () => {
+  test('Google signs in from here rather than starting a sign-up', async () => {
+    const signInWithGoogle = jest.fn().mockResolvedValue(true);
+    useAuthStore.setState({ signInWithGoogle });
+
+    const tree = await render();
+    await press(tree, 'Continue with Google');
+
+    // There is nothing left for this form to ask: the server makes the
+    // account from the token when there is none, and links an email it
+    // already knows rather than refusing it as taken.
+    expect(signInWithGoogle).toHaveBeenCalledTimes(1);
+    expect(textOf(tree, RNText)).not.toContain('Google sign-up is not connected');
+  });
+
+  test('the flows that are not wired up still say so', async () => {
     const tree = await render();
 
-    await press(tree, 'Continue with Google');
-    expect(textOf(tree, RNText)).toContain('Google sign-up is not connected');
+    await press(tree, 'Continue with Apple');
+    expect(textOf(tree, RNText)).toContain('Apple sign-up is not connected');
   });
 });

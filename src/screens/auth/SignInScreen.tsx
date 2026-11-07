@@ -109,6 +109,7 @@ export const SignInScreen = () => {
     useNavigation<NativeStackNavigationProp<AuthStackParamList>>();
 
   const signIn = useAuthStore(s => s.signIn);
+  const signInWithGoogle = useAuthStore(s => s.signInWithGoogle);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
@@ -155,9 +156,25 @@ export const SignInScreen = () => {
     navigation.navigate('ForgotPassword');
   }, [navigation]);
 
-  const onSocialSelect = useCallback((provider: SocialProvider) => {
-    setNotice(`${PROVIDER_NAMES[provider]} sign-in is not connected yet.`);
-  }, []);
+  /**
+   * Google is wired; the other two are not, and say so rather than
+   * doing nothing when pressed (RULES O12).
+   *
+   * Nothing is shown for a cancel. The store leaves `error` null when
+   * somebody backs out of the Google sheet, and a notice saying
+   * "cancelled" under the button would be the app arguing with a
+   * decision they just made.
+   */
+  const onSocialSelect = useCallback(
+    (provider: SocialProvider) => {
+      if (provider === 'google') {
+        signInWithGoogle();
+        return;
+      }
+      setNotice(`${PROVIDER_NAMES[provider]} sign-in is not connected yet.`);
+    },
+    [signInWithGoogle],
+  );
 
   const dismissNotice = useCallback(() => {
     setNotice(null);

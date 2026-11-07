@@ -78,6 +78,7 @@ export const SignUpScreen = () => {
     useNavigation<NativeStackNavigationProp<AuthStackParamList>>();
 
   const signUp = useAuthStore(s => s.signUp);
+  const signInWithGoogle = useAuthStore(s => s.signInWithGoogle);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
@@ -169,9 +170,23 @@ export const SignUpScreen = () => {
     [],
   );
 
-  const onSocialSelect = useCallback((provider: SocialProvider) => {
-    setNotice(`${PROVIDER_NAMES[provider]} sign-up is not connected yet.`);
-  }, []);
+  /**
+   * Google signs somebody straight in rather than starting a sign-up
+   * (RULES O12): the server makes the account from the token if there is
+   * none, so there is nothing left for this form to ask. An email the
+   * app already knows is linked to the account that holds it rather
+   * than refused as taken.
+   */
+  const onSocialSelect = useCallback(
+    (provider: SocialProvider) => {
+      if (provider === 'google') {
+        signInWithGoogle();
+        return;
+      }
+      setNotice(`${PROVIDER_NAMES[provider]} sign-up is not connected yet.`);
+    },
+    [signInWithGoogle],
+  );
 
   const showTerms = useCallback(() => {
     setNotice('The full terms open on vokve.com for now.');

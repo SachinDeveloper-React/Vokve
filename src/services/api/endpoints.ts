@@ -175,6 +175,8 @@ export function shouldUseMockApi(): boolean {
  * Screens and stores call these; nothing else should touch `apiClient`.
  */
 const realAuthApi: AuthApi = {
+  google: idToken =>
+    request(authResponseSchema, client => client.post('/auth/google', { idToken })),
   signIn: (email: string, password: string): Promise<AuthResponse> =>
     request(authResponseSchema, client =>
       client.post('/auth/sign-in', { email, password }),
@@ -950,6 +952,7 @@ const pick = <T>(mock: T, real: T): T => {
 };
 
 export const authApi: AuthApi = {
+  google: idToken => pick(mockAuthApi, realAuthApi).google(idToken),
   signIn: (email, password) =>
     pick(mockAuthApi, realAuthApi).signIn(email, password),
   signUp: payload => pick(mockAuthApi, realAuthApi).signUp(payload),

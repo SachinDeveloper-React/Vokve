@@ -83,6 +83,39 @@ jest.mock('@react-native-firebase/crashlytics', () => ({
   didCrashOnPreviousExecution: jest.fn().mockResolvedValue(false),
 }));
 
+// Google Sign-In is a Nitro module: it has no JavaScript fallback at all,
+// so a suite that imported it would fail at require time. The double
+// answers the three calls the app makes and defaults to a signed-in
+// response; a test about cancelling or failing says so for itself.
+jest.mock('react-native-nitro-google-signin', () => {
+  const success = {
+    type: 'success',
+    data: { idToken: 'google-id-token', serverAuthCode: null, scopes: [], user: {} },
+  };
+  return {
+    GoogleOneTapSignIn: {
+      configure: jest.fn(),
+      checkPlayServices: jest.fn().mockResolvedValue(undefined),
+      signIn: jest.fn().mockResolvedValue(success),
+      presentExplicitSignIn: jest.fn().mockResolvedValue(success),
+      signOut: jest.fn().mockResolvedValue(undefined),
+      getCurrentUser: jest.fn(() => null),
+    },
+    isSuccessResponse: (r) => r?.type === 'success',
+    isCancelledResponse: (r) => r?.type === 'cancelled',
+    isNoSavedCredentialFoundResponse: (r) => r?.type === 'noSavedCredentialFound',
+    isErrorWithCode: (e) => Boolean(e && typeof e === 'object' && 'code' in e),
+    statusCodes: {
+      ONE_TAP_START_FAILED: 'ONE_TAP_START_FAILED',
+      PLAY_SERVICES_NOT_AVAILABLE: 'PLAY_SERVICES_NOT_AVAILABLE',
+      IN_PROGRESS: 'IN_PROGRESS',
+      SIGN_IN_REQUIRED: 'SIGN_IN_REQUIRED',
+      SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED',
+      DEVELOPER_ERROR: 'DEVELOPER_ERROR',
+    },
+  };
+});
+
 // Performance monitoring is a native module whose traces answer nothing:
 // every call is fire-and-forget telemetry, and a test that waited on one
 // would be waiting on a console it cannot see. The double keeps the shape

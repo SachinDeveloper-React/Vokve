@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
+import { verifyGoogleIdToken, type GoogleIdentity } from '../../lib/googleIdentity.js';
 import { getConfig } from '../../config/remote.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
@@ -147,7 +148,7 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
       }
       const nextVerification = await createChallenge({
         channel: secondary, purpose: provenEmail ? 'verify_phone' : 'verify_email',
-        target: provenEmail ? user.phone : user.email, userId, deviceId: meta.deviceId, ip: meta.ip,
+        target: provenEmail ? phoneOf(user) : user.email, userId, deviceId: meta.deviceId, ip: meta.ip,
       });
       return { ...session, nextVerification };
     }
@@ -228,6 +229,114 @@ export async function signIn(identifier: string, password: string, meta: Meta): 
 }
 
 /**
+ * Signing in with Google (RULES O12).
+ *
+ * The phone sends an ID token and nothing else is believed — the email,
+ * the name and the id are all read out of the token after Google's
+ * signature has been checked. A client that posted somebody else's email
+ * would otherwise be signing in as them.
+ *
+ * Matched on `googleId` first and the email only after, because the id is
+ * Google's stable `sub` and an email is not: addresses are changed, given
+ * up and reissued. Matching on email at all is safe only because the
+ * verifier refuses a token whose address Google has not itself proved —
+ * without that check, anyone could sign up to Google with an address they
+ * do not own and arrive here asking to be let into the matching account.
+ *
+ * A new account arrives with a verified email, no phone and a password
+ * nobody can present. That is a shape the rules already know: one proven
+ * contact is enough to sign in, and two are needed to spend (O5), so a
+ * Google member walks and earns from the first minute and is asked for a
+ * number when they come to spend.
+ */
+export async function signInWithGoogle(idToken: string, meta: Meta): Promise<AuthResponse> {
+  const identity = await verifyGoogleIdToken(idToken);
+
+  let user = await UserModel.findOne({ googleId: identity.googleId });
+
+  if (!user) {
+    // Case-insensitive, with the same collation the unique index uses, or
+    // `Someone@gmail.com` would make a second account beside `someone@`.
+    user = await UserModel.findOne({ email: identity.email }).collation({ locale: 'en', strength: 2 });
+    if (user) {
+      // Linking rather than refusing: somebody who signed up with a
+      // password and later presses the Google button means to reach the
+      // same account, and telling them "that email is taken" by their own
+      // account is the most confusing answer there is.
+      user.googleId = identity.googleId;
+      user.emailVerifiedAt = user.emailVerifiedAt ?? new Date();
+      if (!user.avatarUrl && identity.picture) user.avatarUrl = identity.picture;
+      if (!user.name && identity.name) user.name = identity.name;
+      await user.save();
+    }
+  }
+
+  if (user?.deletedAt) {
+    throw new ApiError(401, 'INVALID_CREDENTIALS', 'That email or phone and password do not match.');
+  }
+
+  if (!user) {
+    user = await createGoogleUser(identity, meta);
+  }
+
+  await signedInOn(user, meta);
+  return issueSession(user, meta);
+}
+
+/**
+ * A brand-new account from a Google token.
+ *
+ * The password hash is a string bcrypt can never match, the way a deleted
+ * account's is: it keeps the field a string for the six places that
+ * compare against it, and means the password sign-in simply does not
+ * match rather than needing a special case at each one. Somebody who
+ * wants a password can set one through the ordinary reset, which proves
+ * the same address Google just did.
+ */
+async function createGoogleUser(identity: GoogleIdentity, meta: Meta): Promise<UserDoc> {
+  const config = await getConfig();
+  const userId = newId('usr');
+
+  let user: UserDoc;
+  try {
+    user = await UserModel.create({
+      _id: userId,
+      email: identity.email,
+      googleId: identity.googleId,
+      passwordHash: `google:${identity.googleId}`,
+      name: identity.name ?? '',
+      avatarUrl: identity.picture ?? null,
+      emailVerifiedAt: new Date(),
+      phoneVerifiedAt: null,
+      country: config.locale.country,
+      timezone: config.locale.timezone,
+      trust: { score: config.trust.newAccountScore, tier: 'normal', updatedAt: new Date() },
+    });
+  } catch (error) {
+    // Two taps of the button at once. The second read finds what the
+    // first wrote rather than answering "already registered" to somebody
+    // who is doing nothing wrong.
+    if ((error as { code?: number }).code === 11000) {
+      const existing = await UserModel.findOne({ googleId: identity.googleId });
+      if (existing) return existing;
+    }
+    throw error;
+  }
+
+  await Promise.all([
+    UserSettingsModel.create({ _id: userId }),
+    NotificationPreferencesModel.create({ _id: userId }),
+    CoinBalanceModel.create({ _id: userId }),
+    AuditLogModel.create({
+      actorType: 'user', actorId: userId, deviceId: meta.deviceId,
+      action: 'user.signup_google', subjectType: 'user', subjectId: userId,
+    }),
+  ]);
+
+  return user;
+}
+
+/**
  * Signing in again on an install this account already has: its steps count
  * from now (D-56). Only a sign-in — a code or a step-up taken while signed
  * in leaves counting as it is. An install that is another account's, or
@@ -258,7 +367,11 @@ export async function requestOtp(identifier: string, purpose: 'login' | 'reset_p
   // gets a decoy challenge — stored, rate-limited and masked exactly like a
   // real one, but never delivered — so the response and every later error
   // are the same either way.
-  const target = user ? (channel === 'email' ? user.email : user.phone) : normaliseIdentifier(identifier, channel);
+  const target = user
+    ? channel === 'email'
+      ? user.email
+      : phoneOf(user)
+    : normaliseIdentifier(identifier, channel);
   return createChallenge({
     channel, purpose, target, userId: user?._id ?? null, deviceId: meta.deviceId, ip: meta.ip, decoy: !user,
   });
@@ -397,5 +510,24 @@ export async function sendPhoneOtp(userId: string, meta: Meta) {
   if (!user) throw Errors.unauthorized();
   if (user.phoneVerifiedAt) throw new ApiError(409, 'PHONE_ALREADY_VERIFIED', 'Your number is already verified.');
   if (!isChannelDeliverable('sms')) throw new ApiError(503, 'SMS_UNAVAILABLE', 'Text messages are not available yet. You can verify your number later.');
-  return createChallenge({ channel: 'sms', purpose: 'verify_phone', target: user.phone, userId, deviceId: meta.deviceId, ip: meta.ip });
+  return createChallenge({ channel: 'sms', purpose: 'verify_phone', target: phoneOf(user), userId, deviceId: meta.deviceId, ip: meta.ip });
+}
+
+/**
+ * The account's phone, where it has one.
+ *
+ * An account that arrived through Google has none (RULES O12), and every
+ * caller here is about to send it a text. Refusing in words is the point:
+ * without this the number is `undefined`, the code goes nowhere, and the
+ * member waits for a message that was never addressed to anybody.
+ */
+function phoneOf(user: UserDoc): string {
+  if (!user.phone) {
+    throw new ApiError(
+      409,
+      'NO_PHONE_ON_ACCOUNT',
+      'There is no phone number on this account yet. Add one in your profile first.',
+    );
+  }
+  return user.phone;
 }

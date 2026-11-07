@@ -21,7 +21,8 @@
     "coins:backfill-sync": "tsx src/scripts/backfill-step-sync.ts",
     "plans": "tsx src/scripts/diet-plans.ts",
     "lint": "eslint src test --ext .ts",
-    "dev:memory": "tsx src/dev-memory.ts"
+    "dev:memory": "tsx src/dev-memory.ts",
+    "users:reindex": "tsx src/scripts/reindex-users.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",

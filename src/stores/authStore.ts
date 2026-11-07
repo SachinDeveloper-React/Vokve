@@ -38,6 +38,10 @@ import { useWishlistStore } from './wishlistStore';
 import type { AuthTokens, User, VerificationChallenge } from '../types/models';
 import type { CompleteProfilePayload, SignUpPayload } from '../types/forms';
 import { logger } from '../utils/logger';
+import {
+  forgetGoogleSession,
+  signInWithGoogle as googleSignIn,
+} from '../services/googleSignIn';
 
 /**
  * `unreachable` is a session that exists, could not be confirmed, and has
@@ -94,6 +98,13 @@ interface AuthState {
 
   hydrate: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<boolean>;
+  /**
+   * Signs in with Google (RULES O12). Answers `false` on a cancel exactly
+   * as it does on a failure — the screen has nothing to do either way —
+   * but leaves `error` null for a cancel, so nothing red appears in
+   * front of somebody who simply changed their mind.
+   */
+  signInWithGoogle: () => Promise<boolean>;
   signUp: (payload: SignUpPayload) => Promise<boolean>;
   verifyOtp: (code: string) => Promise<boolean>;
   resendOtp: () => Promise<boolean>;
@@ -297,6 +308,48 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: apiError,
         isSubmitting: false,
       });
+    }
+  },
+
+  signInWithGoogle: async () => {
+    set({ isSubmitting: true, error: null });
+
+    const outcome = await googleSignIn();
+    if (outcome.kind === 'cancelled') {
+      // Backing out of the Google sheet is not a failure, and a message
+      // under the button saying so would be the app arguing with them.
+      set({ isSubmitting: false });
+      return false;
+    }
+    if (outcome.kind === 'failed') {
+      // Wrapped as an `ApiError` because that is what the whole store
+      // carries and what every form reads. `unauthorized` is the honest
+      // kind: nothing reached the server, and Google would not say who
+      // this is.
+      set({
+        error: new ApiError('unauthorized', outcome.message, null, null, null),
+        isSubmitting: false,
+      });
+      return false;
+    }
+
+    try {
+      // The token goes up untouched. Nothing read out of it here would
+      // be a fact anybody had checked.
+      const { user, tokens } = await authApi.google(outcome.idToken);
+      await secureStorage.saveTokens(tokens);
+      const registered = await registerOrExplain(tokens);
+      if (registered !== true) {
+        set({ error: registered, isSubmitting: false });
+        return false;
+      }
+      set({ status: 'authenticated', user, isSubmitting: false, notice: null });
+      hydrateUserCaches();
+      track('sign_in', { method: 'google' });
+      return true;
+    } catch (error) {
+      set({ error: toApiError(error), isSubmitting: false });
+      return false;
     }
   },
 
@@ -620,6 +673,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error,
       );
     }
+    // And the Google session on this phone, or the next person to press
+    // the button on a shared handset is signed straight back into the
+    // account that just left. Never throws.
+    await forgetGoogleSession();
     await endSession(null);
   },
 

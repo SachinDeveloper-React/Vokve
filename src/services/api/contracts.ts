@@ -117,6 +117,15 @@ import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
  */
 export interface AuthApi {
   signIn(email: string, password: string): Promise<AuthResponse>;
+  /**
+   * Signs in with a Google ID token (`POST /auth/google`, RULES O12).
+   *
+   * The token and nothing else. The email, the name and the account id
+   * are read out of it by the server once Google's signature has been
+   * checked — sending them from here would be sending facts nobody had
+   * verified, and a body anybody could write.
+   */
+  google(idToken: string): Promise<AuthResponse>;
   signUp(payload: SignUpPayload): Promise<VerificationChallenge>;
   verifyOtp(verificationId: string, code: string): Promise<AuthResponse>;
   resendOtp(verificationId: string): Promise<VerificationChallenge>;

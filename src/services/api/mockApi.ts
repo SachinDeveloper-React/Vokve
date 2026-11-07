@@ -290,6 +290,28 @@ function makeChallenge(
 }
 
 export const mockAuthApi: AuthApi = {
+  /**
+   * The mock cannot verify a Google token and does not pretend to: it
+   * takes any non-empty one and signs the mock member in. What it does
+   * keep honest is the shape — an account that arrived through Google
+   * has a proved email and no phone (RULES O5, O7), which is the state
+   * the spending gate and the profile prompts have to cope with.
+   */
+  async google(idToken) {
+    await delay();
+    if (!idToken) {
+      throw new ApiError('unauthorized', 'That Google sign-in could not be verified.', 401);
+    }
+    currentUser = currentUser ?? makeUser();
+    currentUser = {
+      ...currentUser,
+      phone: null,
+      phoneVerifiedAt: null,
+      emailVerifiedAt: currentUser.emailVerifiedAt ?? new Date().toISOString(),
+    };
+    return makeAuthResponse(currentUser);
+  },
+
   async signIn(email, password) {
     await delay();
 

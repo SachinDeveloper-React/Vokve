@@ -16,6 +16,23 @@ export const config = {
   apiBaseUrl: __DEV__
     ? `http://${LOCAL_API_HOST}:3000/v1`
     : 'https://vokve-backend-src.vercel.app/v1',
+  /**
+   * The Google OAuth client ids, where this build needs to name them
+   * (RULES O12).
+   *
+   * Null is the ordinary setting, not a gap: `autoDetect` reads the web
+   * id the Google Services plugin writes into the Android resources and
+   * the iOS plist, so the value lives with the rest of the Firebase
+   * config rather than in two places that can disagree. Set these only
+   * for a build pointed at a project whose files are not bundled.
+   *
+   * The **web** id is the one the native SDKs put in the ID token's
+   * audience, and the one the server checks against. An Android client
+   * id used here is the commonest cause of `DEVELOPER_ERROR`.
+   */
+  googleWebClientId: null as string | null,
+  googleIosClientId: null as string | null,
+
   /** Network calls that outlive this are almost always a dead connection. */
   requestTimeoutMs: 15000,
   /** Retries apply to transport failures only, never to 4xx responses. */

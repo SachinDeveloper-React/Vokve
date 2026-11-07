@@ -4,7 +4,8 @@ import { requireAuth } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import {
   otpRequestBody, refreshBody, refreshSession, requestContactChange, requestOtp, requestStepUp, resendOtp, resendOtpBody, resetPassword,
-  resetPasswordBody, sendEmailOtp, sendPhoneOtp, signIn, signInBody, signOut, signUp, signUpBody, verifyOtp, verifyOtpBody,
+  resetPasswordBody, sendEmailOtp, sendPhoneOtp, signIn, signInBody, signInWithGoogle, signOut, signUp, signUpBody,
+  verifyOtp, verifyOtpBody,
 } from './auth.service.js';
 import { z } from 'zod';
 
@@ -40,6 +41,29 @@ authRouter.post('/auth/resend-otp', validate('body', resendOtpBody), rateLimit({
 authRouter.post('/auth/sign-in', validate('body', signInBody), rateLimit({ name: 'sign-in-ip', max: 30, windowSeconds: 600, by: 'ip' }), async (req, res) => {
   res.json(await signIn(req.body.email, req.body.password, meta(req)));
 });
+
+/**
+ * Signing in with Google (RULES O12).
+ *
+ * Takes the ID token and nothing else — no email, no name, no id. All
+ * three are read out of the token once Google's signature has been
+ * checked, because a body that carried them would be a body anybody
+ * could write.
+ *
+ * Limited by IP like the password route: the token is unguessable, but
+ * verifying one costs a round trip to Google's keys and the limit is
+ * what stops that being somebody else's lever.
+ */
+const googleBody = z.object({ idToken: z.string().trim().min(1).max(4000) }).strict();
+
+authRouter.post(
+  '/auth/google',
+  validate('body', googleBody),
+  rateLimit({ name: 'sign-in-google-ip', max: 30, windowSeconds: 600, by: 'ip' }),
+  async (req, res) => {
+    res.json(await signInWithGoogle(req.body.idToken, meta(req)));
+  },
+);
 
 authRouter.post('/auth/refresh', validate('body', refreshBody), async (req, res) => {
   res.json(await refreshSession(req.body.refreshToken, meta(req)));
