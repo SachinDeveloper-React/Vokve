@@ -211,6 +211,81 @@ describe('suggesting the next food', () => {
     expect(response.body.data[0].food.name).toBe('Dal');
   });
 
+  it('suggests a food written before `active` was a field', async () => {
+    const session = await signUpAndRegister();
+    await FoodItemModel.deleteMany({ ownerUserId: null });
+    // No `active` key. `active: true` does not match a missing field —
+    // the same trap as `$size: 0`, one field along — and the rest of this
+    // collection is read with `$ne: false` for exactly that reason.
+    await FoodItemModel.collection.insertOne({
+      _id: 'f-ancient' as never,
+      name: 'Roti',
+      portion: '1',
+      calories: 120,
+      proteinG: 3,
+      carbsG: 25,
+      fatsG: 1,
+      fiberG: 2,
+      ownerUserId: null,
+    } as never);
+
+    const response = await suggestions(session);
+
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].food.name).toBe('Roti');
+  });
+
+  it('says which wall an empty shelf hit', async () => {
+    const session = await signUpAndRegister();
+    await FoodItemModel.deleteMany({ ownerUserId: null });
+
+    // Nothing at all.
+    let response = await suggestions(session);
+    expect(response.body.note).toMatch(/nothing in the food library yet/i);
+
+    // Something, but nothing this diet may have.
+    await FoodItemModel.create({
+      _id: 'f-mutton',
+      name: 'Mutton',
+      portion: '100 g',
+      calories: 250, proteinG: 25, carbsG: 0, fatsG: 17, fiberG: 0,
+      dietTypes: ['non_vegetarian'],
+      active: true,
+      ownerUserId: null,
+    });
+    await setDiet(session, 'vegan');
+    response = await suggestions(session);
+    expect(response.body.note).toMatch(/suiting your diet/i);
+
+    // And something this diet may have, that is simply too big for what
+    // is left. Three sentences, because "nothing fits" is three answers.
+    await setDiet(session, 'non_vegetarian');
+    await log(
+      session,
+      {
+        entries: [
+          {
+            id: 'e-big',
+            slot: 'lunch',
+            // Leaves 200 of the 2,200 kcal day: over the floor below
+            // which nothing is suggested at all, and under the 250 kcal
+            // mutton — so it is the *size* wall that is hit, not the
+            // "day is done" one.
+            name: 'Most of the day',
+            calories: 2000,
+            proteinG: 100,
+            carbsG: 300,
+            fatsG: 80,
+            loggedAt: new Date().toISOString(),
+          },
+        ],
+      },
+      'fill-the-day',
+    );
+    response = await suggestions(session);
+    expect(response.body.note).toMatch(/small enough/i);
+  });
+
   it('never pushes a member their own custom food back at them', async () => {
     const session = await signUpAndRegister();
     await stockLibrary();

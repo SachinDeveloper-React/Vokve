@@ -99,33 +99,63 @@ export async function suggestFoods(userId: string, localDay: IsoDate): Promise<F
   // vegetarian. An untagged food suits everyone, which is what a plain
   // ingredient is and what everything seeded before tags existed is.
   const ceiling = remaining.calories * (1 + rules.headroom);
-  const library = await FoodItemModel.find(
-    {
-      active: true,
-      // Global foods only. A member's own custom food is theirs to log,
-      // never ours to push back at them.
-      ownerUserId: null,
-      calories: { $gt: 0, $lte: ceiling },
-      // `$exists: false` is not belt and braces: `$size: 0` matches an
-      // *empty array* and not a missing field, so every food written
-      // before the tag existed — which is every food in a database that
-      // has been running — would be filtered out and the shelf would
-      // come back empty. An absent tag means the same as an empty one:
-      // it suits everyone.
-      $or: [
-        { dietTypes: { $exists: false } },
-        { dietTypes: { $size: 0 } },
-        { dietTypes: dietType },
-      ],
-    },
-    {
-      name: 1, portion: 1, emoji: 1, imageUrl: 1, dietTypes: 1,
-      calories: 1, proteinG: 1, carbsG: 1, fatsG: 1, fiberG: 1,
-    },
-  ).lean<FoodRow[]>();
+
+  // `active: { $ne: false }` rather than `active: true`, which is the
+  // house convention everywhere else this collection is read and not a
+  // style choice: `true` does not match a document where the field is
+  // absent, and a library that has been running has rows from before it
+  // existed. The same trap as `$size: 0` below, one field along.
+  const allowed = {
+    active: { $ne: false },
+    // Global foods only. A member's own custom food is theirs to log,
+    // never ours to push back at them.
+    ownerUserId: null,
+    calories: { $gt: 0 },
+    // `$size: 0` matches an *empty array* and not a missing field, so
+    // every food written before the tag existed would be filtered out
+    // and the shelf would come back empty. An absent tag means the same
+    // as an empty one: it suits everyone.
+    $or: [
+      { dietTypes: { $exists: false } },
+      { dietTypes: { $size: 0 } },
+      { dietTypes: dietType },
+    ],
+  };
+
+  // Read what the diet allows, then measure the calories here, so the
+  // two reasons a shelf can be empty stay apart. Bounded because an
+  // unbounded read of a growing library is a bill waiting to happen, and
+  // ordered the way the library itself is, so the bound takes the foods
+  // an operator put first rather than an arbitrary few.
+  const permitted = await FoodItemModel.find(allowed, {
+    name: 1, portion: 1, emoji: 1, imageUrl: 1, dietTypes: 1,
+    calories: 1, proteinG: 1, carbsG: 1, fatsG: 1, fiberG: 1,
+  })
+    .sort({ sort: 1, name: 1 })
+    .limit(rules.scanLimit)
+    .lean<FoodRow[]>();
+
+  const library = permitted.filter(food => food.calories <= ceiling);
 
   if (library.length === 0) {
-    return empty('Nothing in the library fits what is left of today.');
+    // Which wall it hit, because "nothing fits" collapses three very
+    // different answers into one sentence — and an operator reading a
+    // complaint cannot tell an empty library from a diet with nothing
+    // tagged for it from a day with 130 calories left in it.
+    if (permitted.length > 0) {
+      return empty(
+        `Nothing in the library is small enough for the ${Math.round(remaining.calories)} kcal you have left.`,
+      );
+    }
+    const anyFood = await FoodItemModel.countDocuments({
+      active: { $ne: false },
+      ownerUserId: null,
+    });
+    return empty(
+      anyFood > 0
+        ? 'Nothing in the library is marked as suiting your diet yet.'
+        : 'There is nothing in the food library yet.',
+    );
   }
 
   // Rule 3. The share, not the grams: 40 g of protein short of 120 is a

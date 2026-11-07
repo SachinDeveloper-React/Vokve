@@ -184,6 +184,8 @@ export const CONFIG_DEFAULTS = {
      * the suggestions start answering *it* rather than the calories.
      */
     macroGapShare: 0.25,
+    /** The most of the library one read weighs up. A bill, bounded. */
+    scanLimit: 300,
   },
   },
   /** Water (RULES §Y). */
