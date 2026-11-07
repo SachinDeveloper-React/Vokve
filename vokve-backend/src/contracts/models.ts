@@ -475,8 +475,31 @@ export const coinTransactionSchema = z.object({
    * exposes coins, so 0.095 per 100 steps is exact.
    */
   amount: z.number(),
-  /** ISO-8601. */
+  /** ISO-8601. When the coins were credited, which is not always what they are for. */
   createdAt: z.string(),
+  /**
+   * The day, or run of days, the coins are *for* — null for a row that is
+   * not about a day (an order, a referral, a badge).
+   *
+   * `createdAt` is when the wallet moved, and for anything that reaches the
+   * server late the two are days apart: a phone closes its day at local
+   * midnight and uploads it the next morning, a watch backfills a
+   * fortnight, a leaderboard week pays on the Monday after it. Without
+   * this, one evening's history showed four "check completed" rows inside
+   * two minutes with nothing saying they were four different days, and the
+   * only reading left was that the same challenge had paid four times.
+   *
+   * `label` is the server's own line, so the member's history and the
+   * operator's ledger cannot word the same row differently.
+   */
+  earnedFor: z
+    .object({
+      start: z.string(),
+      end: z.string(),
+      label: z.string(),
+    })
+    .nullable()
+    .default(null),
 });
 export type CoinTransaction = z.infer<typeof coinTransactionSchema>;
 
@@ -1659,7 +1682,12 @@ export const foodItemSchema = z.object({
   portion: z.string(),
   emoji: z.string().default('🍽️'),
   /**
-   * A photograph of the food, where one has been uploaded (RULES R19).
+   * Which diets this food suits. Empty means it suits everyone, which is
+   * what a plain ingredient actually is (RULES N12).
+   */
+  dietTypes: z.array(z.string()).default([]),
+  /**
+   * A photograph of the food, where one has been uploaded (RULES R18).
    *
    * Null is the ordinary case and not a gap: an emoji is a perfectly good
    * label for a boiled egg, and the app falls back to it. A picture earns
@@ -1674,6 +1702,47 @@ export const foodItemSchema = z.object({
   fiberG: z.number().nonnegative().default(0),
 });
 export type FoodItem = z.infer<typeof foodItemSchema>;
+
+/** What a suggestion is closing: the gap it is the best answer to. */
+export const suggestionGapSchema = z.enum(['protein', 'carbs', 'fats', 'calories']);
+export type SuggestionGap = z.infer<typeof suggestionGapSchema>;
+
+/**
+ * One food the server suggests, and why (RULES N12).
+ *
+ * The reason is not decoration. A suggestion a member cannot account for
+ * is one they ignore, and a wrong one they cannot account for is one they
+ * stop trusting the whole feature over — so every row says what gap it is
+ * answering, in their own figures. It is also the only way anybody
+ * debugging a complaint can tell a bad rule from a bad tag.
+ */
+export const foodSuggestionSchema = z.object({
+  food: foodItemSchema,
+  gap: suggestionGapSchema,
+  /** One line, already written: "72g of protein still to go today". */
+  reason: z.string(),
+});
+export type FoodSuggestion = z.infer<typeof foodSuggestionSchema>;
+
+export const foodSuggestionsSchema = z.object({
+  date: z.string(),
+  /** What is left of the day, after everything logged so far. */
+  remaining: z.object({
+    calories: z.number(),
+    proteinG: z.number(),
+    carbsG: z.number(),
+    fatsG: z.number(),
+  }),
+  /**
+   * Why there is nothing to suggest, where there is nothing: the day is
+   * already full, or the library has nothing this member may eat. Null
+   * when there are suggestions. A screen that drew an empty shelf without
+   * one of these would read as a bug.
+   */
+  note: z.string().nullable(),
+  data: z.array(foodSuggestionSchema),
+});
+export type FoodSuggestions = z.infer<typeof foodSuggestionsSchema>;
 
 /**
  * `GET /foods/library`: a page of the whole library, for browsing rather than

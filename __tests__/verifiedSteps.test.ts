@@ -218,3 +218,93 @@ describe('liveTailOf', () => {
     ).toBe(20);
   });
 });
+
+/**
+ * The tail against a mark that no longer describes what the server holds.
+ *
+ * The mark is read with `getStepsForDate()` before the upload is built, and
+ * the snapshot the server scores is resolved again after it. Health Connect
+ * can answer one of those reads and refuse the other for quota, time out,
+ * or not be asked at all from the background — so the mark can say this
+ * phone's bare sensor count while the server holds the watch's. The mark
+ * can also be gone outright: signing in again clears the bookkeeping and
+ * leaves `serverWeek` where it was.
+ *
+ * Either way the gap used to come back as a tail laid on top of the very
+ * steps that made it, and the dashboard read about double until the next
+ * sync happened to make the two reads agree. These are the two floors that
+ * stop it.
+ */
+describe('liveTailOf against a mark the server has outrun', () => {
+  const localDay = todayIso();
+  const config = { tracker: { fraudDetection: { enabled: true, mode: 'flag' } } } as unknown as ActivityConfig;
+  const week = (steps: number): DailyActivity[] => [
+    day({ date: localDay, steps, verifiedSteps: steps }),
+  ];
+
+  test('adds nothing when the server already holds the whole of this phone’s day', () => {
+    // Health Connect was refused for quota on the read that made the mark,
+    // so it says 100 — the phone's own sensor — while the snapshot sent a
+    // moment later carried the watch's 8,000 and the server scored that.
+    expect(
+      liveTailOf({
+        today: mockSnapshot({ date: localDay, steps: 8_000 }),
+        synced: { [localDay]: { steps: 100, recoveredSteps: 0, suspectSteps: 0, serverSteps: 8_000, at: Date.now() } },
+        activityConfig: config,
+        serverWeek: week(8_000),
+        serverDays: {},
+      }),
+    ).toBe(0);
+  });
+
+  test('adds nothing when there is no mark at all and the server’s day is this phone’s', () => {
+    // Signed in again: `claimOwnership` cleared `synced` and left the week.
+    expect(
+      liveTailOf({
+        today: mockSnapshot({ date: localDay, steps: 6_000 }),
+        synced: {},
+        activityConfig: config,
+        serverWeek: week(6_000),
+        serverDays: {},
+      }),
+    ).toBe(0);
+  });
+
+  test('still climbs past what the server holds', () => {
+    expect(
+      liveTailOf({
+        today: mockSnapshot({ date: localDay, steps: 6_120 }),
+        synced: {},
+        activityConfig: config,
+        serverWeek: week(6_000),
+        serverDays: {},
+      }),
+    ).toBe(120);
+  });
+
+  test('leaves the other phones’ share out of the floor, so the day still climbs', () => {
+    // 7,000 on the server, 4,000 of it another phone's: this one has sent
+    // 3,000 and has walked 100 since.
+    expect(
+      liveTailOf({
+        today: mockSnapshot({ date: localDay, steps: 7_100, otherDevicesSteps: 4_000 }),
+        synced: { [localDay]: { steps: 3_000, recoveredSteps: 0, suspectSteps: 0, at: Date.now() } },
+        activityConfig: config,
+        serverWeek: week(7_000),
+        serverDays: {},
+      }),
+    ).toBe(100);
+  });
+
+  test('falls back to the stored day when the week has not been read', () => {
+    expect(
+      liveTailOf({
+        today: mockSnapshot({ date: localDay, steps: 5_000 }),
+        synced: {},
+        activityConfig: config,
+        serverWeek: [],
+        serverDays: { [localDay]: day({ date: localDay, steps: 5_000, verifiedSteps: 5_000 }) },
+      }),
+    ).toBe(0);
+  });
+});

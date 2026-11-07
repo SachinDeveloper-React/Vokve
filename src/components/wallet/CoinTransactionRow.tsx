@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme, type ThemeColors } from '../../theme';
+import { toIsoDate } from '../../utils/date';
 import { formatClockTime, formatRelativeDay } from '../../utils/format';
 import { HStack, VStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
@@ -50,6 +51,31 @@ export const COIN_SOURCE_STYLE: Record<
   refund: { icon: Undo2, tint: 'textSecondary' },
 };
 
+/**
+ * "For 2 Nov" on a row whose coins are not about the day they landed on,
+ * and nothing on a row where they are.
+ *
+ * Steps and challenges reach the server late all the time — a day closes at
+ * local midnight and the phone uploads it the next morning, a watch
+ * backfills a fortnight at once — so four challenge rows can land inside
+ * two minutes and belong to four different days. With only a clock time
+ * under each, the one reading left to a member is that the same challenge
+ * paid them four times, which is the complaint this answers.
+ *
+ * Silent when the coins are for the very day they were credited, which is
+ * the ordinary case and needs no explaining; a week or a month always says
+ * so, because "the week of 26 Oct" is not something a timestamp can imply.
+ */
+function earnedForNote(transaction: CoinTransaction): string | null {
+  const earned = transaction.earnedFor;
+  if (!earned) {
+    return null;
+  }
+  const creditedOn = toIsoDate(new Date(transaction.createdAt));
+  const oneDay = earned.start === earned.end;
+  return oneDay && earned.start === creditedOn ? null : earned.label;
+}
+
 interface Props {
   transaction: CoinTransaction;
   /**
@@ -73,10 +99,14 @@ export const CoinTransactionRow = memo(
     const { colors } = useTheme();
     const { icon, tint } = COIN_SOURCE_STYLE[transaction.source];
     const isCredit = transaction.amount > 0;
-    const subtitle =
+    const subtitle = [
       when === 'time'
         ? formatClockTime(transaction.createdAt)
-        : formatRelativeDay(transaction.createdAt);
+        : formatRelativeDay(transaction.createdAt),
+      earnedForNote(transaction),
+    ]
+      .filter(Boolean)
+      .join(' · ');
 
     return (
       <HStack align="center" gap="md" py="sm">

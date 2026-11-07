@@ -10,7 +10,7 @@ import StepTracker, {
   type VerificationSnapshotOptions,
 } from 'react-native-step-tracker-pro';
 import { useCoinsStore } from '../stores/coinsStore';
-import { useStepsStore, type SyncedDayMark } from '../stores/stepsStore';
+import { sentStepsOf, useStepsStore, type SyncedDayMark } from '../stores/stepsStore';
 import { useStreakStore } from '../stores/streakStore';
 import type {
   ActivityConfig,
@@ -383,8 +383,9 @@ let sharedOtherDevices: { date: string; steps: number } | null = null;
  * The user's other phones' steps today, handed to the tracker, which shows
  * them on top of this phone's own — the notification, the live count and
  * the daily goal — and never counts them as this phone's (D-53). The
- * server's day less what this phone last sent it; before this phone has
- * sent anything, all of the server's day is the other phones'.
+ * server's day less whatever of it is this phone's own — what it last sent,
+ * or what it is counting now, whichever is more. Before this phone has
+ * counted or sent anything, all of the server's day is the other phones'.
  */
 function shareOtherDevicesSteps(): void {
   if (!session) {
@@ -398,10 +399,25 @@ function shareOtherDevicesSteps(): void {
   if (!day) {
     return;
   }
-  const others = Math.max(
-    0,
-    Math.round(day.steps - (state.synced[today]?.steps ?? 0)),
-  );
+  // The server's day less what this phone put in it. The mark says what the
+  // phone sent; the tracker's own live count is the floor under it, because
+  // a mark can be missing while the server's day is full — a phone that
+  // changed hands, an account signed in again (`claimOwnership` clears the
+  // marks and leaves `serverWeek`), a pruned day. Taking the mark alone
+  // then handed the tracker this phone's whole day back as somebody else's,
+  // and it drew that on top of its own count: the notification, the goal
+  // ring and the dashboard all read about double until the next sync.
+  //
+  // Erring high here is the safe direction. A floor that is too high only
+  // hides other phones' steps for one pass, and the next sync corrects it;
+  // a floor too low shows this phone's walk twice.
+  const snapshot = state.today;
+  const counting =
+    snapshot && snapshot.date === today
+      ? snapshot.steps - (snapshot.otherDevicesSteps ?? 0)
+      : 0;
+  const mine = Math.max(sentStepsOf(state.synced[today]), counting);
+  const others = Math.max(0, Math.round(day.steps) - mine);
   if (
     sharedOtherDevices?.date === today &&
     sharedOtherDevices.steps === others
@@ -1427,11 +1443,29 @@ function recordSent(
   result: StepIngestResult,
 ): void {
   const at = Date.now();
-  useStepsStore.setState(state => ({
-    synced: { ...state.synced, [date]: { ...figures, at } },
-    serverDays: { ...state.serverDays, [date]: result.day },
-    lastSyncedAt: at,
-  }));
+  useStepsStore.setState(state => {
+    // What the server made of the snapshot, as this phone's share of it:
+    // its whole day less the other phones' steps, which this app put there
+    // and are not this phone's to claim back.
+    //
+    // `figures` was read before the upload was built, and the snapshot the
+    // server scored was resolved again after it — a second trip to Health
+    // Connect, which may answer one of the two and refuse the other for
+    // quota, plus whatever was walked in between. Keeping the server's own
+    // answer beside the local read is what stops the gap between them
+    // becoming a phantom tail on the dashboard.
+    const snapshot = state.today;
+    const others =
+      snapshot && snapshot.date === date
+        ? snapshot.otherDevicesSteps ?? 0
+        : 0;
+    const serverSteps = Math.max(0, Math.round(result.day.steps) - others);
+    return {
+      synced: { ...state.synced, [date]: { ...figures, serverSteps, at } },
+      serverDays: { ...state.serverDays, [date]: result.day },
+      lastSyncedAt: at,
+    };
+  });
   patchServerWeek(result.day);
   // The answer has the other phones in it as of this upload.
   shareOtherDevicesSteps();

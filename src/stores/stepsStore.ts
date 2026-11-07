@@ -28,9 +28,34 @@ export interface SyncedDayMark {
    * marks kept from before it was recorded.
    */
   externalSteps?: number;
+  /**
+   * This phone's share of the day as the **server** answered it — its whole
+   * day less the other phones' steps — rather than as the local read above
+   * saw it.
+   *
+   * The two are the same figure measured twice, and they disagree often
+   * enough to matter. `steps` comes from `getStepsForDate()` before the
+   * upload is built; the server's figure comes from the signed snapshot,
+   * resolved again seconds later. Health Connect can answer one read and
+   * refuse the other for quota, time out on it, or not be asked at all in
+   * the background — and then the local read is this phone's bare sensor
+   * count while the server holds the watch's. Steps walked during the
+   * upload part them too.
+   *
+   * Whichever is larger is what the server already has, so that is what the
+   * live tail is measured from. Measuring from the smaller one invents the
+   * difference: the tail re-adds steps the server has already counted, and
+   * the dashboard shows them twice until the next sync happens to make the
+   * two reads agree. Absent on marks kept from before this was recorded.
+   */
+  serverSteps?: number;
   /** Epoch ms the server took it. */
   at: number;
 }
+
+/** What the server already holds from this phone for the day, as its mark has it. */
+export const sentStepsOf = (mark: SyncedDayMark | undefined): number =>
+  Math.max(0, mark?.steps ?? 0, mark?.serverSteps ?? 0);
 
 interface StepsState {
   /**
@@ -418,15 +443,32 @@ export const useVerifiedToday = (): VerifiedActivity => {
  * rather than assumed. It is one switch away in the operator's config.
  */
 export function liveTailOf(
-  state: Pick<StepsState, 'today' | 'synced' | 'activityConfig'>,
+  state: Pick<StepsState, 'today' | 'synced' | 'activityConfig'> &
+    Partial<Pick<StepsState, 'serverWeek' | 'serverDays'>>,
 ): number {
   const today = todayIso();
   if (!state.today || state.today.date !== today) {
     return 0;
   }
   const mark = state.synced[today];
-  const phone = state.today.steps - (state.today.otherDevicesSteps ?? 0);
-  const counted = phone - (mark?.steps ?? 0);
+  const others = state.today.otherDevicesSteps ?? 0;
+  const phone = state.today.steps - others;
+  // What the server holds from this phone, taken from the server's own day
+  // rather than only from the mark — the floor under the subtraction, and
+  // the one figure that survives a mark being missing altogether.
+  //
+  // A mark can be gone while the server's day is full: the phone changed
+  // hands or the account signed in again (`claimOwnership` clears the
+  // bookkeeping and not the week), or the day was pruned. Without this the
+  // whole of the server's day — which this very phone walked — came back as
+  // a tail on top of itself, and the dashboard read about double until the
+  // next sync wrote a mark. The other phones' share comes off first: it is
+  // in the server's day and is not this phone's to re-count.
+  const day =
+    state.serverWeek?.find(entry => entry.date === today) ??
+    state.serverDays?.[today];
+  const held = day ? Math.max(0, Math.round(day.steps) - others) : 0;
+  const counted = phone - Math.max(sentStepsOf(mark), held);
   // What the phone has flagged since the server last took a figure from it.
   const flagged =
     (state.activityConfig?.tracker.fraudDetection.mode ?? 'flag') === 'flag'

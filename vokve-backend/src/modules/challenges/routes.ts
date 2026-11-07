@@ -21,7 +21,8 @@ const boardQuery = z.object({
 /** The board for a day — today in the caller's zone unless one is named (BACKEND §6.7). */
 challengesRouter.get('/challenges', validate('query', boardQuery), async (req, res) => {
   const { date } = req.query as z.infer<typeof boardQuery>;
-  res.json(await getChallenges(req.ctx.userId!, date ?? localDayOf(new Date(), req.ctx.timezone)));
+  const now = new Date();
+  res.json(await getChallenges(req.ctx.userId!, date ?? localDayOf(now, req.ctx.timezone), req.ctx.timezone, now));
 });
 
 /**

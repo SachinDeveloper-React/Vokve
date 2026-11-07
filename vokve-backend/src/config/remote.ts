@@ -204,6 +204,19 @@ function validate(config: AppConfig): void {
       }
     }
   }
+  // A challenge's own grace is money too (RULES C4): zero drops the late
+  // sync that closes a day, and a figure past `activity.maxAgeDays` pays a
+  // whole backfill at once, which is the thing the grace exists to stop.
+  const grace = config.challenges.payGraceHours;
+  if (!(grace >= 0) || !Number.isFinite(grace)) {
+    throw new Error(`challenges.payGraceHours (${grace}) is a number of hours, 0 or more`);
+  }
+  if (grace > config.activity.maxAgeDays * 24) {
+    throw new Error(
+      `challenges.payGraceHours (${grace}) outlives the ingest window (activity.maxAgeDays ${config.activity.maxAgeDays} days):` +
+        ' every day a phone can still send would pay, which is the backfill this grace is here to refuse',
+    );
+  }
   // The prize ladder (RULES L7). This one is money: `tierFor` takes the
   // *first* tier whose range holds a rank, so two ranges over the same place
   // is an ambiguity nobody would see until a Monday paid the wrong figure,

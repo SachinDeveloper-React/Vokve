@@ -6,6 +6,7 @@ import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import { coinTransactionSchema, walletSchema, type CoinTransaction, type EarnRule, type Wallet } from '../../contracts/index.js';
 import { notify } from '../notifications/service.js';
+import { earnedPeriodsFor } from './earned-for.js';
 import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel } from './models.js';
 
 const MS_PER_DAY = 86_400_000;
@@ -281,8 +282,16 @@ export async function listTransactions(userId: string, cursor: string | undefine
   if (cursor) filter._id = { $lt: cursor }; // uuid v7 ids sort by time
   const rows = await CoinLedgerModel.find(filter).sort({ _id: -1 }).limit(limit + 1).lean();
   const page = rows.slice(0, limit);
+  const earned = await earnedPeriodsFor(page);
   const data: CoinTransaction[] = page.map(r =>
-    coinTransactionSchema.parse({ id: r._id, title: r.title, source: r.source, amount: toCoins(r.amountMc), createdAt: r.createdAt.toISOString() }),
+    coinTransactionSchema.parse({
+      id: r._id,
+      title: r.title,
+      source: r.source,
+      amount: toCoins(r.amountMc),
+      createdAt: r.createdAt.toISOString(),
+      earnedFor: earned.get(r._id) ?? null,
+    }),
   );
   return { data, nextCursor: rows.length > limit ? page[page.length - 1]._id : null };
 }

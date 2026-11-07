@@ -8,6 +8,7 @@ import { ActivityDailyModel, StepUploadModel } from '../activity/models.js';
 import { AchievementDefinitionModel, ChallengeCompletionModel, ChallengeDefinitionModel, UserAchievementModel } from '../challenges/models.js';
 import { OrderModel } from '../commerce/models.js';
 import { DeviceModel } from '../devices/models.js';
+import { earnedPeriodsFor } from '../economy/earned-for.js';
 import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel } from '../economy/models.js';
 import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { streakFigures } from '../streak/service.js';
@@ -394,6 +395,11 @@ export async function memberLedger(userId: string, query: LedgerQuery) {
 
   const rows = await CoinLedgerModel.find(filter).sort({ _id: -1 }).limit(query.limit + 1).lean();
   const page = rows.slice(0, query.limit);
+  // The day each row is *for*, which is not the day it was credited on
+  // whenever a phone or a watch reported late (D-92). The same derivation
+  // the member's own history reads, so the panel and the app cannot
+  // describe one row two ways.
+  const earned = await earnedPeriodsFor(page);
   return {
     data: page.map(row => ({
       id: row._id,
@@ -403,6 +409,7 @@ export async function memberLedger(userId: string, query: LedgerQuery) {
       /** What the row is *about*: the day, the order, the challenge period. */
       referenceType: row.referenceType,
       referenceId: row.referenceId,
+      earnedFor: earned.get(row._id) ?? null,
       /** `system` for a job, `user` for a spend, the operator's name for an adjustment. */
       actor: row.actor ?? 'system',
       holdId: row.holdId ?? null,

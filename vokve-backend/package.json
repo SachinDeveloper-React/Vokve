@@ -16,6 +16,8 @@
     "seed": "tsx src/seed/seed.ts",
     "item:mode": "tsx src/scripts/item-payment-mode.ts",
     "coins:add": "tsx src/scripts/add-coins.ts",
+    "coins:audit": "tsx src/scripts/audit-coins.ts",
+    "coins:reconcile": "tsx src/scripts/reconcile-coins.ts",
     "coins:backfill-sync": "tsx src/scripts/backfill-step-sync.ts",
     "plans": "tsx src/scripts/diet-plans.ts",
     "lint": "eslint src test --ext .ts",

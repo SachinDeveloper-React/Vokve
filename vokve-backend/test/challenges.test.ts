@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { invalidateConfig } from '../src/config/remote.js';
-import { addDays, localDayOf } from '../src/lib/dates.js';
+import { addDays, localDayOf, localMidnightUtc } from '../src/lib/dates.js';
 import { ActivityDailyModel } from '../src/modules/activity/models.js';
 import {
   ChallengeCompletionModel,
@@ -36,7 +36,7 @@ async function day(session: Session, localDay: string, figures: Record<string, u
 async function board(session: Session, date?: string) {
   const res = await request(app).get(`/v1/challenges${date ? `?date=${date}` : ''}`).set(authed(session));
   expect(res.status).toBe(200);
-  return res.body as { id: string; progress: number; startsAt: string | null; endsOn: string | null; completedAt: string | null }[];
+  return res.body as { id: string; progress: number; rewardPaid: boolean; startsAt: string | null; endsOn: string | null; completedAt: string | null }[];
 }
 
 const byId = <T extends { id: string }>(rows: T[]) => Object.fromEntries(rows.map(r => [r.id, r]));
@@ -546,5 +546,102 @@ describe('challenges: the day one opens on (RULES C1)', () => {
     // And one that is open from the start has no opening day at all.
     const running = await ChallengeDefinitionModel.findById('ch-10k-steps', { startsOn: 1 }).lean();
     expect(running?.startsOn ?? null).toBeNull();
+  });
+});
+
+/**
+ * The grace a closed period is paid inside, and the backfill it refuses
+ * (RULES C4, ⚙ `challenges.payGraceHours`).
+ *
+ * The phone re-offers every day the ingest window still covers on each
+ * foreground, and a day that only now crosses a goal completes like any
+ * other. Without a grace that reads both ways, a daily challenge either
+ * dies with its own day — dropping the evening walk of everybody whose
+ * phone synced after midnight — or pays three weeks of itself the first
+ * time a member comes back from a fortnight offline. On the evening of
+ * 2026-11-05 that was four challenges over four days credited inside two
+ * minutes, each one a correct per-period payment and the pile of them
+ * plainly wrong.
+ */
+describe('challenges: a closed period, and how long it is still worth coins (RULES C4)', () => {
+  async function graceHours(hours: number) {
+    await AppConfigModel.updateOne({ _id: 'challenges' }, { $set: { 'value.payGraceHours': hours } }, { upsert: true });
+    invalidateConfig();
+  }
+
+  it('pays yesterday for the sync that lands the next morning', async () => {
+    const session = await signUpAndRegister();
+    await stepCoinsOn();
+    await graceHours(36);
+    const yesterday = addDays(today(), -1);
+    await day(session, yesterday, { verifiedSteps: 10_400, steps: 10_400, verified: true });
+
+    expect(await evaluateChallenges(session.userId, yesterday, ZONE)).toContain('ch-10k-steps');
+    expect(await ChallengeCompletionModel.findById(`${session.userId}:ch-10k-steps:${yesterday}`).lean())
+      .toMatchObject({ status: 'paid', granted: 200 });
+  });
+
+  it('records a day dragged in by a backfill and pays nothing for it', async () => {
+    const session = await signUpAndRegister();
+    await stepCoinsOn();
+    await graceHours(36);
+    const longAgo = addDays(today(), -9);
+    await day(session, longAgo, { verifiedSteps: 10_400, steps: 10_400, verified: true });
+
+    expect(await evaluateChallenges(session.userId, longAgo, ZONE)).toContain('ch-10k-steps');
+    // Still a completion — the badge, the count and the history keep it.
+    expect(await ChallengeCompletionModel.findById(`${session.userId}:ch-10k-steps:${longAgo}`).lean())
+      .toMatchObject({ status: 'unpaid', granted: 0, progress: 10_400 });
+    expect(await CoinLedgerModel.countDocuments({ userId: session.userId, source: 'challenge' })).toBe(0);
+    expect(await UserAchievementModel.findById(`${session.userId}:a-10k-steps`).lean()).not.toBeNull();
+    const note = await NotificationModel.findOne({ userId: session.userId, title: '10K Steps Challenge complete! 🏆' }).lean();
+    expect(note?.message).toBe('Goal reached — this day had already closed, so there are no coins for it.');
+  });
+
+  it('pays a whole catch-up only for the days still inside the grace', async () => {
+    const session = await signUpAndRegister();
+    await stepCoinsOn();
+    await graceHours(36);
+    // Eight in the evening, fixed, so the hour the suite happens to run at
+    // cannot move the line. A 36-hour grace from there reaches 20 hours
+    // back over yesterday's midnight and falls 8 short of the one before
+    // it — today and yesterday pay, the rest of the catch-up does not.
+    const now = new Date(localMidnightUtc(today(), ZONE).getTime() + 20 * 3_600_000);
+    const days = [6, 5, 4, 3, 2, 1, 0].map(back => addDays(today(), -back));
+    for (const localDay of days) {
+      await day(session, localDay, { verifiedSteps: 10_400, steps: 10_400, verified: true });
+    }
+    // One foreground, seven days offered, exactly as the phone does it.
+    for (const localDay of days) {
+      await evaluateChallenges(session.userId, localDay, ZONE, now);
+    }
+
+    // Every day is a completion; only the last two are worth anything.
+    // Read off the completions rather than the ledger, because the daily
+    // ceiling (RULES E8) is a different rule and would answer for the
+    // second of them.
+    const rows = await ChallengeCompletionModel.find({ userId: session.userId, challengeId: 'ch-10k-steps' })
+      .sort({ periodStart: 1 })
+      .lean();
+    expect(rows.map(row => [row.periodStart, row.status === 'unpaid' ? 'nothing' : 'coins'])).toEqual([
+      [days[0], 'nothing'],
+      [days[1], 'nothing'],
+      [days[2], 'nothing'],
+      [days[3], 'nothing'],
+      [days[4], 'nothing'],
+      [days[5], 'coins'],
+      [days[6], 'coins'],
+    ]);
+  });
+
+  it('tells the board the same thing the payment will', async () => {
+    const session = await signUpAndRegister();
+    await stepCoinsOn();
+    await graceHours(36);
+
+    const now = byId(await board(session));
+    expect(now['ch-10k-steps'].rewardPaid).toBe(true);
+    const old = byId(await board(session, addDays(today(), -9)));
+    expect(old['ch-10k-steps'].rewardPaid).toBe(false);
   });
 });

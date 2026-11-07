@@ -130,6 +130,39 @@ member token can reach it, and with no key configured every admin route
 answers 404 rather than advertising a door. Every write lands in `audit_log`
 with the plan before and after it.
 
+### Checking the coins add up
+
+```sh
+npm run coins:audit                      # read-only; exits non-zero on a finding
+npm run coins:audit -- --json
+npm run coins:reconcile                  # say what it would put right, write nothing
+npm run coins:reconcile -- --apply
+npm run coins:reconcile -- --apply --drift <userId>
+```
+
+`coins:audit` asks the economy's own invariants of the real collections: no
+event paid twice (RULES E7), every `balanceMc` equal to the sum of its ledger
+rows and every `lifetimeEarnedMc` equal to its credits, nobody over the daily
+ceiling (E8), no challenge paid more than it is worth or paid with no
+completion behind it, and no challenge paid for a day that had already closed
+past ⚙ `challenges.payGraceHours` (C4). It writes nothing and exits non-zero
+when it finds something, so it belongs in a cron or a deploy step rather than
+in somebody's memory — both coin bugs before it were found by reading a
+screenshot of the admin ledger, which is not a way to find the third.
+
+`coins:reconcile` is dry until `--apply`, and only puts right the two findings
+that have one right answer. A **late challenge payment** keeps its credit row
+— that is what happened, and deleting it would leave the completion claiming a
+payment with nothing behind it — and gets a matching reversal beside it, with
+the balance coming down by the same amount. A **wallet holding coins the
+ledger never recorded** (a hand-written balance, or a top-up from before
+`coins:add` wrote its row) keeps the coins and gets the missing row written
+for exactly the gap: the member has been spending them for weeks, and clawing
+them back is the one outcome nobody asked for. That one has to name the member
+with `--drift`, so it can never run across a fleet and quietly mint whatever a
+real bug has leaked. A wallet that is *poorer* than its ledger is never
+touched: that is a member owed coins, and it wants a person.
+
 ### Working with real plans, not the demo ones
 
 The app ships with three demo plans so the screen has something behind it on a

@@ -166,6 +166,36 @@ export function challengePays(
   return def.rewardCoins > 0 && (def.metric === 'workouts' || config.coins.steps.enabled);
 }
 
+/**
+ * Whether a period is still close enough to now to be paid for (RULES C4,
+ * ⚙ `challenges.payGraceHours`).
+ *
+ * A period is paid while it runs and for a grace after it closes, and never
+ * again. The grace is there because a day's last steps reach the server
+ * after the day itself has ended: the phone closes the day at local
+ * midnight and sends the final count whenever it is next awake, so a
+ * challenge that died with its own day would quietly drop the evening walk
+ * of every member who was not holding their phone at midnight.
+ *
+ * What it refuses is the backfill. The phone re-offers every day inside
+ * ⚙ `activity.maxAgeDays` on each foreground, and each day that only now
+ * reaches a goal is a completion of its own with a reward of its own — so a
+ * fresh install, a watch that syncs a fortnight at once, or a week spent
+ * offline would credit three weeks of every daily challenge in the same
+ * minute. That is what the ledger showed on the evening of 2026-11-05: four
+ * challenges × four days, all within two minutes, each of them a correct
+ * per-period payment and the pile of them plainly wrong.
+ *
+ * The completion is recorded either way. It still counts towards the badge,
+ * the leaderboard's `challenges_completed` and the member's history; only
+ * the coins stop.
+ */
+export function withinPayWindow(period: Period, timeZone: string, config: AppConfig, now: Date): boolean {
+  // The period closes at the midnight that *ends* its last day.
+  const closesAt = localMidnightUtc(addDays(period.end, 1), timeZone);
+  return now.getTime() - closesAt.getTime() <= config.challenges.payGraceHours * 3_600_000;
+}
+
 // ─── Reads ─────────────────────────────────────────────────────────────────
 
 /**
@@ -174,7 +204,12 @@ export function challengePays(
  * the ones opening within ⚙ `challenges.upcomingDays` (`startsAt` set,
  * soonest first). A past day shows what that day's periods came to.
  */
-export async function getChallenges(userId: string, date: IsoDate): Promise<Challenge[]> {
+export async function getChallenges(
+  userId: string,
+  date: IsoDate,
+  timeZone: string,
+  now = new Date(),
+): Promise<Challenge[]> {
   const config = await getConfig();
   const defs = (await ChallengeDefinitionModel.find({ active: true }).sort({ sort: 1, _id: 1 }).lean()) as DefinitionRow[];
   const open = defs.filter(def => isOpenOn(def, date));
@@ -202,7 +237,10 @@ export async function getChallenges(userId: string, date: IsoDate): Promise<Chal
         goal: def.goal,
         progress: await progress(def.metric, period),
         rewardCoins: def.rewardCoins,
-        rewardPaid: challengePays(def, config),
+        // The same two questions the payment asks, so a board looking back
+        // at a closed day does not promise coins the completion will not
+        // pay (the bug this pair was split out of).
+        rewardPaid: challengePays(def, config) && withinPayWindow(period, timeZone, config, now),
         rewardsBadge: Boolean(def.rewardsBadge),
         startsAt: null,
         endsOn: period.end,
@@ -470,13 +508,17 @@ export async function getChallengeDetail(
 
   const today = localDayOf(now, timeZone);
   const upcoming = Boolean(def.startsOn && def.startsOn > date);
-  /** Whether finishing it actually pays, asked once for the whole answer. */
-  const pays = challengePays(def, config);
   // An upcoming challenge is shown for the period it opens in: the week the
   // user is looking at has nothing of it to show, and a ring counting their
   // current steps towards a challenge that has not started would be a lie.
   const anchor = upcoming ? def.startsOn! : date;
   const period = detailPeriodOf(def, anchor);
+  /**
+   * Whether finishing it actually pays, asked once for the whole answer —
+   * the metric's own wait (D-46) and the period's grace (RULES C4) in one
+   * figure, because every sentence below reads off it.
+   */
+  const pays = challengePays(def, config) && withinPayWindow(period, timeZone, config, now);
 
   const [progress, stepGoal, joined, finished, completion] = await Promise.all([
     upcoming ? Promise.resolve(0) : progressOf(userId, def.metric, period),
@@ -877,7 +919,12 @@ export async function evaluateChallenges(userId: string, localDay: IsoDate, time
     if (reached < def.goal) continue;
 
     const id = `${userId}:${def._id}:${period.start}`;
-    const payable = challengePays(def, config);
+    // Two separate questions, and both have to be yes: does this challenge
+    // pay at all yet (D-46), and is its period still close enough to pay
+    // for (⚙ `challenges.payGraceHours`). A day dragged in by a backfill
+    // completes and is recorded; it does not pay.
+    const fresh = withinPayWindow(period, timeZone, config, now);
+    const payable = challengePays(def, config) && fresh;
     try {
       await ChallengeCompletionModel.create({
         _id: id,
@@ -924,7 +971,9 @@ export async function evaluateChallenges(userId: string, localDay: IsoDate, time
       userId,
       topic: 'challenge',
       title: `${def.title} complete! 🏆`,
-      message: !payable
+      message: !fresh
+        ? 'Goal reached — this day had already closed, so there are no coins for it.'
+        : !payable
         ? 'Goal reached. Coins for challenges like this start soon.'
         : granted > 0
           ? `You earned ${granted.toLocaleString('en-IN')} coins.`
