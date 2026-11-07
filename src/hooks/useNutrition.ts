@@ -185,3 +185,20 @@ export function useFoodSearch(query: string): Loaded<FoodItem[]> {
 export function useQuickAddFoods(): Loaded<FoodItem[]> {
   return useServerRead('foods:quick-add', () => nutritionApi.quickAddFoods());
 }
+
+/**
+ * What to eat next, for one day (RULES N12).
+ *
+ * Keyed on `confirmedAt` like the day itself, so logging a meal re-asks:
+ * the suggestions are the gap between the targets and the plate, and a
+ * shelf that still recommended protein after a member ate 40 g of it
+ * would be answering a question they had already closed.
+ */
+export function useFoodSuggestions(date: string) {
+  const confirmedAt = useNutritionStore(s => s.confirmedAt);
+  return useServerRead(
+    `nutrition:suggestions:${date}`,
+    () => nutritionApi.suggestions(date),
+    confirmedAt,
+  );
+}

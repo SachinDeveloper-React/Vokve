@@ -422,6 +422,8 @@ export interface AdminFoodInput {
   portion: string;
   emoji?: string;
   imageUrl?: string | null;
+  /** Which diets it suits. Empty suits everyone (RULES N12). */
+  dietTypes?: string[];
   calories: number;
   proteinG?: number;
   carbsG?: number;
@@ -433,7 +435,8 @@ export interface AdminFoodInput {
   active?: boolean;
 }
 
-export interface AdminFood extends Required<Omit<AdminFoodInput, 'emoji' | 'imageUrl'>> {
+export interface AdminFood extends Required<Omit<AdminFoodInput, 'emoji' | 'imageUrl' | 'dietTypes'>> {
+  dietTypes: string[];
   id: string;
   emoji: string;
   /** A library image, or null where the emoji still stands in for it. */
@@ -448,6 +451,7 @@ type FoodRow = {
   portion: string;
   emoji?: string | null;
   imageUrl?: string | null;
+  dietTypes?: string[];
   calories: number;
   proteinG?: number | null;
   carbsG?: number | null;
@@ -467,6 +471,7 @@ function toAdminFood(row: FoodRow): AdminFood {
     portion: row.portion,
     emoji: row.emoji ?? '🍽️',
     imageUrl: row.imageUrl ?? null,
+    dietTypes: row.dietTypes ?? [],
     calories: row.calories,
     proteinG: row.proteinG ?? 0,
     carbsG: row.carbsG ?? 0,
@@ -554,6 +559,7 @@ export async function adminCreateFood(actor: string, input: AdminFoodInput): Pro
     portion: input.portion.trim() || '1 serving',
     emoji: input.emoji ?? '🍽️',
     imageUrl: input.imageUrl ?? null,
+    dietTypes: input.dietTypes ?? [],
     ...foodFigures({ ...input, calories: input.calories }),
     ownerUserId: null,
     quickAdd: input.quickAdd === true,
@@ -588,6 +594,7 @@ export async function adminUpdateFood(actor: string, foodId: string, patch: Part
   if (patch.portion !== undefined) next.portion = patch.portion.trim() || '1 serving';
   if (patch.emoji !== undefined) next.emoji = patch.emoji;
   if (patch.imageUrl !== undefined) next.imageUrl = patch.imageUrl;
+  if (patch.dietTypes !== undefined) next.dietTypes = patch.dietTypes;
   if (patch.quickAdd !== undefined) next.quickAdd = patch.quickAdd;
   if (patch.sort !== undefined) next.sort = patch.sort;
   if (patch.active !== undefined) next.active = patch.active;

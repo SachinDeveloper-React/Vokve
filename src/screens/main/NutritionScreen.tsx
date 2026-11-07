@@ -10,6 +10,7 @@ import { CalorieSummaryCard } from '../../components/nutrition/CalorieSummaryCar
 import { DailyGoalCard } from '../../components/nutrition/DailyGoalCard';
 import { GoalEditorSheet } from '../../components/nutrition/GoalEditorSheet';
 import { MealsCard } from '../../components/nutrition/MealsCard';
+import { SuggestionsCard } from '../../components/nutrition/SuggestionsCard';
 import { NutritionHeader } from '../../components/nutrition/NutritionHeader';
 import {
   NutritionPeriodFilter,
@@ -31,14 +32,20 @@ import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
 import { useActivityDay } from '../../hooks/useActivity';
 import { useReferralCard, useTip } from '../../hooks/useContent';
-import { useNutritionDay, useNutritionDays } from '../../hooks/useNutrition';
+import {
+  useFoodSuggestions,
+  useNutritionDay,
+  useNutritionDays,
+} from '../../hooks/useNutrition';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
+import { useMealDraftStore } from '../../stores/mealDraftStore';
 import { useNutritionStore } from '../../stores/nutritionStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type {
   DietType,
+  FoodSuggestion,
   MealPlan,
   MealSlot,
   NutritionGoal,
@@ -115,6 +122,9 @@ export const NutritionScreen = () => {
   const refreshIfStale = useNutritionStore(s => s.refreshIfStale);
   const setPreferences = useNutritionStore(s => s.setPreferences);
   const day = useNutritionDay(date);
+  // Only for the day view: a week's suggestions would be a shelf for a
+  // gap that no longer exists.
+  const suggestions = useFoodSuggestions(date);
   const burned = useActivityDay(date).data?.caloriesBurned ?? 0;
   const tip = useTip('nutrition');
 
@@ -239,6 +249,24 @@ export const NutritionScreen = () => {
     [navigation],
   );
 
+  /**
+   * A suggestion goes into the draft and opens the add-meal screen, rather
+   * than being logged where it was tapped.
+   *
+   * A meal is a slot and a portion, and neither is a thing this card knows:
+   * guessing "lunch because it is one o'clock" is the kind of helpfulness
+   * that writes the wrong thing into somebody's diary and leaves them to
+   * find it. So the food is carried over and the member finishes the
+   * sentence on the screen built for it.
+   */
+  const onPressSuggestion = useCallback(
+    (suggestion: FoodSuggestion) => {
+      useMealDraftStore.getState().add(suggestion.food);
+      navigation.navigate('AddMeal', { date });
+    },
+    [navigation, date],
+  );
+
   const onOpenHistory = useCallback(
     () => navigation.navigate('NutritionHistory'),
     [navigation],
@@ -358,6 +386,16 @@ export const NutritionScreen = () => {
                 onRetry={periodDays.reload}
               />
             )}
+
+            {/* Under the summary, because it only means anything once the
+                figures above it have been read: it is the answer to the
+                gap they show. */}
+            <SuggestionsCard
+              reason={suggestions.data?.data[0]?.reason ?? null}
+              note={suggestions.data?.note ?? null}
+              suggestions={suggestions.data?.data ?? []}
+              onPressSuggestion={onPressSuggestion}
+            />
 
             <DailyGoalCard
               calories={profile.goals.calories}

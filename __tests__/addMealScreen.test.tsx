@@ -81,6 +81,7 @@ jest.mock('../src/services/api/endpoints', () => {
       ),
       quickAddFoods: jest.fn(() => api.mockNutritionApi.quickAddFoods()),
       day: jest.fn((date: string) => api.mockNutritionApi.day(date)),
+      suggestions: jest.fn((date: string) => api.mockNutritionApi.suggestions(date)),
       remove: jest.fn((id: string, options: unknown) =>
         api.mockNutritionApi.remove(id, options),
       ),

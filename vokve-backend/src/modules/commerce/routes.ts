@@ -6,6 +6,7 @@ import { requireDevice } from '../../middleware/device.js';
 import { idempotent } from '../../middleware/idempotency.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
+import { suggestShopItems } from './recommend.service.js';
 import { requireVerifiedContacts } from '../../middleware/verified.js';
 import {
   addToWishlist, addressBody, cancelOrder, checkout, clearCart, countOrders, createAddress, deleteAddress, deleteReview, getCart, getItem, getOrder,
@@ -50,6 +51,19 @@ commerceRouter.get('/shop/items', validate('query', itemsQuery), async (req, res
     inStock: q.inStock === 'true', q: q.q, sort: q.sort, minPrice: q.minPrice, maxPrice: q.maxPrice, minRating: q.minRating,
     cursor: q.cursor, limit: q.limit,
   }));
+});
+
+/**
+ * What the shop puts in front of this member, and why (RULES R19).
+ *
+ * Unlike the shelves beside it, this one is *about* the caller: their own
+ * orders, their saved items and the coins they hold today. Everything here
+ * is already behind auth, so the only thing worth saying is that this
+ * route has nothing to fall back on without a member — an unsigned-in
+ * shelf is still a shelf, an unsigned-in recommendation is nothing.
+ */
+commerceRouter.get('/shop/suggestions', async (req, res) => {
+  res.json(await suggestShopItems(req.ctx.userId!));
 });
 
 commerceRouter.get('/shop/categories', async (_req, res) => {

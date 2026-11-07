@@ -39,7 +39,7 @@ export const IdempotencyModel = model('Idempotency', idempotencySchema);
 // permission snapshots and the operator's reads of both.
 
 /**
- * The catalogue's image library (RULES R19).
+ * The catalogue's image library (RULES R18).
  *
  * One row per object in the bucket, which is what makes a bucket usable by
  * a person: S3 holds opaque keys, and an operator looking for the photo of

@@ -156,6 +156,35 @@ export const CONFIG_DEFAULTS = {
     searchLimit: 25,
     /** How many foods one page of `GET /foods/library` holds at most. */
     libraryPageSize: 20,
+  /**
+   * What the server suggests a member eats next (RULES N12).
+   *
+   * Rules rather than a model, and every threshold here rather than in
+   * code, because each one is a judgement only real plates can settle. A
+   * suggestion engine is also the feature with the shortest patience: a
+   * member who is shown chicken once, or a 900 kcal dessert against the
+   * 200 they have left, does not give it a second chance.
+   */
+  recommend: {
+    /** How many to offer. A shelf, not a catalogue. */
+    limit: 6,
+    /**
+     * Calories left below which nothing is suggested. Under this the
+     * honest answer is "the day is done", not a smaller biscuit.
+     */
+    minRemainingCalories: 120,
+    /**
+     * How far past the remaining calories one food may still go, as a
+     * share. A little slack, because a plate is not an arithmetic puzzle
+     * and refusing a 310 kcal food against 300 left is pedantry.
+     */
+    headroom: 0.1,
+    /**
+     * How far behind a macro has to be, as a share of its target, before
+     * the suggestions start answering *it* rather than the calories.
+     */
+    macroGapShare: 0.25,
+  },
   },
   /** Water (RULES §Y). */
   hydration: {
@@ -440,6 +469,25 @@ export const CONFIG_DEFAULTS = {
      * this is also what bounds the work that read does.
      */
     boardSize: 20,
+    /**
+     * How long after a period closes its completion can still be paid
+     * (RULES C4). A day's steps reach the server late all the time — the
+     * phone closes the day at midnight and syncs the last count the next
+     * morning — so a daily challenge has to outlive its own day or every
+     * member loses the walk they took after their last sync.
+     *
+     * It must not outlive it by much. The phone re-offers every day inside
+     * ⚙ `activity.maxAgeDays` (21) on each foreground, and a day that only
+     * now crosses a goal completes and pays like any other: a member who
+     * installs the app, or whose watch backfills a fortnight, would collect
+     * three weeks of every daily challenge in one evening. Past this the
+     * completion is still recorded — the badge, the count, the leaderboard
+     * — and nothing is credited.
+     *
+     * 36 hours covers the late-night walk synced at breakfast and a day
+     * spent offline; it does not cover a backfill.
+     */
+    payGraceHours: 36,
   },
   /**
    * The shop's money side (RULES R1, R11–R13). Prices are paise and a coin
@@ -513,6 +561,25 @@ export const CONFIG_DEFAULTS = {
      * `lib/whatsapp.ts`, and the option stays hidden until then.
      */
     whatsappUpdates: true,
+  /**
+   * What the shop puts in front of one member (RULES R19).
+   *
+   * Weights rather than a ranking written into code, because the right
+   * order between "they buy from this shelf" and "they can afford it
+   * today" is a merchandising judgement, not an engineering one — and it
+   * is the sort of thing the owner will want to move on a Friday.
+   */
+  recommend: {
+    limit: 8,
+    /** How many of their most recent orders are read for affinity. */
+    ordersRead: 20,
+    /** The most candidates scored. A shop this size is well inside it. */
+    scanLimit: 300,
+    categoryWeight: 3,
+    affordableWeight: 2,
+    dealWeight: 1.5,
+    featuredWeight: 1,
+  },
   },
   otp: {
     /**

@@ -16,6 +16,7 @@ import type {
   DeliveryPreferences,
   DeviceHealthReport,
   DeviceHealthSnapshot,
+  FoodSuggestions,
   PushAck,
   PushAckResult,
   EventIntake,
@@ -848,6 +849,15 @@ export interface NutritionApi {
   ): Promise<NutritionProfile>;
   /** One day's food (`YYYY-MM-DD`). */
   day(date: string): Promise<NutritionDay>;
+  /**
+   * What to eat next, and why (`GET /nutrition/suggestions`, RULES N12).
+   *
+   * Read for the day it is asked about, because the answer is the gap
+   * between that day's targets and what is already on it. Comes back with
+   * a `note` and nothing else when there is nothing honest to suggest —
+   * the day is full, or the library has nothing this member eats.
+   */
+  suggestions(date: string): Promise<FoodSuggestions>;
   /** What each day from `from` to `to` came to, every day present. */
   days(from: string, to: string): Promise<NutritionDayTotal[]>;
   /**

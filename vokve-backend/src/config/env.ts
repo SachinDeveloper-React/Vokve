@@ -127,7 +127,7 @@ const envSchema = z.object({
   OPS_EMAIL: unsetWhenBlank(z.string().email()),
 
   /**
-   * Where catalogue images live (RULES R19).
+   * Where catalogue images live (RULES R18).
    *
    * Member avatars are kept in Mongo as bytes, which is fine for one small
    * square per account that only that account's screens ask for. A product

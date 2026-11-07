@@ -74,6 +74,20 @@ const foodItemSchema = new Schema(
     carbsG: { type: Number, default: 0, min: 0 },
     fatsG: { type: Number, default: 0, min: 0 },
     fiberG: { type: Number, default: 0, min: 0 },
+    /**
+     * Which diets this food suits (RULES N12).
+     *
+     * The one fact a recommendation cannot work without, and the reason it
+     * had to exist before any of this was built: suggesting chicken to a
+     * vegetarian is not a slightly worse recommendation, it is the end of
+     * the feature — nobody who sees it once trusts the next one.
+     *
+     * Empty means "suits everyone", which is what a plain ingredient like
+     * rice or an apple actually is, and what every food seeded before this
+     * existed is assumed to be until somebody says otherwise. A member's
+     * own custom food is never recommended, so it is never tagged.
+     */
+    dietTypes: { type: [String], enum: DIET_TYPES, default: [] },
     ownerUserId: { type: String, default: null },
     quickAdd: { type: Boolean, default: false },
     sort: { type: Number, default: 0 },

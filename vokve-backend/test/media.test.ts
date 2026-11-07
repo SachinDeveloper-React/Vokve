@@ -9,7 +9,7 @@ import { app } from './helpers.js';
 const adminHeaders = () => ({ 'x-admin-key': 'test-admin-key-test-admin-key' });
 
 /**
- * The catalogue's image library (RULES R19).
+ * The catalogue's image library (RULES R18).
  *
  * The part worth the most tests is the spreadsheet, because it is the part
  * an operator uses on five hundred products at once and the part where a

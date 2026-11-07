@@ -10,7 +10,7 @@ import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
 /**
- * The catalogue's images (RULES R19).
+ * The catalogue's images (RULES R18).
  *
  * Nothing here ever holds the bytes. The browser is given a signed URL and
  * puts the file to the bucket itself, for two reasons that both matter: the

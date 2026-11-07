@@ -31,6 +31,7 @@ import {
   dietPlanSummarySchema,
   foodItemSchema,
   foodLibraryPageSchema,
+  foodSuggestionsSchema,
   healthScoreSchema,
   nutritionDaySchema,
   nutritionProfileSchema,
@@ -2541,10 +2542,82 @@ function mockPlanSummary(plan: (typeof mockPlanLibrary)[number]) {
   });
 }
 
+/** One decimal, for figures the member reads rather than adds up. */
+const round1 = (value: number) => Math.round(value * 10) / 10;
+
 export const mockNutritionApi: NutritionApi = {
   async profile() {
     await delay();
     return nutritionProfileSchema.parse(mockNutritionProfile);
+  },
+  /**
+   * The same three rules the server applies, against the mock's own day
+   * (RULES N12): nothing the member's diet refuses, nothing that does not
+   * fit what is left, and the macro furthest behind answered first.
+   *
+   * Written out here rather than stubbed with a fixed list, because the
+   * interesting states — the day already full, a library with nothing a
+   * vegan may eat — are exactly the ones a developer needs to be able to
+   * reach without a server.
+   */
+  async suggestions(date) {
+    await delay();
+    const day = await this.day(date);
+    const remaining = {
+      calories: round1(day.goals.calories - day.totals.calories),
+      proteinG: round1(day.goals.proteinG - day.totals.proteinG),
+      carbsG: round1(day.goals.carbsG - day.totals.carbsG),
+      fatsG: round1(day.goals.fatsG - day.totals.fatsG),
+    };
+
+    if (remaining.calories < 120) {
+      return foodSuggestionsSchema.parse({
+        date,
+        remaining,
+        note:
+          remaining.calories <= 0
+            ? 'You have met today’s calorie goal. Nothing more to suggest.'
+            : `Only ${Math.round(remaining.calories)} kcal left today — not really enough to suggest anything.`,
+        data: [],
+      });
+    }
+
+    const diet = mockNutritionProfile.preferences.dietType;
+    const fits = foodLibrary.filter(
+      food =>
+        food.calories > 0 &&
+        food.calories <= remaining.calories * 1.1 &&
+        (food.dietTypes.length === 0 || food.dietTypes.includes(diet)),
+    );
+
+    const gaps = [
+      { gap: 'protein' as const, label: 'protein', key: 'proteinG' as const, goal: day.goals.proteinG },
+      { gap: 'carbs' as const, label: 'carbs', key: 'carbsG' as const, goal: day.goals.carbsG },
+      { gap: 'fats' as const, label: 'fats', key: 'fatsG' as const, goal: day.goals.fatsG },
+    ]
+      .map(entry => ({ ...entry, left: remaining[entry.key], share: entry.goal > 0 ? remaining[entry.key] / entry.goal : 0 }))
+      .filter(entry => entry.share >= 0.25 && entry.left > 0)
+      .sort((a, b) => b.share - a.share)[0];
+
+    const data = [...fits]
+      .sort((a, b) =>
+        gaps ? b[gaps.key] / Math.max(1, b.calories) - a[gaps.key] / Math.max(1, a.calories) : 0,
+      )
+      .slice(0, 6)
+      .map(food => ({
+        food,
+        gap: gaps?.gap ?? ('calories' as const),
+        reason: gaps
+          ? `${Math.round(gaps.left)}g of ${gaps.label} still to go today`
+          : `Fits the ${Math.round(remaining.calories)} kcal you have left`,
+      }));
+
+    return foodSuggestionsSchema.parse({
+      date,
+      remaining,
+      note: data.length === 0 ? 'Nothing in the library fits what is left of today.' : null,
+      data,
+    });
   },
   async updateProfile(patch) {
     await delay();

@@ -181,7 +181,7 @@ export async function importItems(
   const known = new Set(existing.map(row => row._id));
   // One read for the whole sheet. A two-thousand-row import would otherwise
   // be two thousand round trips to answer a question the library can answer
-  // once (RULES R19).
+  // once (RULES R18).
   const library = await mediaByFilename();
 
   const failed: ItemImportResult['failed'] = [];

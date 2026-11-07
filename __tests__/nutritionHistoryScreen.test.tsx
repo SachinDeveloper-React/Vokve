@@ -54,6 +54,7 @@ jest.mock('../src/services/api/endpoints', () => {
     nutritionApi: {
       profile: jest.fn(() => api.mockNutritionApi.profile()),
       day: jest.fn((date: string) => api.mockNutritionApi.day(date)),
+      suggestions: jest.fn((date: string) => api.mockNutritionApi.suggestions(date)),
       days: jest.fn((from: string, to: string) =>
         api.mockNutritionApi.days(from, to),
       ),

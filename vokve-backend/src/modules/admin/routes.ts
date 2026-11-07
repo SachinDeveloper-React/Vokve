@@ -659,7 +659,7 @@ adminUsersRouter.post('/admin/shop/items/import', validate('body', itemImportBod
   res.json(await importItems(req.ctx.adminActor!, body.rows, { dryRun: body.dryRun }));
 });
 
-// ─── The catalogue's image library (RULES R19) ─────────────────────────────
+// ─── The catalogue's image library (RULES R18) ─────────────────────────────
 
 /**
  * A URL the panel may put one image to.

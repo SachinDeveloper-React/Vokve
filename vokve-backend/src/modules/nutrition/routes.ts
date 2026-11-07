@@ -6,6 +6,7 @@ import { requireDevice } from '../../middleware/device.js';
 import { idempotent } from '../../middleware/idempotency.js';
 import { validate } from '../../middleware/validate.js';
 import { DIET_TYPES, MEAL_PLANS, MEAL_SLOTS, NUTRITION_GOALS } from './models.js';
+import { suggestFoods } from './recommend.service.js';
 import {
   createCustomFood,
   deleteFood,
@@ -103,6 +104,18 @@ nutritionRouter.delete('/nutrition/entries/:id', idempotent, async (req, res) =>
 const searchQuery = z.object({
   q: z.string().max(60).default(''),
   limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
+/**
+ * What to eat next, and why (RULES N12).
+ *
+ * Read for the day the caller names, because the answer is the gap
+ * between that day's targets and what is already on it — a suggestion for
+ * "today" is meaningless to somebody filling in yesterday.
+ */
+nutritionRouter.get('/nutrition/suggestions', validate('query', dayQuery), async (req, res) => {
+  const { date } = req.query as z.infer<typeof dayQuery>;
+  res.json(await suggestFoods(req.ctx.userId!, date ?? localDayOf(new Date(), req.ctx.timezone)));
 });
 
 /** The library the caller can see, by word prefix (RULES N8). */

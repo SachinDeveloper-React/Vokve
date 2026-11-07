@@ -73,6 +73,7 @@ import {
   appUpdateSchema,
   appErrorIntakeSchema,
   deviceHealthSnapshotSchema,
+  foodSuggestionsSchema,
   pushAckResultSchema,
   eventIntakeSchema,
   permissionSnapshotSchema,
@@ -770,6 +771,10 @@ const realContentApi: ContentApi = {
 const realNutritionApi: NutritionApi = {
   profile: () =>
     request(nutritionProfileSchema, client => client.get('/nutrition/profile')),
+  suggestions: date =>
+    request(foodSuggestionsSchema, client =>
+      client.get('/nutrition/suggestions', { params: { date } }),
+    ),
   updateProfile: (patch, { idempotencyKey }) =>
     request(nutritionProfileSchema, client =>
       client.put('/nutrition/profile', patch, {
@@ -1133,6 +1138,7 @@ export const contentApi: ContentApi = {
 
 export const nutritionApi: NutritionApi = {
   profile: () => pick(mockNutritionApi, realNutritionApi).profile(),
+  suggestions: date => pick(mockNutritionApi, realNutritionApi).suggestions(date),
   updateProfile: (patch, options) =>
     pick(mockNutritionApi, realNutritionApi).updateProfile(patch, options),
   day: date => pick(mockNutritionApi, realNutritionApi).day(date),
