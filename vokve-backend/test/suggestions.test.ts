@@ -185,6 +185,32 @@ describe('suggesting the next food', () => {
     expect(response.body.note).toBeTruthy();
   });
 
+  it('suggests a food written before diet tags existed', async () => {
+    const session = await signUpAndRegister();
+    await FoodItemModel.deleteMany({ ownerUserId: null });
+    // No `dietTypes` key at all — which is every row in a database that
+    // was running before the field was added. `$size: 0` matches an empty
+    // array and *not* a missing field, so a query written the obvious way
+    // returns nothing and the shelf comes back empty with no explanation.
+    await FoodItemModel.collection.insertOne({
+      _id: 'f-legacy' as never,
+      name: 'Dal',
+      portion: '1 bowl',
+      calories: 180,
+      proteinG: 12,
+      carbsG: 20,
+      fatsG: 3,
+      fiberG: 5,
+      active: true,
+      ownerUserId: null,
+    } as never);
+
+    const response = await suggestions(session);
+
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].food.name).toBe('Dal');
+  });
+
   it('never pushes a member their own custom food back at them', async () => {
     const session = await signUpAndRegister();
     await stockLibrary();

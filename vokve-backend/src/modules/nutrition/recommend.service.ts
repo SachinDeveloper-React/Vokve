@@ -106,7 +106,17 @@ export async function suggestFoods(userId: string, localDay: IsoDate): Promise<F
       // never ours to push back at them.
       ownerUserId: null,
       calories: { $gt: 0, $lte: ceiling },
-      $or: [{ dietTypes: { $size: 0 } }, { dietTypes: dietType }],
+      // `$exists: false` is not belt and braces: `$size: 0` matches an
+      // *empty array* and not a missing field, so every food written
+      // before the tag existed — which is every food in a database that
+      // has been running — would be filtered out and the shelf would
+      // come back empty. An absent tag means the same as an empty one:
+      // it suits everyone.
+      $or: [
+        { dietTypes: { $exists: false } },
+        { dietTypes: { $size: 0 } },
+        { dietTypes: dietType },
+      ],
     },
     {
       name: 1, portion: 1, emoji: 1, imageUrl: 1, dietTypes: 1,

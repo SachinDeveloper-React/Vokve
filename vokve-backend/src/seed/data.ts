@@ -575,20 +575,20 @@ export const CONTENT_TIPS = [
  * same collection with an owner and are never seeded.
  */
 export const FOOD_ITEMS = [
-  {"_id": "fl-oats", "name": "Oats (Cooked)", "portion": "1 Cup (150 g)", "emoji": "🥣", "calories": 150, "proteinG": 5, "carbsG": 27, "fatsG": 3, "fiberG": 4, "quickAdd": true, "sort": 1},
-  {"_id": "fl-banana", "name": "Banana", "portion": "1 Medium (118 g)", "emoji": "🍌", "calories": 89, "proteinG": 1, "carbsG": 23, "fatsG": 0.3, "fiberG": 2.6, "quickAdd": true, "sort": 2},
+  {"_id": "fl-oats", "name": "Oats (Cooked)", "portion": "1 Cup (150 g)", "emoji": "🥣", "dietTypes": [], "calories": 150, "proteinG": 5, "carbsG": 27, "fatsG": 3, "fiberG": 4, "quickAdd": true, "sort": 1},
+  {"_id": "fl-banana", "name": "Banana", "portion": "1 Medium (118 g)", "emoji": "🍌", "dietTypes": [], "calories": 89, "proteinG": 1, "carbsG": 23, "fatsG": 0.3, "fiberG": 2.6, "quickAdd": true, "sort": 2},
   {"_id": "fl-egg", "name": "Boiled Egg", "portion": "1 Large (50 g)", "emoji": "🥚", "dietTypes": ["eggetarian", "non_vegetarian"], "calories": 78, "proteinG": 6, "carbsG": 0.6, "fatsG": 5, "fiberG": 0, "quickAdd": true, "sort": 3},
-  {"_id": "fl-peanut-butter", "name": "Peanut Butter", "portion": "1 Tbsp (16 g)", "emoji": "🥜", "calories": 94, "proteinG": 4, "carbsG": 3, "fatsG": 8, "fiberG": 1, "quickAdd": true, "sort": 4},
-  {"_id": "fl-brown-rice", "name": "Brown Rice", "portion": "1 Cup (150 g)", "emoji": "🍚", "calories": 215, "proteinG": 5, "carbsG": 45, "fatsG": 1.8, "fiberG": 3.5, "quickAdd": false, "sort": 5},
-  {"_id": "fl-dal", "name": "Dal", "portion": "1 Bowl (150 g)", "emoji": "🍲", "calories": 180, "proteinG": 10, "carbsG": 22, "fatsG": 5, "fiberG": 6, "quickAdd": false, "sort": 6},
+  {"_id": "fl-peanut-butter", "name": "Peanut Butter", "portion": "1 Tbsp (16 g)", "emoji": "🥜", "dietTypes": [], "calories": 94, "proteinG": 4, "carbsG": 3, "fatsG": 8, "fiberG": 1, "quickAdd": true, "sort": 4},
+  {"_id": "fl-brown-rice", "name": "Brown Rice", "portion": "1 Cup (150 g)", "emoji": "🍚", "dietTypes": [], "calories": 215, "proteinG": 5, "carbsG": 45, "fatsG": 1.8, "fiberG": 3.5, "quickAdd": false, "sort": 5},
+  {"_id": "fl-dal", "name": "Dal", "portion": "1 Bowl (150 g)", "emoji": "🍲", "dietTypes": [], "calories": 180, "proteinG": 10, "carbsG": 22, "fatsG": 5, "fiberG": 6, "quickAdd": false, "sort": 6},
   {"_id": "fl-paneer", "name": "Paneer", "portion": "100 g", "emoji": "🧀", "dietTypes": ["vegetarian", "eggetarian", "non_vegetarian"], "calories": 265, "proteinG": 18, "carbsG": 6, "fatsG": 20, "fiberG": 0, "quickAdd": false, "sort": 7},
   {"_id": "fl-curd", "name": "Curd", "portion": "1 Bowl (150 g)", "emoji": "🥛", "dietTypes": ["vegetarian", "eggetarian", "non_vegetarian"], "calories": 98, "proteinG": 6, "carbsG": 8, "fatsG": 4, "fiberG": 0, "quickAdd": false, "sort": 8},
-  {"_id": "fl-roti", "name": "Roti", "portion": "1 Piece (40 g)", "emoji": "🫓", "calories": 104, "proteinG": 3, "carbsG": 20, "fatsG": 1.5, "fiberG": 2, "quickAdd": false, "sort": 9},
+  {"_id": "fl-roti", "name": "Roti", "portion": "1 Piece (40 g)", "emoji": "🫓", "dietTypes": [], "calories": 104, "proteinG": 3, "carbsG": 20, "fatsG": 1.5, "fiberG": 2, "quickAdd": false, "sort": 9},
   {"_id": "fl-chicken", "name": "Grilled Chicken", "portion": "100 g", "emoji": "🍗", "dietTypes": ["non_vegetarian"], "calories": 165, "proteinG": 31, "carbsG": 0, "fatsG": 3.6, "fiberG": 0, "quickAdd": false, "sort": 10},
-  {"_id": "fl-salad", "name": "Mixed Salad", "portion": "1 Bowl (120 g)", "emoji": "🥗", "calories": 45, "proteinG": 2, "carbsG": 8, "fatsG": 0.5, "fiberG": 3, "quickAdd": false, "sort": 11},
-  {"_id": "fl-almonds", "name": "Almonds", "portion": "10 pieces (12 g)", "emoji": "🌰", "calories": 70, "proteinG": 3, "carbsG": 2.5, "fatsG": 6, "fiberG": 1.5, "quickAdd": false, "sort": 12},
-  {"_id": "fl-apple", "name": "Apple", "portion": "1 Medium (180 g)", "emoji": "🍎", "calories": 95, "proteinG": 0.5, "carbsG": 25, "fatsG": 0.3, "fiberG": 4.4, "quickAdd": false, "sort": 13},
-  {"_id": "fl-coffee", "name": "Black Coffee", "portion": "1 Cup", "emoji": "☕", "calories": 5, "proteinG": 0.3, "carbsG": 0, "fatsG": 0, "fiberG": 0, "quickAdd": false, "sort": 14},
+  {"_id": "fl-salad", "name": "Mixed Salad", "portion": "1 Bowl (120 g)", "emoji": "🥗", "dietTypes": [], "calories": 45, "proteinG": 2, "carbsG": 8, "fatsG": 0.5, "fiberG": 3, "quickAdd": false, "sort": 11},
+  {"_id": "fl-almonds", "name": "Almonds", "portion": "10 pieces (12 g)", "emoji": "🌰", "dietTypes": [], "calories": 70, "proteinG": 3, "carbsG": 2.5, "fatsG": 6, "fiberG": 1.5, "quickAdd": false, "sort": 12},
+  {"_id": "fl-apple", "name": "Apple", "portion": "1 Medium (180 g)", "emoji": "🍎", "dietTypes": [], "calories": 95, "proteinG": 0.5, "carbsG": 25, "fatsG": 0.3, "fiberG": 4.4, "quickAdd": false, "sort": 13},
+  {"_id": "fl-coffee", "name": "Black Coffee", "portion": "1 Cup", "emoji": "☕", "dietTypes": [], "calories": 5, "proteinG": 0.3, "carbsG": 0, "fatsG": 0, "fiberG": 0, "quickAdd": false, "sort": 14},
   {"_id": "fl-protein-shake", "name": "Protein Shake", "portion": "1 Scoop (30 g)", "emoji": "🥤", "dietTypes": ["vegetarian", "eggetarian", "non_vegetarian"], "calories": 120, "proteinG": 24, "carbsG": 3, "fatsG": 1.5, "fiberG": 0, "quickAdd": false, "sort": 15},
 ] as const;
 

@@ -2588,7 +2588,10 @@ export const mockNutritionApi: NutritionApi = {
       food =>
         food.calories > 0 &&
         food.calories <= remaining.calories * 1.1 &&
-        (food.dietTypes.length === 0 || food.dietTypes.includes(diet)),
+        // Optional chaining for the same reason the server's query checks
+        // `$exists`: a food written before the tag existed has no list,
+        // and that means "suits everyone", not "crash".
+        ((food.dietTypes?.length ?? 0) === 0 || food.dietTypes.includes(diet)),
     );
 
     const gaps = [
