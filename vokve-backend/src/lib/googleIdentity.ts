@@ -18,7 +18,10 @@ import { logger } from './logger.js';
  * audience is the **web** client id even on Android and iOS — that is
  * what the native SDKs put in the token when they are configured with
  * `webClientId`, and accepting anything else would accept tokens minted
- * for a different app.
+ * for a different app. It is a *list* of our own clients, because
+ * Android and iOS read that id out of different bundled files and a
+ * project whose two apps were registered at different times has a
+ * different web client in each.
  */
 
 /** Google's two issuers; both are legitimate and both appear in the wild. */
@@ -27,7 +30,24 @@ const ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
 let client: OAuth2Client | null = null;
 
 export function isGoogleSignInConfigured(): boolean {
-  return Boolean(env.GOOGLE_WEB_CLIENT_ID);
+  return audiences().length > 0;
+}
+
+/**
+ * Every client id a token may legitimately be addressed to.
+ *
+ * A list because a Firebase project whose Android and iOS apps were
+ * added at different times carries a *different* web client in each
+ * bundled file, so the two platforms mint different audiences from the
+ * same code. Both are ours; accepting both is right, and the
+ * alternative is one platform failing every sign-in with nothing in the
+ * logs but "token rejected".
+ */
+function audiences(): string[] {
+  return (env.GOOGLE_WEB_CLIENT_ID ?? '')
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean);
 }
 
 /** Tests swap the verifier for one that does not reach Google. */
@@ -49,7 +69,9 @@ export interface GoogleIdentity {
 async function oauthClient(): Promise<OAuth2Client> {
   if (client) return client;
   const { OAuth2Client } = await import('google-auth-library');
-  client = new OAuth2Client(env.GOOGLE_WEB_CLIENT_ID);
+  // The id here only labels the client; the audience actually enforced
+  // is the list passed to `verifyIdToken`.
+  client = new OAuth2Client(audiences()[0]);
   return client;
 }
 
@@ -76,7 +98,7 @@ export async function verifyGoogleIdToken(idToken: string): Promise<GoogleIdenti
   try {
     const ticket = await (await oauthClient()).verifyIdToken({
       idToken,
-      audience: env.GOOGLE_WEB_CLIENT_ID!,
+      audience: audiences(),
     });
     payload = ticket.getPayload();
   } catch (error) {

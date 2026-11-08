@@ -7,7 +7,7 @@ import { app, baseHeaders, signUpAndRegister } from './helpers.js';
 import { seed } from '../src/seed/seed.js';
 
 /**
- * Signing in with Google (RULES O7).
+ * Signing in with Google (RULES O12).
  *
  * Everything here turns on one thing: the server believes the *token*
  * and nothing else in the request. So the tests send bodies that lie —

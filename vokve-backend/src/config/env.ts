@@ -152,7 +152,7 @@ const envSchema = z.object({
   AWS_S3_PUBLIC_BASE: unsetWhenBlank(z.string().url()),
 
   /**
-   * The **web** OAuth client id Google ID tokens are checked against
+   * The **web** OAuth client id(s) Google ID tokens are checked against
    * (RULES O12).
    *
    * Web, even though the tokens come from Android and iOS: that is the
@@ -160,6 +160,16 @@ const envSchema = z.object({
    * with `webClientId`, and it is the one value that says "this token
    * was minted for us". Unset means the Google route answers 503 rather
    * than accepting anything.
+   *
+   * A **comma-separated list** is allowed, and is not a loosening: a
+   * Firebase project whose Android and iOS apps were added at different
+   * times carries a different web client in each bundled file —
+   * `default_web_client_id` in `google-services.json`, `WEB_CLIENT_ID`
+   * in the plist — so the two platforms honestly mint different
+   * audiences. Accepting both of *our own* clients is right; the
+   * alternative is one platform silently failing every sign-in. Each
+   * entry is still checked exactly, so this is nothing like accepting
+   * any audience.
    */
   GOOGLE_WEB_CLIENT_ID: unsetWhenBlank(z.string().min(1)),
 

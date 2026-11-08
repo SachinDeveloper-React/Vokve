@@ -6,6 +6,7 @@
     "android": "react-native run-android",
     "android-release": "cd android && ./gradlew clean && ./gradlew bundleRelease",
     "android-release-apk": "cd android && ./gradlew clean && cd .. && npm run android -- --mode='release'",
+    "google:check": "node scripts/check-google-config.mjs",
     "ios": "react-native run-ios",
     "ios:install": "cd ios && pod install && cd ..",
     "lint": "eslint .",
