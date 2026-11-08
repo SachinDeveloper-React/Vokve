@@ -12,7 +12,28 @@
           "package_name": "com.vokve"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "292040708519-3ntckiq3ctpmql8g3gchdf04tiqlpe5s.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.vokve",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "292040708519-e06pmdv9g5jaduief2hcpn8mtq99cqpv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.vokve",
+            "certificate_hash": "bd8e79fac38598244e90cf2d8a6791d883c8df73"
+          }
+        },
+        {
+          "client_id": "292040708519-d9ckk1rns9qg1bamid1kd0bgmil9iba1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyC8zOOG9n_MO67o2HB0t8vLBnH3gvjP6Ns"
@@ -20,7 +41,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "292040708519-d9ckk1rns9qg1bamid1kd0bgmil9iba1.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "292040708519-aad736b8sil4nu0i89glimj23m8k0c15.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "org.react-native.vokve"
+              }
+            }
+          ]
         }
       }
     }

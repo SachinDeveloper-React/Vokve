@@ -7,20 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		03D8B2BC30489CA5006C7CF1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 03D8B2BB30489CA5006C7CF1 /* GoogleService-Info.plist */; };
 		0B5CD7E5CE5B91495116F5A5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		13C7703730A03FEE009FB38F /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 13C7703630A03FEE009FB38F /* GoogleService-Info.plist */; };
 		1FFBB886DE66F2136C0A16EE /* Pods_vokve.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 327D53C5C0F2330944491494 /* Pods_vokve.framework */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		03D8B2BB30489CA5006C7CF1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* vokve.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = vokve.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = vokve/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = vokve/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = vokve/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		13C7703630A03FEE009FB38F /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		327D53C5C0F2330944491494 /* Pods_vokve.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_vokve.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		50A655775831ECE4E479C302 /* Pods-vokve.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-vokve.debug.xcconfig"; path = "Target Support Files/Pods-vokve/Pods-vokve.debug.xcconfig"; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = vokve/AppDelegate.swift; sourceTree = "<group>"; };
@@ -72,7 +72,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				03D8B2BB30489CA5006C7CF1 /* GoogleService-Info.plist */,
+				13C7703630A03FEE009FB38F /* GoogleService-Info.plist */,
 				13B07FAE1A68108700A75B9A /* vokve */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
@@ -166,7 +166,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
-				03D8B2BC30489CA5006C7CF1 /* GoogleService-Info.plist in Resources */,
+				13C7703730A03FEE009FB38F /* GoogleService-Info.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				0B5CD7E5CE5B91495116F5A5 /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -336,6 +336,7 @@
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 78K4ML2KHZ;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = vokve/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
@@ -370,6 +371,7 @@
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 78K4ML2KHZ;
 				INFOPLIST_FILE = vokve/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
