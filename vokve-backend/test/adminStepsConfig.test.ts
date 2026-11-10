@@ -48,6 +48,36 @@ describe('admin: the step pipeline’s knobs', () => {
     expect(phone.body.sync.maxAgeDays).toBe(10);
   });
 
+  it('turns the vehicle gate off, and on with different thresholds, without an app release (A29)', async () => {
+    const session = await signUpAndRegister();
+    const served = async () =>
+      (await request(app).get('/v1/activity/config').set(authed(session))).body.tracker.motionGate;
+    // On by default: a bus ride is not a walk.
+    expect(await served()).toMatchObject({ enabled: true, engageSeconds: 2, minPeakRatio: 0.12 });
+
+    const off = await request(app)
+      .put('/v1/admin/config/steps')
+      .set(ADMIN)
+      .send({ patch: { activity: { tracker: { motionGate: { enabled: false } } } } });
+    expect(off.status).toBe(200);
+    expect(await served()).toMatchObject({ enabled: false });
+
+    const tuned = await request(app)
+      .put('/v1/admin/config/steps')
+      .set(ADMIN)
+      .send({ patch: { activity: { tracker: { motionGate: { enabled: true, engageSeconds: 5, minPeakRatio: 0.2 } } } } });
+    expect(tuned.status).toBe(200);
+    expect(await served()).toMatchObject({ enabled: true, engageSeconds: 5, minPeakRatio: 0.2 });
+
+    // A peak share of 1 wants a pure tone and would hold back every walk.
+    const absurd = await request(app)
+      .put('/v1/admin/config/steps')
+      .set(ADMIN)
+      .send({ patch: { activity: { tracker: { motionGate: { minPeakRatio: 1 } } } } });
+    expect(absurd.status).toBe(422);
+    expect(await served()).toMatchObject({ minPeakRatio: 0.2 });
+  });
+
   it('refuses a patch the config validator would reject, and writes nothing', async () => {
     // A per-source cap above the daily ceiling (RULES E8c).
     const res = await request(app)

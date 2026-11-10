@@ -1,6 +1,6 @@
 import type { AppConfig } from '../../config/defaults.js';
 import type { FlagLayer } from '../integrity/models.js';
-import type { DeviceDayEvidence, SourceEvidence } from './snapshot.js';
+import { countedOf, type DeviceDayEvidence, type SourceEvidence } from './snapshot.js';
 
 /**
  * The fraud layers (BACKEND §7.5, RULES A14–A20), as pure functions of what
@@ -90,7 +90,15 @@ export interface DeviceScore {
   /** What the day shows: what the phone showed its user, or the server's count when higher. */
   displaySteps: number;
   /** The phone's own count, and what was taken off it before it competed. */
-  phone: { counted: number; recovered: number; flagged: number; clean: number };
+  phone: {
+    /** The phone's own sensor total, less what its motion gate held back (A29). */
+    counted: number;
+    recovered: number;
+    flagged: number;
+    /** What the motion gate held back as a vehicle's vibration, already off `counted`. */
+    gated: number;
+    clean: number;
+  };
   /** The phone's own count, less what it recovered in one go or flagged. */
   phoneClean: number;
   /** Every Health Connect source the device reported, and what became of it. */
@@ -150,7 +158,12 @@ export function scoreDevice(
   const flag = (layer: FlagLayer, kind: string, severity: Severity, details: Record<string, unknown> = {}) =>
     flags.push({ layer, kind, severity, deviceId: input.deviceId, details });
 
-  const deviceSteps = ev.deviceSteps;
+  // What this phone counted as steps: its raw sensor total less what its own
+  // motion gate held back as a vehicle's vibration (A29). Every check below
+  // measures against this and not the raw figure — the gated share is in no
+  // minute, in no resolved count, and in nothing the member was shown.
+  const deviceSteps = countedOf(ev);
+  const gatedSteps = Math.max(0, ev.gatedSteps ?? 0);
   const phoneClean = Math.max(0, deviceSteps - ev.recoveredSteps - ev.suspectSteps);
 
   // ─── L0 · device integrity ──────────────────────────────────────────────
@@ -468,7 +481,14 @@ export function scoreDevice(
     deviceId: input.deviceId,
     // Never below what the server itself decided the day is worth.
     displaySteps: Math.max(ev.resolved.steps, deviceSteps, candidate),
-    phone: { counted: deviceSteps, recovered: ev.recoveredSteps, flagged: ev.suspectSteps, clean: phoneClean },
+    phone: {
+      counted: deviceSteps,
+      recovered: ev.recoveredSteps,
+      flagged: ev.suspectSteps,
+      /** What the phone's own motion gate held back, already off `counted` (A29). */
+      gated: gatedSteps,
+      clean: phoneClean,
+    },
     phoneClean,
     sources: ev.sources.map(source => decisions.get(source)!).filter(Boolean),
     candidate,
@@ -535,7 +555,10 @@ export function unionPhones(inputs: DeviceInput[], scored: DeviceScore[], active
       higher(shown, at, timedSteps + untimedSteps);
       higher(timed, at, timedSteps);
     }
-    unplaced = Math.max(unplaced, input.evidence.deviceSteps - placed);
+    // The minutes hold no gated step, so the phone's counted total is what
+    // the remainder is measured from (A29); the raw figure would add a bus
+    // ride back as steps no minute could account for.
+    unplaced = Math.max(unplaced, countedOf(input.evidence) - placed);
     if (!score?.verified) continue;
     // A verified phone's clean count — less what it recovered and flagged —
     // spread over its timed minutes, so it never adds more than it verified.

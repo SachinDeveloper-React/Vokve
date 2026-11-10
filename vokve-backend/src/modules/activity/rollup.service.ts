@@ -15,7 +15,7 @@ import { markEarned } from '../streak/service.js';
 import { scoreDay, type DeviceInput, type DayFlag } from './layers.js';
 import { ActivityDailyModel, DeviceDayModel } from './models.js';
 import { creditStepsForDay, getDay } from './service.js';
-import { hourFinder, type DeviceDayEvidence } from './snapshot.js';
+import { countedOf, hourFinder, type DeviceDayEvidence } from './snapshot.js';
 
 /**
  * One user's day, scored from every device that sent it (ARCHITECTURE §5.3
@@ -147,7 +147,9 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
   }
   // The phone that counted the most supplies the pedometer figure, kept for
   // the day-to-day checks (A17), which compare a phone with itself.
-  const counting = inputs.reduce((a, b) => (b.evidence.deviceSteps > a.evidence.deviceSteps ? b : a)).evidence;
+  const counting = inputs.reduce((a, b) =>
+    countedOf(b.evidence) > countedOf(a.evidence) ? b : a,
+  ).evidence;
 
   // The other app the phone showed for the day, when it showed one the
   // server did not verify — a watch relayed with no recording method, say.
@@ -181,7 +183,10 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
       $set: {
         steps: score.displaySteps,
         verifiedSteps: score.verifiedSteps,
-        pedometerSteps: counting.deviceSteps,
+        // What that phone counted as steps, so the day-to-day checks compare
+        // like with like: a day the motion gate held a ride back on is not a
+        // day the phone walked less (A29).
+        pedometerSteps: countedOf(counting),
         distanceKm: Math.round(distanceKm * 100) / 100,
         activeMinutes: Math.max(score.union.activeMinutes, counting.minutes.activeMinutes),
         stepCalories: Math.round(stepCalories * 10) / 10,

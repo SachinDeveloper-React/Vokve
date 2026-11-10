@@ -705,11 +705,11 @@ Each foreground, **each backgrounding** (the tail of the walk between the last s
 | N | `GET /activity/today` | Same shape, one day |
 | N | `GET /activity/day?date=` | One day, same shape as today |
 | N | `GET /activity/range` | `?from&to&granularity=hour\|day\|week\|month` → `{ points[{start,end,steps,verifiedSteps}], totals, best }`. `week` = consecutive 7-day blocks from `from` (W1–W5 of a month); `month` = calendar months, clipped |
-| N | `GET /activity/config` | The phone tracker's set-up (⚙ `activity.tracker` — Health Connect read, and written with the phone's own steps per minute, A23) and sync policy (⚙ `activity.sync`), passed to react-native-step-tracker-pro as is |
+| N | `GET /activity/config` | The phone tracker's set-up (⚙ `activity.tracker` — Health Connect read, and written with the phone's own steps per minute, A23; the vehicle gate and its thresholds, A29) and sync policy (⚙ `activity.sync`), passed to react-native-step-tracker-pro as is |
 | N | `GET /activity/goal` | `StepGoal`: the goal now, a suggestion (recent days or the profile's activity level, + ⚙ 2,000, up to the age/BMI target), `basedOn {age, bmi, recentSteps}`, `min/max/increment` (⚙ `activity.goal`) and `chosenAt`. Saved through `PUT /me/settings` (D-55, P11) |
 | N | `GET /activity/sources?date=` | How a day was matched: each device's own count (recovered/flagged taken off), every Health Connect app with its status (`used`/`lower`/`not_counted`/`unverified`/`blocked`/`not_computed`) and a server-written note, the raw records by app, the uploads, plain-language `explanation`, and — only where ⚙ `activity.inspector.showChecks` allows — the layer scores and flags |
 | N | `POST /activity/ingest/nonce` | Single-use value the next signed snapshot carries (10 min) |
-| N | `POST /activity/ingest` | One day's **signed step snapshot** (react-native-step-tracker-pro `getSignedSnapshot`) + Play Integrity on request — see the example in §15. Cut to the time the account was signed in on the phone before it is scored (A22, D-56) |
+| N | `POST /activity/ingest` | One day's **signed step snapshot** (react-native-step-tracker-pro `getSignedSnapshot`) + Play Integrity on request — see the example in §15. Cut to the time the account was signed in on the phone before it is scored (A22, D-56), and what the phone's vehicle gate held back (`gatedSteps`) comes off before that (A29) |
 | N | `GET/POST/DELETE /health/connections[/:provider]` | Provider consent + sync cursor |
 | N | `GET /home` | Optional aggregate: today + weekly + streak + hydration + unread count |
 

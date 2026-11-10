@@ -64,6 +64,14 @@ const FALLBACK_CONFIG: ActivityConfig = {
     motionWindowRetention: 864,
     fraudDetection: { enabled: true, mode: 'flag' },
     motionSampling: { enabled: true, windowSeconds: 10, intervalMinutes: 5 },
+    motionGate: {
+      enabled: true,
+      windowSeconds: 3,
+      stillVariance: 0.02,
+      minPeakRatio: 0.12,
+      maxZeroCrossingRate: 9,
+      engageSeconds: 2,
+    },
     privacyPolicyUrl: 'https://vokve.app/privacy',
   },
   sync: {
@@ -125,8 +133,18 @@ const NOTIFICATION_COPY = {
 /**
  * The tracker's config: the server's set-up (Health Connect read for a
  * watch and written with this phone's own steps, checks that flag and
- * remove nothing, `split` recovery, as it stands by default), the
- * notification's words, and the user's own body and goal.
+ * remove nothing, `split` recovery, and the vehicle gate on, as it stands
+ * by default), the notification's words, and the user's own body and goal.
+ *
+ * The gate (`motionGate`, tracker 2.8) is why a bus ride adds nothing: the
+ * phone's step counter is a pedometer in the sensor hub and a vehicle's
+ * vibration feeds it a rhythm it reports as walking, so the tracker watches
+ * the accelerometer while it counts and keeps those steps out of every
+ * figure — the live count, the notification, what is written to Health
+ * Connect and what is uploaded. They arrive at the server as `gatedSteps`,
+ * out of the day it scores. Nothing here is this app's judgement: every
+ * threshold is the server's (⚙ `activity.tracker.motionGate`), down to
+ * turning it off.
  */
 function trackerConfig(
   profile: StepProfile,

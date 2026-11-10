@@ -644,6 +644,41 @@ export const CONFIG_DEFAULTS = {
       motionWindowRetention: 864,
       fraudDetection: { enabled: true, mode: 'flag' as 'flag' | 'exclude' },
       motionSampling: { enabled: true, windowSeconds: 10, intervalMinutes: 5 },
+      /**
+       * **Steps a vehicle shook out of the phone are not steps** (A29,
+       * tracker 2.8). Android's step counter is a pedometer inside the
+       * sensor hub, and a bus seat, a car's floor or a bicycle's frame feeds
+       * it a rhythm it reports as walking — the oldest complaint there is,
+       * and one nothing after the fact can undo, because the counter hands
+       * over a number and not a waveform. On, the tracker watches the
+       * accelerometer while it counts and holds back the steps that arrive
+       * while the phone is being vibrated rather than walked; they stay in
+       * the snapshot's raw `deviceSteps` and arrive as `gatedSteps`, which
+       * the scoring takes off before a day is shown, verified or paid.
+       *
+       * The cost is one accelerometer registration for as long as counting
+       * runs, which is battery — worth it here, because these are steps
+       * Vokve would otherwise pay coins for. Off turns the whole thing off
+       * without an app release.
+       *
+       * The thresholds are the tracker's own defaults and are meant to be
+       * tuned against real devices: sit in a bus with the steps debug report
+       * on screen and watch the verdict move from `gait` to `vibration`.
+       * Every one of them is clamped again inside the tracker.
+       */
+      motionGate: {
+        enabled: true,
+        /** Seconds of accelerometer behind one verdict; 1–15. */
+        windowSeconds: 3,
+        /** (m/s²)² below which the phone is still — and a still phone is never gated. */
+        stillVariance: 0.02,
+        /** Share of the band's energy a gait peak must hold; higher gates more, and eventually gates walks. */
+        minPeakRatio: 0.12,
+        /** Mean crossings a second above which it is engine buzz, not a cadence. */
+        maxZeroCrossingRate: 9,
+        /** Seconds of unbroken vibration before a step is held back — what keeps the first steps off a bus. */
+        engageSeconds: 2,
+      },
     },
     /** When and what the phone sends (BACKEND §7.3). */
     sync: {

@@ -85,6 +85,15 @@ export const signedSnapshotSchema = z.object({
   deviceSteps: count.min(0),
   recoveredSteps: count.min(0).default(0),
   suspectSteps: count.min(0).default(0),
+  /**
+   * Of `deviceSteps`, what the phone's motion gate held back as a vehicle's
+   * vibration rather than steps (tracker 2.8, ⚙ `tracker.motionGate`). The
+   * device saying it never saw a step, not a flag for this server to weigh:
+   * it is already out of `resolved.steps` and out of every minute, so it is
+   * taken off `deviceSteps` before anything is scored or paid. 0 from a
+   * tracker older than 2.8, and on a phone with the gate off.
+   */
+  gatedSteps: count.min(0).default(0),
   sensor: z.string().default('none'),
   coverageStartAt: count.default(0),
   sources: z.array(sourceSchema).default([]),
@@ -204,6 +213,12 @@ export interface DeviceDayEvidence {
   deviceSteps: number;
   recoveredSteps: number;
   suspectSteps: number;
+  /**
+   * Of `deviceSteps`, what the phone's motion gate held back as a vehicle's
+   * vibration (A29). Absent on days stored before 2.8 — `countedOf()` is
+   * how every check reads the two together.
+   */
+  gatedSteps?: number;
   coverageStartAt: number;
   resolved: {
     steps: number;
@@ -272,6 +287,20 @@ export interface DeviceDayEvidence {
    */
   counting?: { window: [number, number][]; leftOut: number };
 }
+
+/**
+ * What a phone counted **as steps**: its raw sensor total less whatever its
+ * motion gate held back as a vehicle's vibration (A29).
+ *
+ * `deviceSteps` is the hardware counter's own figure, kept raw so the
+ * evidence says what the sensor said. Everything that scores, displays or
+ * pays a day reads it through here, because the gated share is in no minute
+ * of the day, in no `resolved` figure, and in nothing the phone itself
+ * showed the member — counting it would both pay for a bus ride and make
+ * the day look like a count with no minutes behind it (`steps_unaccounted`).
+ */
+export const countedOf = (evidence: Pick<DeviceDayEvidence, 'deviceSteps' | 'gatedSteps'>): number =>
+  Math.max(0, evidence.deviceSteps - (evidence.gatedSteps ?? 0));
 
 /** The local hour of an instant, in the zone the phone reported. */
 export function hourFinder(timezone: string, utcOffsetMinutes: number): (epochMs: number) => number {
@@ -343,6 +372,7 @@ export function summarise(snapshot: SignedSnapshot, config: AppConfig['activity'
     deviceSteps: Math.round(snapshot.deviceSteps),
     recoveredSteps: Math.round(snapshot.recoveredSteps),
     suspectSteps: Math.round(snapshot.suspectSteps),
+    gatedSteps: Math.round(snapshot.gatedSteps),
     coverageStartAt: snapshot.coverageStartAt,
     resolved: {
       steps: Math.round(snapshot.resolved.steps),

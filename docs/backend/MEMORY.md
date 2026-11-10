@@ -234,6 +234,7 @@ The client was built ahead of the rules, and a few numbers disagree with each ot
 | Walking cadence band | 1.4–2.5 Hz; shake > 3 Hz | RULES A16 |
 | Max devices / account | 5; flag at ≥ 3 accounts per device | RULES DV8 |
 | Motion sampling | 10 s every 5 min while steps accrue | D-23 |
+| Vehicle gate | **on**, 3 s window, engages after 2 s of vibration, still under 0.02 (m/s²)², peak share 0.12, buzz over 9/s ⚙ `activity.tracker.motionGate` | RULES A29 — 2026-11-10 (new in tracker 2.8) |
 | Ingest window | today and the 14 days before, in the phone's zone ⚙ `activity.maxAgeDays` | RULES A8 — D-77, 2026-10-14 (was 7) |
 | Step coin ceiling | 0.95 per 1,000 verified → **28.5 coins** a day at the 30k tier cap; ⚙ `coins.sourceCaps.steps` **30** | D-77 — 2026-10-14 (was 200, unreachable) |
 | Sync nudge | silent push after 20 h quiet, 8 h cooldown, member told at 72 h, given up at 30 d ⚙ `activity.syncNudge` | RULES A28 — D-77, 2026-10-14 |

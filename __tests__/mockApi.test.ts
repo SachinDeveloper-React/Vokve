@@ -440,6 +440,8 @@ describe('mock step sync', () => {
       counted: 6400,
       recovered: 200,
       flagged: 100,
+      // Nothing was held back: this snapshot carries no vehicle gate figure.
+      gated: 0,
       clean: 6100,
     });
     expect(report.uploads).toHaveLength(1);

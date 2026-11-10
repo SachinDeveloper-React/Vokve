@@ -203,6 +203,29 @@ export const activityConfigSchema = z.object({
       windowSeconds: z.number().int().positive(),
       intervalMinutes: z.number().int().positive(),
     }),
+    /**
+     * Steps the hardware counter reported while a vehicle was shaking the
+     * phone are held back rather than counted (tracker 2.8's `motionGate`).
+     * Defaulted off rather than required, so an answer from a server that
+     * does not know about the gate leaves counting exactly as it was.
+     */
+    motionGate: z
+      .object({
+        enabled: z.boolean(),
+        windowSeconds: z.number().int().positive(),
+        stillVariance: z.number().nonnegative(),
+        minPeakRatio: z.number().nonnegative(),
+        maxZeroCrossingRate: z.number().positive(),
+        engageSeconds: z.number().int().nonnegative(),
+      })
+      .default({
+        enabled: false,
+        windowSeconds: 3,
+        stillVariance: 0.02,
+        minPeakRatio: 0.12,
+        maxZeroCrossingRate: 9,
+        engageSeconds: 2,
+      }),
     /** Where Health Connect sends someone who asks why the app wants their steps. */
     privacyPolicyUrl: z.string(),
   }),
@@ -355,11 +378,19 @@ export const stepSourceDeviceSchema = z.object({
   syncedAt: z.string().nullable(),
   /** The phone's own sensor, and what was taken off it before it competed. */
   phone: z.object({
+    /** The phone's own sensor count, already without what a vehicle shook out of it. */
     counted: z.number().int().nonnegative(),
     /** Credited in one go after the phone had stopped counting. */
     recovered: z.number().int().nonnegative(),
     /** Flagged by the phone's own checks. */
     flagged: z.number().int().nonnegative(),
+    /**
+     * What the phone's own vehicle gate held back as a bus, a car or a bike
+     * shaking it rather than steps. **Never part of `counted`** — unlike
+     * `recovered` and `flagged`, which come off it — so the three do not
+     * subtract the same way. 0 on a day the gate did not run.
+     */
+    gated: z.number().int().nonnegative().default(0),
     clean: z.number().int().nonnegative(),
   }),
   /** The best count this phone's evidence supports. */

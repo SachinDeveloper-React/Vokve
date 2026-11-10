@@ -179,7 +179,10 @@ export function cutToWindow(
   const manualStepsExcluded = shown && snapshot.resolved.manualStepsExcluded > 0 ? Math.max(0, shown.manualSteps) : 0;
   const resolvedSteps = shown ? Math.max(0, shown.steps - manualStepsExcluded) : deviceSteps;
 
-  const before = Math.max(snapshot.resolved.steps, snapshot.deviceSteps);
+  // What the whole day would have shown, measured the way the cut day is:
+  // the gated share is in none of the minutes the cut is rebuilt from, so
+  // counting it here would read as steps the sign-in took away (A29).
+  const before = Math.max(snapshot.resolved.steps, snapshot.deviceSteps - snapshot.gatedSteps);
   const after = Math.max(resolvedSteps, deviceSteps);
   return {
     snapshot: {
@@ -187,6 +190,10 @@ export function cutToWindow(
       deviceSteps,
       recoveredSteps: 0,
       suspectSteps,
+      // The cut count is summed from the minutes, and the motion gate's
+      // steps reach no minute: they are already out of `deviceSteps` above,
+      // so nothing is left to take off a second time.
+      gatedSteps: 0,
       sources,
       resolved: { ...snapshot.resolved, steps: resolvedSteps, manualStepsExcluded },
       minutes,

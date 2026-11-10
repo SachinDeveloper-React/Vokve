@@ -196,9 +196,16 @@ export function signSnapshot(key: TestKey, payload: Record<string, unknown>) {
 export interface DayShape {
   date: string;
   nonce: string;
+  /** The hardware counter's own figure for the day, `gatedSteps` and all. */
   deviceSteps: number;
   recoveredSteps?: number;
   suspectSteps?: number;
+  /**
+   * Of `deviceSteps`, what the phone's motion gate held back as a vehicle's
+   * vibration (tracker 2.8). They reach no minute and no resolved figure,
+   * so the walk below is built from `deviceSteps` less these.
+   */
+  gatedSteps?: number;
   resolvedSteps?: number;
   /** The other app the phone showed `resolvedSteps` from; its own count when absent. */
   resolvedBy?: { packageName: string; appName: string; kind?: string };
@@ -225,7 +232,10 @@ export function snapshotPayload(shape: DayShape): Record<string, unknown> {
   // The walk's start, 09:00 IST unless the shape says, in epoch ms.
   const start =Date.parse(`${shape.date}T${String(shape.walkStartHour ?? 9).padStart(2, '0')}:00:00+05:30`);
   const perMinute = shape.perMinute ?? 100;
-  const minutes = Array.from({ length: shape.walkingMinutes ?? Math.round(shape.deviceSteps / perMinute) }, (_, i) => ({
+  // What the phone counted as steps; the gate's share is in the raw total and
+  // nowhere else, exactly as the tracker sends it.
+  const counted = shape.deviceSteps - (shape.gatedSteps ?? 0);
+  const minutes = Array.from({ length: shape.walkingMinutes ?? Math.round(counted / perMinute) }, (_, i) => ({
     minuteStart: start + i * 60_000, steps: perMinute, untimedSteps: 0, chargingSteps: 0, stillSteps: 0, vehicleSteps: 0,
   }));
   const windows = (shape.windows ?? [{ hz: 1.9, variance: 4, steps: 180 }, { hz: 1.8, variance: 3.5, steps: 170 }]).map((w, i) => ({
@@ -238,14 +248,15 @@ export function snapshotPayload(shape: DayShape): Record<string, unknown> {
     date: shape.date,
     deviceSteps: shape.deviceSteps,
     recoveredSteps: shape.recoveredSteps ?? 0,
+    gatedSteps: shape.gatedSteps ?? 0,
     sensor: 'step_counter',
     coverageStartAt: 0,
     sources: shape.sources ?? [],
     sourcesStatus: shape.sources ? 'read' : 'not_consulted',
     resolved: {
-      date: shape.date, steps: shape.resolvedSteps ?? shape.deviceSteps, kind: shape.resolvedBy?.kind ?? 'self',
+      date: shape.date, steps: shape.resolvedSteps ?? counted, kind: shape.resolvedBy?.kind ?? 'self',
       packageName: shape.resolvedBy?.packageName ?? null, appName: shape.resolvedBy?.appName ?? 'This device',
-      deviceSteps: shape.deviceSteps, externalSteps: shape.resolvedBy ? shape.resolvedSteps ?? 0 : 0, usedExternal: !!shape.resolvedBy,
+      deviceSteps: counted, externalSteps: shape.resolvedBy ? shape.resolvedSteps ?? 0 : 0, usedExternal: !!shape.resolvedBy,
       merged: false, baselineSteps: 0, manualStepsExcluded: 0, suspectStepsExcluded: 0, distanceSource: 'derived',
     },
     capabilities: { hasStepCounter: true, hasStepDetector: true, manufacturer: 'Google', model: 'Pixel 8', sdkInt: 35 },

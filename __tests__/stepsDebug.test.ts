@@ -254,6 +254,79 @@ test('says plainly when Health Connect is refusing the app for calling it too of
   expect(tracker.getHealthConnectRecords).toHaveBeenCalledTimes(1);
 });
 
+test('says what the vehicle gate thinks and what it held back today', async () => {
+  // A phone in a bus: the counter reported 2,600, the gate held 600 of them
+  // back, and the figures below are already without them.
+  tracker.getIntegrityReport.mockResolvedValue({
+    date: today,
+    enabled: true,
+    mode: 'flag',
+    deviceSteps: 2600,
+    suspectSteps: 0,
+    flags: [],
+    events: [],
+    motionGate: {
+      enabled: true,
+      verdict: 'vibration',
+      gatedSteps: 600,
+      rules: {
+        windowSeconds: 3,
+        stillVariance: 0.02,
+        minPeakRatio: 0.12,
+        maxZeroCrossingRate: 9,
+        engageSeconds: 2,
+      },
+    },
+  });
+  tracker.getVerificationSnapshot.mockImplementation(async (date: string) =>
+    snapshot(date, { deviceSteps: 2600, gatedSteps: 600 }),
+  );
+
+  const [setup, day, , byHour] = await report();
+
+  expect(setup).toContain(
+    'Vehicle gate: on · the phone right now: vibration · held back today 600',
+  );
+  // The hours are the minutes, and no minute holds a held-back step.
+  expect(byHour).toContain(
+    '(and 600 the sensor reported are in none of these hours: the vehicle gate held them back)',
+  );
+  // 2,000 of real walking, so the "why" compares the apps against that and
+  // not against the sensor's 2,600.
+  expect(day).toContain("not more than the phone's 2,000");
+  expect(setup).toContain('engages after 2s');
+  // The raw sensor count is the one place they are still in.
+  expect(day).toContain(
+    "2,600 steps today, counting since midnight · added after a gap 0 · flagged 0 · held back as a vehicle's shaking 600",
+  );
+  // Nothing is held back, and nothing is said, while the gate is off.
+  tracker.getIntegrityReport.mockResolvedValue({
+    date: today,
+    enabled: true,
+    mode: 'flag',
+    deviceSteps: 2600,
+    suspectSteps: 0,
+    flags: [],
+    events: [],
+    motionGate: {
+      enabled: false,
+      verdict: 'unknown',
+      gatedSteps: 0,
+      rules: {
+        windowSeconds: 3,
+        stillVariance: 0.02,
+        minPeakRatio: 0.12,
+        maxZeroCrossingRate: 9,
+        engageSeconds: 2,
+      },
+    },
+  });
+  const [off] = await report();
+  expect(off).toContain(
+    'Vehicle gate: OFF — steps a bus or a car shakes out of the phone are counted',
+  );
+});
+
 test('a permission that is really missing is said to be missing', async () => {
   tracker.getHealthConnectStatus.mockResolvedValue({
     ...CONNECTED,

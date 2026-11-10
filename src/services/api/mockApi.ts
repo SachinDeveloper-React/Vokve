@@ -3175,6 +3175,8 @@ interface MockSnapshotPayload {
   deviceSteps?: unknown;
   recoveredSteps?: unknown;
   suspectSteps?: unknown;
+  /** What the phone's vehicle gate held back, already out of `resolved` (A29). */
+  gatedSteps?: unknown;
   resolved?: { steps?: unknown; usedExternal?: unknown };
   minutes?: { steps?: unknown }[];
   sources?: {
@@ -3202,6 +3204,14 @@ const MOCK_ACTIVITY_CONFIG = {
     motionWindowRetention: 864,
     fraudDetection: { enabled: true, mode: 'flag' },
     motionSampling: { enabled: true, windowSeconds: 10, intervalMinutes: 5 },
+    motionGate: {
+      enabled: true,
+      windowSeconds: 3,
+      stillVariance: 0.02,
+      minPeakRatio: 0.12,
+      maxZeroCrossingRate: 9,
+      engageSeconds: 2,
+    },
     privacyPolicyUrl: 'https://vokve.app/privacy',
   },
   sync: {
@@ -3256,9 +3266,10 @@ const num = (value: unknown) =>
 
 /**
  * The day a snapshot describes, judged the simple way: the phone's own count
- * less what it recovered in one go or flagged is what verifies. The real
- * server weighs a trusted watch, the motion windows and the device's
- * history as well; this is enough for every screen to have a number.
+ * — less what a vehicle shook out of it, what it recovered in one go and
+ * what it flagged — is what verifies. The real server weighs a trusted
+ * watch, the motion windows and the device's history as well; this is enough
+ * for every screen to have a number.
  */
 function mockDayFrom(
   date: string,
@@ -3267,6 +3278,7 @@ function mockDayFrom(
   const steps = Math.max(0, Math.round(num(payload.resolved?.steps)));
   const clean =
     num(payload.deviceSteps) -
+    num(payload.gatedSteps) -
     num(payload.recoveredSteps) -
     num(payload.suspectSteps);
   const verifiedSteps = Math.max(0, Math.min(steps, Math.round(clean)));
@@ -3446,7 +3458,11 @@ export const mockActivityApi: ActivityApi = {
       });
     }
     const { payload, at } = latest;
-    const counted = Math.round(num(payload.deviceSteps));
+    // What the phone counted as steps: the sensor's total less what the
+    // vehicle gate held back (A29), which is in no minute and in nothing
+    // the phone showed.
+    const counted = Math.round(num(payload.deviceSteps) - num(payload.gatedSteps));
+    const gated = Math.max(0, Math.round(num(payload.gatedSteps)));
     const recovered = Math.round(num(payload.recoveredSteps));
     const flagged = Math.round(num(payload.suspectSteps));
     const clean = Math.max(0, counted - recovered - flagged);
@@ -3488,7 +3504,7 @@ export const mockActivityApi: ActivityApi = {
           isCurrent: true,
           answeredForDay: true,
           syncedAt: at,
-          phone: { counted, recovered, flagged, clean },
+          phone: { counted, recovered, flagged, gated, clean },
           counted: clean,
           source: 'device',
           verified: day.verified,

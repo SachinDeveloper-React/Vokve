@@ -297,6 +297,15 @@ function explain(
   }
   const phone = best.phone;
   lines.push(`${name} counted ${plural(phone.counted, 'step', 'steps')} with its own sensor.`);
+  // A29: the sensor reported them, the phone decided they were a vehicle
+  // shaking it, and they were never part of the count above. Said plainly,
+  // because an hour in a bus that adds nothing is the one figure a member
+  // comes to this page to ask about.
+  if ((phone.gated ?? 0) > 0) {
+    lines.push(
+      `Its sensor also reported ${plural(phone.gated ?? 0, 'step', 'steps')} while the phone was being shaken by a vehicle rather than walked — a bus, a car or a bike — so those were never counted.`,
+    );
+  }
   if (phone.recovered > 0) {
     lines.push(`${plural(phone.recovered, 'step was', 'steps were')} added in one go after the phone had stopped counting for a while, so they are left out.`);
   }
@@ -437,7 +446,9 @@ export async function getSourcesReport(userId: string, date: string, currentDevi
     uploads: uploads.map(upload => ({
       at: upload.receivedAt.toISOString(),
       deviceName: names.get(upload.deviceId) ?? 'Phone',
-      phoneSteps: Math.max(0, Math.round(upload.deviceSteps ?? 0)),
+      // What the phone counted as steps: its sensor total less what its
+      // motion gate held back (A29), so this row and the day agree.
+      phoneSteps: Math.max(0, Math.round((upload.deviceSteps ?? 0) - (upload.gatedSteps ?? 0))),
       shownSteps: Math.max(0, Math.round(upload.resolvedSteps ?? 0)),
       playIntegrity: upload.integrityVerdict ?? null,
     })),

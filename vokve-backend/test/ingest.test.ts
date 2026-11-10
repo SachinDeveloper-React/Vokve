@@ -521,6 +521,21 @@ describe('reading steps back: config, ranges and sources', () => {
     expect(hours.body.points[8].steps).toBe(8500);
   });
 
+  it('tells the member in plain words why an hour in a bus added nothing (A29)', async () => {
+    const { session, key } = await attested();
+    // 5,000 walked, 3,600 the phone held back as a vehicle shaking it.
+    const res = await post(session, await snapshotFor(session, key, { deviceSteps: 8_600, gatedSteps: 3_600 }));
+    expect(res.body.day).toMatchObject({ steps: 5_000, verifiedSteps: 5_000 });
+
+    const report = (await request(app).get(`/v1/activity/sources?date=${today()}`).set(authed(session))).body;
+    expect(report.devices[0]).toMatchObject({ phone: { counted: 5_000, gated: 3_600, clean: 5_000 } });
+    // The upload row reads as the day does, not as the raw sensor figure.
+    expect(report.uploads[0]).toMatchObject({ phoneSteps: 5_000 });
+    const said = report.explanation.join(' ');
+    expect(said).toContain('counted 5,000 steps with its own sensor');
+    expect(said).toContain('reported 3,600 steps while the phone was being shaken by a vehicle');
+  });
+
   it('a watch relayed by Google Fit, its steps with no recording method: the day shows it, the phone’s count verifies, and the page says why (D-51)', async () => {
     // The phone counted the morning; the watch alone saw a 200-step walk at 14:00.
     const hourly = Array.from({ length: 24 }, (_, h) => (h === 9 ? 1000 : h === 14 ? 200 : 0));

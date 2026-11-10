@@ -75,6 +75,8 @@ const stepUploadSchema = new Schema(
     deviceSteps: Number,
     recoveredSteps: Number,
     suspectSteps: Number,
+    /** Of `deviceSteps`, what the phone's motion gate held back as a vehicle's vibration (A29). */
+    gatedSteps: Number,
     resolvedSteps: Number,
     integrityVerdict: { type: String, default: null },
     appVersion: String,

@@ -168,6 +168,7 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
     deviceSteps: parsed.deviceSteps,
     recoveredSteps: parsed.recoveredSteps,
     suspectSteps: parsed.suspectSteps,
+    gatedSteps: parsed.gatedSteps,
     resolvedSteps: parsed.resolved.steps,
     integrityVerdict: play?.verdict ?? null,
     appVersion: ctx.appVersion,

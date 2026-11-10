@@ -64,6 +64,24 @@ export const stepsConfigPatch = z
               })
               .strict()
               .partial(),
+            /**
+             * The vehicle gate (A29). The bounds are the tracker's own, which
+             * clamps each one again: a window under a second holds too little
+             * of a stride to find one, a peak share of 1 wants a pure tone and
+             * would gate every walk, and an engage wait past two minutes means
+             * the ride is over before the gate starts.
+             */
+            motionGate: z
+              .object({
+                enabled: z.boolean(),
+                windowSeconds: z.number().int().min(1).max(15),
+                stillVariance: z.number().min(0).max(1),
+                minPeakRatio: z.number().min(0).max(0.9),
+                maxZeroCrossingRate: z.number().min(1).max(100),
+                engageSeconds: z.number().int().min(0).max(120),
+              })
+              .strict()
+              .partial(),
           })
           .strict()
           .partial(),

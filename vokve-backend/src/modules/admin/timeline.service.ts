@@ -429,15 +429,25 @@ export async function stepsTimeline(userId: string, query: TimelineQuery) {
       rejectedDevices: allDays.length - deviceDays.length,
     },
     devices: allDays.map(day => {
-      const evidence = day.evidence as { deviceSteps?: number; minuteSteps?: unknown[] };
+      const evidence = day.evidence as { deviceSteps?: number; gatedSteps?: number; minuteSteps?: unknown[] };
       const tally = perDevice.get(day.deviceId);
       const device = devices.find(row => row._id === day.deviceId);
       const decided = storedOf.get(day.deviceId);
       return {
         deviceId: day.deviceId,
         name: nameOf.get(day.deviceId) ?? 'Phone',
-        /** Everything this phone's own sensor counted for the day. */
+        /**
+         * Everything this phone's own sensor counted for the day, the raw
+         * figure — `gatedSteps` of it never reached a minute, so a phone
+         * carried on a bus reads higher here than anywhere else.
+         */
         deviceSteps: evidence?.deviceSteps ?? 0,
+        /**
+         * Of that, what the phone's own motion gate held back as a vehicle's
+         * vibration rather than steps (A29). Already out of everything the
+         * day was scored, shown or paid on. 0 before tracker 2.8.
+         */
+        gatedSteps: evidence?.gatedSteps ?? 0,
         /** Whether this phone's own counter answered for it, or a Health Connect app did. */
         source: decided?.source ?? null,
         /** The Health Connect source that answered for this phone, by package name. */

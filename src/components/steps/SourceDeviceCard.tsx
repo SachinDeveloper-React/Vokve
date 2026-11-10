@@ -149,6 +149,17 @@ export const SourceDeviceCard = memo(({ device }: Props) => {
             label="Counted by the phone"
             value={formatGrouped(phone.counted)}
           />
+          {/*
+            Never part of the count above, so no minus sign: the phone's own
+            sensor reported them while a vehicle was shaking it, and the
+            phone decided they were not steps. The rows below it do subtract.
+          */}
+          {phone.gated > 0 ? (
+            <Figure
+              label="Shaken by a vehicle, not counted"
+              value={formatGrouped(phone.gated)}
+            />
+          ) : null}
           {phone.recovered > 0 ? (
             <Figure
               label="Added after a gap"

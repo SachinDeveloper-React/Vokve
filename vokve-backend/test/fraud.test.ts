@@ -141,6 +141,32 @@ describe('fraud: a total the minutes do not account for (RULES A24)', () => {
   });
 });
 
+describe('fraud: steps a vehicle shook out of the counter (RULES A29)', () => {
+  it('pays for the walk and not for the bus ride', async () => {
+    const { session, key } = await attested();
+    // The counter reported 8,600 for the day. 3,600 of them arrived while the
+    // phone was being vibrated by a bus, so the phone held them back: they are
+    // in its raw figure, in none of its minutes, and in nothing it showed.
+    const { res, date } = await send(session, key, { deviceSteps: 8_600, gatedSteps: 3_600 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.day).toMatchObject({ steps: 5_000, verifiedSteps: 5_000, verified: true });
+    // And the raw figure is not read as 3,600 steps no minute can explain.
+    expect(await flagsOn(session.userId, date)).not.toContain('steps_unaccounted:soft');
+    const day = await ActivityDailyModel.findById(`${session.userId}:${date}`).lean();
+    expect(day?.hardRejects ?? []).not.toContain('steps_unaccounted');
+    expect(day?.pedometerSteps).toBe(5_000);
+    expect(day?.breakdown?.devices?.[0]?.phone).toMatchObject({ counted: 5_000, gated: 3_600 });
+  });
+
+  it('is the device saying it saw no step, so a day of nothing but a ride is worth nothing', async () => {
+    const { session, key } = await attested();
+    const { res } = await send(session, key, { deviceSteps: 2_400, gatedSteps: 2_400, walkingMinutes: 0 });
+
+    expect(res.body.day).toMatchObject({ steps: 0, verifiedSteps: 0 });
+  });
+});
+
 describe('fraud: evidence switched off (RULES A25)', () => {
   it('scores the motion layer rather than dropping it when the sampling it asked for is missing', async () => {
     const { session, key } = await attested();

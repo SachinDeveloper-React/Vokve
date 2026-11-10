@@ -82,6 +82,14 @@ const SERVER_CONFIG = {
     motionWindowRetention: 864,
     fraudDetection: { enabled: true, mode: 'flag' as const },
     motionSampling: { enabled: true, windowSeconds: 10, intervalMinutes: 5 },
+    motionGate: {
+      enabled: true,
+      windowSeconds: 3,
+      stillVariance: 0.02,
+      minPeakRatio: 0.12,
+      maxZeroCrossingRate: 9,
+      engageSeconds: 2,
+    },
     privacyPolicyUrl: 'https://vokve.app/privacy',
   },
   sync: {
@@ -204,6 +212,16 @@ describe('a step session', () => {
         wearableAllowlist: ['com.google.android.apps.fitness'],
         gapRecovery: 'drop',
         fraudDetection: { enabled: true, mode: 'flag' },
+        // Steps a vehicle shakes out of the counter are held back on the
+        // phone, by the server's thresholds (tracker 2.8).
+        motionGate: {
+          enabled: true,
+          windowSeconds: 3,
+          stillVariance: 0.02,
+          minPeakRatio: 0.12,
+          maxZeroCrossingRate: 9,
+          engageSeconds: 2,
+        },
         privacyPolicyUrl: 'https://vokve.app/privacy',
       }),
     );

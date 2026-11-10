@@ -144,6 +144,22 @@ describe('counting from sign-in (D-56): the part of a day that counts', () => {
     expect(cut.snapshot.resolved.steps).toBe(700);
     expect(cut.leftOut).toBe(3300);
   });
+
+  it('does not count a vehicle gate\u2019s steps as steps the sign-in took away (A29)', () => {
+    // The counter reported 2,600: 1,000 walked before the sign-in, 500 after,
+    // and 1,100 the phone held back as a bus shaking it. The gated share is
+    // in no minute, so the cut must neither credit nor blame it.
+    const payload = snapshotPayload({ date: DAY, nonce: 'n', deviceSteps: 2600, gatedSteps: 1100, walkingMinutes: 0 });
+    payload.minutes = [...walk(DAY, '09:00', 10, 100), ...walk(DAY, '13:00', 5, 100)];
+
+    const cut = cutToWindow(signedSnapshotSchema.parse(payload), [[at(DAY, '12:00'), at('2026-10-02', '00:00')]]);
+
+    expect(cut.snapshot.deviceSteps).toBe(500);
+    // Already out of the 500 above; nothing is left to take off twice.
+    expect(cut.snapshot.gatedSteps).toBe(0);
+    // The sign-in cost the morning's 1,000 \u2014 not the 1,100 the gate held.
+    expect(cut.leftOut).toBe(1000);
+  });
 });
 
 describe('counting from sign-in (D-56): signing in and out', () => {

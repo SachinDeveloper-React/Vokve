@@ -200,6 +200,26 @@ describe('StepSourcesScreen', () => {
     expect(text).toContain('7,000 on the phone');
   });
 
+  test('names what a vehicle shook out of the count, and only when there was some', async () => {
+    // A day with no gate figure says nothing about it.
+    expect(textOf(await render(), RNText)).not.toContain('Shaken by a vehicle');
+
+    mockSources.mockResolvedValue({
+      ...REPORT,
+      devices: [
+        {
+          ...REPORT.devices[0],
+          phone: { counted: 7000, recovered: 300, flagged: 0, gated: 3600, clean: 6700 },
+        },
+      ],
+    });
+    const text = textOf(await render(), RNText);
+    expect(text).toContain('Shaken by a vehicle, not counted');
+    // No minus sign: they were never in the 7,000 above.
+    expect(text).toContain('3,600');
+    expect(text).not.toContain('− 3,600');
+  });
+
   test('shows the fraud layers only when the server sends them', async () => {
     expect(textOf(await render(), RNText)).toContain('Score 92 of 100');
 

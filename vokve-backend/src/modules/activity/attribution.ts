@@ -26,7 +26,14 @@ export const PHONE_SOURCE_NAME = 'Phone step counter';
 /** One device's part of `activity_daily.breakdown`, as `rollup.service.ts` writes it. */
 export interface StoredDevice {
   deviceId: string;
-  phone: { counted: number; recovered: number; flagged: number; clean: number };
+  phone: {
+    counted: number;
+    recovered: number;
+    flagged: number;
+    /** What the phone's motion gate held back as a vehicle's vibration (A29); absent before 2.8. */
+    gated?: number;
+    clean: number;
+  };
   candidate: number;
   source: 'device' | 'health_connect';
   /** The Health Connect source that answered for this phone, by package name. */

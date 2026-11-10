@@ -201,6 +201,28 @@ export const activityConfigSchema = z.object({
       windowSeconds: z.number().int().positive(),
       intervalMinutes: z.number().int().positive(),
     }),
+    /**
+     * Steps a vehicle shook out of the phone are held back rather than
+     * counted (A29, tracker 2.8). Defaulted so an app answered by a server
+     * that does not know about the gate counts exactly as it did before.
+     */
+    motionGate: z
+      .object({
+        enabled: z.boolean(),
+        windowSeconds: z.number().int().positive(),
+        stillVariance: z.number().nonnegative(),
+        minPeakRatio: z.number().nonnegative(),
+        maxZeroCrossingRate: z.number().positive(),
+        engageSeconds: z.number().int().nonnegative(),
+      })
+      .default({
+        enabled: false,
+        windowSeconds: 3,
+        stillVariance: 0.02,
+        minPeakRatio: 0.12,
+        maxZeroCrossingRate: 9,
+        engageSeconds: 2,
+      }),
     /** Where Health Connect sends someone who asks why the app wants their steps. */
     privacyPolicyUrl: z.string(),
   }),

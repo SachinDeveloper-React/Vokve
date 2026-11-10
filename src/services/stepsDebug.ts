@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import StepTracker, {
   type AnyHealthConnectRecord,
   type HealthConnectStatus,
+  type IntegrityReport,
   type StepSource,
   type StepTrackerConfig,
   type VerificationSnapshot,
@@ -91,6 +92,17 @@ const short = (permission: string) =>
 const cell = (value: number) => n(value).padStart(7);
 const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0);
 
+/**
+ * What this phone counted **as steps**: the sensor's raw total less whatever
+ * the vehicle gate held back (2.8). The raw figure is `deviceSteps`, and it
+ * is the only place the gated share is still in — the tracker compares
+ * Health Connect's apps against this, the minutes hold only this, and this
+ * is what goes up. Comparing an app against the raw figure would explain the
+ * day by a number the tracker never used.
+ */
+const countedBy = (snapshot: VerificationSnapshot) =>
+  Math.max(0, snapshot.deviceSteps - (snapshot.gatedSteps ?? 0));
+
 const stepsAllowed = (status: HealthConnectStatus) =>
   status.stepsGranted ?? status.canReadSteps ?? status.canRead;
 
@@ -116,7 +128,7 @@ export async function stepDebugReport(
   const dayStart = new Date(now);
   dayStart.setHours(0, 0, 0, 0);
 
-  const [trackerConfig, snapshot] = await Promise.all([
+  const [trackerConfig, snapshot, integrity] = await Promise.all([
     read(() => StepTracker.getConfig()),
     read(() =>
       StepTracker.getVerificationSnapshot(date, {
@@ -124,6 +136,9 @@ export async function stepDebugReport(
         healthConnectRecordTypes: ['steps'],
       }),
     ),
+    // The vehicle gate's verdict as it stands *now*, which no snapshot
+    // carries: on the phone, not Health Connect, so it costs no rate limit.
+    read(() => StepTracker.getIntegrityReport(date)),
   ]);
   const records = await recordsOf(snapshot, dayStart.getTime(), now);
   // Asked fresh for the tracker's own count of its Health Connect calls
@@ -142,7 +157,7 @@ export async function stepDebugReport(
     health?.rateLimit?.readsLimited === true;
 
   const sections = [
-    setupSection(reason, date, now, snapshot, trackerConfig, health),
+    setupSection(reason, date, now, snapshot, trackerConfig, health, integrity),
   ];
   if (snapshot.ok) {
     sections.push(
@@ -212,6 +227,36 @@ async function recordsOf(
       };
 }
 
+/**
+ * The vehicle gate (2.8): whether it is on, what it makes of the phone's
+ * movement right now, and how much of today it has held back.
+ *
+ * `verdict` is the line to read while sitting in a bus: it moves to
+ * `vibration` a second or two into a ride and back to `gait` on the first
+ * step off it. `unknown` means no verdict is recent enough to speak — the
+ * gate is off, the accelerometer is not delivering, or a window has yet to
+ * fill — and nothing is held back then.
+ */
+function gateLine(integrity: Read<IntegrityReport>): string {
+  if (!integrity.ok) {
+    return `Vehicle gate: could not be read — ${integrity.error}`;
+  }
+  const gate = integrity.value.motionGate;
+  if (!gate) {
+    return 'Vehicle gate: not in this tracker build (needs 2.8)';
+  }
+  if (!gate.enabled) {
+    return 'Vehicle gate: OFF — steps a bus or a car shakes out of the phone are counted';
+  }
+  const rules = gate.rules;
+  return (
+    `Vehicle gate: on · the phone right now: ${gate.verdict} · held back today ${n(
+      gate.gatedSteps,
+    )} · window ${rules.windowSeconds}s · engages after ${rules.engageSeconds}s · ` +
+    `still under ${rules.stillVariance} · peak share ${rules.minPeakRatio} · buzz over ${rules.maxZeroCrossingRate}/s`
+  );
+}
+
 function setupSection(
   reason: string,
   date: string,
@@ -219,6 +264,7 @@ function setupSection(
   snapshot: Read<VerificationSnapshot>,
   trackerConfig: Read<StepTrackerConfig>,
   health: HealthConnectStatus | null,
+  integrity: Read<IntegrityReport>,
 ): string[] {
   const api = apiLevel();
   const phone = snapshot.ok
@@ -267,6 +313,7 @@ function setupSection(
   } else {
     lines.push(`Tracker config: could not be read — ${trackerConfig.error}`);
   }
+  lines.push(gateLine(integrity));
   lines.push(
     health
       ? `Health Connect: ${health.availability} · steps allowed: ${yesNo(
@@ -321,7 +368,13 @@ function daySection(
       snapshot.deviceSteps,
     )} steps today, counting since ${since} · added after a gap ${n(
       snapshot.recoveredSteps,
-    )} · flagged ${n(snapshot.suspectSteps)}`,
+    )} · flagged ${n(snapshot.suspectSteps)}${
+      // 2.8: already out of every figure below, and of what is uploaded —
+      // the raw sensor count above is the only place they are still in.
+      (snapshot.gatedSteps ?? 0) > 0
+        ? ` · held back as a vehicle's shaking ${n(snapshot.gatedSteps ?? 0)}`
+        : ''
+    }`,
     countFrom
       ? `Counting from sign-in: nothing before ${new Date(
           countFrom,
@@ -398,7 +451,7 @@ function why(
   const counted = (source: StepSource) =>
     source.steps - (typedOut ? Math.max(0, source.manualSteps) : 0);
   const best = others.reduce((a, b) => (counted(b) > counted(a) ? b : a));
-  const phone = snapshot.deviceSteps;
+  const phone = countedBy(snapshot);
   if (counted(best) <= phone) {
     return counted(best) < best.steps
       ? `${best.appName} has ${n(best.steps)}, but ${n(
@@ -509,11 +562,20 @@ function hoursSection(snapshot: VerificationSnapshot): string[] {
       .map(app => ` |${cell(sum(app.hours))}`)
       .join('')}`,
   );
-  if (sum(phone) !== snapshot.deviceSteps) {
+  // The minutes hold what the sensor was seen taking as steps: not a
+  // backlog credited in one go, and not what the vehicle gate held back.
+  if (sum(phone) !== countedBy(snapshot)) {
     lines.push(
-      `  (the phone's minutes add up to ${n(sum(phone))}; its total is ${n(
-        snapshot.deviceSteps,
+      `  (the phone's minutes add up to ${n(sum(phone))}; its count is ${n(
+        countedBy(snapshot),
       )})`,
+    );
+  }
+  if ((snapshot.gatedSteps ?? 0) > 0) {
+    lines.push(
+      `  (and ${n(
+        snapshot.gatedSteps ?? 0,
+      )} the sensor reported are in none of these hours: the vehicle gate held them back)`,
     );
   }
   for (const app of apps) {
