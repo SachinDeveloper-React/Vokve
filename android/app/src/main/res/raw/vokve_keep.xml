@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Resources that are looked up by NAME at runtime, which the resource
+  shrinker (`shrinkResources` in app/build.gradle) cannot see: it keeps what
+  the compiled code refers to by id, and a name that arrives as a string -
+  from JavaScript, or from a library calling `getIdentifier` - is not that.
+  Left out of this list, each of these is deleted from a release build and
+  nothing fails until somebody uses it:
+
+    - the three hydration reminder sounds. They are chosen in
+      `src/constants/reminderSounds.ts` and handed to notifee as a name
+      (`sound: 'bell'`), so a release build without them has reminders that
+      arrive silent, or on the phone's default sound.
+
+    - `default_web_client_id`, the OAuth client id the Google Services
+      plugin generates from google-services.json. Google sign-in is
+      configured with `webClientId: 'autoDetect'`
+      (`src/services/googleSignIn.ts`), which reads this string by name;
+      without it every Google sign-in fails before Google is ever asked.
+
+  A new sound file, or any other resource named from JavaScript, has to be
+  added here as well as to res/.
+
+  The file is NOT called keep.xml on purpose. Keep files are merged by name
+  like any other resource, and the React Native Gradle plugin generates a
+  raw/keep.xml of its own for the images JavaScript bundles; a file of that
+  name here is silently replaced by it, and every line above is ignored.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/water_drop,@raw/chime,@raw/bell,@string/default_web_client_id" />

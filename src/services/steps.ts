@@ -27,7 +27,25 @@ import { activityApi, deviceApi } from './api/endpoints';
 import { ApiError, toApiError } from './api/errors';
 import { getDeviceId } from './device';
 import { measure } from './perf';
-import { logStepDebug } from './stepsDebug';
+
+/**
+ * The step report for the console, in a development build only (see
+ * `stepsDebug`). A `require` behind `__DEV__` rather than an `import`, so
+ * the reporter is not in a release bundle at all: it already did nothing
+ * there, and Metro ships every module that is imported whether or not it
+ * ever runs.
+ *
+ * Required as this module loads rather than at the first report: a report
+ * is asked for from the tail of a promise chain, and a `require` that first
+ * runs there can land after a test's environment has been torn down.
+ */
+const stepsDebug: typeof import('./stepsDebug') | null = __DEV__
+  ? require('./stepsDebug')
+  : null;
+
+function logStepDebug(reason: string): void {
+  stepsDebug?.logStepDebug(reason);
+}
 
 /**
  * Steps: counted on the phone by react-native-step-tracker-pro, signed there

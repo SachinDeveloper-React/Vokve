@@ -19,25 +19,8 @@ PODS:
     - ReactNativeDependencies
   - fast_float (8.0.0):
     - ReactNativeDependencies
-  - FBAEMKit (18.1.1):
-    - FBSDKCoreKit_Basics (= 18.1.1)
   - FBLazyVector (0.87.1):
     - React-Core-prebuilt
-  - FBSDKCoreKit (18.1.1):
-    - FBAEMKit (= 18.1.1)
-    - FBSDKCoreKit_Basics (= 18.1.1)
-  - FBSDKCoreKit_Basics (18.1.1)
-  - FBSDKGamingServicesKit (18.1.1):
-    - FBSDKCoreKit (= 18.1.1)
-    - FBSDKCoreKit_Basics (= 18.1.1)
-    - FBSDKShareKit (= 18.1.1)
-  - FBSDKLoginKit (18.1.1):
-    - FBSDKCoreKit (= 18.1.1)
-  - FBSDKShareKit (18.1.1):
-    - FBSDKCoreKit (= 18.1.1)
-  - Firebase/Auth (12.18.0):
-    - Firebase/CoreOnly
-    - FirebaseAuth (~> 12.18.0)
   - Firebase/CoreOnly (12.18.0):
     - FirebaseCore (~> 12.18.0)
   - Firebase/Crashlytics (12.18.0):
@@ -51,17 +34,6 @@ PODS:
     - FirebasePerformance (~> 12.18.0)
   - FirebaseABTesting (12.18.0):
     - FirebaseCore (~> 12.18.0)
-  - FirebaseAppCheckInterop (12.18.0)
-  - FirebaseAuth (12.18.0):
-    - FirebaseAppCheckInterop (~> 12.18.0)
-    - FirebaseAuthInterop (~> 12.18.0)
-    - FirebaseCore (~> 12.18.0)
-    - FirebaseCoreExtension (~> 12.18.0)
-    - GoogleUtilities/AppDelegateSwizzler (~> 8.1)
-    - GoogleUtilities/Environment (~> 8.1)
-    - GTMSessionFetcher/Core (< 6.0, >= 3.4)
-    - RecaptchaInterop (~> 101.0)
-  - FirebaseAuthInterop (12.18.0)
   - FirebaseCore (12.18.0):
     - FirebaseCoreInternal (~> 12.18.0)
     - GoogleUtilities/Environment (~> 8.1)
@@ -1482,21 +1454,6 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-fbsdk-next (13.4.3):
-    - React-Core
-    - react-native-fbsdk-next/Core (= 13.4.3)
-    - react-native-fbsdk-next/Login (= 13.4.3)
-    - react-native-fbsdk-next/Share (= 13.4.3)
-  - react-native-fbsdk-next/Core (13.4.3):
-    - FBSDKCoreKit (~> 18.0)
-    - React-Core
-  - react-native-fbsdk-next/Login (13.4.3):
-    - FBSDKLoginKit (~> 18.0)
-    - React-Core
-  - react-native-fbsdk-next/Share (13.4.3):
-    - FBSDKGamingServicesKit (~> 18.0)
-    - FBSDKShareKit (~> 18.0)
-    - React-Core
   - react-native-image-picker (8.2.1):
     - hermes-engine
     - RCTRequired
@@ -2106,30 +2063,6 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNFBAuth (26.4.0):
-    - Firebase/Auth (= 12.18.0)
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-bridging
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - RNFBApp
-    - Yoga
   - RNFBCrashlytics (26.4.0):
     - Firebase/Crashlytics (= 12.18.0)
     - FirebaseCoreExtension (= 12.18.0)
@@ -2551,7 +2484,6 @@ DEPENDENCIES:
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
   - React-mutationobservernativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver`)
-  - react-native-fbsdk-next (from `../node_modules/react-native-fbsdk-next`)
   - react-native-image-picker (from `../node_modules/react-native-image-picker`)
   - react-native-keyboard-controller (from `../node_modules/react-native-keyboard-controller`)
   - "react-native-netinfo (from `../node_modules/@react-native-community/netinfo`)"
@@ -2596,7 +2528,6 @@ DEPENDENCIES:
   - "RNCClipboard (from `../node_modules/@react-native-clipboard/clipboard`)"
   - RNDeviceInfo (from `../node_modules/react-native-device-info`)
   - "RNFBApp (from `../node_modules/@react-native-firebase/app`)"
-  - "RNFBAuth (from `../node_modules/@react-native-firebase/auth`)"
   - "RNFBCrashlytics (from `../node_modules/@react-native-firebase/crashlytics`)"
   - "RNFBMessaging (from `../node_modules/@react-native-firebase/messaging`)"
   - "RNFBPerf (from `../node_modules/@react-native-firebase/perf`)"
@@ -2613,17 +2544,8 @@ SPEC REPOS:
   trunk:
     - AppAuth
     - AppCheckCore
-    - FBAEMKit
-    - FBSDKCoreKit
-    - FBSDKCoreKit_Basics
-    - FBSDKGamingServicesKit
-    - FBSDKLoginKit
-    - FBSDKShareKit
     - Firebase
     - FirebaseABTesting
-    - FirebaseAppCheckInterop
-    - FirebaseAuth
-    - FirebaseAuthInterop
     - FirebaseCore
     - FirebaseCoreExtension
     - FirebaseCoreInternal
@@ -2750,8 +2672,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   React-mutationobservernativemodule:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver"
-  react-native-fbsdk-next:
-    :path: "../node_modules/react-native-fbsdk-next"
   react-native-image-picker:
     :path: "../node_modules/react-native-image-picker"
   react-native-keyboard-controller:
@@ -2840,8 +2760,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-device-info"
   RNFBApp:
     :path: "../node_modules/@react-native-firebase/app"
-  RNFBAuth:
-    :path: "../node_modules/@react-native-firebase/auth"
   RNFBCrashlytics:
     :path: "../node_modules/@react-native-firebase/crashlytics"
   RNFBMessaging:
@@ -2872,18 +2790,9 @@ SPEC CHECKSUMS:
   BVLinearGradient: cb006ba232a1f3e4f341bb62c42d1098c284da70
   DoubleConversion: 501a575c40c0b50c89685762dd3e415e6bb26fb0
   fast_float: 7c925d1cebf8328d4018d061f49377e9f887e3b4
-  FBAEMKit: fbb0a50e13109400d0615e7630a0db26ec6b8206
   FBLazyVector: e08a27053b503eeb756ea4bd75d570d2f2522a1b
-  FBSDKCoreKit: 0063014b3b1f7e975e70b60232b0cf8003839746
-  FBSDKCoreKit_Basics: f4a1e0f38769eb71abaf6395b85e015318fcda49
-  FBSDKGamingServicesKit: b53cdd0293c559ba9a72add38ccd6b541df379e9
-  FBSDKLoginKit: 0e6d0df30ae0a5b33f33d9050ca10ca21e0da234
-  FBSDKShareKit: b588264311416ed8d7eabe1333c552fc4b86aa48
   Firebase: 5523dd53ebe603451b4e1befcd99fa20a5c015cd
   FirebaseABTesting: 7060ad22592c1ae86cccf9cc0f886f470084cbd5
-  FirebaseAppCheckInterop: 8c2fe8b563377bd948ee6acc2871fe2dfb3a034a
-  FirebaseAuth: 389097b0c63059262aa02800cb0b93c9fab09130
-  FirebaseAuthInterop: 32c03820809ddc9e63dfaaf3711ce2ac8da7e6ae
   FirebaseCore: 96787d19ee32dc2242cc487b301bc616afeb398b
   FirebaseCoreExtension: a86bab02524ca2bff95dddab7a3fcad505c2ddeb
   FirebaseCoreInternal: 93b2d5f9e184c6818a04433891c358b0720a6a38
@@ -2950,7 +2859,6 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 8c1898265f1ac21bd7e3c9afca8440ba2adb8753
   React-microtasksnativemodule: 04833b425e5e7381ef5ab1b15be3f74c05632448
   React-mutationobservernativemodule: eac010f6dcd8fa461aa3d75db3a8f2ec6bcb8fbd
-  react-native-fbsdk-next: 325e4973a478f098bb9406fb2a13fa2e1f5dffeb
   react-native-image-picker: fb55a573ca2d0c23789fa88fb07b878d591559d8
   react-native-keyboard-controller: eeb3830d24f927a3768712b9c9397514efdc7517
   react-native-netinfo: afde752bbbafa8accf42ec4e8c82a91f3624922f
@@ -2996,7 +2904,6 @@ SPEC CHECKSUMS:
   RNCClipboard: e706ef7ccbbfd69f829c1b683f893bc7668c9fdb
   RNDeviceInfo: 4c852998208b60dc192ae3529e5867817719ad1e
   RNFBApp: b2a6488cfc84694ae79abb10474c0aa030722246
-  RNFBAuth: d428e3285d3480b0cb8fd9152e0b236d8022a919
   RNFBCrashlytics: 045c90443cd80f6fd2be54772ed09292da5ddad1
   RNFBMessaging: 90bab2ad25b0e6fc61b1dda8e9dae53f48993a69
   RNFBPerf: 09ffa15c45bcf39ec7c402aa4a45d064edf41b0f
@@ -3009,6 +2916,6 @@ SPEC CHECKSUMS:
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
 
-PODFILE CHECKSUM: d839ff0e7d53e87bb4b5eb5b21a9e08e5bcf91ab
+PODFILE CHECKSUM: 535596ac7b58ff5e1601117a5d4989483f1a768a
 
 COCOAPODS: 1.17.0

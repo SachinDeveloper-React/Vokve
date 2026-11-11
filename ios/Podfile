@@ -95,9 +95,10 @@ ENV['USE_FRAMEWORKS'] ||= 'static'
 
 # @react-native-firebase >= 26 defaults to resolving firebase-ios-sdk through SPM
 # on RN >= 0.75, and SPM mode hard-requires `:linkage => :dynamic`. Dynamic
-# linkage is incompatible with RN 0.87's prebuilt React.xcframework (static), and
-# react-native-fbsdk-next does not link under dynamic frameworks either. So: opt
-# out of SPM and let CocoaPods resolve Firebase.
+# linkage is incompatible with RN 0.87's prebuilt React.xcframework (static). So:
+# opt out of SPM and let CocoaPods resolve Firebase. (react-native-fbsdk-next,
+# should Facebook sign-in bring it back, does not link under dynamic frameworks
+# either.)
 $RNFirebaseDisableSPM = true
 $RNFirebaseAsStaticFramework = true
 

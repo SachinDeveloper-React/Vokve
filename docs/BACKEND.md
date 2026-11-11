@@ -107,7 +107,7 @@ Thirteen zustand stores persist to MMKV. Each one is a client-side cache of stat
 | Health Connect (Android) | Yes — `react-native-health-connect@4.1.3`, permission delegate in `MainActivity.kt`, `PermissionRationaleActivity.kt`, `READ_STEPS` / `WRITE_STEPS` / `READ_HEALTH_DATA_IN_BACKGROUND` in the manifest | **No** |
 | HealthKit (iOS) | **No** — no usage strings in `Info.plist`, no entitlement | No |
 | Firebase (auth, messaging, crashlytics, perf) | All four packages installed, `firebase.json` present | **No** — zero `firebase` imports under `src/` |
-| Google / Apple / Facebook sign-in | `react-native-nitro-google-signin`, `react-native-fbsdk-next` installed; `SocialAuthRow` renders all three | **No** — handlers show "not connected yet" |
+| Google / Apple / Facebook sign-in | `react-native-nitro-google-signin` installed and Google wired (RULES O12); `SocialAuthRow` renders all three. `react-native-fbsdk-next` was removed until Facebook sign-in is built: unused, it still shipped the Facebook SDK, its exported activities and the advertising-ID permissions in every build | **Google only** — Apple and Facebook show "not connected yet" |
 | OS share sheet + clipboard | Wired in `ReferralScreen` | Yes |
 | Device info | `react-native-device-info@15.0.2` installed — model, OS, vendor id, `isEmulator()`, app version/build | **No** — zero imports; no device id exists anywhere in the client |
 

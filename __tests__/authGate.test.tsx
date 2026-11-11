@@ -47,6 +47,23 @@ afterEach(() => {
   globals.__DEV__ = realDev;
 });
 
+/**
+ * Every tree a test rendered, so each can be taken down when it ends.
+ *
+ * Left mounted, a tree goes on answering the stores: the state reset after
+ * the last test re-rendered it once Jest had already torn the environment
+ * down, and a render that reaches for a module at that point is not a
+ * warning — it is an exception in the worker, which fails the whole file in
+ * a full run while every test in it passes.
+ */
+const mounted: ReactTestRenderer.ReactTestRenderer[] = [];
+
+afterEach(async () => {
+  await ReactTestRenderer.act(() => {
+    for (const tree of mounted.splice(0)) tree.unmount();
+  });
+});
+
 const renderGate = async () => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await ReactTestRenderer.act(() => {
@@ -66,6 +83,7 @@ const renderGate = async () => {
       </SafeAreaProvider>,
     );
   });
+  mounted.push(tree);
   return tree;
 };
 

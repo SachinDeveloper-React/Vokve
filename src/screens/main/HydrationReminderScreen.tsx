@@ -24,7 +24,6 @@ import { useTip } from '../../hooks/useContent';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { useReminderDelivery } from '../../hooks/useReminderDelivery';
 import { useReminderSounds } from '../../hooks/useReminderSounds';
-import { logReminderDebug } from '../../services/remindersDebug';
 import { useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import { useQuietHours } from '../../stores/notificationSettingsStore';
@@ -50,8 +49,18 @@ const makeStyles = ({ spacing }: ThemeShape) =>
     content: { paddingBottom: spacing.xxxl, gap: spacing.md },
   });
 
+/**
+ * Why a reminder did or did not arrive, for the console, in a development
+ * build only. A `require` behind `__DEV__` rather than an `import`, so the
+ * reporter is left out of a release bundle instead of shipping as code that
+ * returns on its first line.
+ */
+const remindersDebug: typeof import('../../services/remindersDebug') | null =
+  __DEV__ ? require('../../services/remindersDebug') : null;
+
 /** Stable, so the focus hook does not re-run on every render. */
-const reportReminders = () => logReminderDebug('reminder screen opened');
+const reportReminders = () =>
+  remindersDebug?.logReminderDebug('reminder screen opened');
 
 /**
  * "Everyday" when the plan runs all week, otherwise the days it does run.

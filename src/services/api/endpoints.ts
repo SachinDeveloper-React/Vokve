@@ -125,36 +125,24 @@ import type {
   WishlistApi,
   WorkoutApi,
 } from './contracts';
-import {
-  MOCK_RULES,
-  mockAccountApi,
-  mockActivityApi,
-  mockAddressApi,
-  mockAppApi,
-  mockAuthApi,
-  mockCartApi,
-  mockChallengeApi,
-  mockCheckoutApi,
-  mockContentApi,
-  mockDeviceApi,
-  mockHydrationApi,
-  mockLeaderboardApi,
-  mockNotificationApi,
-  mockNotificationPreferencesApi,
-  mockNutritionApi,
-  mockOrderApi,
-  mockReferralApi,
-  mockSettingsApi,
-  mockShopApi,
-  mockStreakApi,
-  mockTelemetryApi,
-  mockUserApi,
-  mockSupportApi,
-  mockVitalsApi,
-  mockWalletApi,
-  mockWishlistApi,
-  mockWorkoutApi,
-} from './mockApi';
+type MockApis = typeof import('./mockApi');
+
+/**
+ * The mock backend, in a development build only.
+ *
+ * A `require` behind `__DEV__` rather than an `import`, and that is the
+ * whole point: Metro bundles every module a file imports whether or not it
+ * is ever called, so an import shipped six thousand lines of fake API and
+ * its seed data — about 130 KB — in a release build that can never reach
+ * them (`shouldUseMockApi` is false there). `__DEV__` is the literal
+ * `false` in a release bundle, the branch is folded away before Metro
+ * collects dependencies, and neither file is in it.
+ *
+ * Required here, as the module loads, and not inside `pick`: a `require`
+ * that first runs from a late promise can land after a test's environment
+ * has been torn down, which Jest treats as a crash of the whole worker.
+ */
+const mockApis: MockApis | null = __DEV__ ? require('./mockApi') : null;
 
 /**
  * Whether this call is served from `mockApi` instead of the network.
@@ -931,8 +919,12 @@ const realNotificationApi: NotificationApi = {
  */
 let hasAnnouncedMock = false;
 
-const pick = <T>(mock: T, real: T): T => {
-  if (!shouldUseMockApi()) {
+const pick = <K extends keyof MockApis>(
+  name: K,
+  real: MockApis[K],
+): MockApis[K] => {
+  const mocks = shouldUseMockApi() ? mockApis : null;
+  if (!mocks) {
     return real;
   }
 
@@ -943,302 +935,302 @@ const pick = <T>(mock: T, real: T): T => {
     hasAnnouncedMock = true;
     logger.warn(
       'endpoints',
-      `Mock API is ON — no network calls. OTP is ${MOCK_RULES.otp}. ` +
+      `Mock API is ON — no network calls. OTP is ${mocks.MOCK_RULES.otp}. ` +
         'Set config.useMockApi = false to use the real backend.',
     );
   }
 
-  return mock;
+  return mocks[name];
 };
 
 export const authApi: AuthApi = {
-  google: idToken => pick(mockAuthApi, realAuthApi).google(idToken),
+  google: idToken => pick('mockAuthApi', realAuthApi).google(idToken),
   signIn: (email, password) =>
-    pick(mockAuthApi, realAuthApi).signIn(email, password),
-  signUp: payload => pick(mockAuthApi, realAuthApi).signUp(payload),
+    pick('mockAuthApi', realAuthApi).signIn(email, password),
+  signUp: payload => pick('mockAuthApi', realAuthApi).signUp(payload),
   verifyOtp: (verificationId, code) =>
-    pick(mockAuthApi, realAuthApi).verifyOtp(verificationId, code),
+    pick('mockAuthApi', realAuthApi).verifyOtp(verificationId, code),
   resendOtp: verificationId =>
-    pick(mockAuthApi, realAuthApi).resendOtp(verificationId),
-  sendEmailOtp: () => pick(mockAuthApi, realAuthApi).sendEmailOtp(),
+    pick('mockAuthApi', realAuthApi).resendOtp(verificationId),
+  sendEmailOtp: () => pick('mockAuthApi', realAuthApi).sendEmailOtp(),
   forgotPassword: identifier =>
-    pick(mockAuthApi, realAuthApi).forgotPassword(identifier),
+    pick('mockAuthApi', realAuthApi).forgotPassword(identifier),
   resetPassword: (verificationId, code, password) =>
-    pick(mockAuthApi, realAuthApi).resetPassword(
+    pick('mockAuthApi', realAuthApi).resetPassword(
       verificationId,
       code,
       password,
     ),
-  stepUp: () => pick(mockAuthApi, realAuthApi).stepUp(),
-  signOut: () => pick(mockAuthApi, realAuthApi).signOut(),
+  stepUp: () => pick('mockAuthApi', realAuthApi).stepUp(),
+  signOut: () => pick('mockAuthApi', realAuthApi).signOut(),
 };
 
 export const deviceApi: DeviceApi = {
   register: (profile, refreshToken) =>
-    pick(mockDeviceApi, realDeviceApi).register(profile, refreshToken),
+    pick('mockDeviceApi', realDeviceApi).register(profile, refreshToken),
   setPushToken: (deviceId, pushToken) =>
-    pick(mockDeviceApi, realDeviceApi).setPushToken(deviceId, pushToken),
+    pick('mockDeviceApi', realDeviceApi).setPushToken(deviceId, pushToken),
   setLocalReminders: (deviceId, scheduled) =>
-    pick(mockDeviceApi, realDeviceApi).setLocalReminders(deviceId, scheduled),
+    pick('mockDeviceApi', realDeviceApi).setLocalReminders(deviceId, scheduled),
   attestationChallenge: deviceId =>
-    pick(mockDeviceApi, realDeviceApi).attestationChallenge(deviceId),
+    pick('mockDeviceApi', realDeviceApi).attestationChallenge(deviceId),
   submitAttestation: (deviceId, attestation) =>
-    pick(mockDeviceApi, realDeviceApi).submitAttestation(deviceId, attestation),
+    pick('mockDeviceApi', realDeviceApi).submitAttestation(deviceId, attestation),
 };
 
 export const telemetryApi: TelemetryApi = {
   sendEvents: events =>
-    pick(mockTelemetryApi, realTelemetryApi).sendEvents(events),
+    pick('mockTelemetryApi', realTelemetryApi).sendEvents(events),
   reportErrors: errors =>
-    pick(mockTelemetryApi, realTelemetryApi).reportErrors(errors),
+    pick('mockTelemetryApi', realTelemetryApi).reportErrors(errors),
   reportDeviceHealth: report =>
-    pick(mockTelemetryApi, realTelemetryApi).reportDeviceHealth(report),
+    pick('mockTelemetryApi', realTelemetryApi).reportDeviceHealth(report),
   reportPermissions: permissions =>
-    pick(mockTelemetryApi, realTelemetryApi).reportPermissions(permissions),
-  permissions: () => pick(mockTelemetryApi, realTelemetryApi).permissions(),
-  ackPush: ack => pick(mockTelemetryApi, realTelemetryApi).ackPush(ack),
+    pick('mockTelemetryApi', realTelemetryApi).reportPermissions(permissions),
+  permissions: () => pick('mockTelemetryApi', realTelemetryApi).permissions(),
+  ackPush: ack => pick('mockTelemetryApi', realTelemetryApi).ackPush(ack),
 };
 
 export const walletApi: WalletApi = {
-  get: () => pick(mockWalletApi, realWalletApi).get(),
-  transactions: query => pick(mockWalletApi, realWalletApi).transactions(query),
-  earnRules: () => pick(mockWalletApi, realWalletApi).earnRules(),
+  get: () => pick('mockWalletApi', realWalletApi).get(),
+  transactions: query => pick('mockWalletApi', realWalletApi).transactions(query),
+  earnRules: () => pick('mockWalletApi', realWalletApi).earnRules(),
 };
 
 export const userApi: UserApi = {
-  me: () => pick(mockUserApi, realUserApi).me(),
-  updateProfile: patch => pick(mockUserApi, realUserApi).updateProfile(patch),
+  me: () => pick('mockUserApi', realUserApi).me(),
+  updateProfile: patch => pick('mockUserApi', realUserApi).updateProfile(patch),
   completeProfile: payload =>
-    pick(mockUserApi, realUserApi).completeProfile(payload),
-  uploadAvatar: input => pick(mockUserApi, realUserApi).uploadAvatar(input),
-  removeAvatar: () => pick(mockUserApi, realUserApi).removeAvatar(),
+    pick('mockUserApi', realUserApi).completeProfile(payload),
+  uploadAvatar: input => pick('mockUserApi', realUserApi).uploadAvatar(input),
+  removeAvatar: () => pick('mockUserApi', realUserApi).removeAvatar(),
 };
 
 export const settingsApi: SettingsApi = {
-  get: () => pick(mockSettingsApi, realSettingsApi).get(),
-  update: patch => pick(mockSettingsApi, realSettingsApi).update(patch),
+  get: () => pick('mockSettingsApi', realSettingsApi).get(),
+  update: patch => pick('mockSettingsApi', realSettingsApi).update(patch),
 };
 
 export const workoutApi: WorkoutApi = {
-  templates: () => pick(mockWorkoutApi, realWorkoutApi).templates(),
-  history: cursor => pick(mockWorkoutApi, realWorkoutApi).history(cursor),
-  save: workout => pick(mockWorkoutApi, realWorkoutApi).save(workout),
+  templates: () => pick('mockWorkoutApi', realWorkoutApi).templates(),
+  history: cursor => pick('mockWorkoutApi', realWorkoutApi).history(cursor),
+  save: workout => pick('mockWorkoutApi', realWorkoutApi).save(workout),
 };
 
 export const activityApi: ActivityApi = {
-  weekly: () => pick(mockActivityApi, realActivityApi).weekly(),
-  today: () => pick(mockActivityApi, realActivityApi).today(),
-  day: date => pick(mockActivityApi, realActivityApi).day(date),
-  range: query => pick(mockActivityApi, realActivityApi).range(query),
-  config: () => pick(mockActivityApi, realActivityApi).config(),
-  goal: () => pick(mockActivityApi, realActivityApi).goal(),
-  sources: date => pick(mockActivityApi, realActivityApi).sources(date),
-  ingestNonce: () => pick(mockActivityApi, realActivityApi).ingestNonce(),
+  weekly: () => pick('mockActivityApi', realActivityApi).weekly(),
+  today: () => pick('mockActivityApi', realActivityApi).today(),
+  day: date => pick('mockActivityApi', realActivityApi).day(date),
+  range: query => pick('mockActivityApi', realActivityApi).range(query),
+  config: () => pick('mockActivityApi', realActivityApi).config(),
+  goal: () => pick('mockActivityApi', realActivityApi).goal(),
+  sources: date => pick('mockActivityApi', realActivityApi).sources(date),
+  ingestNonce: () => pick('mockActivityApi', realActivityApi).ingestNonce(),
   ingest: (payload, options) =>
-    pick(mockActivityApi, realActivityApi).ingest(payload, options),
+    pick('mockActivityApi', realActivityApi).ingest(payload, options),
 };
 
 export const shopApi: ShopApi = {
-  suggestions: () => pick(mockShopApi, realShopApi).suggestions(),
-  items: query => pick(mockShopApi, realShopApi).items(query),
-  item: id => pick(mockShopApi, realShopApi).item(id),
-  categories: () => pick(mockShopApi, realShopApi).categories(),
-  config: () => pick(mockShopApi, realShopApi).config(),
+  suggestions: () => pick('mockShopApi', realShopApi).suggestions(),
+  items: query => pick('mockShopApi', realShopApi).items(query),
+  item: id => pick('mockShopApi', realShopApi).item(id),
+  categories: () => pick('mockShopApi', realShopApi).categories(),
+  config: () => pick('mockShopApi', realShopApi).config(),
   reviews: (itemId, query) =>
-    pick(mockShopApi, realShopApi).reviews(itemId, query),
+    pick('mockShopApi', realShopApi).reviews(itemId, query),
   writeReview: (itemId, input) =>
-    pick(mockShopApi, realShopApi).writeReview(itemId, input),
-  deleteReview: itemId => pick(mockShopApi, realShopApi).deleteReview(itemId),
+    pick('mockShopApi', realShopApi).writeReview(itemId, input),
+  deleteReview: itemId => pick('mockShopApi', realShopApi).deleteReview(itemId),
 };
 
 export const wishlistApi: WishlistApi = {
-  list: () => pick(mockWishlistApi, realWishlistApi).list(),
-  ids: () => pick(mockWishlistApi, realWishlistApi).ids(),
-  add: itemId => pick(mockWishlistApi, realWishlistApi).add(itemId),
-  remove: itemId => pick(mockWishlistApi, realWishlistApi).remove(itemId),
+  list: () => pick('mockWishlistApi', realWishlistApi).list(),
+  ids: () => pick('mockWishlistApi', realWishlistApi).ids(),
+  add: itemId => pick('mockWishlistApi', realWishlistApi).add(itemId),
+  remove: itemId => pick('mockWishlistApi', realWishlistApi).remove(itemId),
 };
 
 export const cartApi: CartApi = {
-  get: () => pick(mockCartApi, realCartApi).get(),
-  setLine: line => pick(mockCartApi, realCartApi).setLine(line),
+  get: () => pick('mockCartApi', realCartApi).get(),
+  setLine: line => pick('mockCartApi', realCartApi).setLine(line),
   removeLine: (itemId, size, color) =>
-    pick(mockCartApi, realCartApi).removeLine(itemId, size, color),
-  applyCoupon: code => pick(mockCartApi, realCartApi).applyCoupon(code),
-  removeCoupon: () => pick(mockCartApi, realCartApi).removeCoupon(),
-  clear: () => pick(mockCartApi, realCartApi).clear(),
+    pick('mockCartApi', realCartApi).removeLine(itemId, size, color),
+  applyCoupon: code => pick('mockCartApi', realCartApi).applyCoupon(code),
+  removeCoupon: () => pick('mockCartApi', realCartApi).removeCoupon(),
+  clear: () => pick('mockCartApi', realCartApi).clear(),
 };
 
 export const checkoutApi: CheckoutApi = {
   quote: (lines, coins, couponCode) =>
-    pick(mockCheckoutApi, realCheckoutApi).quote(lines, coins, couponCode),
+    pick('mockCheckoutApi', realCheckoutApi).quote(lines, coins, couponCode),
   place: (payload, options) =>
-    pick(mockCheckoutApi, realCheckoutApi).place(payload, options),
+    pick('mockCheckoutApi', realCheckoutApi).place(payload, options),
   pay: (orderId, proof, options) =>
-    pick(mockCheckoutApi, realCheckoutApi).pay(orderId, proof, options),
+    pick('mockCheckoutApi', realCheckoutApi).pay(orderId, proof, options),
 };
 
 export const orderApi: OrderApi = {
   list: (cursor, filter) =>
-    pick(mockOrderApi, realOrderApi).list(cursor, filter),
-  get: id => pick(mockOrderApi, realOrderApi).get(id),
-  count: () => pick(mockOrderApi, realOrderApi).count(),
-  cancel: (id, options) => pick(mockOrderApi, realOrderApi).cancel(id, options),
+    pick('mockOrderApi', realOrderApi).list(cursor, filter),
+  get: id => pick('mockOrderApi', realOrderApi).get(id),
+  count: () => pick('mockOrderApi', realOrderApi).count(),
+  cancel: (id, options) => pick('mockOrderApi', realOrderApi).cancel(id, options),
   changeAddress: (id, addressId) =>
-    pick(mockOrderApi, realOrderApi).changeAddress(id, addressId),
+    pick('mockOrderApi', realOrderApi).changeAddress(id, addressId),
   reorder: (id, options) =>
-    pick(mockOrderApi, realOrderApi).reorder(id, options),
+    pick('mockOrderApi', realOrderApi).reorder(id, options),
 };
 
 export const referralApi: ReferralApi = {
-  me: () => pick(mockReferralApi, realReferralApi).me(),
-  list: cursor => pick(mockReferralApi, realReferralApi).list(cursor),
-  apply: code => pick(mockReferralApi, realReferralApi).apply(code),
+  me: () => pick('mockReferralApi', realReferralApi).me(),
+  list: cursor => pick('mockReferralApi', realReferralApi).list(cursor),
+  apply: code => pick('mockReferralApi', realReferralApi).apply(code),
 };
 
 export const streakApi: StreakApi = {
-  get: () => pick(mockStreakApi, realStreakApi).get(),
-  freeze: options => pick(mockStreakApi, realStreakApi).freeze(options),
-  restore: options => pick(mockStreakApi, realStreakApi).restore(options),
+  get: () => pick('mockStreakApi', realStreakApi).get(),
+  freeze: options => pick('mockStreakApi', realStreakApi).freeze(options),
+  restore: options => pick('mockStreakApi', realStreakApi).restore(options),
   history: (cursor, limit) =>
-    pick(mockStreakApi, realStreakApi).history(cursor, limit),
-  day: date => pick(mockStreakApi, realStreakApi).day(date),
+    pick('mockStreakApi', realStreakApi).history(cursor, limit),
+  day: date => pick('mockStreakApi', realStreakApi).day(date),
   dayEvents: (date, cursor, limit) =>
-    pick(mockStreakApi, realStreakApi).dayEvents(date, cursor, limit),
+    pick('mockStreakApi', realStreakApi).dayEvents(date, cursor, limit),
 };
 
 export const challengeApi: ChallengeApi = {
-  board: date => pick(mockChallengeApi, realChallengeApi).board(date),
+  board: date => pick('mockChallengeApi', realChallengeApi).board(date),
   detail: (id, date) =>
-    pick(mockChallengeApi, realChallengeApi).detail(id, date),
-  achievements: () => pick(mockChallengeApi, realChallengeApi).achievements(),
-  achievement: id => pick(mockChallengeApi, realChallengeApi).achievement(id),
+    pick('mockChallengeApi', realChallengeApi).detail(id, date),
+  achievements: () => pick('mockChallengeApi', realChallengeApi).achievements(),
+  achievement: id => pick('mockChallengeApi', realChallengeApi).achievement(id),
 };
 
 export const leaderboardApi: LeaderboardApi = {
-  board: page => pick(mockLeaderboardApi, realLeaderboardApi).board(page),
-  history: () => pick(mockLeaderboardApi, realLeaderboardApi).history(),
-  rules: () => pick(mockLeaderboardApi, realLeaderboardApi).rules(),
+  board: page => pick('mockLeaderboardApi', realLeaderboardApi).board(page),
+  history: () => pick('mockLeaderboardApi', realLeaderboardApi).history(),
+  rules: () => pick('mockLeaderboardApi', realLeaderboardApi).rules(),
 };
 
 export const hydrationApi: HydrationApi = {
-  today: () => pick(mockHydrationApi, realHydrationApi).today(),
+  today: () => pick('mockHydrationApi', realHydrationApi).today(),
   log: (entry, options) =>
-    pick(mockHydrationApi, realHydrationApi).log(entry, options),
+    pick('mockHydrationApi', realHydrationApi).log(entry, options),
   remove: (id, options) =>
-    pick(mockHydrationApi, realHydrationApi).remove(id, options),
-  stats: () => pick(mockHydrationApi, realHydrationApi).stats(),
-  days: (from, to) => pick(mockHydrationApi, realHydrationApi).days(from, to),
+    pick('mockHydrationApi', realHydrationApi).remove(id, options),
+  stats: () => pick('mockHydrationApi', realHydrationApi).stats(),
+  days: (from, to) => pick('mockHydrationApi', realHydrationApi).days(from, to),
   history: (from, to) =>
-    pick(mockHydrationApi, realHydrationApi).history(from, to),
-  day: date => pick(mockHydrationApi, realHydrationApi).day(date),
-  reminders: () => pick(mockHydrationApi, realHydrationApi).reminders(),
+    pick('mockHydrationApi', realHydrationApi).history(from, to),
+  day: date => pick('mockHydrationApi', realHydrationApi).day(date),
+  reminders: () => pick('mockHydrationApi', realHydrationApi).reminders(),
   reminderSounds: () =>
-    pick(mockHydrationApi, realHydrationApi).reminderSounds(),
+    pick('mockHydrationApi', realHydrationApi).reminderSounds(),
   saveReminders: (plan, options) =>
-    pick(mockHydrationApi, realHydrationApi).saveReminders(plan, options),
+    pick('mockHydrationApi', realHydrationApi).saveReminders(plan, options),
 };
 
 export const contentApi: ContentApi = {
-  tip: topic => pick(mockContentApi, realContentApi).tip(topic),
-  referralCards: () => pick(mockContentApi, realContentApi).referralCards(),
+  tip: topic => pick('mockContentApi', realContentApi).tip(topic),
+  referralCards: () => pick('mockContentApi', realContentApi).referralCards(),
 };
 
 export const nutritionApi: NutritionApi = {
-  profile: () => pick(mockNutritionApi, realNutritionApi).profile(),
-  suggestions: date => pick(mockNutritionApi, realNutritionApi).suggestions(date),
+  profile: () => pick('mockNutritionApi', realNutritionApi).profile(),
+  suggestions: date => pick('mockNutritionApi', realNutritionApi).suggestions(date),
   updateProfile: (patch, options) =>
-    pick(mockNutritionApi, realNutritionApi).updateProfile(patch, options),
-  day: date => pick(mockNutritionApi, realNutritionApi).day(date),
-  days: (from, to) => pick(mockNutritionApi, realNutritionApi).days(from, to),
+    pick('mockNutritionApi', realNutritionApi).updateProfile(patch, options),
+  day: date => pick('mockNutritionApi', realNutritionApi).day(date),
+  days: (from, to) => pick('mockNutritionApi', realNutritionApi).days(from, to),
   log: (entries, options) =>
-    pick(mockNutritionApi, realNutritionApi).log(entries, options),
+    pick('mockNutritionApi', realNutritionApi).log(entries, options),
   remove: (id, options) =>
-    pick(mockNutritionApi, realNutritionApi).remove(id, options),
+    pick('mockNutritionApi', realNutritionApi).remove(id, options),
   searchFoods: query =>
-    pick(mockNutritionApi, realNutritionApi).searchFoods(query),
-  quickAddFoods: () => pick(mockNutritionApi, realNutritionApi).quickAddFoods(),
-  plan: date => pick(mockNutritionApi, realNutritionApi).plan(date),
+    pick('mockNutritionApi', realNutritionApi).searchFoods(query),
+  quickAddFoods: () => pick('mockNutritionApi', realNutritionApi).quickAddFoods(),
+  plan: date => pick('mockNutritionApi', realNutritionApi).plan(date),
   planDays: (from, to) =>
-    pick(mockNutritionApi, realNutritionApi).planDays(from, to),
+    pick('mockNutritionApi', realNutritionApi).planDays(from, to),
   foodLibrary: query =>
-    pick(mockNutritionApi, realNutritionApi).foodLibrary(query),
+    pick('mockNutritionApi', realNutritionApi).foodLibrary(query),
   createCustomFood: input =>
-    pick(mockNutritionApi, realNutritionApi).createCustomFood(input),
-  dietPlans: () => pick(mockNutritionApi, realNutritionApi).dietPlans(),
-  dietPlan: id => pick(mockNutritionApi, realNutritionApi).dietPlan(id),
+    pick('mockNutritionApi', realNutritionApi).createCustomFood(input),
+  dietPlans: () => pick('mockNutritionApi', realNutritionApi).dietPlans(),
+  dietPlan: id => pick('mockNutritionApi', realNutritionApi).dietPlan(id),
 };
 
 export const vitalsApi: VitalsApi = {
-  list: query => pick(mockVitalsApi, realVitalsApi).list(query),
-  latest: () => pick(mockVitalsApi, realVitalsApi).latest(),
+  list: query => pick('mockVitalsApi', realVitalsApi).list(query),
+  latest: () => pick('mockVitalsApi', realVitalsApi).latest(),
   log: (reading, options) =>
-    pick(mockVitalsApi, realVitalsApi).log(reading, options),
+    pick('mockVitalsApi', realVitalsApi).log(reading, options),
   remove: (id, options) =>
-    pick(mockVitalsApi, realVitalsApi).remove(id, options),
-  score: () => pick(mockVitalsApi, realVitalsApi).score(),
+    pick('mockVitalsApi', realVitalsApi).remove(id, options),
+  score: () => pick('mockVitalsApi', realVitalsApi).score(),
 };
 
 export const addressApi: AddressApi = {
-  list: () => pick(mockAddressApi, realAddressApi).list(),
-  create: input => pick(mockAddressApi, realAddressApi).create(input),
-  update: (id, patch) => pick(mockAddressApi, realAddressApi).update(id, patch),
-  setDefault: id => pick(mockAddressApi, realAddressApi).setDefault(id),
-  remove: id => pick(mockAddressApi, realAddressApi).remove(id),
+  list: () => pick('mockAddressApi', realAddressApi).list(),
+  create: input => pick('mockAddressApi', realAddressApi).create(input),
+  update: (id, patch) => pick('mockAddressApi', realAddressApi).update(id, patch),
+  setDefault: id => pick('mockAddressApi', realAddressApi).setDefault(id),
+  remove: id => pick('mockAddressApi', realAddressApi).remove(id),
   deliveryPreferences: () =>
-    pick(mockAddressApi, realAddressApi).deliveryPreferences(),
+    pick('mockAddressApi', realAddressApi).deliveryPreferences(),
   setDeliveryPreferences: patch =>
-    pick(mockAddressApi, realAddressApi).setDeliveryPreferences(patch),
+    pick('mockAddressApi', realAddressApi).setDeliveryPreferences(patch),
 };
 
 export const notificationPreferencesApi: NotificationPreferencesApi = {
   get: () =>
-    pick(mockNotificationPreferencesApi, realNotificationPreferencesApi).get(),
+    pick('mockNotificationPreferencesApi', realNotificationPreferencesApi).get(),
   update: patch =>
-    pick(mockNotificationPreferencesApi, realNotificationPreferencesApi).update(
+    pick('mockNotificationPreferencesApi', realNotificationPreferencesApi).update(
       patch,
     ),
 };
 
 export const notificationApi: NotificationApi = {
-  list: query => pick(mockNotificationApi, realNotificationApi).list(query),
-  counts: () => pick(mockNotificationApi, realNotificationApi).counts(),
-  markRead: id => pick(mockNotificationApi, realNotificationApi).markRead(id),
+  list: query => pick('mockNotificationApi', realNotificationApi).list(query),
+  counts: () => pick('mockNotificationApi', realNotificationApi).counts(),
+  markRead: id => pick('mockNotificationApi', realNotificationApi).markRead(id),
   markAllRead: () =>
-    pick(mockNotificationApi, realNotificationApi).markAllRead(),
+    pick('mockNotificationApi', realNotificationApi).markAllRead(),
 };
 
 export const accountApi: AccountApi = {
-  profile: () => pick(mockAccountApi, realAccountApi).profile(),
-  privacy: () => pick(mockAccountApi, realAccountApi).privacy(),
+  profile: () => pick('mockAccountApi', realAccountApi).profile(),
+  privacy: () => pick('mockAccountApi', realAccountApi).privacy(),
   updatePrivacy: patch =>
-    pick(mockAccountApi, realAccountApi).updatePrivacy(patch),
+    pick('mockAccountApi', realAccountApi).updatePrivacy(patch),
   changePassword: input =>
-    pick(mockAccountApi, realAccountApi).changePassword(input),
-  changeEmail: input => pick(mockAccountApi, realAccountApi).changeEmail(input),
-  changePhone: input => pick(mockAccountApi, realAccountApi).changePhone(input),
-  sessions: () => pick(mockAccountApi, realAccountApi).sessions(),
+    pick('mockAccountApi', realAccountApi).changePassword(input),
+  changeEmail: input => pick('mockAccountApi', realAccountApi).changeEmail(input),
+  changePhone: input => pick('mockAccountApi', realAccountApi).changePhone(input),
+  sessions: () => pick('mockAccountApi', realAccountApi).sessions(),
   revokeOtherSessions: () =>
-    pick(mockAccountApi, realAccountApi).revokeOtherSessions(),
-  exportData: () => pick(mockAccountApi, realAccountApi).exportData(),
-  deletion: () => pick(mockAccountApi, realAccountApi).deletion(),
+    pick('mockAccountApi', realAccountApi).revokeOtherSessions(),
+  exportData: () => pick('mockAccountApi', realAccountApi).exportData(),
+  deletion: () => pick('mockAccountApi', realAccountApi).deletion(),
   scheduleDeletion: input =>
-    pick(mockAccountApi, realAccountApi).scheduleDeletion(input),
-  cancelDeletion: () => pick(mockAccountApi, realAccountApi).cancelDeletion(),
+    pick('mockAccountApi', realAccountApi).scheduleDeletion(input),
+  cancelDeletion: () => pick('mockAccountApi', realAccountApi).cancelDeletion(),
 };
 
 export const supportApi: SupportApi = {
-  home: () => pick(mockSupportApi, realSupportApi).home(),
-  guide: () => pick(mockSupportApi, realSupportApi).guide(),
-  faqs: query => pick(mockSupportApi, realSupportApi).faqs(query),
-  tickets: () => pick(mockSupportApi, realSupportApi).tickets(),
-  ticket: id => pick(mockSupportApi, realSupportApi).ticket(id),
+  home: () => pick('mockSupportApi', realSupportApi).home(),
+  guide: () => pick('mockSupportApi', realSupportApi).guide(),
+  faqs: query => pick('mockSupportApi', realSupportApi).faqs(query),
+  tickets: () => pick('mockSupportApi', realSupportApi).tickets(),
+  ticket: id => pick('mockSupportApi', realSupportApi).ticket(id),
   createTicket: input =>
-    pick(mockSupportApi, realSupportApi).createTicket(input),
+    pick('mockSupportApi', realSupportApi).createTicket(input),
   reply: (id, message) =>
-    pick(mockSupportApi, realSupportApi).reply(id, message),
+    pick('mockSupportApi', realSupportApi).reply(id, message),
 };
 
 export const appApi: AppApi = {
-  about: () => pick(mockAppApi, realAppApi).about(),
-  update: () => pick(mockAppApi, realAppApi).update(),
+  about: () => pick('mockAppApi', realAppApi).about(),
+  update: () => pick('mockAppApi', realAppApi).update(),
 };

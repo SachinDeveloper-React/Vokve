@@ -56,9 +56,39 @@ react {
 }
 
 /**
- * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ * Runs R8 on release builds: shrinks, optimises and renames the Java/Kotlin
+ * bytecode, and — with `shrinkResources` below — drops the resources the
+ * surviving code no longer refers to.
+ *
+ * This is most of what a release APK was carrying for nothing. An app's
+ * libraries arrive whole (Play services, Firebase, AndroidX, the React
+ * Native core) and the app calls a fraction of each; off, all four dex
+ * files shipped, about 33 MB of bytecode before compression.
+ *
+ * Every library here that is reached by reflection or from native code
+ * ships its own keep rules, and the few this app needs beyond those are in
+ * `proguard-rules.pro`. A class missing in release only — a crash the debug
+ * build never shows — is the symptom of a rule that is needed there.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
+
+/**
+ * The upload key's whereabouts and passwords, from `android/keystore.properties`
+ * — a file that is not in git (see `.gitignore`), or from the machine's own
+ * `~/.gradle/gradle.properties`, whichever has them.
+ *
+ * They used to sit in `android/gradle.properties`, which *is* in git: the
+ * passwords of the key that signs every release were in the repository and
+ * in its history. `keystore.properties.example` shows the four lines.
+ */
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+def signingValue = { String name ->
+    keystoreProperties.getProperty(name) ?: project.findProperty(name)
+}
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -86,13 +116,20 @@ android {
         versionCode 1
         versionName "1.0"
     }
+    androidResources {
+        // The app is written in English and nothing else. Its libraries are
+        // not: Play services, Firebase, AndroidX and Material each bring
+        // their strings in some eighty languages, and all of them were
+        // packaged. Add a language here the day the app has one.
+        localeFilters += ["en"]
+    }
     signingConfigs {
         release {
-            if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
-                storeFile file(MYAPP_UPLOAD_STORE_FILE)
-                storePassword MYAPP_UPLOAD_STORE_PASSWORD
-                keyAlias MYAPP_UPLOAD_KEY_ALIAS
-                keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            if (signingValue('MYAPP_UPLOAD_STORE_FILE')) {
+                storeFile file(signingValue('MYAPP_UPLOAD_STORE_FILE'))
+                storePassword signingValue('MYAPP_UPLOAD_STORE_PASSWORD')
+                keyAlias signingValue('MYAPP_UPLOAD_KEY_ALIAS')
+                keyPassword signingValue('MYAPP_UPLOAD_KEY_PASSWORD')
             }
         }
         debug {
@@ -111,6 +148,9 @@ android {
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
+            // Needs the code shrunk first: it keeps what the code that is
+            // left still refers to.
+            shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }

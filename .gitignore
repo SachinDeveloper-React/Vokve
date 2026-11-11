@@ -33,6 +33,8 @@ local.properties
 .cxx/
 *.keystore
 !debug.keystore
+# The upload key's passwords (android/app/build.gradle reads them from here).
+keystore.properties
 .kotlin/
 
 # node.js
