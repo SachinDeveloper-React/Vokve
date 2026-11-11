@@ -25,12 +25,62 @@ const USER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const storedUserSchema = z.object({ at: z.number(), user: userSchema });
 
 /**
+ * The tokens as this process last read or wrote them: `undefined` until the
+ * Keychain has answered once, then the tokens or `null` for "signed out".
+ *
+ * Every request asks for the access token, and the Keychain is not a
+ * variable — on Android each read is a round trip to the Keystore to
+ * decrypt the entry, tens of milliseconds, and a launch fires a dozen
+ * requests at once. So the Keychain is read once and this is what the
+ * requests get. It is in memory only, in the one JavaScript runtime the
+ * app, its headless tasks and its push handler share, and every write goes
+ * through `saveTokens` / `clearTokens` below, which keep it in step — so it
+ * cannot disagree with the Keychain, and it is gone when the process is.
+ */
+let cachedTokens: AuthTokens | null | undefined;
+/** The first read, shared by everything that asked before it answered. */
+let pendingRead: Promise<AuthTokens | null> | null = null;
+
+async function readTokensFromKeychain(): Promise<AuthTokens | null> {
+  try {
+    const entry = await Keychain.getGenericPassword({
+      service: TOKEN_SERVICE,
+    });
+    // A sign-in or sign-out that finished while the Keychain was being read
+    // is newer than what it returned, and wins.
+    if (cachedTokens !== undefined) {
+      return cachedTokens;
+    }
+    if (!entry) {
+      cachedTokens = null;
+      return null;
+    }
+
+    const parsed = authTokensSchema.safeParse(JSON.parse(entry.password));
+    if (!parsed.success) {
+      // A shape change means the stored blob is unusable — drop it so the
+      // user gets a clean sign-in instead of a confusing failure later.
+      await secureStorage.clearTokens();
+      return null;
+    }
+    cachedTokens = parsed.data;
+    return parsed.data;
+  } catch (error) {
+    // Not remembered: a Keychain that failed once is asked again next time,
+    // rather than one bad read signing the member out until the app restarts.
+    logger.error('secureStorage', 'Failed to read auth tokens', error);
+    return null;
+  }
+}
+
+/**
  * Auth tokens live in the Keychain / Android Keystore, never in MMKV.
  * MMKV is plain-text on disk, which is fine for a theme preference and wrong
  * for a credential that grants access to a user's health data.
  */
 export const secureStorage = {
   async saveTokens(tokens: AuthTokens): Promise<void> {
+    cachedTokens = tokens;
     try {
       await Keychain.setGenericPassword('tokens', JSON.stringify(tokens), {
         service: TOKEN_SERVICE,
@@ -41,29 +91,19 @@ export const secureStorage = {
   },
 
   async readTokens(): Promise<AuthTokens | null> {
-    try {
-      const entry = await Keychain.getGenericPassword({
-        service: TOKEN_SERVICE,
-      });
-      if (!entry) {
-        return null;
-      }
-
-      const parsed = authTokensSchema.safeParse(JSON.parse(entry.password));
-      if (!parsed.success) {
-        // A shape change means the stored blob is unusable — drop it so the
-        // user gets a clean sign-in instead of a confusing failure later.
-        await secureStorage.clearTokens();
-        return null;
-      }
-      return parsed.data;
-    } catch (error) {
-      logger.error('secureStorage', 'Failed to read auth tokens', error);
-      return null;
+    if (cachedTokens !== undefined) {
+      return cachedTokens;
     }
+    pendingRead =
+      pendingRead ??
+      readTokensFromKeychain().finally(() => {
+        pendingRead = null;
+      });
+    return pendingRead;
   },
 
   async clearTokens(): Promise<void> {
+    cachedTokens = null;
     try {
       await Keychain.resetGenericPassword({ service: TOKEN_SERVICE });
     } catch (error) {
