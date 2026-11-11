@@ -42,7 +42,9 @@ export const signInBody = z.object({
 export const verifyOtpBody = z.object({ verificationId: z.string().min(1), code: z.string().regex(/^\d{4,8}$/) });
 export const resendOtpBody = z.object({ verificationId: z.string().min(1) });
 export const refreshBody = z.object({ refreshToken: z.string().min(1) });
-export const otpRequestBody = z.object({ identifier: z.string().trim().min(1), purpose: z.enum(['login', 'reset_password']) });
+// Bounded: the identifier is also the key of a rate limit, and an email or a
+// phone number is never longer than this.
+export const otpRequestBody = z.object({ identifier: z.string().trim().min(1).max(254), purpose: z.enum(['login', 'reset_password']) });
 export const resetPasswordBody = z.object({ verificationId: z.string().min(1), code: z.string().regex(/^\d{4,8}$/), password: signUpBody.shape.password });
 
 interface Meta { deviceId?: string; ip?: string; appVersion?: string }
@@ -390,6 +392,16 @@ export async function requestContactChange(userId: string, kind: 'phone' | 'emai
   if (!user) throw Errors.unauthorized();
   const channel = kind === 'email' ? 'email' : 'sms';
   const target = normaliseIdentifier(newValue, channel);
+  // The same two rules sign-up applies, which this route never did: any
+  // string of three characters was taken as the new contact, sent to the
+  // mailer as a recipient — where `a@x.com, b@y.com` is two of them — and
+  // written to the account once the code came back.
+  const wellFormed = kind === 'email'
+    ? signUpBody.shape.email.safeParse(target).success
+    : signUpBody.shape.phone.safeParse(target).success;
+  if (!wellFormed) {
+    throw Errors.validation({ [kind]: kind === 'email' ? 'That does not look like an email address' : 'Enter a valid phone number' });
+  }
   if ((kind === 'email' && target === user.email) || (kind === 'phone' && target === user.phone)) {
     throw new ApiError(422, 'SAME_CONTACT', `That is already your ${kind}.`);
   }
