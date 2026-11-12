@@ -34,6 +34,27 @@ function blankIsDefault(schema: z.ZodString, fallback: string) {
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
+  /**
+   * How many reverse proxies stand between the internet and this process,
+   * which is how many entries at the end of `X-Forwarded-For` to believe.
+   *
+   * Each proxy appends the address it saw, so with one proxy the last entry
+   * is the caller and everything before it is whatever the caller typed.
+   * Believing the whole header — Express's `trust proxy: true`, which this
+   * was — takes the *first* entry, the caller's own, and every per-IP limit
+   * in the API (sign-in, OTP send, OTP verify) then counts an address the
+   * request chose for itself.
+   *
+   * One is right for a single platform proxy: Vercel, Render, Railway, Fly,
+   * one nginx. Two for a CDN in front of that. Too low is the safe way to
+   * be wrong but not a harmless one — the limits then count the proxy's
+   * address, so every member shares a bucket; if sign-ins start answering
+   * 429 for everybody after a hosting change, this is the number to raise.
+   * Zero trusts nothing and uses the socket's address.
+   *
+   * A blank value is the default, not zero: `z.coerce` reads `''` as 0.
+   */
+  TRUST_PROXY_HOPS: z.preprocess(value => (value === '' ? undefined : value), z.coerce.number().int().min(0).max(10).default(1)),
   MONGODB_URI: z.string().default('mongodb://localhost:27017/vokve?replicaSet=rs0&directConnection=true'),
   REDIS_URL: z.string().optional(),
   JWT_SECRET: z.string().min(16).default('dev-only-secret-change-me-please'),

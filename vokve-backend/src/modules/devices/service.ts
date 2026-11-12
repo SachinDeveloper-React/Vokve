@@ -229,7 +229,7 @@ export async function revokeDevice(userId: string, deviceId: string, actorDevice
   ).lean();
   if (!device) throw Errors.notFound('That device');
   // Revocation must be immediate — drop the heartbeat debounce so the next request re-checks the DB.
-  await getKV().del(heartbeatKey(deviceId));
+  await getKV().del(heartbeatKey(deviceId, userId));
   await RefreshTokenModel.updateMany({ userId, deviceId, revokedAt: null }, { $set: { revokedAt: new Date() } });
   await stopCounting(userId, { deviceId });
   await AuditLogModel.create({ actorType: 'user', actorId: userId, deviceId: actorDeviceId, action: 'device.revoke',

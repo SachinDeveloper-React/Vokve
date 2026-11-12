@@ -14,7 +14,9 @@ export async function listExercises(filter: { muscleGroup?: string; equipment?: 
   const where: Record<string, unknown> = {};
   if (filter.muscleGroup) where.muscleGroup = filter.muscleGroup;
   if (filter.equipment) where.equipment = filter.equipment;
-  if (filter.q) where.name = { $regex: filter.q, $options: 'i' };
+  // The member's word, matched as written: escaped, because unescaped it is
+  // a pattern of their choosing run against every name in the collection.
+  if (filter.q) where.name = { $regex: filter.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
   const rows = await ExerciseModel.find(where).sort({ name: 1 }).lean();
   return rows.map(r => exerciseSchema.parse({ id: r._id, name: r.name, muscleGroup: r.muscleGroup, equipment: r.equipment, isTimed: r.isTimed, imageUrl: r.imageUrl }));
 }
