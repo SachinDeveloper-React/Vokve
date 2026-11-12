@@ -10,8 +10,6 @@ import { logger } from '../lib/logger.js';
 export interface KeyValue {
   incrWithTtl(key: string, ttlSeconds: number): Promise<number>;
   setIfAbsent(key: string, ttlSeconds: number): Promise<boolean>;
-  /** Whether the key is set and has not expired. */
-  has(key: string): Promise<boolean>;
   del(key: string): Promise<void>;
   quit(): Promise<void>;
 }
@@ -37,9 +35,6 @@ class MemoryKV implements KeyValue {
     this.store.set(key, { value: 1, expiresAt: Date.now() + ttlSeconds * 1000 });
     return true;
   }
-  async has(key: string) {
-    return this.live(key) !== undefined;
-  }
   async del(key: string) {
     this.store.delete(key);
   }
@@ -58,9 +53,6 @@ class RedisKV implements KeyValue {
   async setIfAbsent(key: string, ttlSeconds: number) {
     const result = await this.client.set(key, '1', 'EX', ttlSeconds, 'NX');
     return result === 'OK';
-  }
-  async has(key: string) {
-    return (await this.client.exists(key)) === 1;
   }
   async del(key: string) {
     await this.client.del(key);

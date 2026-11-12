@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { activityLevelSchema, fitnessGoalSchema, genderSchema, unitSystemSchema } from '../../contracts/index.js';
 import { getConfig } from '../../config/remote.js';
 import { withTransaction } from '../../db/mongo.js';
 import { toCoins, toMilli } from '../../lib/coins.js';
@@ -9,9 +10,10 @@ import { AchievementDefinitionModel, UserAchievementModel } from '../challenges/
 import { unlockAchievement } from '../challenges/service.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../economy/models.js';
 import { credit } from '../economy/service.js';
-import { UserModel } from '../identity/models.js';
+import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { notify } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
+import { logReading } from '../vitals/service.js';
 import { page, pageFields } from './paging.js';
 
 /**
@@ -198,6 +200,122 @@ export async function verifyMemberContact(actor: string, userId: string, body: V
     canRedeem: Boolean(after?.emailVerifiedAt && after?.phoneVerifiedAt),
     told: { status: told.status, push: told.push },
   };
+}
+
+// ─── The profile, corrected for them ───────────────────────────────────────
+
+/**
+ * What an operator may correct on an account: the same fields the member's
+ * own `PATCH /me` takes, with the same bounds, plus the two contact details.
+ *
+ * A contact detail is the one change that is more than a correction, so it
+ * behaves differently: the new address or number is **not** taken as
+ * proven — its verification stamp is cleared, exactly as the member's own
+ * change would leave it until the code came back — and "Mark verified" is
+ * the separate, typed-back step for when support has proven it some other
+ * way. A Google account still signs in by `googleId`, not by the address.
+ */
+export const profileBody = z
+  .object({
+    name: z.string().trim().min(2).max(60).optional(),
+    email: z.string().trim().toLowerCase().email('That does not look like an email address').optional(),
+    phone: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'A number looks like +919876543210').optional(),
+    avatarUrl: z.string().url().nullable().optional(),
+    heightCm: z.number().min(90).max(250).nullable().optional(),
+    weightKg: z.number().min(25).max(300).nullable().optional(),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'A date looks like 1994-03-21').nullable().optional(),
+    gender: genderSchema.nullable().optional(),
+    goal: fitnessGoalSchema.optional(),
+    activityLevel: activityLevelSchema.optional(),
+    units: unitSystemSchema.optional(),
+    weeklyGoalWorkouts: z.number().int().min(1).max(14).optional(),
+    country: z.string().trim().regex(/^[A-Z]{2}$/, 'A country is two letters, like IN').optional(),
+    /** Required, as on every other write against an account. */
+    reason: z.string().trim().min(3).max(300),
+  })
+  .strict();
+export type ProfileBody = z.infer<typeof profileBody>;
+
+const PROFILE_FIELDS = [
+  'name', 'email', 'phone', 'avatarUrl', 'heightCm', 'weightKg', 'dateOfBirth', 'gender',
+  'goal', 'activityLevel', 'units', 'weeklyGoalWorkouts', 'country',
+] as const;
+
+/** The profile as the edit form needs it: every field it can change, as stored. */
+export function profileOf(user: Record<string, any>) {
+  return {
+    name: user.name ?? '',
+    email: user.email ?? '',
+    phone: user.phone ?? null,
+    avatarUrl: user.avatarUrl ?? null,
+    heightCm: user.heightCm ?? null,
+    weightKg: user.weightKg ?? null,
+    dateOfBirth: user.dateOfBirth ?? null,
+    gender: user.gender ?? null,
+    goal: user.goal ?? 'stay_active',
+    activityLevel: user.activityLevel ?? 'moderate',
+    units: user.units ?? 'metric',
+    weeklyGoalWorkouts: user.weeklyGoalWorkouts ?? 4,
+    country: user.country ?? 'IN',
+    emailVerifiedAt: iso(user.emailVerifiedAt),
+    phoneVerifiedAt: iso(user.phoneVerifiedAt),
+  };
+}
+
+export async function updateMemberProfile(actor: string, userId: string, body: ProfileBody) {
+  const before = await UserModel.findById(userId).lean();
+  if (!before) throw Errors.notFound('That member');
+  if (before.deletedAt) {
+    throw Errors.conflict('ALREADY_DELETED', 'That account has already been deleted and anonymised.');
+  }
+
+  // Only what actually differs: a form posts every box, and an audit row
+  // listing ten "changes" that changed nothing hides the one that did.
+  const set: Record<string, unknown> = {};
+  for (const key of PROFILE_FIELDS) {
+    const next = body[key];
+    if (next === undefined) continue;
+    const held = (before as Record<string, unknown>)[key] ?? null;
+    if (next !== held) set[key] = next;
+  }
+  if (Object.keys(set).length === 0) throw Errors.validation({ name: 'Nothing to change — every box says what is already there.' });
+
+  if (set.email !== undefined) {
+    const taken = await UserModel.exists({ _id: { $ne: userId }, email: set.email })
+      .collation({ locale: 'en', strength: 2 });
+    if (taken) throw Errors.validation({ email: 'Another account already signs in with that address.' });
+    set.emailVerifiedAt = null;
+  }
+  if (set.phone !== undefined) {
+    if (await UserModel.exists({ _id: { $ne: userId }, phone: set.phone })) {
+      throw Errors.validation({ phone: 'Another account already has that number.' });
+    }
+    set.phoneVerifiedAt = null;
+  }
+
+  await UserModel.updateOne({ _id: userId }, { $set: set });
+  // Units live in two places for the member (profile and settings), and the
+  // app reads settings: kept in step the way the member's own save does.
+  if (set.units !== undefined) {
+    await UserSettingsModel.updateOne({ _id: userId }, { $set: { units: set.units } }, { upsert: true });
+  }
+  // A weight is a reading too (RULES V4), the same as when the member saves it.
+  if (typeof set.weightKg === 'number') {
+    await logReading(userId, { id: `admin-profile-${Date.now()}`, kind: 'weight', value: set.weightKg });
+  }
+
+  await AuditLogModel.create({
+    actorType: 'admin',
+    actorId: actor,
+    action: 'member.profile',
+    subjectType: 'user',
+    subjectId: userId,
+    before: Object.fromEntries(Object.keys(set).map(key => [key, (before as Record<string, unknown>)[key] ?? null])),
+    after: { ...set, reason: body.reason },
+  });
+
+  const after = await UserModel.findById(userId).lean();
+  return { changed: Object.keys(set).filter(key => !key.endsWith('VerifiedAt')), profile: profileOf(after!) };
 }
 
 // ─── A correction to what they were paid (RULES E2) ────────────────────────

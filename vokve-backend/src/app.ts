@@ -2,7 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
-import { env, isTest } from './config/env.js';
+import { isTest } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestContext } from './middleware/requestContext.js';
@@ -36,9 +36,7 @@ import { vitalsRouter } from './modules/vitals/routes.js';
  */
 export function createApp() {
   const app = express();
-  // The number of proxies in front of this process, not `true`: see
-  // `TRUST_PROXY_HOPS`. `req.ip` is what every per-IP rate limit counts.
-  app.set('trust proxy', env.TRUST_PROXY_HOPS);
+  app.set('trust proxy', true);
   app.disable('x-powered-by');
 
   app.use(helmet());

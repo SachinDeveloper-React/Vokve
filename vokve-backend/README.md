@@ -673,6 +673,12 @@ curl -s -X POST $A/admin/users/<userId>/coins -H "$K" -H 'Content-Type: applicat
 curl -s -X POST $A/admin/users/<userId>/coins -H "$K" -H 'Content-Type: application/json' \
   -d '{"amount":-100,"title":"Correction","reason":"fraud confirmed on 2026-10-14"}' | jq
 
+# their profile, corrected — the fields PATCH /me takes, plus email and phone.
+# Only what differs is written; a new email or number comes back unverified.
+curl -s -X PUT $A/admin/users/<userId>/profile -H "$K" -H 'Content-Type: application/json' \
+  -d '{"name":"Asha Verma","heightCm":162,"reason":"member asked on chat"}' | jq
+# → {"changed":["name","heightCm"],"profile":{...}}
+
 # every operator action on the account, newest first — and the member's own
 curl -s "$A/admin/users/<userId>/audit?limit=20" -H "$K" | jq '.data[] | {at, action, actorType, actorId, after}'
 ```
@@ -983,6 +989,11 @@ curl -s "$A/admin/shop/reviews?sort=lowest&rating=1" -H "$K" | jq '{summary, dat
 # and take one down, which recounts the item
 curl -s -X DELETE $A/admin/shop/reviews/rev_123 -H "$K" -H 'Content-Type: application/json' -d '{"reason":"abuse"}' | jq
 # → {"deleted":true,"itemId":"tee","rating":{"average":5,"count":1}}
+
+# or correct it in place — the words, the stars, the verified mark; moving
+# the stars recounts the item, and the old words stay on the audit row
+curl -s -X PUT $A/admin/shop/reviews/rev_123 -H "$K" -H 'Content-Type: application/json' \
+  -d '{"body":"Awful.","rating":3,"reason":"phone number in the text"}' | jq
 ```
 
 Deleting goes through commerce's own `recomputeItemRating`: `ratingAverage`

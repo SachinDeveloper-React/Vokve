@@ -190,6 +190,43 @@ export async function deleteMedia(actor: string, id: string): Promise<{ deleted:
 }
 
 /**
+ * Renames one, or moves it to another shelf of the library.
+ *
+ * The filename is the handle the spreadsheet import matches a row's image
+ * column against, so renaming is how a picture uploaded as `IMG_2041.jpg`
+ * becomes the `protein-bar.jpg` the sheet names. The URL and the object in
+ * the bucket stay exactly as they are: anything already showing it keeps
+ * showing it.
+ */
+export const mediaPatch = z
+  .object({
+    filename: z.string().trim().min(1).max(160).optional(),
+    kind: z.enum(MEDIA_KINDS).optional(),
+  })
+  .strict()
+  .refine(body => body.filename !== undefined || body.kind !== undefined, 'Change something');
+export type MediaPatch = z.infer<typeof mediaPatch>;
+
+export async function updateMedia(actor: string, id: string, patch: MediaPatch): Promise<MediaAssetView> {
+  const before = await MediaAssetModel.findById(id).lean();
+  if (!before) throw Errors.notFound('That image');
+
+  await MediaAssetModel.updateOne({ _id: id }, { $set: patch });
+  await AuditLogModel.create({
+    actorType: 'admin',
+    actorId: actor,
+    action: 'media.update',
+    subjectType: 'media',
+    subjectId: id,
+    before: { filename: before.filename, kind: before.kind },
+    after: { ...patch },
+  });
+
+  const after = await MediaAssetModel.findById(id).lean();
+  return view(after!);
+}
+
+/**
  * The library by filename, for the spreadsheet import.
  *
  * One read for the whole sheet rather than a lookup per row: a two-thousand

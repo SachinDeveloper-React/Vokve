@@ -182,3 +182,60 @@ export async function deleteReview(actor: string, reviewId: string, reason: stri
     rating: { average: item?.ratingAverage ?? 0, count: item?.ratingCount ?? 0 },
   };
 }
+
+/**
+ * Corrects a review in place — an address left in the text, a slur, the
+ * wrong star pressed — where deleting it would take the member's whole
+ * review down for one line.
+ *
+ * The same bounds the member's own write has (`reviewBody`), the item's
+ * rating recounted when the stars move, and the words as they were kept in
+ * the audit row, because this is changing what somebody else said.
+ */
+export const reviewPatch = z
+  .object({
+    rating: z.number().int().min(1).max(5).optional(),
+    title: z.string().trim().max(80).nullable().optional(),
+    body: z.string().trim().min(1).max(1000).optional(),
+    verified: z.boolean().optional(),
+    reason: z.string().trim().min(3).max(300),
+  })
+  .strict();
+export type ReviewPatch = z.infer<typeof reviewPatch>;
+
+export async function updateReview(actor: string, reviewId: string, patch: ReviewPatch) {
+  const before = await ReviewModel.findById(reviewId).lean();
+  if (!before) throw Errors.notFound('That review');
+
+  const { reason, ...fields } = patch;
+  const set: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    const next = key === 'title' && value === '' ? null : value;
+    if (next !== ((before as Record<string, unknown>)[key] ?? null)) set[key] = next;
+  }
+  if (Object.keys(set).length === 0) throw Errors.validation({ body: 'Nothing to change.' });
+
+  await ReviewModel.updateOne({ _id: reviewId }, { $set: set });
+  if (set.rating !== undefined) await recomputeItemRating(before.itemId);
+
+  const item = await ShopItemModel.findById(before.itemId, { ratingAverage: 1, ratingCount: 1 }).lean();
+  await AuditLogModel.create({
+    actorType: 'admin',
+    actorId: actor,
+    action: 'shop.review_edited',
+    subjectType: 'review',
+    subjectId: reviewId,
+    before: Object.fromEntries(Object.keys(set).map(key => [key, (before as Record<string, unknown>)[key] ?? null])),
+    after: { ...set, reason },
+  });
+
+  const after = await ReviewModel.findById(reviewId).lean();
+  return {
+    id: reviewId,
+    itemId: before.itemId,
+    changed: Object.keys(set),
+    review: { rating: after!.rating, title: after!.title ?? null, body: after!.body, verified: after!.verified === true },
+    rating: { average: item?.ratingAverage ?? 0, count: item?.ratingCount ?? 0 },
+  };
+}

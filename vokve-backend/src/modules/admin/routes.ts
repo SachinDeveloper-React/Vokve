@@ -111,7 +111,7 @@ import {
   removeBasketLine,
   removeWishlistEntry,
 } from './baskets.service.js';
-import { deleteReview, deleteReviewBody, listReviews, reviewQuery } from './reviews.service.js';
+import { deleteReview, deleteReviewBody, listReviews, reviewPatch, reviewQuery, updateReview } from './reviews.service.js';
 import {
   adjustBody,
   adjustMemberCoins,
@@ -119,8 +119,10 @@ import {
   grantBadge,
   grantBadgeBody,
   memberAudit,
+  profileBody,
   setMemberStatus,
   statusBody,
+  updateMemberProfile,
   verifyContactBody,
   verifyMemberContact,
 } from './moderation.service.js';
@@ -155,9 +157,11 @@ import {
   confirmMediaUpload,
   deleteMedia,
   listMedia,
+  mediaPatch,
   mediaQuery,
   signUploadBody,
   signMediaUpload,
+  updateMedia,
 } from './media.service.js';
 import {
   appConfig,
@@ -566,6 +570,14 @@ adminUsersRouter.put('/admin/users/:userId/status', validate('body', statusBody)
 });
 
 /**
+ * Corrects their profile — the fields the member's own `PATCH /me` takes,
+ * and the email and number, which come back unverified. A reason is required.
+ */
+adminUsersRouter.put('/admin/users/:userId/profile', validate('body', profileBody), async (req, res) => {
+  res.json(await updateMemberProfile(req.ctx.adminActor!, String(req.params.userId), req.body));
+});
+
+/**
  * A contact detail proven by hand, for the member whose code never arrives
  * (RULES O5). It unlocks redeeming, so it asks for the value typed back and
  * for a reason, and there is no route that undoes it.
@@ -683,6 +695,11 @@ adminUsersRouter.post('/admin/media', validate('body', confirmUploadBody), async
 /** The library, newest first, searched by the filename it was chosen under. */
 adminUsersRouter.get('/admin/media', validate('query', mediaQuery), async (req, res) => {
   res.json(await listMedia(req.query as unknown as z.infer<typeof mediaQuery>));
+});
+
+/** Renames it, or moves it to another shelf of the library. The URL never changes. */
+adminUsersRouter.put('/admin/media/:mediaId', validate('body', mediaPatch), async (req, res) => {
+  res.json(await updateMedia(req.ctx.adminActor!, String(req.params.mediaId), req.body));
 });
 
 /** Refused while a product still shows it — a broken picture is worse than none. */
@@ -1108,6 +1125,11 @@ adminUsersRouter.delete(
 /** Every review, worst first if asked — which is the sort this exists for. */
 adminUsersRouter.get('/admin/shop/reviews', validate('query', reviewQuery), async (req, res) => {
   res.json(await listReviews(req.query as unknown as z.infer<typeof reviewQuery>));
+});
+
+/** Corrects one in place; the stars moving recounts the item's rating. */
+adminUsersRouter.put('/admin/shop/reviews/:reviewId', validate('body', reviewPatch), async (req, res) => {
+  res.json(await updateReview(req.ctx.adminActor!, String(req.params.reviewId), req.body));
 });
 
 /** Takes one down and recounts the item's rating, which every list reads. */
