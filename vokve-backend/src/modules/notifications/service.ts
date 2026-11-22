@@ -34,11 +34,11 @@ export const FEED_CATEGORY: Record<NotificationTopic, NotificationCategory> = {
 
 export type PreferenceSwitch = NotificationPreferenceKey;
 
-/** The eight switches, in the order the settings screen shows them. */
+/** The nine switches, in the order the settings screen shows them. */
 export const PREFERENCE_SWITCHES = notificationPreferenceSchema.options;
 
 /**
- * Which of the eight consent switches governs a topic's push. Coarser than
+ * Which of the consent switches governs a topic's push. Coarser than
  * the topics on purpose: the settings screen asks about kinds of message,
  * and a user who turned "coins" off meant the expiry warning too.
  *
@@ -163,6 +163,10 @@ export interface NotifyInput {
    * because a feed row is targeting too.
    */
   personalised?: boolean;
+  /** Where a tap goes, when more exact than the topic's screen (RULES M10). */
+  link?: string | null;
+  /** The automation or scheduled message that wrote it (RULES M11). */
+  origin?: string | null;
   now?: Date;
 }
 
@@ -200,7 +204,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
   try {
     await NotificationModel.create({
       _id: id, userId: input.userId, topic: input.topic, title: input.title, message: input.message,
-      dedupeKey: input.dedupeKey ?? null, createdAt: now,
+      dedupeKey: input.dedupeKey ?? null, link: input.link ?? null, origin: input.origin ?? null, createdAt: now,
     });
   } catch (err) {
     if ((err as { code?: number }).code === 11000) return { id: null, status: 'duplicate', push: 'skipped' };
@@ -225,7 +229,7 @@ export async function notify(input: NotifyInput): Promise<NotifyResult> {
     return { id, status: 'created', push: 'deferred' };
   }
 
-  const push = await pushRow(id, input.userId, input.title, input.message, input.topic, input.pushTtlSeconds);
+  const push = await pushRow(id, input.userId, input.title, input.message, input.topic, input.pushTtlSeconds, input.link ?? null);
   return { id, status: 'created', push };
 }
 
@@ -268,7 +272,9 @@ async function refusedNotifications(userId: string, deviceIds: string[]): Promis
   return refused;
 }
 
-async function pushRow(id: string, userId: string, title: string, message: string, topic: NotificationTopic, ttlSeconds?: number): Promise<NotifyResult['push']> {
+async function pushRow(
+  id: string, userId: string, title: string, message: string, topic: NotificationTopic, ttlSeconds?: number, link: string | null = null,
+): Promise<NotifyResult['push']> {
   const devices = await DeviceModel.find({ userId, 'push.token': { $type: 'string' }, 'push.invalidAt': null }, { 'push.token': 1 }).lean();
   if (devices.length === 0) return 'no_device';
 
@@ -281,7 +287,7 @@ async function pushRow(id: string, userId: string, title: string, message: strin
   // the only channel, and that is worth telling apart from having no phone.
   if (tokens.length === 0) return 'not_permitted';
 
-  const result = await sendPush(tokens, { title, body: message, data: { topic, notificationId: id }, ttlSeconds });
+  const result = await sendPush(tokens, { title, body: message, data: { topic, notificationId: id, ...(link ? { link } : {}) }, ttlSeconds });
   if (result.invalid.length > 0) {
     await DeviceModel.updateMany({ 'push.token': { $in: result.invalid } }, { $set: { 'push.invalidAt': new Date() } });
   }
@@ -297,7 +303,7 @@ export async function flushDeferredPushes(now = new Date()): Promise<number> {
   for (const row of due) {
     // Cleared first so a failing provider cannot make the tick retry forever.
     await NotificationModel.updateOne({ _id: row._id }, { $set: { pushDeferredUntil: null } });
-    const push = await pushRow(row._id, row.userId, row.title, row.message, row.topic as NotificationTopic);
+    const push = await pushRow(row._id, row.userId, row.title, row.message, row.topic as NotificationTopic, undefined, row.link ?? null);
     if (push === 'sent') sent += 1;
   }
   if (due.length > 0) logger.info({ due: due.length, sent }, 'notifications.flushed');
@@ -306,8 +312,11 @@ export async function flushDeferredPushes(now = new Date()): Promise<number> {
 
 // ─── Reads ─────────────────────────────────────────────────────────────────
 
-function toContract(row: { _id: string; topic: string; title: string; message: string; createdAt: Date; read: boolean }): AppNotification {
-  return appNotificationSchema.parse({ id: row._id, topic: row.topic, title: row.title, message: row.message, createdAt: row.createdAt.toISOString(), read: row.read });
+function toContract(row: { _id: string; topic: string; title: string; message: string; createdAt: Date; read: boolean; link?: string | null }): AppNotification {
+  return appNotificationSchema.parse({
+    id: row._id, topic: row.topic, title: row.title, message: row.message, createdAt: row.createdAt.toISOString(), read: row.read,
+    link: row.link ?? null,
+  });
 }
 
 function topicsOf(category: NotificationCategory): NotificationTopic[] {

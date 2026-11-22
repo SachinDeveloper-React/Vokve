@@ -15,6 +15,7 @@ import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { LoadState } from '../../components/ui/LoadState';
 import { Screen } from '../../components/ui/Screen';
+import { routeForLink } from '../../services/notifications';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import {
   useNotificationCounts,
@@ -61,6 +62,29 @@ export const NotificationsScreen = () => {
   const counts = useNotificationCounts();
   const groups = useNotificationGroups(filter);
   const markRead = useNotificationsStore(s => s.markRead);
+
+  // A row with a link of its own opens it — the saved reward, the update —
+  // as the push would have (RULES M10). Rows without one are read in place,
+  // as they always were.
+  const onPressNotification = useCallback(
+    (id: string) => {
+      markRead(id);
+      const link = groups
+        .flatMap(group => group.notifications)
+        .find(notification => notification.id === id)?.link;
+      const route = routeForLink(link);
+      if (!route) return;
+      if (route.kind === 'product') {
+        navigation.navigate('ProductDetail', { id: route.id });
+      } else if (route.kind === 'tab') {
+        navigation.navigate('Main', { screen: route.name });
+      } else {
+        // Every screen a link names takes no params — see `NotificationRoute`.
+        navigation.navigate(route.name as 'Notifications');
+      }
+    },
+    [groups, markRead, navigation],
+  );
   const markAllRead = useNotificationsStore(s => s.markAllRead);
   const hydrateFromServer = useNotificationsStore(s => s.hydrateFromServer);
   const refreshIfStale = useNotificationsStore(s => s.refreshIfStale);
@@ -182,7 +206,7 @@ export const NotificationsScreen = () => {
               key={group.date}
               title={group.title}
               notifications={group.notifications}
-              onPressNotification={markRead}
+              onPressNotification={onPressNotification}
             />
           ))
         ) : (

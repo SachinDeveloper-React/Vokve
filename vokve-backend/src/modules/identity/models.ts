@@ -165,6 +165,8 @@ const notificationPreferencesSchema = new Schema(
       challenges: { type: Boolean, default: true }, orders: { type: Boolean, default: true },
       offers: { type: Boolean, default: true }, announcements: { type: Boolean, default: true },
       referrals: { type: Boolean, default: true }, health: { type: Boolean, default: false },
+      /** Automated check-ins, summaries and tips (RULES M9). */
+      motivation: { type: Boolean, default: true },
     },
     quietHours: { enabled: { type: Boolean, default: true }, start: { type: String, default: '22:00' }, end: { type: String, default: '07:00' } },
     sms: { type: Boolean, default: true },

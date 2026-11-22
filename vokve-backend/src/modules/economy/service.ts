@@ -5,6 +5,7 @@ import { ApiError } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { toCoins, toMilli } from '../../lib/coins.js';
 import { logger } from '../../lib/logger.js';
+import { balanceRaised } from './events.js';
 import { CoinBalanceModel, CoinDailyCapModel, CoinHoldModel, CoinLedgerModel, type CoinSource } from './models.js';
 
 /**
@@ -99,6 +100,14 @@ export async function credit(event: EarnEvent): Promise<EarnResult> {
   const requestedMc = toMilli(event.amount);
   if (requestedMc <= 0) return { granted: 0, requested: event.amount, capped: 0, status: 'already_done' };
 
+  const result = await creditInTransaction(event, requestedMc);
+  // After the commit, never inside it: a listener reads the balance it
+  // is being told about (RULES M12).
+  if (result.status === 'credited') await balanceRaised(event.userId);
+  return result;
+}
+
+function creditInTransaction(event: EarnEvent, requestedMc: number): Promise<EarnResult> {
   return withTransaction(async session => {
     const existing = await CoinLedgerModel.findOne(refFilter(event)).session(session).lean();
     if (existing) return { granted: toCoins(existing.amountMc), requested: event.amount, capped: 0, status: 'already_done', ledgerId: existing._id };
@@ -148,9 +157,9 @@ export async function hold(event: EarnEvent, releaseAfter: Date | null): Promise
 }
 
 export async function release(holdId: string): Promise<'released' | 'noop'> {
-  return withTransaction(async session => {
+  const released = await withTransaction(async session => {
     const h = await CoinHoldModel.findOneAndUpdate({ _id: holdId, status: 'held' }, { $set: { status: 'released' } }, { session, new: true });
-    if (!h) return 'noop';
+    if (!h) return null;
     await CoinLedgerModel.create([{
       _id: newId('led'), userId: h.userId, amountMc: h.amountMc, source: h.source, title: h.title,
       referenceType: h.referenceType, referenceId: h.referenceId, holdId: h._id,
@@ -160,8 +169,11 @@ export async function release(holdId: string): Promise<'released' | 'noop'> {
       { $inc: { balanceMc: h.amountMc, pendingMc: -h.amountMc, lifetimeEarnedMc: h.amountMc }, $set: { lastCreditAt: new Date() } },
       { session },
     );
-    return 'released';
+    return { userId: h.userId };
   });
+  if (!released) return 'noop';
+  await balanceRaised(released.userId);
+  return 'released';
 }
 
 export async function voidHold(holdId: string, reason: string): Promise<'voided' | 'noop'> {

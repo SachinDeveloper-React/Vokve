@@ -14,7 +14,9 @@ import { handleAppleNotification } from './modules/identity/appleNotifications.s
 import { requestContext } from './middleware/requestContext.js';
 import { versionGate } from './middleware/version.js';
 import { accountRouter, aboutRouter } from './modules/account/routes.js';
+import { adminAutomationsRouter } from './modules/admin/automations.routes.js';
 import { adminUsersRouter } from './modules/admin/routes.js';
+import { registerWishlistGoalAlerts } from './modules/commerce/wishlistGoals.service.js';
 import { adminSessionRouter } from './modules/admin/session.routes.js';
 import { requireAdmin } from './middleware/admin.js';
 import { recordStaffActivity } from './modules/staff/activity.js';
@@ -114,6 +116,8 @@ export function requestLogger() {
  * handler, which is why the routes can `await` freely.
  */
 export function createApp() {
+  // A credit that takes the wallet to a saved reward's goal tells the member (RULES M12).
+  registerWishlistGoalAlerts();
   const app = express();
   // The number of proxies in front of this process, not `true`: see
   // `TRUST_PROXY_HOPS`. `req.ip` is what every per-IP rate limit counts.
@@ -219,6 +223,7 @@ app.get("/", (req, res) => {
   v1.use(staffRouter);
   v1.use(adminNutritionRouter);
   v1.use(adminUsersRouter);
+  v1.use(adminAutomationsRouter);
   app.use('/v1', v1);
 
   app.use((_req, res) => {

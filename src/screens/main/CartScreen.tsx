@@ -12,6 +12,7 @@ import { SecureRedemptionBanner } from '../../components/cart/SecureRedemptionBa
 import { useToast } from '../../components/feedback/Toast';
 import { HStack, VStack } from '../../components/layout/Stack';
 import { Icon } from '../../components/media/Icon';
+import { CoinProgressCard } from '../../components/shop/CoinProgressCard';
 import { PayAmount } from '../../components/shop/PayAmount';
 import { ShopPageHeader } from '../../components/shop/ShopPageHeader';
 import { AppText } from '../../components/ui/AppText';
@@ -32,6 +33,7 @@ import {
   type ThemeShape,
 } from '../../theme';
 import type { CartLine } from '../../types/models';
+import { coinGoalOf, orderGoalStatus } from '../../utils/coinGoal';
 import { formatCoins } from '../../utils/format';
 
 const makeStyles = ({ spacing: space, colors }: ThemeShape) =>
@@ -216,6 +218,23 @@ export const CartScreen = () => {
   const short = quote?.coinsShort ?? 0;
   const blocked = hasSoldOut || short > 0;
 
+  // The coins this order must take, against the wallet (RULES R20) — only
+  // where it must take some: a basket that coins merely discount has
+  // nothing to save up for. Measured with the quote's own shortfall, so
+  // the bar and the line over the button never disagree by a coin.
+  const orderGoal = useMemo(() => {
+    if (!quote || quote.coinsMin <= 0) return null;
+    const have =
+      quote.coinsShort > 0
+        ? quote.coinsMin - quote.coinsShort
+        : Math.max(Math.floor(balance), quote.coinsMin);
+    return coinGoalOf(
+      quote.coinsMin,
+      have,
+      quote.paymentMode === 'coins' ? 'redeem' : 'share',
+    );
+  }, [balance, quote]);
+
   return (
     <Screen edges={['top']}>
       <ShopPageHeader
@@ -268,6 +287,14 @@ export const CartScreen = () => {
               }
               caption="Your items are safe and will be delivered to you"
             />
+
+            {orderGoal ? (
+              <CoinProgressCard
+                title="Coins for This Order"
+                goal={orderGoal}
+                status={orderGoalStatus(orderGoal)}
+              />
+            ) : null}
 
             {lines.map(line => {
               const key = cartLineKey(line.item.id, line.size, line.color);

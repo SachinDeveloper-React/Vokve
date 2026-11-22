@@ -33,7 +33,12 @@ export const WishlistButton = memo(
         const nowSaved = await toggle(item);
         toast.show({
           title: nowSaved ? 'Saved to wishlist' : 'Removed from wishlist',
-          message: item.title,
+          // Something that takes coins gets a bar on Home (RULES R20);
+          // the toast is where a member first learns that.
+          message:
+            nowSaved && item.coinGoal > 0
+              ? `${item.title} · your progress is on Home`
+              : item.title,
           tone: 'info',
           durationMs: 1800,
         });

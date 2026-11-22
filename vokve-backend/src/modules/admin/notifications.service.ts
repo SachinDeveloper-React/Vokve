@@ -4,6 +4,7 @@ import { Errors } from '../../lib/errors.js';
 import { UserModel } from '../identity/models.js';
 import { NotificationPreferencesModel } from '../identity/models.js';
 import { NotificationModel } from '../notifications/models.js';
+import { AUTOMATIONS, AUTOMATION_KEYS } from '../notifications/automations.catalog.js';
 import { PREFERENCE_SWITCHES, preferencesInUse } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
 import { page, pageFields } from './paging.js';
@@ -137,8 +138,11 @@ export async function notificationConsent() {
     },
     switches: PREFERENCE_SWITCHES.map(key => {
       const defaultOn = defaults[key] ?? true;
-      const on = (tally[`${key}_on`] ?? 0) + (defaultOn ? noRow : 0);
-      const off = (tally[`${key}_off`] ?? 0) + (defaultOn ? 0 : noRow);
+      // A row with no value for the switch (written before it existed) is
+      // on its default, so only the explicit opposite of the default is
+      // counted from the rows and the rest follow the default.
+      const on = defaultOn ? withRow - (tally[`${key}_off`] ?? 0) + noRow : tally[`${key}_on`] ?? 0;
+      const off = defaultOn ? tally[`${key}_off`] ?? 0 : withRow - (tally[`${key}_on`] ?? 0) + noRow;
       return {
         key,
         defaultOn,
@@ -149,6 +153,8 @@ export async function notificationConsent() {
         chosen: defaultOn ? off : on,
         /** The topics sent on it; empty means only a caller naming it. */
         governs: governs[key] ?? [],
+        /** The automations that name it (RULES M11) — `motivation` is theirs alone. */
+        automations: AUTOMATION_KEYS.filter(automation => AUTOMATIONS[automation].preference === key),
       };
     }),
   };

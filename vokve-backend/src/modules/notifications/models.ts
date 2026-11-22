@@ -25,6 +25,18 @@ const notificationSchema = new Schema(
     read: { type: Boolean, default: false },
     readAt: { type: Date, default: null },
     dedupeKey: { type: String, default: null },
+    /**
+     * Where tapping it goes, when more exact than the topic's screen
+     * (RULES M10) — `product:<id>`, `wishlist` and the rest. Sent in the
+     * push's data as well, so a tap from the lock screen lands there too.
+     */
+    link: { type: String, default: null },
+    /**
+     * Which automation or scheduled message wrote it (RULES M11):
+     * `auto:<key>` or `campaign:<id>`. Null for everything else. What the
+     * daily cap counts and what the panel's sent/opened figures are read by.
+     */
+    origin: { type: String, default: null },
     pushedAt: { type: Date, default: null },
     pushDeferredUntil: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now },
@@ -35,4 +47,5 @@ notificationSchema.index({ userId: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, read: 1 });
 notificationSchema.index({ userId: 1, dedupeKey: 1 }, { unique: true, partialFilterExpression: { dedupeKey: { $type: 'string' } } });
 notificationSchema.index({ pushDeferredUntil: 1 }, { sparse: true });
+notificationSchema.index({ origin: 1, createdAt: -1 }, { partialFilterExpression: { origin: { $type: 'string' } } });
 export const NotificationModel = model('Notification', notificationSchema);

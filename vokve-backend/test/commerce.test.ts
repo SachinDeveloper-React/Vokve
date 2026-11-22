@@ -1004,6 +1004,72 @@ describe('commerce: how an order is paid (RULES R1, R11, D-59)', () => {
   });
 });
 
+describe('commerce: saving up for an item (RULES R20)', () => {
+  /** What the till takes for one unit, asked of a wallet too full to clamp anything. */
+  async function oneUnit(session: Session, itemId: string) {
+    const [item, quoted] = await Promise.all([
+      request(app).get(`/v1/shop/items/${itemId}`).set(authed(session)),
+      request(app).post('/v1/checkout/quote').set(authed(session)).send({ lines: [{ itemId, quantity: 1 }] }),
+    ]);
+    expect(item.status).toBe(200);
+    expect(quoted.status).toBe(200);
+    return { goal: item.body.coinGoal as number, quote: quoted.body };
+  }
+
+  it('every item says what one unit takes in coins, and it is what a one-unit quote takes, in every mode', async () => {
+    const { session } = await shopper(50_000);
+
+    // The shop's default, 30% coins: the cap takes its share, the wraps
+    // are a coins reward (₹349 → 1,396 coins + 196 to ship), and the
+    // roller is money only — nothing to save up for.
+    const cap = await oneUnit(session, 'cap');
+    expect(cap.goal).toBe(538);
+    expect(cap.quote.coinsMax).toBe(538);
+    const wraps = await oneUnit(session, 'wrist-wraps');
+    expect(wraps.goal).toBe(1592);
+    expect(wraps.quote).toMatchObject({ coinsMin: 1592, coinsMax: 1592 });
+    const roller = await oneUnit(session, 'foam-roller');
+    expect(roller.goal).toBe(0);
+    expect(roller.quote.coinsMax).toBe(0);
+
+    // Coins alone: the delivery is part of the goal under ₹999, and not
+    // at or above it.
+    await setCommerce({ paymentMode: 'coins' });
+    const capInCoins = await oneUnit(session, 'cap');
+    expect(capInCoins.goal).toBe(1796 + 196);
+    expect(capInCoins.quote).toMatchObject({ coinsMin: capInCoins.goal, coinsMax: capInCoins.goal });
+    const mat = await oneUnit(session, 'yoga-mat');
+    expect(mat.goal).toBe(3996);
+    expect(mat.quote).toMatchObject({ shipping: 0, coinsMin: 3996, coinsMax: 3996 });
+
+    // A fixed split: the share is required, and it is the goal.
+    await setCommerce({ paymentMode: 'mixed', coinShareMin: 0.2, coinShareMax: 0.2 });
+    const fixed = await oneUnit(session, 'kettlebell-8');
+    expect(fixed.goal).toBe(Math.floor((179900 * 0.2) / COIN));
+    expect(fixed.quote).toMatchObject({ coinsMin: fixed.goal, coinsMax: fixed.goal });
+  });
+
+  it('an operator\'s own coin price is what the goal is built on', async () => {
+    const { session } = await shopper(50_000);
+    await ShopItemModel.updateOne({ _id: 'wrist-wraps' }, { $set: { coinPrice: 1_000 } });
+    const wraps = await oneUnit(session, 'wrist-wraps');
+    expect(wraps.goal).toBe(1_000 + 196);
+    expect(wraps.quote).toMatchObject({ coinsMin: 1_196, coinsMax: 1_196 });
+  });
+
+  it('the wishlist carries each saved item\'s goal, so the home card needs nothing else', async () => {
+    const { session } = await shopper(100);
+    for (const id of ['foam-roller', 'wrist-wraps']) {
+      expect((await request(app).put(`/v1/wishlist/${id}`).set(authed(session))).status).toBe(200);
+    }
+    const saved = (await request(app).get('/v1/wishlist').set(authed(session))).body.data;
+    expect(saved.map((item: { id: string; coinGoal: number }) => [item.id, item.coinGoal])).toEqual([
+      ['wrist-wraps', 1592],
+      ['foam-roller', 0],
+    ]);
+  });
+});
+
 describe('commerce: coupons (RULES R16)', () => {
   it('applies only a coupon that fits the basket, takes it off the goods, is spent by the order and given back on cancel', async () => {
     const { session, addressId } = await shopper(2_000);

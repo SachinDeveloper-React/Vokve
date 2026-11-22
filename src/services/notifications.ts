@@ -669,10 +669,14 @@ export type NotificationRoute =
         | 'Streak'
         | 'Challenges'
         | 'HealthCheckup'
-        | 'Notifications';
+        | 'Notifications'
+        | 'Wishlist'
+        | 'About';
     }
   /** A tab, which is reached through `Main` rather than pushed. */
-  | { kind: 'tab'; name: 'Wallet' };
+  | { kind: 'tab'; name: 'Wallet' | 'Home' | 'Shop' }
+  /** One product's page — a saved reward the wallet now covers (RULES M12). */
+  | { kind: 'product'; id: string };
 
 const screen = (
   name: Extract<NotificationRoute, { kind: 'screen' }>['name'],
@@ -705,6 +709,44 @@ export function routeForTopic(topic: string | undefined): NotificationRoute {
     default:
       return screen('Notifications');
   }
+}
+
+/**
+ * Where a message's own link goes (RULES M10), or null for a link this
+ * build does not know — the caller then falls back to the topic, so a link
+ * added on the server after this build shipped is never a dead tap.
+ */
+export function routeForLink(link: string | null | undefined): NotificationRoute | null {
+  if (!link) return null;
+  if (link.startsWith('product:')) {
+    const id = link.slice('product:'.length).trim();
+    return id ? { kind: 'product', id } : null;
+  }
+  switch (link) {
+    case 'home':
+      return { kind: 'tab', name: 'Home' };
+    case 'wallet':
+      return { kind: 'tab', name: 'Wallet' };
+    case 'shop':
+      return { kind: 'tab', name: 'Shop' };
+    case 'steps':
+      return screen('StepTracking');
+    case 'wishlist':
+      return screen('Wishlist');
+    // The About screen is where the version and the store button are.
+    case 'update':
+      return screen('About');
+    default:
+      return null;
+  }
+}
+
+/** Where a push goes: its own link if this build knows it, else its topic's screen. */
+export function routeForPush(
+  topic: string | undefined,
+  link: string | null | undefined,
+): NotificationRoute {
+  return routeForLink(link) ?? routeForTopic(topic);
 }
 
 /**
@@ -786,7 +828,10 @@ function routeForNotification(
   if (!notification) return null;
   if (isHydrationReminder(notification)) return screen('Hydration');
   const topic = notification.data?.topic;
-  return typeof topic === 'string' ? routeForTopic(topic) : null;
+  const link = notification.data?.link;
+  return typeof topic === 'string'
+    ? routeForPush(topic, typeof link === 'string' ? link : undefined)
+    : null;
 }
 
 /**

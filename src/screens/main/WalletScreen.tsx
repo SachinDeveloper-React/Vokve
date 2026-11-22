@@ -13,11 +13,13 @@ import { WalletHeader } from '../../components/wallet/WalletHeader';
 import { WalletSyncNotice } from '../../components/wallet/WalletSyncNotice';
 import { LoadState } from '../../components/ui/LoadState';
 import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
+import { WishlistGoalsCard } from '../../components/shop/WishlistGoalsCard';
 import { Screen } from '../../components/ui/Screen';
 import { useReferralCard } from '../../hooks/useContent';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { useAuthStatus, useCurrentUser } from '../../stores/authStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
+import { useWishlistItems, useWishlistStore } from '../../stores/wishlistStore';
 import {
   useCoinBalance,
   useCoinExpiry,
@@ -80,6 +82,7 @@ export const WalletScreen = () => {
   const earnedToday = useCoinsEarnedToday();
   const remainingToday = useCoinsRemainingToday();
   const hasUnreadNotifications = useHasUnreadNotifications();
+  const savedItems = useWishlistItems();
 
   const isSyncing = useIsWalletSyncing();
   const syncError = useWalletSyncError();
@@ -97,8 +100,12 @@ export const WalletScreen = () => {
     if (!isSignedIn) {
       return undefined;
     }
-    refreshIfStale();
-    return navigation.addListener('focus', refreshIfStale);
+    const refresh = () => {
+      refreshIfStale();
+      useWishlistStore.getState().refreshItemsIfStale();
+    };
+    refresh();
+    return navigation.addListener('focus', refresh);
   }, [isSignedIn, navigation, refreshIfStale]);
 
   // The spinner follows the pull, not every sync: a background refresh on
@@ -120,6 +127,16 @@ export const WalletScreen = () => {
 
   const onOpenAccount = useCallback(
     () => navigation.navigate('Main', { screen: 'Account' }),
+    [navigation],
+  );
+
+  const onOpenProduct = useCallback(
+    (id: string) => navigation.navigate('ProductDetail', { id }),
+    [navigation],
+  );
+
+  const onOpenWishlist = useCallback(
+    () => navigation.navigate('Wishlist'),
     [navigation],
   );
 
@@ -234,6 +251,14 @@ export const WalletScreen = () => {
           onPressShop={onOpenShop}
           onPressHistory={onOpenHistory}
           onPressOrders={onOpenOrders}
+        />
+
+        {/* What the balance above is being saved for (RULES R20). */}
+        <WishlistGoalsCard
+          items={savedItems}
+          balance={balance}
+          onPressItem={onOpenProduct}
+          onPressViewAll={onOpenWishlist}
         />
 
         <KeepGoingCard />

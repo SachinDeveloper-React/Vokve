@@ -138,10 +138,23 @@ const wishlistSchema = new Schema(
     userId: { type: String, required: true },
     itemId: { type: String, required: true },
     addedAt: { type: Date, default: Date.now },
+    /**
+     * Whether crossing this item's coin goal should tell the member (RULES
+     * M12). False once told, true again once the wallet drops back below
+     * it — so a goal reached, spent and reached again is said twice, and a
+     * balance hovering around it is not said every hour. Unset on rows
+     * saved before the alert existed: the first check sets it without
+     * telling, so nobody is told on launch day about something they could
+     * already afford.
+     */
+    goalArmed: { type: Boolean, default: undefined },
+    /** When the member was last told; the cooldown is read from this. */
+    goalAlertedAt: { type: Date, default: null },
   },
   { collection: 'wishlists', versionKey: false },
 );
 wishlistSchema.index({ userId: 1, addedAt: -1 });
+wishlistSchema.index({ goalArmed: 1, userId: 1 });
 export const WishlistModel = model('Wishlist', wishlistSchema);
 
 /**

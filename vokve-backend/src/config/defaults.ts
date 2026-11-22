@@ -1156,6 +1156,28 @@ export const CONFIG_DEFAULTS = {
       clockSkewInstalls: 10,
     },
   },
+  /**
+   * The automated messages (RULES M11): the built-in check-ins, summaries
+   * and tips, and the operator's scheduled messages. Each automation's own
+   * hour, days and words live in `notification_automations` and are edited
+   * from the panel; these are the rules over all of them.
+   */
+  automations: {
+    /** Off stops every automation and scheduled message at once; nothing else is touched. */
+    enabled: true,
+    /**
+     * The most automated messages one member gets in their own day. The
+     * member's own news — a goal reached, a saved reward now affordable —
+     * is not counted, and is never held back by it.
+     */
+    maxPerDay: 3,
+    /**
+     * Only members whose phone has talked to us inside this many days get
+     * the daily ones; past it they are the win-back's, not the morning
+     * message's.
+     */
+    activeWithinDays: 30,
+  },
 };
 
 export type AppConfig = typeof CONFIG_DEFAULTS;

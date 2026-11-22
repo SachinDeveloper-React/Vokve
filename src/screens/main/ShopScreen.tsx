@@ -14,6 +14,7 @@ import { ShopCoinsBanner } from '../../components/shop/ShopCoinsBanner';
 import { ShopHeader } from '../../components/shop/ShopHeader';
 import { ShopSearchBar } from '../../components/shop/ShopSearchBar';
 import { TopCategoriesGrid } from '../../components/shop/TopCategoriesGrid';
+import { WishlistGoalsCard } from '../../components/shop/WishlistGoalsCard';
 import { LoadState } from '../../components/ui/LoadState';
 import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
 import { Screen } from '../../components/ui/Screen';
@@ -30,7 +31,11 @@ import {
   useShopItems,
   useShopStore,
 } from '../../stores/shopStore';
-import { useWishlistCount } from '../../stores/wishlistStore';
+import {
+  useWishlistCount,
+  useWishlistItems,
+  useWishlistStore,
+} from '../../stores/wishlistStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { PaymentMode, ShopCategory, ShopItem } from '../../types/models';
 import { whenIdle, type Idle } from '../../utils/idle';
@@ -99,6 +104,7 @@ export const ShopScreen = () => {
   const cartCount = useCartCount();
   const paymentMode = usePaymentMode();
   const wishlistCount = useWishlistCount();
+  const savedItems = useWishlistItems();
 
   const [filter, setFilter] = useState<ShopFilter>('all');
   const ready = useAfterTransition();
@@ -120,6 +126,7 @@ export const ShopScreen = () => {
       idle = whenIdle(() => {
         idle = null;
         refreshCatalogueIfStale();
+        useWishlistStore.getState().refreshItemsIfStale();
       });
     };
     refresh();
@@ -234,6 +241,17 @@ export const ShopScreen = () => {
 
         <EmailVerificationBanner reason="place orders" />
         <ShopCoinsBanner balance={balance} onPressBestRewards={onOpenAll} />
+
+        {/* Under the balance: "you have this", then "and this is how far
+            it goes towards what you saved" (RULES R20). Two rows at most —
+            the shelf is what this tab is for. */}
+        <WishlistGoalsCard
+          items={savedItems}
+          balance={balance}
+          limit={2}
+          onPressItem={onOpenSuggestion}
+          onPressViewAll={onOpenWishlist}
+        />
 
         <ReferralPromoCard
           card={referralCard}

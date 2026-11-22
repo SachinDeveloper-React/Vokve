@@ -21,7 +21,7 @@ import {
   displayPushNotification,
   ensureDefaultChannel,
   recordNotificationTap,
-  routeForTopic,
+  routeForPush,
 } from './notifications';
 import { syncStepsInBackground } from './steps';
 
@@ -334,7 +334,13 @@ export function startPushHandling(): () => void {
 function openFromPush(message: PushMessage): void {
   if (isSyncPing(message)) return;
   const topic = message.data?.topic;
-  recordNotificationTap(routeForTopic(typeof topic === 'string' ? topic : undefined));
+  const link = message.data?.link;
+  recordNotificationTap(
+    routeForPush(
+      typeof topic === 'string' ? topic : undefined,
+      typeof link === 'string' ? link : undefined,
+    ),
+  );
   refreshFeed();
 }
 

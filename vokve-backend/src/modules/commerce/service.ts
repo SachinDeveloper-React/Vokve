@@ -171,6 +171,25 @@ function coinsFloorFor(paise: number, mode: PaymentMode, cfg: CommerceConfig, wh
 }
 
 /**
+ * What saving up for one unit of an item means in coins (RULES R20): the
+ * coins the till takes for it ordered on its own, at the most coins it
+ * allows. A coins-only item takes its coin price and the delivery in coins;
+ * a part-coins item its coin share of the goods; a money-only item none.
+ *
+ * This is `buildQuote` for one line with no coupon and an unlimited wallet,
+ * worked out directly so that a shelf of a hundred items is not quoted a
+ * hundred times. The commerce tests hold the two to the same figure in
+ * every mode, so the bar a member watches fill and the till that takes the
+ * coins cannot drift apart.
+ */
+function coinGoalFor(price: number, mode: PaymentMode, coinPrice: number, cfg: CommerceConfig): number {
+  if (mode === 'money') return 0;
+  const shipping = cfg.freeShippingAbovePaise !== null && price >= cfg.freeShippingAbovePaise ? 0 : cfg.shippingFeePaise;
+  if (mode === 'coins') return coinPrice + coinsFor(shipping, cfg);
+  return Math.min(coinsCapFor(price, mode, cfg, coinPrice), Math.ceil((price + shipping) / cfg.coinValuePaise));
+}
+
+/**
  * Splits `amount` across `weights` in proportion, the last part carrying
  * whatever the rounding left over, so the parts always add back up to the
  * whole. This is how a coupon reaches each line: a line's share of the
@@ -249,10 +268,11 @@ type ItemRow = {
 
 function toItem(row: ItemRow, onHand: number, cfg: CommerceConfig): ShopItem {
   const mode = modeOf(row, cfg);
+  const coinPrice = coinPriceOf(row, cfg);
   return shopItemSchema.parse({
     id: row._id, title: row.title, description: row.description, price: row.price, mrp: row.mrp ?? null, currency: cfg.currency,
-    coinsMax: coinsCapFor(row.price, mode, cfg, coinPriceOf(row, cfg)), coinsMin: coinsFloorFor(row.price, mode, cfg, coinPriceOf(row, cfg)),
-    coinPrice: coinPriceOf(row, cfg),
+    coinsMax: coinsCapFor(row.price, mode, cfg, coinPrice), coinsMin: coinsFloorFor(row.price, mode, cfg, coinPrice),
+    coinPrice, coinGoal: coinGoalFor(row.price, mode, coinPrice, cfg),
     paymentMode: mode, category: row.category,
     emoji: row.emoji, badge: row.badge, isDeal: row.isDeal, inStock: onHand > 0,
     featured: row.featured, subcategory: row.subcategory, tags: row.tags ?? [], sizes: row.sizes ?? [],
@@ -568,11 +588,42 @@ export async function wishlistIds(userId: string): Promise<string[]> {
   return rows.map(r => r.itemId);
 }
 
-/** Saving twice is one save: the key is the pair. */
+/**
+ * Saving twice is one save: the key is the pair. An item saved when the
+ * wallet already covers it starts disarmed (RULES M12) — the member can see
+ * they can afford it; the alert is for the day the wallet gets there.
+ */
 export async function addToWishlist(userId: string, itemId: string): Promise<void> {
   const exists = await ShopItemModel.exists({ _id: itemId, active: true });
   if (!exists) throw Errors.notFound('That item');
-  await WishlistModel.updateOne({ _id: `${userId}:${itemId}` }, { $setOnInsert: { userId, itemId, addedAt: new Date() } }, { upsert: true });
+  const cfg = await commerceConfig();
+  const [found, balance] = await Promise.all([loadItems([itemId], cfg), wholeCoins(userId)]);
+  const item = found.get(itemId)?.item;
+  await WishlistModel.updateOne(
+    { _id: `${userId}:${itemId}` },
+    { $setOnInsert: { userId, itemId, addedAt: new Date(), goalArmed: !(item && coinGoalReached(item, balance)), goalAlertedAt: null } },
+    { upsert: true },
+  );
+}
+
+/**
+ * Whether the wallet covers a saved item in the sense an alert means
+ * (RULES M12): coins are what it takes (its goal is required, not a
+ * discount), it is in stock, and the whole coins reach its goal.
+ */
+export function coinGoalReached(item: Pick<ShopItem, 'coinGoal' | 'coinsMin' | 'inStock'>, balance: number): boolean {
+  return item.coinGoal > 0 && item.coinsMin > 0 && item.inStock && balance >= item.coinGoal;
+}
+
+/** The items behind some ids, as a shelf shows them — for the wishlist's goal alerts. */
+export async function shopItemsById(ids: string[]): Promise<Map<string, ShopItem>> {
+  const loaded = await loadItems(ids, await commerceConfig());
+  return new Map([...loaded].map(([id, found]) => [id, found.item]));
+}
+
+/** Whole coins in the wallet, as the till counts them. */
+export function spendableCoins(userId: string): Promise<number> {
+  return wholeCoins(userId);
 }
 
 export async function removeFromWishlist(userId: string, itemId: string): Promise<void> {

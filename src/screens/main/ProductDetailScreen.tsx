@@ -4,13 +4,17 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CircleCheck,
+  Heart,
   RotateCcw,
   Ruler,
   Star,
   Truck,
 } from 'lucide-react-native';
+import { useToast } from '../../components/feedback/Toast';
+import { Pressable } from '../../components/form/Pressable';
 import { HStack, VStack } from '../../components/layout/Stack';
 import { Icon } from '../../components/media/Icon';
+import { CoinProgressCard } from '../../components/shop/CoinProgressCard';
 import { ColorSwatchPicker } from '../../components/shop/ColorSwatchPicker';
 import { PayAmount } from '../../components/shop/PayAmount';
 import { ProductFeatureGrid } from '../../components/shop/ProductFeatureGrid';
@@ -43,8 +47,10 @@ import {
   useThemedStyles,
   type ThemeShape,
 } from '../../theme';
+import { useIsWishlisted, useWishlistStore } from '../../stores/wishlistStore';
 import type { Quote, ShopItem } from '../../types/models';
 import type { RootStackScreenProps } from '../../types/navigation';
+import { itemCoinGoal, itemGoalStatus } from '../../utils/coinGoal';
 import { withAlpha } from '../../utils/color';
 import { formatCoins, formatMoney } from '../../utils/format';
 
@@ -126,6 +132,33 @@ export const ProductDetailScreen = () => {
   const [size, setSize] = useState<string | null>(null);
   const [sizeError, setSizeError] = useState<string | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
+
+  // How close the wallet is to this item (RULES R20) — the same figure the
+  // wishlist and Home draw, so a member who tapped through from a bar sees
+  // that bar again here.
+  const goal = item ? itemCoinGoal(item, balance) : null;
+  const goalStatus = goal && item ? itemGoalStatus(goal, item.inStock) : null;
+  const isSaved = useIsWishlisted(id);
+  const toggleSaved = useWishlistStore(s => s.toggle);
+  const toast = useToast();
+  const onTrackGoal = useCallback(async () => {
+    if (!item) return;
+    try {
+      await toggleSaved(item);
+      toast.show({
+        title: 'Saved to wishlist',
+        message: 'Your progress towards it is on Home now.',
+        tone: 'success',
+        durationMs: 2200,
+      });
+    } catch (error) {
+      toast.show({
+        title: "Couldn't save it",
+        message: (error as Error).message,
+        tone: 'warning',
+      });
+    }
+  }, [item, toast, toggleSaved]);
 
   // Fresh stock, and the whole item for a deep link.
   useEffect(() => {
@@ -376,6 +409,44 @@ export const ProductDetailScreen = () => {
                 </VStack>
               </VStack>
             </HStack>
+
+            {goal && goalStatus ? (
+              <CoinProgressCard
+                title="Your Coins"
+                goal={goal}
+                status={goalStatus}
+                footer={
+                  isSaved ? (
+                    <HStack align="center" gap="xs">
+                      <Icon
+                        as={Heart}
+                        size="xs"
+                        tint={colors.destructive}
+                        fill={colors.destructive}
+                      />
+                      <AppText variant="micro" color="textSecondary">
+                        In your wishlist — tracked on your Home screen
+                      </AppText>
+                    </HStack>
+                  ) : !goal.reached ? (
+                    <Pressable
+                      onPress={onTrackGoal}
+                      feedback="opacity"
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Save to wishlist and track your progress on Home"
+                    >
+                      <HStack align="center" gap="xs">
+                        <Icon as={Heart} size="xs" tint={colors.brandAccent} />
+                        <AppText variant="micro" style={styles.brand}>
+                          Save it to track your progress on Home
+                        </AppText>
+                      </HStack>
+                    </Pressable>
+                  ) : null
+                }
+              />
+            ) : null}
 
             {item.colors.length > 0 ? (
               <VStack gap="md">

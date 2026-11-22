@@ -1,9 +1,11 @@
 import React, { memo, useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ShoppingCart } from 'lucide-react-native';
+import { useCoinBalance } from '../../stores/coinsStore';
 import { spacing, typography, useTheme } from '../../theme';
 import { moderateScale } from '../../theme/responsive';
 import type { ShopItem } from '../../types/models';
+import { itemCoinGoal, itemGoalStatus } from '../../utils/coinGoal';
 import { Box } from '../layout/Box';
 import { HStack, VStack } from '../layout/Stack';
 import { ZStack } from '../layout/ZStack';
@@ -14,6 +16,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Pressable } from '../form/Pressable';
 import { CoinAmount } from '../wallet/CoinAmount';
+import { CoinGoalMeter } from './CoinGoalMeter';
 import { Price } from './Price';
 import { RatingStars } from './RatingStars';
 import { ShopItemBadge } from './ShopItemBadge';
@@ -37,7 +40,31 @@ interface Props {
    * column on the browse and search pages, where the column decides.
    */
   fill?: boolean;
+  /**
+   * Draws how close the wallet is to this item under its price (RULES
+   * R20) — for the wishlist, where every card is something being saved for.
+   */
+  showGoal?: boolean;
 }
+
+/**
+ * The goal bar on its own component, so only the cards that draw one
+ * re-render when the balance moves — not every card on every shelf.
+ */
+const ItemGoal = memo(({ item }: { item: ShopItem }) => {
+  const balance = useCoinBalance();
+  const goal = itemCoinGoal(item, balance);
+  if (!goal) return null;
+  return (
+    <CoinGoalMeter
+      goal={goal}
+      status={itemGoalStatus(goal, item.inStock)}
+      variant="compact"
+    />
+  );
+});
+
+ItemGoal.displayName = 'ItemGoal';
 
 /**
  * One item on a shelf: art, price against list price, its stars, a heart,
@@ -54,7 +81,7 @@ interface Props {
  * Sold-out items stay on the shelf with their art dimmed rather than
  * disappearing: a user saving up for one needs to be able to see it.
  */
-export const ShopItemCard = memo(({ item, onPress, fill = false }: Props) => {
+export const ShopItemCard = memo(({ item, onPress, fill = false, showGoal = false }: Props) => {
   const { colors } = useTheme();
   // How *this* item is bought, not how the shop is (RULES R11).
   const mode = item.paymentMode;
@@ -136,6 +163,7 @@ export const ShopItemCard = memo(({ item, onPress, fill = false }: Props) => {
               <CoinAmount amount={item.coinsMax} size="sm" />
             </HStack>
           ) : null}
+          {showGoal ? <ItemGoal item={item} /> : null}
         </VStack>
 
         <Button

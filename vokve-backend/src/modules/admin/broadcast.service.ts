@@ -55,7 +55,7 @@ const DAY_MS = 86_400_000;
  * an operator checks before sending, and a count that came from a different
  * query than the send did is not a check.
  */
-async function resolve(segment: Segment, limit = MAX_RECIPIENTS): Promise<string[]> {
+export async function resolveSegment(segment: Segment, limit = MAX_RECIPIENTS): Promise<string[]> {
   const filter: Record<string, unknown> = { deletedAt: null };
   if (segment.tier) filter['trust.tier'] = segment.tier;
 
@@ -93,7 +93,7 @@ async function resolve(segment: Segment, limit = MAX_RECIPIENTS): Promise<string
 }
 
 export async function previewBroadcast(segment: Segment) {
-  const ids = await resolve(segment);
+  const ids = await resolveSegment(segment);
   return {
     matched: Math.min(ids.length, MAX_RECIPIENTS),
     /** True when the segment is bigger than one call will send. */
@@ -130,7 +130,7 @@ export const broadcastBody = z
 export type BroadcastBody = z.infer<typeof broadcastBody>;
 
 export async function sendBroadcast(actor: string, body: BroadcastBody) {
-  const ids = await resolve(body.segment);
+  const ids = await resolveSegment(body.segment);
   const recipients = ids.slice(0, MAX_RECIPIENTS);
 
   // A tenth either way. The segment is live — somebody signs up while the

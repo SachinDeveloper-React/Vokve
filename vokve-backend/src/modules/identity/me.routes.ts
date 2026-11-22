@@ -128,13 +128,19 @@ const prefsBody = z.object({
   categories: z.object({
     activity: z.boolean(), coins: z.boolean(), challenges: z.boolean(), orders: z.boolean(),
     offers: z.boolean(), announcements: z.boolean(), referrals: z.boolean(), health: z.boolean(),
+    motivation: z.boolean(),
   }).partial().optional(),
   quietHours: z.object({ enabled: z.boolean(), start: timeHHmm, end: timeHHmm }).partial().optional(),
   sms: z.boolean().optional(),
   email: z.boolean().optional(),
 }).strict();
 
-const prefsOut = (p: Record<string, any>) => ({ categories: p.categories, quietHours: p.quietHours, sms: p.sms, email: p.email });
+// A row written before the motivation switch existed has no value for it,
+// and a lean read applies no defaults: it is on until turned off (RULES M9).
+const prefsOut = (p: Record<string, any>) => ({
+  categories: { ...p.categories, motivation: p.categories?.motivation ?? true },
+  quietHours: p.quietHours, sms: p.sms, email: p.email,
+});
 
 meRouter.get('/me/notification-preferences', async (req, res) => {
   const p = await NotificationPreferencesModel.findOneAndUpdate({ _id: req.ctx.userId }, { $setOnInsert: { _id: req.ctx.userId } }, { upsert: true, new: true }).lean();

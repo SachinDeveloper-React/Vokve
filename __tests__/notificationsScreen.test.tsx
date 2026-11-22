@@ -63,6 +63,7 @@ const note = (
   topic: AppNotification['topic'],
   createdAt: string,
   read = false,
+  link: string | null = null,
 ): AppNotification => ({
   id,
   topic,
@@ -70,6 +71,7 @@ const note = (
   message: `Message ${id}`,
   createdAt,
   read,
+  link,
 });
 
 /** The feed as a finished sync leaves it. */
@@ -236,6 +238,32 @@ describe('NotificationsScreen', () => {
     expect(
       useNotificationsStore.getState().notifications.some(n => !n.read),
     ).toBe(false);
+  });
+
+  test('a row with a link of its own opens it; one without is read in place (RULES M10)', async () => {
+    seed([
+      note('a', 'reward', at(0, 10, 30), false, 'product:wrist-wraps'),
+      note('b', 'system', at(0, 9, 30), false, 'update'),
+      note('c', 'steps', at(0, 8, 30), false, 'somewhere-new'),
+      note('d', 'steps', at(0, 7, 30)),
+    ]);
+    const tree = await render();
+
+    press(tree, 'Unread. Title a');
+    expect(mockNavigate).toHaveBeenLastCalledWith('ProductDetail', {
+      id: 'wrist-wraps',
+    });
+    press(tree, 'Unread. Title b');
+    expect(mockNavigate).toHaveBeenLastCalledWith('About');
+
+    // A link this build does not know, and no link at all: read, not moved.
+    mockNavigate.mockClear();
+    press(tree, 'Unread. Title c');
+    press(tree, 'Unread. Title d');
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(
+      useNotificationsStore.getState().notifications.every(n => n.read),
+    ).toBe(true);
   });
 
   test('"Mark all as read" clears every row and the bell in one tap', async () => {

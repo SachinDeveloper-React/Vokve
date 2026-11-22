@@ -21,11 +21,11 @@ interface Props {
 }
 
 /**
- * The eight categories, each with its own switch.
+ * The nine categories, each with its own switch.
  *
  * "Enable All" and no "Disable All", deliberately. Turning everything on is
  * one decision a user might reasonably make in one tap; turning everything off
- * is eight decisions they would rather make one at a time — and a single tap
+ * is nine decisions they would rather make one at a time — and a single tap
  * that silences an order's delivery updates along with a promotion is how
  * people miss parcels.
  */

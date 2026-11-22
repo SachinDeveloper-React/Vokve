@@ -74,6 +74,13 @@ const SUPPORT_TINTS: readonly string[] = supportTintSchema.options;
 const SUPPORT_CATEGORIES: readonly string[] = supportCategorySchema.options;
 
 function validate(config: AppConfig): void {
+  const automations = config.automations;
+  if (!Number.isInteger(automations.maxPerDay) || automations.maxPerDay < 1 || automations.maxPerDay > 10) {
+    throw new Error(`automations.maxPerDay (${automations.maxPerDay}) must be a whole number from 1 to 10`);
+  }
+  if (!Number.isInteger(automations.activeWithinDays) || automations.activeWithinDays < 1 || automations.activeWithinDays > 365) {
+    throw new Error(`automations.activeWithinDays (${automations.activeWithinDays}) must be a whole number from 1 to 365`);
+  }
   for (const [source, cap] of Object.entries(config.coins.sourceCaps)) {
     if (cap > config.coins.dailyCap) {
       throw new Error(`coins.sourceCaps.${source} (${cap}) exceeds coins.dailyCap (${config.coins.dailyCap})`);

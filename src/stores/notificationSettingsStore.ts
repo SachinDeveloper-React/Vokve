@@ -12,7 +12,7 @@ import { mmkvStorage } from './index';
  *
  * Finer-grained than the notification centre's own `activity | reward |
  * system` filters, and deliberately so: those three are how a feed is *read*,
- * where these eight are what the app is allowed to *send*. A user who wants
+ * where these nine are what the app is allowed to *send*. A user who wants
  * shop updates but not promotions has to be able to say so, and no filter on
  * a list can express that.
  */
@@ -25,6 +25,7 @@ export const NOTIFICATION_CATEGORIES = [
   'announcements',
   'referrals',
   'health',
+  'motivation',
 ] as const;
 
 export type NotificationCategoryKey = (typeof NOTIFICATION_CATEGORIES)[number];
@@ -48,6 +49,7 @@ const DEFAULT_CATEGORIES: CategorySwitches = {
   announcements: true,
   referrals: true,
   health: false,
+  motivation: true,
 };
 
 export interface QuietHours {
@@ -98,7 +100,9 @@ interface NotificationSettingsState {
 /** The switches, as the server's record carries them. */
 function fromServer(prefs: NotificationPreferences) {
   return {
-    categories: prefs.categories,
+    // Over the defaults, so a switch the server has not heard of yet reads
+    // as its default rather than as missing.
+    categories: { ...DEFAULT_CATEGORIES, ...prefs.categories },
     quietHours: prefs.quietHours,
     sms: prefs.sms,
     email: prefs.email,
@@ -240,6 +244,16 @@ export const useNotificationSettingsStore = create<NotificationSettingsState>()(
       name: 'vokve.notificationSettings',
       storage: createJSONStorage(() => mmkvStorage),
       version: 1,
+      // A switch added since this was stored (motivation, RULES M9) reads
+      // as its default rather than as undefined — an off-looking switch.
+      merge: (persisted, current) => {
+        const stored = (persisted ?? {}) as Partial<NotificationSettingsState>;
+        return {
+          ...current,
+          ...stored,
+          categories: { ...DEFAULT_CATEGORIES, ...(stored.categories ?? {}) },
+        };
+      },
       partialize: state => ({
         categories: state.categories,
         quietHours: state.quietHours,

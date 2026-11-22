@@ -81,6 +81,7 @@ export const PERMISSION_GROUPS = [
       { key: 'notifications.view', label: 'read sent notifications and consent' },
       { key: 'notifications.broadcast', label: 'broadcast to a segment' },
       { key: 'notifications.retract', label: 'retract a broadcast or delete a notification' },
+      { key: 'notifications.automate', label: 'change automated messages and schedule messages' },
     ],
   },
   {
@@ -373,6 +374,15 @@ export const ROUTE_PERMISSIONS: Record<string, RouteRule> = {
   'POST /admin/notifications/broadcast': 'notifications.broadcast',
   'POST /admin/notifications/broadcasts/:dedupeKey/retract': 'notifications.retract',
   'DELETE /admin/notifications/:id': 'notifications.retract',
+  // ─── Automated and scheduled messages (admin/automations.routes.ts) ───────
+  'GET /admin/automations': 'notifications.view',
+  'PUT /admin/automations/settings': 'notifications.automate',
+  'PUT /admin/automations/:key': 'notifications.automate',
+  'DELETE /admin/automations/:key': 'notifications.automate',
+  'POST /admin/automations/:key/preview': 'notifications.automate',
+  'POST /admin/campaigns': 'notifications.automate',
+  'PUT /admin/campaigns/:id': 'notifications.automate',
+  'DELETE /admin/campaigns/:id': 'notifications.automate',
 
   // ─── Fitness ─────────────────────────────────────────────────────────────
   'GET /admin/challenges': 'challenges.view',

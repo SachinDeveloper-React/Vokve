@@ -310,7 +310,7 @@ export const seedCoinTransactions: CoinTransaction[] = [
  */
 const shopItemRows: Omit<
   ShopItem,
-  DetailKey | 'coinsMin' | 'coinPrice' | 'paymentMode'
+  DetailKey | 'coinsMin' | 'coinPrice' | 'coinGoal' | 'paymentMode'
 >[] = [
   {
     id: 'tee',
@@ -1204,6 +1204,15 @@ export const shopItems: ShopItem[] = shopItemRows.map(row => {
   // The server's figures at its defaults, ₹0.25 a coin: all of a
   // coins-only item, none of a money-only one, the share of the rest.
   const coinPrice = Math.ceil(row.price / 25);
+  // RULES R20 at the same defaults: ₹49 to ship under ₹999, in coins too
+  // for a coins-only item.
+  const shipping = row.price >= 99900 ? 0 : 4900;
+  const coinGoal =
+    paymentMode === 'coins'
+      ? coinPrice + Math.ceil(shipping / 25)
+      : paymentMode === 'money'
+      ? 0
+      : Math.min(row.coinsMax, Math.ceil((row.price + shipping) / 25));
   return {
     images: [],
     ribbon: null,
@@ -1215,6 +1224,7 @@ export const shopItems: ShopItem[] = shopItemRows.map(row => {
     ...row,
     paymentMode,
     coinPrice,
+    coinGoal,
     coinsMin: paymentMode === 'coins' ? coinPrice : 0,
     coinsMax:
       paymentMode === 'coins'
@@ -1270,7 +1280,7 @@ function at(days: number, hours: number, minutes: number): string {
  * Today's three are unread; everything older has been seen, which is what
  * gives the blue dot something to mean on first launch.
  */
-export const seedNotifications: AppNotification[] = [
+const seedNotificationRows: Omit<AppNotification, 'link'>[] = [
   {
     id: 'n-1',
     topic: 'steps',
@@ -1368,6 +1378,10 @@ export const seedNotifications: AppNotification[] = [
     read: true,
   },
 ];
+
+export const seedNotifications: AppNotification[] = seedNotificationRows.map(
+  row => ({ ...row, link: null }),
+);
 
 /**
  * ISO date `days` days from now — what an upcoming challenge starts on. The

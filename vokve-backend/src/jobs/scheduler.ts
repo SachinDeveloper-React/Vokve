@@ -5,9 +5,11 @@ import { sweepFleetAlerts } from '../modules/telemetry/alerts.job.js';
 import { nudgeStaleSyncs } from '../modules/activity/nudge.job.js';
 import { retryDueRefunds } from '../modules/commerce/refunds.service.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
+import { sweepWishlistGoals } from '../modules/commerce/wishlistGoals.service.js';
 import { releaseDueHolds } from '../modules/economy/holds.service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
 import { sweepReminders } from '../modules/hydration/reminders.job.js';
+import { runAutomations } from '../modules/notifications/automations.service.js';
 import { flushDeferredPushes } from '../modules/notifications/service.js';
 import { warnStreaksAtRisk } from '../modules/streak/service.js';
 import { closeDueWeeks } from '../modules/leaderboard/service.js';
@@ -87,6 +89,13 @@ const HOURLY_JOBS: readonly DailyJob[] = [
   // Last week's board, frozen and paid a few hours into Monday in each
   // country's zone (RULES L6, L10). A week already closed is skipped.
   { name: 'leaderboard-close', run: () => closeDueWeeks() },
+  // The automated messages and the operator's scheduled ones, each at the
+  // member's own local hour (RULES M11). Every message is keyed to its
+  // occasion, so a second instance running the same hour writes nothing.
+  { name: 'automations', run: () => runAutomations() },
+  // Saved rewards the wallet now covers, for what no credit announces — a
+  // restock, a price cut — and goals to re-arm (RULES M12).
+  { name: 'wishlist-goals', run: () => sweepWishlistGoals() },
   // Whether the app is working, for everybody (RULES P17). Last, because it
   // reads what the jobs above have just written — a nudge sent this tick is
   // part of the push-delivery figure on the next one.

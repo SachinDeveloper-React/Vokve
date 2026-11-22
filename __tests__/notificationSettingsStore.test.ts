@@ -29,6 +29,7 @@ const SERVER: NotificationPreferences = {
     announcements: true,
     referrals: true,
     health: true,
+    motivation: true,
   },
   quietHours: { enabled: false, start: '23:00', end: '06:30' },
   sms: false,

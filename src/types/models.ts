@@ -729,6 +729,16 @@ export const shopItemSchema = z.object({
    */
   coinPrice: z.number().int().nonnegative().default(0),
   /**
+   * What saving up for one of these means, in coins (RULES R20): the coins
+   * the till takes for one unit ordered on its own, at the most coins the
+   * item allows — the delivery too where coins pay it (a coins-only item),
+   * the coin share of the goods where it is part coins. The figure the goal
+   * bars on the wishlist, the home screen and the product page fill
+   * towards, the server's so they all agree with the checkout. 0 for an
+   * item coins cannot go towards, which draws no bar.
+   */
+  coinGoal: z.number().int().nonnegative().default(0),
+  /**
    * How this item may be bought (RULES R11): `coins` takes coins alone,
    * `money` takes no coins at all, and `mixed` takes the shop's share of
    * each. Resolved by the server — an item's own setting, or the shop's
@@ -2082,6 +2092,12 @@ export const notificationPreferencesSchema = z.object({
     announcements: z.boolean(),
     referrals: z.boolean(),
     health: z.boolean(),
+    /**
+     * Daily motivation, goal check-ins, the weekly summary and tips (RULES
+     * M9). Defaulted rather than required: an account written before the
+     * switch existed has no value stored, and it is on until turned off.
+     */
+    motivation: z.boolean().default(true),
   }),
   quietHours: z.object({
     enabled: z.boolean(),
@@ -2118,6 +2134,14 @@ export const appNotificationSchema = z.object({
   /** ISO-8601. Drives both the day heading and the clock time on the row. */
   createdAt: z.string(),
   read: z.boolean().default(false),
+  /**
+   * Where tapping it goes, when that is somewhere more exact than the
+   * topic's own screen (RULES M10): `product:<id>`, `wishlist`, `shop`,
+   * `wallet`, `steps`, `home`, `update`. Null for the topic's screen. An
+   * app that does not know a link falls back to the topic, so a new one
+   * never needs a release to be safe.
+   */
+  link: z.string().nullable().default(null),
 });
 export type AppNotification = z.infer<typeof appNotificationSchema>;
 

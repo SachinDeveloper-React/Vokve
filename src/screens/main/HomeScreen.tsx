@@ -10,6 +10,7 @@ import { StepGoalCard } from '../../components/fitness/StepGoalCard';
 import { WeeklyStepsChart } from '../../components/fitness/WeeklyStepsChart';
 import { StepTrackingPromptCard } from '../../components/steps/StepTrackingPromptCard';
 import { ReferralPromoCard } from '../../components/referral/ReferralPromoCard';
+import { WishlistGoalsCard } from '../../components/shop/WishlistGoalsCard';
 import { Screen } from '../../components/ui/Screen';
 import { useReferralCard, useTip } from '../../hooks/useContent';
 import { useLogWater } from '../../hooks/useLogWater';
@@ -17,6 +18,8 @@ import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import { syncStepsNow } from '../../services/steps';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import { useCurrentUser } from '../../stores/authStore';
+import { useCoinBalance, useCoinsStore } from '../../stores/coinsStore';
+import { useWishlistItems, useWishlistStore } from '../../stores/wishlistStore';
 import { useHasUnreadNotifications } from '../../stores/notificationsStore';
 import { useCurrentStreak, useStreakStore } from '../../stores/streakStore';
 import {
@@ -35,6 +38,22 @@ import {
 } from '../../stores/stepsStore';
 import { addDays, formatWeekdayShort, todayIso } from '../../utils/date';
 import { MotivationCard } from '../../components';
+
+/**
+ * The saved items and the balance behind the "Saving For" bars — only for
+ * a member who has saved something, so Home costs nobody else a request.
+ * Coins move on the server (a challenge paid, an order refunded) without
+ * the app seeing it, and a bar that lags the wallet is the one thing this
+ * card cannot afford.
+ */
+const refreshSavingFor = () => {
+  const wishlist = useWishlistStore.getState();
+  // Free with nothing saved — it only clears items left over from before.
+  wishlist.refreshItemsIfStale();
+  if (wishlist.ids.length > 0) {
+    useCoinsStore.getState().refreshIfStale();
+  }
+};
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -71,10 +90,14 @@ export const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   const motivation = useTip('motivation');
+  // What the member is saving for, against the coins they hold (RULES R20).
+  const savedItems = useWishlistItems();
+  const balance = useCoinBalance();
 
   useRefreshOnFocus(
     useStreakStore.getState().refreshIfStale,
     useHydrationStore.getState().refreshIfStale,
+    refreshSavingFor,
   );
 
   // Every figure on the step cards is the server's, and only the part of it
@@ -161,6 +184,16 @@ export const HomeScreen = () => {
     [navigation],
   );
 
+  const onOpenProduct = useCallback(
+    (id: string) => navigation.navigate('ProductDetail', { id }),
+    [navigation],
+  );
+
+  const onOpenWishlist = useCallback(
+    () => navigation.navigate('Wishlist'),
+    [navigation],
+  );
+
   return (
     <Screen edges={['top']}>
       <ScrollView
@@ -207,6 +240,16 @@ export const HomeScreen = () => {
           activeMinutes={today.activeMinutes}
           caloriesBurned={today.caloriesBurned}
           onPressAnalysis={onOpenAnalytics}
+        />
+
+        {/* Steps make coins, and this is what the coins are for: the
+            bar that moved since the last walk. Nothing is drawn until
+            something saved takes coins. */}
+        <WishlistGoalsCard
+          items={savedItems}
+          balance={balance}
+          onPressItem={onOpenProduct}
+          onPressViewAll={onOpenWishlist}
         />
 
         <WeeklyStepsChart data={week} goal={stepGoal} />

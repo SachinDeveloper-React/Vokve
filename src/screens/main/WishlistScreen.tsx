@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { FlashList, type ListRenderItem } from '@shopify/flash-list';
 import { useNavigation } from '@react-navigation/native';
@@ -12,6 +12,7 @@ import { useCoinBalance } from '../../stores/coinsStore';
 import { useWishlistItems, useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { ShopItem } from '../../types/models';
+import { countReady, rankCoinGoals } from '../../utils/coinGoal';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -24,7 +25,9 @@ const makeStyles = ({ spacing }: ThemeShape) =>
 /**
  * What the user has saved, with prices and stock as they are now. The
  * same cards as the shelf, so a saved thing can be added to the basket —
- * or unsaved, from its own heart — without opening it.
+ * or unsaved, from its own heart — without opening it. Each card also
+ * says how close the wallet is to it (RULES R20), and the subtitle how
+ * many are ready to redeem.
  */
 export const WishlistScreen = () => {
   const styles = useThemedStyles(makeStyles);
@@ -54,6 +57,12 @@ export const WishlistScreen = () => {
     (item: ShopItem) => navigation.navigate('ProductDetail', { id: item.id }),
     [navigation],
   );
+  // Counted exactly as Home's "Saving For" card counts them.
+  const readyCount = useMemo(
+    () => countReady(rankCoinGoals(items ?? [], balance)),
+    [balance, items],
+  );
+
   const onPressShop = useCallback(
     () => navigation.navigate('Main', { screen: 'Shop' }),
     [navigation],
@@ -62,7 +71,7 @@ export const WishlistScreen = () => {
   const renderItem = useCallback<ListRenderItem<ShopItem>>(
     ({ item }) => (
       <View style={styles.cell}>
-        <ShopItemCard item={item} onPress={onPressItem} fill />
+        <ShopItemCard item={item} onPress={onPressItem} fill showGoal />
       </View>
     ),
     [onPressItem, styles.cell],
@@ -87,7 +96,9 @@ export const WishlistScreen = () => {
                   ? ' '
                   : `${items.length} ${
                       items.length === 1 ? 'item' : 'items'
-                    } saved`
+                    } saved${
+                      readyCount > 0 ? ` · ${readyCount} ready to redeem` : ''
+                    }`
               }
             />
           </View>

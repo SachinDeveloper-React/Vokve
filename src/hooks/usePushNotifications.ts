@@ -39,6 +39,10 @@ export function usePushNotifications(
         navigationRef.navigate('Main', { screen: route.name });
         return;
       }
+      if (route.kind === 'product') {
+        navigationRef.navigate('ProductDetail', { id: route.id });
+        return;
+      }
       // `navigate` is typed one screen at a time, so a union of names needs
       // a cast. It is sound here because every screen in `NotificationRoute`
       // takes no params — which is the only thing the cast hides.

@@ -3758,6 +3758,7 @@ let mockPreferences: NotificationPreferences = {
     announcements: true,
     referrals: true,
     health: false,
+    motivation: true,
   },
   quietHours: { enabled: true, start: '22:00', end: '07:00' },
   sms: true,
@@ -4122,6 +4123,25 @@ function mockCoinsFloor(paise: number, mode: PaymentMode): number {
   );
 }
 
+/**
+ * The server's `coinGoalFor` (RULES R20): what one unit ordered on its own
+ * takes in coins at the most coins allowed — the delivery too for a
+ * coins-only item.
+ */
+function mockCoinGoal(paise: number, mode: PaymentMode): number {
+  if (mode === 'money') return 0;
+  const cfg = MOCK_SHOP_CONFIG;
+  const shipping =
+    cfg.freeShippingAbovePaise !== null && paise >= cfg.freeShippingAbovePaise
+      ? 0
+      : cfg.shippingFeePaise;
+  if (mode === 'coins') return mockCoinsFor(paise) + mockCoinsFor(shipping);
+  return Math.min(
+    mockCoinsCap(paise, mode),
+    Math.ceil((paise + shipping) / cfg.coinValuePaise),
+  );
+}
+
 /** The server's pro-rata split, with the last part carrying the rounding. */
 /**
  * How the coins a member spends fall across the lines, and what money is
@@ -4278,6 +4298,7 @@ function withStock(item: (typeof shopItems)[number]): ShopItem {
     coinsMax: mockCoinsCap(item.price, mode),
     coinsMin: mockCoinsFloor(item.price, mode),
     coinPrice: mockCoinsFor(item.price),
+    coinGoal: mockCoinGoal(item.price, mode),
     rating: ratingOf(item.id),
   };
 }

@@ -11,6 +11,7 @@ export type CategoryTint = Extract<
   | 'brandAccent'
   | 'avatarCyan'
   | 'destructive'
+  | 'gold'
 >;
 
 interface CategoryPresentation {
@@ -71,5 +72,10 @@ export const CATEGORY_STYLE: Record<
     title: 'Health Reminders',
     description: 'Hydration, health tracking and measurement reminders',
     tint: 'destructive',
+  },
+  motivation: {
+    title: 'Tips & Motivation',
+    description: 'Morning motivation, goal check-ins, weekly summaries and tips',
+    tint: 'gold',
   },
 };
