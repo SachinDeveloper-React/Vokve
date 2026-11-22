@@ -12,7 +12,7 @@ const attestationRecordSchema = new Schema(
     _id: { type: String, required: true },
     userId: { type: String, required: true },
     deviceId: { type: String, required: true },
-    provider: { type: String, enum: ['key_attestation', 'play_integrity'], required: true },
+    provider: { type: String, enum: ['key_attestation', 'app_attest', 'play_integrity'], required: true },
     verdict: { type: String, required: true },
     details: { type: Schema.Types.Mixed, default: null },
     checkedAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 90 },

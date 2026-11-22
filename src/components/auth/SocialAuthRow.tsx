@@ -17,7 +17,7 @@ const MARK_SIZE = moderateScale(22);
  * the app that must not be redrawn in the house icon style — a sign-in button
  * is only trustworthy if the mark on it is the real one.
  */
-const GoogleMark = () => (
+export const GoogleMark = () => (
   <Svg width={MARK_SIZE} height={MARK_SIZE} viewBox="0 0 18 18">
     <Path
       fill="#4285F4"
@@ -39,7 +39,7 @@ const GoogleMark = () => (
 );
 
 /** Apple's mark is monochrome by design — it takes the theme's text colour. */
-const AppleMark = ({ color }: { color: string }) => (
+export const AppleMark = ({ color }: { color: string }) => (
   <Svg width={MARK_SIZE} height={MARK_SIZE} viewBox="0 0 24 24">
     <Path
       fill={color}

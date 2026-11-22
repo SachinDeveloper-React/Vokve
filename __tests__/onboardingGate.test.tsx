@@ -15,6 +15,7 @@ import React from 'react';
 import { Text } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import StepTracker from 'react-native-step-tracker-pro';
 import { textOf as collectText } from './helpers/text';
 import { RootNavigator } from '../src/navigation/RootNavigator';
 import { ThemeProvider } from '../src/theme';
@@ -200,8 +201,23 @@ const press = async (
 };
 
 describe('after the profile, the permission screens', () => {
+  const tracker = StepTracker as unknown as Record<string, jest.Mock>;
+
   beforeEach(() => {
     useOnboardingStore.setState({ permissionsDoneFor: [] });
+    // This phone already counts and already reads its health store, so
+    // notifications are the one thing left to ask for.
+    tracker.getTrackingState.mockResolvedValue('running');
+    tracker.checkPermissions.mockResolvedValue({
+      activityRecognition: true,
+      postNotifications: true,
+      foregroundServiceHealth: true,
+      allGranted: true,
+    });
+    tracker.getHealthConnectStatus.mockResolvedValue({
+      availability: 'available',
+      stepsGranted: true,
+    });
     api.settingsApi.update.mockImplementation(async patch => ({
       units: 'metric',
       dailyStepGoal: 10_000,
@@ -218,6 +234,7 @@ describe('after the profile, the permission screens', () => {
     (hasPermission as jest.Mock).mockResolvedValue(
       AuthorizationStatus.AUTHORIZED,
     );
+    tracker.getTrackingState.mockResolvedValue('idle');
   });
 
   test('come before Home, then the step goal, and Home follows it', async () => {

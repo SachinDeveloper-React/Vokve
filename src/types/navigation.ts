@@ -290,6 +290,12 @@ export type RootStackParamList = {
   EditProfile: { focus?: ProfileGap['field'] } | undefined;
   /** Password, email, phone and the devices with a live session. */
   Security: undefined;
+  /**
+   * Add, prove or change the phone number, through Firebase (RULES O14).
+   * `reason: 'redeem'` when checkout sent the member here, which the screen
+   * says so they know why.
+   */
+  VerifyPhone: { reason?: 'redeem' } | undefined;
   /** The data choices, plus the export and the account deletion. */
   Privacy: undefined;
   /** The help centre's front page: its rows, its search, the way to a human. */

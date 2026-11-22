@@ -446,7 +446,7 @@ Every screen in the app, what it renders, where that data comes from today, what
 - **Source today:** `addressesStore` — every write goes to the server and the list is re-read from the answer.
 
 #### Account
-- **Renders:** `AccountHeader` (bell with an unread dot), `EmailVerificationBanner`, `ProfileSummaryCard` (name, avatar, level badge, tier title, member since, a level bar reading "1,000 / 3,700 to level 19", rank "#412 of 18.9k", and the stat strip: coins, streak, badges earned, lifetime steps), `ProfileCompletenessCard` (percent, bar, the top three gaps with what each is worth — hidden at 100%), `AccountShortcutsRow` (Edit Profile, Privacy, Notifications, Appearance → local sheet, Security), `AchievementsCard` (the achievement shelf itself — `GET /achievements`, earned first, each ring opening its own screen, "View All" → the shelf), `MilestoneShelf` (the account's own seven milestones — steps, workouts, coins, orders, referrals — reached first, locked ones keeping their place with a progress bar), `PremiumUpsellCard`, `AccountMenuList` (My Orders, Wishlist, My Rewards, Streak Freeze & Restore, Health Data → HealthCheckup, Help & Support, About v1.0.0, Log Out), `DataSafetyNote`, pull-to-refresh.
+- **Renders:** `AccountHeader` (bell with an unread dot), `EmailVerificationBanner`, `ProfileSummaryCard` (name, avatar, level badge, tier title, member since, a level bar reading "1,000 / 3,700 to level 19", rank "#412 of 18.9k", and the stat strip: coins, streak, badges earned, lifetime steps), `ProfileCompletenessCard` (percent, bar, the top three gaps with what each is worth — hidden at 100%), `AccountShortcutsRow` (Edit Profile, Privacy, Notifications, Appearance → local sheet, Security), `AchievementsCard` (the achievement shelf itself — `GET /achievements`, earned first, each ring opening its own screen, "View All" → the shelf), `MilestoneShelf` (the account's own seven milestones — steps, workouts, coins, orders, referrals — reached first, locked ones keeping their place with a progress bar), `AccountMenuList` (My Orders, Wishlist, My Rewards, Streak Freeze & Restore, Health Data → HealthCheckup, Help & Support, About v1.0.0, Log Out), `DataSafetyNote`, pull-to-refresh.
 - **Source (built):** `accountStore` — `GET /me/profile`, fetched on sign-in, refreshed on tab focus when older than 60 s, persisted so the tab paints its level and badges before the network answers. The coin balance comes from `coinsStore` instead: it changes on every spend and the wallet knows first. The `user` record (name, avatar) is the auth store's.
 - **Backend (built — `modules/account`):** `GET /me/profile` → `ProfileSummary`, everything computed on read (RULES P9): the level and its band from lifetime coins (P4), the streak from the activity rollups (today not being active does not break the run — the day is not over), the steps, workouts and minutes from aggregates, orders and referrals from counts, rank from "how many members have earned more" (no leaderboard table needed), seven milestones each carrying `unlocked` and their progress — **never a date**, since a milestone is judged against a running total that carries no history — and completeness with its unmet `gaps` (P6). These are *not* the achievement shelf: `ChallengeMetric` is fixed to steps/calories/minutes/days/workouts (C1), so coins earned, a first order and referrals have no home in `achievement_definitions` and live here under their own name. A gap leads to the screen that can close it: a contact to Security, an address to the address book, everything else to the profile form.
 
@@ -882,7 +882,7 @@ Gated by `ADMIN_API_KEY` as `X-Admin-Key`; every write lands in `audit_log`. The
 | | Method + path | Notes |
 |---|---|---|
 | N | `POST /devices/register` | `{ installId, vendorId, profile, integrity, pushToken? }` → `{ deviceId, trustTier, mustUpgrade, minVersion }`. Called on every launch; idempotent by `(user, installId)` |
-| N | `PATCH /devices/:deviceId` | Heartbeat: app version/build, OS, push token, timezone, locale |
+| N | `PATCH /devices/:deviceId` | Heartbeat: app version/build, OS, push token, timezone, locale, `appIcon` (the launcher icon it shows, RULES DV13) |
 | N | `POST /devices/:deviceId/attestation/challenge` | 32 random bytes (base64url), single use, 10 min — only for the calling device |
 | N | `POST /devices/:deviceId/attestation` | The Keystore key made for it: `{ keyId, publicKey, certificateChain, … }` → `{ keyId, attested, securityLevel }`. Chain checked to Google's roots (by key), challenge, package, signer, revocation list; an unattestable key is kept as `attested:false` |
 | N | `GET /me/devices` | All devices on the account with last seen, app version, current flag |
@@ -892,6 +892,10 @@ Gated by `ADMIN_API_KEY` as `X-Admin-Key`; every write lands in `audit_log`. The
 | ✓ | `GET /v1/admin/releases?platform=` | Every known build with its status, the minimum in force, and which builds that minimum refuses |
 | ✓ | `POST /v1/admin/releases` | Records the build the store now serves — `{ platform, version, build, status, notes?, minOs?, releasedAt? }`, idempotent on the three; `current` is exclusive per platform. A knock at most, never a wall |
 | ✓ | `PUT /v1/admin/app/update-policy` | Raises or lowers the wall (`minVersion` per platform) and rewords both prompts. `409 NO_BUILD_TO_UPDATE_TO` if the minimum would exceed what the store is serving |
+| ✓ | `GET /app/icon` (public) | Which launcher icon to show (RULES DV13): `{ base, festive }` — keys from `devices/appIcons.ts`; the app shows `festive` unless the member turned festive icons off, and skips a key its build does not carry |
+| ✓ | `GET /v1/admin/app-icon` | The catalogue, the everyday and hand-picked festive icon, the schedule with each window's state, what is live and why, and how many phones (seen in 30 days) report each icon |
+| ✓ | `PUT /v1/admin/app-icon` | `{ base?, festive?: key\|null, note? }` — the everyday icon, or a festive one on by hand (wins over the schedule) |
+| ✓ | `POST /v1/admin/app-icon/schedule` · `DELETE …/schedule/:id` | A festive icon between two instants `{ icon, startsAt, endsAt, note? }`; windows may not overlap, one already closed is refused |
 | ✓ | `POST /events` | Product analytics batch `{ events: [{ name, at, sessionId?, props? }] }`, ≤ 100 — device, platform, version, build, OS and timezone attached server-side; **202** with `{ accepted, dropped? }`; `screen_view` lifts `props.screen` onto the row (RULES P13) |
 | ✓ | `PUT /me/permissions` | What this phone's OS allows, the whole set: `{ permissions: [{ key, state, detail? }] }` → the snapshot with each answer's `since` (RULES P14). Not dropped by the analytics switch — it is support's state, not a metric |
 | ✓ | `GET /me/permissions` | The same snapshot back, for the app's own "what's off" |
@@ -1169,7 +1173,7 @@ Six phases, detailed in [PHASES.md](backend/PHASES.md): **(1)** make the four ex
 4. Coin rate — modelled cost per MAU at 10 / 1,000?
 5. Leaderboard country — signup, locale, or IP? Movers?
 6. Shipping — who fulfils, which countries, who pays duties?
-7. Premium — subscription or multiplier? Needs IAP + receipt validation.
+7. Premium — none. The owner had the client's "VOKVE Premium" card removed on 2026-11-22 (D-17); reopen only with a product decision.
 8. Manual step entry — offer at all?
 9. Health score — which factors, what weights? (RULES.md §H proposes)
 10. Diet plan — server-generated from preferences, or curated rotations per (dietType × mealPlan)?

@@ -3,12 +3,15 @@ import type {
   AchievementDetail,
   AccountDeletion,
   AccountSession,
+  SignInMethods,
+  SignInProvider,
   Address,
   AnalyticsEvent,
   AppAbout,
   AppError,
   AppErrorIntake,
   AppUpdate,
+  AppIconDecision,
   Cart,
   Challenge,
   ChallengeDetail,
@@ -108,6 +111,28 @@ import type { DeviceProfile } from '../device';
 import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
 
 /**
+ * What a provider sign-in should do when the identity matches no account
+ * (RULES O15): `ask` answers `IDENTITY_NOT_LINKED` with a link token so the
+ * member can say whether they already have one; `create` makes it.
+ */
+export type IfNewIdentity = 'create' | 'ask';
+
+/** A fresh Apple sign-in, sent to confirm something nothing can undo (RULES O16). */
+export interface AppleConfirmation {
+  idToken: string;
+  nonce: string;
+  authorizationCode: string;
+}
+
+/** What `POST /auth/apple` takes (RULES O13). */
+export interface AppleSignInPayload {
+  idToken: string;
+  nonce: string;
+  fullName: { givenName: string | null; familyName: string | null } | null;
+  ifNew?: IfNewIdentity;
+}
+
+/**
  * The shape of every API group, written once.
  *
  * The real implementation and the in-memory one in `mockApi.ts` both have to
@@ -125,7 +150,21 @@ export interface AuthApi {
    * checked — sending them from here would be sending facts nobody had
    * verified, and a body anybody could write.
    */
-  google(idToken: string): Promise<AuthResponse>;
+  google(idToken: string, ifNew?: IfNewIdentity): Promise<AuthResponse>;
+  /**
+   * Signs in with an Apple identity token (`POST /auth/apple`, RULES O13).
+   *
+   * The token, the raw nonce it was minted for, and the member's name on
+   * the one sign-in Apple tells the app it. Nothing that says who the
+   * member is — the server reads that out of the token.
+   */
+  apple(payload: AppleSignInPayload): Promise<AuthResponse>;
+  /**
+   * "Create a new account" after `IDENTITY_NOT_LINKED` (RULES O15): the
+   * identity the link token holds becomes an account, or signs in to the
+   * one that appeared for it in between.
+   */
+  createFromIdentity(linkToken: string): Promise<AuthResponse>;
   signUp(payload: SignUpPayload): Promise<VerificationChallenge>;
   verifyOtp(verificationId: string, code: string): Promise<AuthResponse>;
   resendOtp(verificationId: string): Promise<VerificationChallenge>;
@@ -189,6 +228,11 @@ export interface DeviceApi {
     deviceId: string,
     scheduled: boolean,
   ): Promise<{ ok: boolean }>;
+  /**
+   * The launcher icon this install is showing (RULES DV13), so the panel
+   * can tell how many phones a change has reached.
+   */
+  setAppIcon(deviceId: string, icon: string): Promise<{ ok: boolean }>;
   /** A single-use challenge for the next Keystore key this device makes. */
   attestationChallenge(deviceId: string): Promise<AttestationChallenge>;
   /**
@@ -203,7 +247,8 @@ export interface DeviceApi {
 }
 
 /**
- * A Keystore key as `attestDevice()` reports it. Written out rather than
+ * A Keystore key (Android) or Secure Enclave key (iOS) as `attestDevice()`
+ * reports it. Written out rather than
  * imported from the step tracker, so the API layer does not depend on the
  * one platform that has it.
  */
@@ -220,6 +265,19 @@ export interface DeviceAttestationPayload {
   securityLevel: string;
   /** Epoch ms the key was made. */
   createdAt: number;
+  /**
+   * iOS only: App Attest's attestation of the install, whose client data
+   * binds the server's challenge to this key (`challenge|keyId`). What the
+   * certificate chain is on Android; absent on Android, and on an iPhone
+   * that cannot attest (a simulator).
+   */
+  appAttest?: {
+    keyId: string;
+    /** Base64 CBOR. */
+    attestationObject: string;
+    clientData: string;
+    environment: 'development' | 'production';
+  };
 }
 
 /**
@@ -638,21 +696,62 @@ export interface AccountApi {
    */
   changeEmail(input: {
     email: string;
-    password: string;
+    /** The account's proof (RULES O17): its password, or a fresh provider sign-in where it has none. */
+    password?: string;
+    apple?: AppleConfirmation;
+    google?: { idToken: string };
   }): Promise<VerificationChallenge>;
   changePhone(input: {
     phone: string;
     password: string;
   }): Promise<VerificationChallenge>;
+  /**
+   * Asks, before Firebase is asked to send an SMS, whether this number may
+   * go on this account (RULES O14): not someone else's, and the password
+   * when it would replace the number on file. Throws the field errors.
+   */
+  checkPhone(input: {
+    phone: string;
+    password?: string;
+  }): Promise<{ ok: true }>;
+  /**
+   * Hands the server the Firebase token that proves the number, and gets
+   * the account back with the number on it, verified (RULES O14).
+   */
+  verifyPhone(input: { idToken: string; password?: string }): Promise<User>;
+  /** The password and the Google and Apple identities on the account (RULES O15). */
+  signInMethods(): Promise<SignInMethods>;
+  /** Connects the Google account a fresh ID token names. `IDENTITY_IN_USE` (409) when another account has it. */
+  connectGoogle(idToken: string): Promise<SignInMethods>;
+  /** Connects the Apple ID a fresh identity token names, with its nonce. */
+  connectApple(
+    payload: Omit<AppleSignInPayload, 'ifNew'>,
+  ): Promise<SignInMethods>;
+  /** Connects the identity an `IDENTITY_NOT_LINKED` link token holds. `IDENTITY_LINK_EXPIRED` (410) after 15 minutes. */
+  connectIdentity(linkToken: string): Promise<SignInMethods>;
+  /**
+   * `LAST_SIGN_IN_METHOD` (409) when it is the only way in. Apple needs a
+   * fresh Apple sign-in beside it, which the server revokes with (RULES O16).
+   */
+  disconnect(
+    provider: SignInProvider,
+    apple?: AppleConfirmation,
+  ): Promise<SignInMethods>;
   sessions(): Promise<AccountSession[]>;
   /** Signs every device but this one out. */
   revokeOtherSessions(): Promise<{ signedOut: number }>;
   /** The whole account as JSON. `EXPORT_TOO_SOON` (429) carries `retryAfterSeconds`. */
   exportData(): Promise<Record<string, unknown>>;
   deletion(): Promise<AccountDeletion>;
-  /** Schedules it for the end of the grace window; the password is asked for again. */
+  /**
+   * Schedules it for the end of the grace window. The proof is the one
+   * `deletion().confirmWith` names (RULES O16): the password, or a fresh
+   * Apple or Google sign-in — Apple's is also what revokes it.
+   */
   scheduleDeletion(input: {
-    password: string;
+    password?: string;
+    apple?: AppleConfirmation;
+    google?: { idToken: string };
     reason?: string;
   }): Promise<AccountDeletion>;
   cancelDeletion(): Promise<AccountDeletion>;
@@ -693,6 +792,11 @@ export interface AppApi {
    * build learns what to tell its member — so it is never gated.
    */
   update(): Promise<AppUpdate>;
+  /**
+   * Which launcher icon to show (RULES DV13): the everyday one, and a
+   * festive one when there is one. Public, like `update`.
+   */
+  icon(): Promise<AppIconDecision>;
 }
 
 export interface StreakApi {

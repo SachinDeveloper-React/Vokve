@@ -65,11 +65,11 @@ export const stepsConfigPatch = z
               .strict()
               .partial(),
             /**
-             * The vehicle gate (A29). The bounds are the tracker's own, which
-             * clamps each one again: a window under a second holds too little
-             * of a stride to find one, a peak share of 1 wants a pure tone and
-             * would gate every walk, and an engage wait past two minutes means
-             * the ride is over before the gate starts.
+             * The vehicle gate (A29). The bounds are the tracker's own. From
+             * tracker 2.9 only `enabled` and `stillVariance` do anything, but
+             * the other four are still range-checked by the tracker's JS
+             * (`initialize`/`updateConfig` throw on one out of range), so a
+             * value the phone would refuse is refused here first.
              */
             motionGate: z
               .object({
@@ -247,10 +247,18 @@ function flatten(value: unknown, prefix = ''): Record<string, unknown> {
   return out;
 }
 
-/** The value at a dotted path, or undefined where the path does not exist. */
+/**
+ * The value at a dotted path, or undefined where the path does not exist.
+ *
+ * Own keys only. This is the check that says a path is a real config key,
+ * and an inherited one passed it: `coins.__proto__` or
+ * `coins.constructor.prototype` resolved to Object's own prototype, so a
+ * patch could be written *through* it — onto every object in the process
+ * (RULES Z8).
+ */
 function at(source: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((node, key) => {
-    if (node === null || typeof node !== 'object') return undefined;
+    if (node === null || typeof node !== 'object' || !Object.hasOwn(node, key)) return undefined;
     return (node as Record<string, unknown>)[key];
   }, source);
 }
@@ -453,6 +461,11 @@ const MANAGED_ELSEWHERE: { prefix: string; by: string; why: string }[] = [
     by: 'Releases',
     why: 'raising the minimum is refused there when the store has no build to send members to (NO_BUILD_TO_UPDATE_TO), and that check is the point of it',
   },
+  {
+    prefix: 'app.icon',
+    by: 'App icon',
+    why: 'every key there is checked against the icons a build can carry, and the festive windows against each other',
+  },
 ];
 
 const kindOf = (value: unknown): string =>
@@ -481,6 +494,8 @@ const NULLABLE = [
   'commerce.trackingUrlTemplate',
   'support.phone',
   'support.hours',
+  /** Empty: iPhones' keys are kept unattested rather than checked against no team. */
+  'integrity.ios.teamId',
 ];
 
 /**

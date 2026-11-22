@@ -1,8 +1,9 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { getConfig } from '../../config/remote.js';
 import { GOOGLE_ROOT_KEYS } from '../../lib/attestation/googleRoots.js';
+import { AppAttestError, verifyAppAttestation } from '../../lib/attestation/appAttest.js';
 import { verifyKeyAttestation } from '../../lib/attestation/keyAttestation.js';
 import { revocationLookup } from '../../lib/attestation/revocation.js';
 import { ApiError, Errors } from '../../lib/errors.js';
@@ -24,6 +25,13 @@ let trustedRoots: ReadonlySet<string> = GOOGLE_ROOT_KEYS;
 
 export function setTrustedAttestationRoots(next: ReadonlySet<string> | null): void {
   trustedRoots = next ?? GOOGLE_ROOT_KEYS;
+}
+
+/** The root an App Attest chain must end in: Apple's, unless a test swaps in its own (PEM). */
+let appAttestRoot: string | undefined;
+
+export function setAppAttestRoot(pem: string | null): void {
+  appAttestRoot = pem ?? undefined;
 }
 
 /**
@@ -51,6 +59,19 @@ export const attestationBody = z.object({
   attested: z.boolean(),
   securityLevel: z.string().max(32),
   createdAt: z.number().nonnegative(),
+  /**
+   * iOS (react-native-step-tracker-pro-ios): App Attest's attestation, whose
+   * client data binds the challenge to this key. Null or absent from an
+   * iPhone that cannot attest (a simulator); never sent by Android.
+   */
+  appAttest: z
+    .object({
+      keyId: z.string().min(1).max(128),
+      attestationObject: z.string().min(1).max(32_768),
+      clientData: z.string().min(1).max(512),
+      environment: z.enum(['development', 'production']),
+    })
+    .nullish(),
 });
 export type AttestationBody = z.infer<typeof attestationBody>;
 
@@ -74,6 +95,10 @@ export async function submitAttestation(userId: string, deviceId: string, body: 
   const challenge = device?.attestationChallenge?.value;
   if (!device || !challenge) {
     throw Errors.conflict('ATTESTATION_CHALLENGE_INVALID', 'That check ran out of time. Please try again.');
+  }
+
+  if (body.appAttest || device.platform === 'ios') {
+    return submitAppAttestation(userId, deviceId, body, challenge, config, now);
   }
 
   const result = verifyKeyAttestation(body, {
@@ -131,6 +156,7 @@ export async function submitAttestation(userId: string, deviceId: string, body: 
           packageNames: result.packageNames,
           signatureDigests: result.signatureDigests,
           revocationChecked: result.revocationChecked,
+          provider: 'key_attestation',
           verifiedAt: now,
         },
       },
@@ -149,6 +175,112 @@ export async function submitAttestation(userId: string, deviceId: string, body: 
   }
 
   return { keyId, attested: result.attested, securityLevel: result.securityLevel };
+}
+
+/**
+ * An iPhone's key (react-native-step-tracker-pro-ios): a Secure Enclave key
+ * App Attest vouched for. The same three outcomes as Android's chain:
+ * attested; kept as unattested (a phone that cannot attest, or a server not
+ * told the team id); refused — a forged or replayed attestation.
+ */
+async function submitAppAttestation(
+  userId: string,
+  deviceId: string,
+  body: AttestationBody,
+  challenge: string,
+  config: Awaited<ReturnType<typeof getConfig>>,
+  now: Date,
+) {
+  const keyId = body.keyId.toLowerCase();
+  // The key itself first, as on Android: its id is its hash.
+  if (createHash('sha256').update(Buffer.from(body.publicKey, 'base64')).digest('hex') !== keyId) {
+    await recordAppAttest(userId, deviceId, 'refused', { keyId, failure: 'key_mismatch' }, now);
+    throw new ApiError(422, 'ATTESTATION_INVALID', 'This phone could not be verified. Please try again.', { failure: 'key_mismatch' });
+  }
+
+  const ios = config.integrity.ios;
+  const teamId = env.APPLE_TEAM_ID ?? ios.teamId;
+  let failure: string | null = null;
+  let appAttest: { keyId: string; credentialPublicKey: string; environment: string; counter: number } | undefined;
+
+  if (!body.appAttest) {
+    failure = 'app_attest_unavailable';
+  } else if (!teamId) {
+    failure = 'app_attest_not_configured';
+  } else {
+    const environments = env.NODE_ENV === 'production'
+      ? ios.environments
+      : [...new Set([...ios.environments, 'development' as const])];
+    try {
+      const verified = verifyAppAttestation(
+        {
+          attestationObject: body.appAttest.attestationObject,
+          keyId: body.appAttest.keyId,
+          clientData: body.appAttest.clientData,
+          signingPublicKey: body.publicKey,
+        },
+        { challenge, teamId, bundleId: ios.bundleId, environments, now, rootPem: appAttestRoot },
+      );
+      appAttest = {
+        keyId: body.appAttest.keyId,
+        credentialPublicKey: verified.credentialPublicKey,
+        environment: verified.environment,
+        counter: 0,
+      };
+    } catch (error) {
+      const reason = error instanceof AppAttestError ? error.failure : 'malformed';
+      await recordAppAttest(userId, deviceId, 'refused', { keyId, failure: reason }, now);
+      logger.warn({ userId, deviceId, failure: reason, message: (error as Error).message }, 'attestation.app_attest_refused');
+      throw new ApiError(422, 'ATTESTATION_INVALID', 'This phone could not be verified. Please try again.', { failure: reason });
+    }
+  }
+
+  const attested = appAttest !== undefined;
+  await recordAppAttest(userId, deviceId, attested ? 'attested' : 'unattested', {
+    keyId, failure, environment: appAttest?.environment ?? null, clientSaidAttested: body.attested,
+  }, now);
+
+  await DeviceModel.updateOne(
+    { _id: deviceId, userId },
+    {
+      $set: {
+        attestation: {
+          keyId,
+          publicKey: body.publicKey,
+          algorithm: body.algorithm,
+          attested,
+          failure,
+          securityLevel: body.securityLevel,
+          provider: 'app_attest',
+          appAttest,
+          verifiedAt: now,
+        },
+      },
+    },
+  );
+
+  // A Secure Enclave key never leaves its phone: on two accounts it is forged (A18).
+  const shared = await DeviceModel.countDocuments({ 'attestation.keyId': keyId, userId: { $ne: userId } });
+  if (shared > 0) {
+    await AuditLogModel.create({
+      actorType: 'system', action: 'attestation.key_shared', subjectType: 'user', subjectId: userId, deviceId,
+      after: { keyId, accounts: shared + 1 },
+    });
+  }
+
+  return { keyId, attested, securityLevel: body.securityLevel };
+}
+
+async function recordAppAttest(
+  userId: string,
+  deviceId: string,
+  verdict: 'attested' | 'unattested' | 'refused',
+  details: Record<string, unknown>,
+  now: Date,
+) {
+  await AttestationRecordModel.create({
+    _id: newId('att'), userId, deviceId, provider: 'app_attest', verdict, details, checkedAt: now,
+  });
 }
 
 /** The Cloud project tokens are requested for, or null when Play Integrity is not in use. */

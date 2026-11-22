@@ -83,7 +83,9 @@ export const ConnectionErrorScreen = () => {
             variant="ghost"
             fullWidth
             disabled={isRetrying}
-            onPress={signOut}
+            // Called bare: handed over directly, the press event would
+            // arrive as `signOut`'s notice.
+            onPress={() => signOut()}
             icon={<Icon as={LogOut} size="md" color="textSecondary" />}
           />
         </VStack>

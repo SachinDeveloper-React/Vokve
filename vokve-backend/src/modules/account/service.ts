@@ -6,6 +6,7 @@ import { toCoins } from '../../lib/coins.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
+import { sniffImage } from '../../lib/storage.js';
 import {
   accountDeletionSchema,
   accountSessionSchema,
@@ -45,7 +46,8 @@ import { AddressModel, OrderModel } from '../commerce/models.js';
 import { CoinBalanceModel } from '../economy/models.js';
 import { AppReleaseModel, DeviceModel } from '../devices/models.js';
 import { listDevices, stopCounting } from '../devices/service.js';
-import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel } from '../identity/models.js';
+import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from '../identity/models.js';
+import { confirmationFields, confirmationFor, confirmMember } from '../identity/confirm.service.js';
 import { NotificationModel } from '../notifications/models.js';
 import { AuditLogModel } from '../platform/models.js';
 import { ReferralModel } from '../social/models.js';
@@ -272,13 +274,7 @@ export const avatarBody = z.object({
 }).strict();
 
 /** The magic bytes each type starts with — a `.jpg` that is really a PDF is not an avatar. */
-function sniff(buffer: Buffer): AvatarType | null {
-  if (buffer.length < 12) return null;
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
-  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
-  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
-  return null;
-}
+const sniff = (buffer: Buffer): AvatarType | null => sniffImage(buffer);
 
 /** Where the app fetches a stored image from. Absolute: it goes into a `User`. */
 export function mediaUrl(id: string): string {
@@ -541,43 +537,45 @@ export async function exportAccount(userId: string): Promise<Record<string, unkn
 
 // ─── Deletion (RULES P5) ───────────────────────────────────────────────────
 
+/**
+ * The proof the account's own way in gives (RULES O16) — a password, or a
+ * fresh Apple or Google sign-in for an account that has none or has Apple
+ * on it — and an optional reason.
+ */
 export const deleteAccountBody = z.object({
-  password: z.string().min(1, 'Enter your password'),
+  ...confirmationFields,
   reason: z.string().trim().max(280).optional(),
 }).strict();
 
-interface DeletionFields {
-  scheduledAt?: Date | null;
-  purgeAt?: Date | null;
-  reason?: string | null;
-}
-
-function toDeletion(user: { deletion?: DeletionFields | null }, graceDays: number): AccountDeletion {
+function toDeletion(user: UserDoc, graceDays: number): AccountDeletion {
   return accountDeletionSchema.parse({
     scheduledAt: user.deletion?.scheduledAt?.toISOString() ?? null,
     purgeAt: user.deletion?.purgeAt?.toISOString() ?? null,
     reason: user.deletion?.reason ?? null,
     graceDays,
+    confirmWith: confirmationFor(user),
   });
 }
 
 export async function getDeletion(userId: string): Promise<AccountDeletion> {
   const config = await getConfig();
-  const user = await UserModel.findById(userId).lean();
+  const user = await UserModel.findById(userId);
   if (!user || user.deletedAt) throw Errors.unauthorized();
   return toDeletion(user, config.account.deletionGraceDays);
 }
 
 /**
  * Schedules a deletion the member can still call off (RULES P5). The
- * password is asked for again because this is the one action nothing else
- * can undo once the window closes, and a phone left on a table should not
- * be enough to end an account.
+ * member proves it is them again because this is the one action nothing
+ * else can undo once the window closes, and a phone left on a table should
+ * not be enough to end an account — with the account's own way in (O16),
+ * which for an Apple account also revokes its Apple authorisation now,
+ * at the request, the way Apple asks.
  */
 export async function scheduleDeletion(
   userId: string,
   body: z.infer<typeof deleteAccountBody>,
-  meta: { deviceId?: string },
+  meta: { deviceId?: string; platform?: string },
 ): Promise<AccountDeletion> {
   const config = await getConfig();
   const user = await UserModel.findById(userId);
@@ -585,8 +583,7 @@ export async function scheduleDeletion(
   if (user.flags?.legalHold) {
     throw Errors.forbidden('ACCOUNT_ON_HOLD', 'This account cannot be deleted right now. Contact support.');
   }
-  const matches = await bcrypt.compare(body.password, user.passwordHash);
-  if (!matches) throw new ApiError(422, 'PASSWORD_INCORRECT', 'That is not your password.', { password: 'That is not your password.' });
+  const confirmed = await confirmMember(user, body, meta);
 
   const now = new Date();
   user.deletion = {
@@ -595,7 +592,10 @@ export async function scheduleDeletion(
     reason: body.reason ?? null,
   };
   await user.save();
-  await AuditLogModel.create({ actorType: 'user', actorId: userId, deviceId: meta.deviceId, action: 'user.deletion_scheduled', subjectType: 'user', subjectId: userId, after: { purgeAt: user.deletion.purgeAt, reason: body.reason ?? null } });
+  await AuditLogModel.create({
+    actorType: 'user', actorId: userId, deviceId: meta.deviceId, action: 'user.deletion_scheduled', subjectType: 'user', subjectId: userId,
+    after: { purgeAt: user.deletion.purgeAt, reason: body.reason ?? null, confirmedWith: confirmed.method, appleRevocation: confirmed.appleRevocation },
+  });
   return toDeletion(user, config.account.deletionGraceDays);
 }
 

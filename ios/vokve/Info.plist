@@ -29,7 +29,7 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.292040708519-aad736b8sil4nu0i89glimj23m8k0c15</string>
+				<string>com.googleusercontent.apps.1098246351234-5p0j2c1lifopaf4hegnr6jr2sl7k11le</string>
 			</array>
 		</dict>
 	</array>
@@ -46,12 +46,20 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>VOKVE uses the camera so you can take a profile photo.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Vokve reads your steps and walking distance from Apple Health, so the steps your Apple Watch or another fitness app records count towards your daily goal.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Vokve counts your steps with your iPhone's motion sensor, all day, even when the app is closed.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>VOKVE needs access to your photos so you can choose a profile photo.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>VokveAppIconDefault</key>
+	<string>redfield</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

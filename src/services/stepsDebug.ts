@@ -94,7 +94,7 @@ const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0);
 
 /**
  * What this phone counted **as steps**: the sensor's raw total less whatever
- * the vehicle gate held back (2.8). The raw figure is `deviceSteps`, and it
+ * the vehicle gate held back. The raw figure is `deviceSteps`, and it
  * is the only place the gated share is still in — the tracker compares
  * Health Connect's apps against this, the minutes hold only this, and this
  * is what goes up. Comparing an app against the raw figure would explain the
@@ -228,32 +228,31 @@ async function recordsOf(
 }
 
 /**
- * The vehicle gate (2.8): whether it is on, what it makes of the phone's
- * movement right now, and how much of today it has held back.
+ * The vehicle gate: whether it is on, whether it can work, whether it is
+ * holding steps right now, and how much of today it has held back.
  *
- * `verdict` is the line to read while sitting in a bus: it moves to
- * `vibration` a second or two into a ride and back to `gait` on the first
- * step off it. `unknown` means no verdict is recent enough to speak — the
- * gate is off, the accelerometer is not delivering, or a window has yet to
- * fill — and nothing is held back then.
+ * From tracker 2.9 it holds steps only while Activity Recognition says
+ * "in a vehicle" or "on a bicycle", which needs play-services-location in
+ * the app: `Activity Recognition MISSING` means nothing will ever be held.
+ * On a bus, `HOLDING` should turn on about a minute in and off within a
+ * minute of getting off and walking. The accelerometer is only watched
+ * while a ride is held, so its verdict reads `unknown` the rest of the time.
  */
 function gateLine(integrity: Read<IntegrityReport>): string {
   if (!integrity.ok) {
     return `Vehicle gate: could not be read — ${integrity.error}`;
   }
   const gate = integrity.value.motionGate;
-  if (!gate) {
-    return 'Vehicle gate: not in this tracker build (needs 2.8)';
-  }
   if (!gate.enabled) {
-    return 'Vehicle gate: OFF — steps a bus or a car shakes out of the phone are counted';
+    return 'Vehicle gate: OFF — steps the counter reports on a bus or in a car are counted';
   }
-  const rules = gate.rules;
+  const ar = gate.activityRecognition;
   return (
-    `Vehicle gate: on · the phone right now: ${gate.verdict} · held back today ${n(
-      gate.gatedSteps,
-    )} · window ${rules.windowSeconds}s · engages after ${rules.engageSeconds}s · ` +
-    `still under ${rules.stillVariance} · peak share ${rules.minPeakRatio} · buzz over ${rules.maxZeroCrossingRate}/s`
+    `Vehicle gate: on · Activity Recognition ${
+      ar.available ? `available, last said ${ar.activity}` : 'MISSING — nothing is held'
+    } · ${gate.holding ? 'HOLDING (in a vehicle)' : 'counting'} · accelerometer ${
+      gate.verdict
+    } · held back today ${n(gate.gatedSteps)}`
   );
 }
 
@@ -369,10 +368,10 @@ function daySection(
     )} steps today, counting since ${since} · added after a gap ${n(
       snapshot.recoveredSteps,
     )} · flagged ${n(snapshot.suspectSteps)}${
-      // 2.8: already out of every figure below, and of what is uploaded —
+      // Already out of every figure below, and of what is uploaded —
       // the raw sensor count above is the only place they are still in.
       (snapshot.gatedSteps ?? 0) > 0
-        ? ` · held back as a vehicle's shaking ${n(snapshot.gatedSteps ?? 0)}`
+        ? ` · held back while in a vehicle ${n(snapshot.gatedSteps ?? 0)}`
         : ''
     }`,
     countFrom

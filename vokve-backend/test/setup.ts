@@ -38,6 +38,20 @@ process.env.PLAY_INTEGRITY_CLIENT_EMAIL = '';
 process.env.PLAY_INTEGRITY_PRIVATE_KEY = '';
 process.env.PLAY_INTEGRITY_SERVICE_ACCOUNT = '';
 delete process.env.PLAY_INTEGRITY_CLOUD_PROJECT_NUMBER;
+// Nor to Apple's token endpoints: with the developer's own Sign in with
+// Apple key in `.env`, any test that confirms with Apple would exchange a
+// made-up code with Apple for real. `appleRevocation.test.ts` sets its own
+// key and stubs the transport (RULES O16).
+process.env.APPLE_TEAM_ID = '';
+process.env.APPLE_KEY_ID = '';
+process.env.APPLE_PRIVATE_KEY = '';
+process.env.APPLE_REDIRECT_URI = '';
+// Security knobs a developer's `.env` may carry: a second factor on the
+// admin door, a CORS allowlist, a secret mid-rotation. Each changes what
+// the suite's requests get back, so `security.test.ts` sets them itself.
+process.env.ADMIN_TOTP_SECRET = '';
+process.env.CORS_ORIGINS = '';
+process.env.JWT_SECRET_PREVIOUS = '';
 
 let replSet: MongoMemoryReplSet;
 

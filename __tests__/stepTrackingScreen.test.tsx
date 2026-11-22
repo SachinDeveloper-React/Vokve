@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { Text as RNText } from 'react-native';
+import { Platform, Text as RNText } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import StepTracker, {
@@ -97,9 +97,12 @@ let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
 beforeEach(() => {
   jest.clearAllMocks();
   useStepsStore.setState(INITIAL, true);
+  // Android's copy unless a test says otherwise; jest's default OS is iOS.
+  jest.replaceProperty(Platform, 'OS', 'android');
 });
 
 afterEach(async () => {
+  jest.restoreAllMocks();
   const tree = mounted;
   mounted = null;
   if (tree) {
@@ -148,6 +151,32 @@ const press = async (
 };
 
 describe('StepTrackingScreen', () => {
+  test('on an iPhone it speaks of Motion & Fitness and Apple Health, and never offers to write there', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    useStepsStore.setState({
+      supported: true,
+      trackingState: 'idle',
+      healthConnect: {
+        ...CONNECTED,
+        provider: 'healthkit',
+        canWriteSteps: false,
+      } as HealthConnectStatus,
+    });
+    steps.enableStepTracking.mockResolvedValueOnce('permission_denied');
+    const tree = await render();
+
+    let text = allText(tree);
+    expect(text).toContain("your iPhone's own motion sensor");
+    expect(text).not.toContain('notification');
+    expect(text).toContain('Apple Health');
+    expect(text).toContain('It never writes to Apple Health');
+    expect(text).not.toContain('Add my steps');
+
+    await press(tree, 'Turn on step counting');
+    text = allText(tree);
+    expect(text).toContain('Motion & Fitness');
+  });
+
   test('says what counting means before it asks to turn it on', async () => {
     useStepsStore.setState({ supported: true, trackingState: 'idle' });
     const tree = await render();

@@ -81,6 +81,12 @@ const eventSchema = z.object({
 export const signedSnapshotSchema = z.object({
   schemaVersion: z.literal(2),
   libraryVersion: z.string().default('unknown'),
+  /**
+   * Which tracker signed it: `'ios'` from react-native-step-tracker-pro-ios,
+   * `'android'` from tracker 2.11 on Android; absent (older Android) means
+   * Android.
+   */
+  platform: z.enum(['android', 'ios']).catch('android').default('android'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   deviceSteps: count.min(0),
   recoveredSteps: count.min(0).default(0),
@@ -153,7 +159,12 @@ export const signedSnapshotSchema = z.object({
     .prefault({}),
   minutesStatus: z.enum(['enabled', 'disabled']).optional(),
   minutes: z.array(minuteSchema).optional(),
-  motionWindowsStatus: z.enum(['enabled', 'disabled']).optional(),
+  /**
+   * `'unsupported'`: iOS, which has no background accelerometer and so no
+   * motion windows at all (react-native-step-tracker-pro-ios). Not a phone
+   * that turned sampling off.
+   */
+  motionWindowsStatus: z.enum(['enabled', 'disabled', 'unsupported']).optional(),
   motionWindows: z.array(windowSchema).optional(),
   healthConnectRecords: z
     .object({
@@ -205,6 +216,8 @@ export interface SourceEvidence {
 /** One device's day, as the fraud layers read it. Small enough to keep with the day. */
 export interface DeviceDayEvidence {
   libraryVersion: string;
+  /** Absent on days stored before iOS was supported: those are Android's. */
+  platform?: 'android' | 'ios';
   sensor: string;
   timezone: string;
   utcOffsetMinutes: number;
@@ -252,7 +265,7 @@ export interface DeviceDayEvidence {
    */
   minuteSteps?: [number, number, number][];
   motion: {
-    status: 'enabled' | 'disabled' | 'absent';
+    status: 'enabled' | 'disabled' | 'absent' | 'unsupported';
     windows: number;
     stepWindows: number;
     walk: number;
@@ -364,6 +377,7 @@ export function summarise(snapshot: SignedSnapshot, config: AppConfig['activity'
 
   return {
     libraryVersion: snapshot.libraryVersion,
+    platform: snapshot.platform,
     sensor: snapshot.sensor,
     timezone: snapshot.clock.timezone,
     utcOffsetMinutes: snapshot.clock.utcOffsetMinutes,

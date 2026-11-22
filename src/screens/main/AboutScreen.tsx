@@ -27,9 +27,16 @@ import { Icon } from '../../components/media/Icon';
 import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { Switch } from '../../components/form/Switch';
 import { Screen } from '../../components/ui/Screen';
 import { Wordmark } from '../../components/brand/Wordmark';
 import { appApi } from '../../services/api/endpoints';
+import {
+  areFestiveIconsOn,
+  canChangeAppIcon,
+  setFestiveIconsOn,
+  syncAppIcon,
+} from '../../services/appIcon';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { AppAbout } from '../../types/models';
@@ -79,6 +86,26 @@ export const AboutScreen = () => {
 
   const [about, setAbout] = useState<AppAbout | null>(null);
   const [isLoading, setLoading] = useState(true);
+  const [festiveIcons, setFestiveIcons] = useState(areFestiveIconsOn);
+
+  // The member's own say over the launcher icon (RULES DV13). The server
+  // decides which festive icon, and when; this decides whether this phone
+  // shows them at all. Applied straight away rather than at the next launch.
+  const onFestiveIcons = useCallback(
+    async (on: boolean) => {
+      setFestiveIcons(on);
+      setFestiveIconsOn(on);
+      const result = await syncAppIcon();
+      if (result.status === 'pending') {
+        toast.show({
+          title: 'Icon updated',
+          message: 'Your home-screen icon changes when you leave VOKVE.',
+          tone: 'info',
+        });
+      }
+    },
+    [toast],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +165,17 @@ export const AboutScreen = () => {
             Move more. Earn as you go.
           </AppText>
         </View>
+
+        {canChangeAppIcon() ? (
+          <Card radius="xl" padding="base">
+            <Switch
+              value={festiveIcons}
+              onChange={onFestiveIcons}
+              label="Festive app icon"
+              helper="Let the VOKVE icon dress up for festivals like Diwali, Holi and Eid."
+            />
+          </Card>
+        ) : null}
 
         {about === null ? (
           isLoading ? (

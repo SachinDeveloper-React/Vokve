@@ -287,9 +287,18 @@ const orderSchema = new Schema(
     /** The ledger row that paid the coins part, and the refund row if cancelled. */
     ledgerId: { type: String, default: null },
     refundLedgerId: { type: String, default: null },
+    /**
+     * The app's `Idempotency-Key` for the checkout that placed it. The
+     * request-level replay forgets a key whose answer was an error, and an
+     * error can come *after* the order was committed (a crash, a notifier
+     * failing) — so the order itself answers for the key too, and a retry
+     * finds it rather than placing a second one (RULES R2).
+     */
+    idempotencyKey: { type: String, default: null },
   },
   { timestamps: true, collection: 'orders' },
 );
+orderSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } });
 orderSchema.index({ userId: 1, placedAt: -1 });
 // Support looks an order up by the number a member reads out.
 orderSchema.index({ number: 1 });
@@ -297,6 +306,45 @@ orderSchema.index({ status: 1, placedAt: -1 });
 orderSchema.index({ status: 1, 'payment.expiresAt': 1 });
 orderSchema.index({ userId: 1, 'items.itemId': 1 });
 export const OrderModel = model('Order', orderSchema);
+
+/**
+ * Money owed back through the gateway, one row per payment (RULES R6, R12).
+ *
+ * The coins side of a cancel is a ledger row written in the same
+ * transaction as the cancel, so it cannot be lost. The money side is a call
+ * to somebody else's server, which cannot join a transaction — so the
+ * *intention* is written here inside it, and the call is made after. A
+ * refund the gateway refuses, or one the process dies before making, is
+ * still here, and the hourly sweep tries it again until it goes through or
+ * support is told. `_id` is the order and the payment together, so the same
+ * payment is never owed back twice.
+ */
+const paymentRefundSchema = new Schema(
+  {
+    _id: { type: String, required: true }, // `${orderId}:${providerPaymentId}`
+    orderId: { type: String, required: true },
+    userId: { type: String, required: true },
+    provider: { type: String, default: null },
+    providerPaymentId: { type: String, required: true },
+    /** Paise. */
+    amount: { type: Number, required: true, min: 0 },
+    currency: { type: String, default: 'INR' },
+    /** `cancelled`, `admin_refund`, `late_payment` (it came after the order was released) or `duplicate_payment`. */
+    reason: { type: String, required: true },
+    status: { type: String, enum: ['pending', 'refunded', 'failed'], default: 'pending' },
+    attempts: { type: Number, default: 0 },
+    lastError: { type: String, default: null },
+    /** Held by whoever is calling the gateway right now, so two never call it at once. */
+    lockedUntil: { type: Date, default: null },
+    /** When the sweep may try again; null once it has given up and support has been told. */
+    nextAttemptAt: { type: Date, default: () => new Date() },
+    refundedAt: { type: Date, default: null },
+  },
+  { timestamps: true, collection: 'payment_refunds', versionKey: false },
+);
+paymentRefundSchema.index({ status: 1, nextAttemptAt: 1 });
+paymentRefundSchema.index({ orderId: 1 });
+export const PaymentRefundModel = model('PaymentRefund', paymentRefundSchema);
 
 /**
  * Coupons (RULES R16). `_id` is the code, upper-case. One takes a share of

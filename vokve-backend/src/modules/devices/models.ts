@@ -17,7 +17,11 @@ const deviceSchema = new Schema(
       isEmulator: Boolean, isTablet: Boolean, totalMemoryMb: Number, carrier: String,
       locale: String, timezone: String, screen: { w: Number, h: Number, scale: Number }, hasBiometrics: Boolean,
     },
-    app: { version: String, build: String, bundleId: String, firstVersion: String },
+    app: {
+      version: String, build: String, bundleId: String, firstVersion: String,
+      /** The launcher icon this install last said it was showing (RULES DV13). */
+      icon: { type: String, default: null },
+    },
     push: {
       token: String,
       provider: { type: String, default: 'fcm' },
@@ -94,6 +98,19 @@ const deviceSchema = new Schema(
       signatureDigests: { type: [String], default: undefined },
       revocationChecked: Boolean,
       verifiedAt: Date,
+      /** What vouched for the key: Android key attestation, or Apple App Attest (iOS). */
+      provider: { type: String, enum: ['key_attestation', 'app_attest'] },
+      /**
+       * iOS: the App Attest credential that vouched for the Secure Enclave
+       * signing key, kept for assertions (`counter` must only ever grow).
+       */
+      appAttest: {
+        type: new Schema(
+          { keyId: String, credentialPublicKey: String, environment: String, counter: Number },
+          { _id: false },
+        ),
+        default: undefined,
+      },
     },
     /** The challenge the next key must carry. Single use, and short-lived. */
     attestationChallenge: { value: String, expiresAt: Date },

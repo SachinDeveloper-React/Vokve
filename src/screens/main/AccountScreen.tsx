@@ -8,7 +8,6 @@ import { AppearanceSheet } from '../../components/account/AppearanceSheet';
 import { MilestoneShelf } from '../../components/account/MilestoneShelf';
 import { DataSafetyNote } from '../../components/account/DataSafetyNote';
 import { EmailVerificationBanner } from '../../components/account/EmailVerificationBanner';
-import { PremiumUpsellCard } from '../../components/account/PremiumUpsellCard';
 import { ProfileCompletenessCard } from '../../components/account/ProfileCompletenessCard';
 import { ProfileSummaryCard } from '../../components/account/ProfileSummaryCard';
 import { AchievementsCard } from '../../components/challenges/AchievementsCard';
@@ -240,8 +239,6 @@ export const AccountScreen = () => {
           at="middle"
           onPress={onOpenReferral}
         />
-
-        <PremiumUpsellCard onPressUpgrade={go('LeaderboardRewards')} />
 
         <AccountMenuList
           appVersion={config.appVersion}

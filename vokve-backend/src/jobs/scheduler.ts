@@ -3,6 +3,7 @@ import { logger } from '../lib/logger.js';
 import { purgeScheduledDeletions } from '../modules/account/service.js';
 import { sweepFleetAlerts } from '../modules/telemetry/alerts.job.js';
 import { nudgeStaleSyncs } from '../modules/activity/nudge.job.js';
+import { retryDueRefunds } from '../modules/commerce/refunds.service.js';
 import { expireUnpaidOrders } from '../modules/commerce/service.js';
 import { releaseDueHolds } from '../modules/economy/holds.service.js';
 import { expireIdleWallets, warnExpiringWallets } from '../modules/economy/wallet.service.js';
@@ -69,6 +70,10 @@ const DAILY_JOBS: readonly DailyJob[] = [
 const HOURLY_JOBS: readonly DailyJob[] = [
   { name: 'flush-deferred-pushes', run: () => flushDeferredPushes() },
   { name: 'expire-unpaid-orders', run: () => expireUnpaidOrders() },
+  // Money owed back that has not gone through yet — the gateway refused or
+  // timed out, or the process stopped between a cancel and its refund
+  // (RULES R6). Each row backs off on its own clock, so hourly is a ceiling.
+  { name: 'retry-refunds', run: () => retryDueRefunds() },
   // Step coins out of escrow once their window has passed (RULES E15). A
   // hold is moved by a conditional update, so two instances split the work.
   { name: 'release-holds', run: () => releaseDueHolds() },

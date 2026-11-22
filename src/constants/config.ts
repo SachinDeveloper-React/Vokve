@@ -10,7 +10,7 @@ import { Platform } from 'react-native';
  * emulator reaches the host machine at 10.0.2.2, not localhost; a physical
  * device needs the machine's LAN address instead (D-31: staging comes later).
  */
-const LOCAL_API_HOST = Platform.OS === 'android' ? '192.168.0.112' : 'localhost';
+const LOCAL_API_HOST = Platform.OS === 'android' ? '10.20.38.237' : 'localhost';
 
 export const config = {
   apiBaseUrl: __DEV__
@@ -30,8 +30,29 @@ export const config = {
    * audience, and the one the server checks against. An Android client
    * id used here is the commonest cause of `DEVELOPER_ERROR`.
    */
-  googleWebClientId: null as string | null,
-  googleIosClientId: null as string | null,
+  googleWebClientId: "1098246351234-d1jqe3edqm4f23961qqfgd78ucd9spbc.apps.googleusercontent.com" as string | null,
+  googleIosClientId: "1098246351234-5p0j2c1lifopaf4hegnr6jr2sl7k11le.apps.googleusercontent.com" as string | null,
+
+  /**
+   * Apple sign-in on **Android** (RULES O13). iOS needs neither: it signs
+   * in natively and Apple addresses the token to the bundle id.
+   *
+   * Android has no native Apple sign-in, so it opens Apple's web flow in a
+   * WebView, and that flow is identified by a **Services ID** — created in
+   * the Apple developer account under Identifiers → Services IDs, grouped
+   * with the app's App ID, with Sign in with Apple configured on it. Its
+   * tokens are addressed to this id, so it must also be on the server's
+   * `APPLE_CLIENT_IDS` list.
+   *
+   * The return URL must be one of the Return URLs registered on that
+   * Services ID, character for character. The WebView reads the result off
+   * Apple's page before the browser gets there, but Apple refuses to start
+   * the flow for a URL it does not know. The backend answers it with a
+   * small page (`/v1/auth/apple/callback`). Not switched on `__DEV__`: it is
+   * an id registered with Apple, not where this build's API lives.
+   */
+  appleServiceId: 'com.vokve.fitness.service' as string | null,
+  appleRedirectUri: 'https://vokve-d50ff.firebaseapp.com/__/auth/handler' as string | null,
 
   /** Network calls that outlive this are almost always a dead connection. */
   requestTimeoutMs: 15000,

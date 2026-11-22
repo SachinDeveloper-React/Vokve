@@ -7,6 +7,8 @@ import type {
   StepSourceStatus,
 } from '../../types/models';
 import { useTheme, type ThemeShape } from '../../theme';
+import { useHealthConnectStatus } from '../../stores/stepsStore';
+import { healthStoreName } from '../../utils/healthStore';
 import {
   formatClockTime,
   formatGrouped,
@@ -119,6 +121,7 @@ const yesNo = (value: boolean | null) =>
  */
 export const SourceDeviceCard = memo(({ device }: Props) => {
   const { colors } = useTheme();
+  const healthName = healthStoreName(useHealthConnectStatus());
   const { phone } = device;
   const synced = device.syncedAt
     ? `Synced ${formatRelativeDay(device.syncedAt)}, ${formatClockTime(
@@ -151,12 +154,13 @@ export const SourceDeviceCard = memo(({ device }: Props) => {
           />
           {/*
             Never part of the count above, so no minus sign: the phone's own
-            sensor reported them while a vehicle was shaking it, and the
-            phone decided they were not steps. The rows below it do subtract.
+            sensor reported them while Google's Activity Recognition said the
+            phone was in a vehicle or on a bike (tracker 2.9), and the phone
+            held them back. The rows below it do subtract.
           */}
           {phone.gated > 0 ? (
             <Figure
-              label="Shaken by a vehicle, not counted"
+              label="In a vehicle, not counted"
               value={formatGrouped(phone.gated)}
             />
           ) : null}
@@ -179,7 +183,7 @@ export const SourceDeviceCard = memo(({ device }: Props) => {
           <Figure
             label={
               device.source === 'health_connect'
-                ? 'Best count (from Health Connect)'
+                ? `Best count (from ${healthName})`
                 : 'Best count (the phone)'
             }
             value={formatGrouped(device.counted)}
@@ -191,7 +195,7 @@ export const SourceDeviceCard = memo(({ device }: Props) => {
 
         <VStack gap="md">
           <AppText variant="label" color="textSecondary">
-            Health Connect apps
+            {healthName} apps
           </AppText>
           {device.sourcesNote ? (
             <AppText variant="caption" color="textSecondary">

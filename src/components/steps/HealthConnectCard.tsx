@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { HeartPulse } from 'lucide-react-native';
 import type { HealthConnectStatus } from 'react-native-step-tracker-pro';
 import { useTheme } from '../../theme';
+import { isAppleHealth, type HealthStoreName } from '../../utils/healthStore';
 import { HStack, VStack } from '../layout/Stack';
 import { AppText } from '../ui/AppText';
 import { Button } from '../ui/Button';
@@ -36,6 +37,9 @@ export function healthConnectWrites(
   if (
     !enabled ||
     !status ||
+    // Apple Health is read only: the iPhone already writes its own steps
+    // there, and Vokve adding them again would double every other app's day.
+    isAppleHealth(status) ||
     status.undeclaredPermissions?.includes(WRITE_STEPS)
   ) {
     return 'off';
@@ -65,6 +69,8 @@ export function healthConnectCardState(
 
 interface Props {
   state: HealthConnectCardState;
+  /** Health Connect, or Apple Health on an iPhone. */
+  name?: HealthStoreName;
   /** Whether this phone's steps are written there, once connected. */
   writes: HealthConnectWrites;
   /** Asks for the write grant (`ask`). */
@@ -82,9 +88,11 @@ interface Props {
   onDisconnect: () => void;
 }
 
-const PROMPT: Partial<
+type Prompts = Partial<
   Record<HealthConnectCardState, { message: string; action: string }>
-> = {
+>;
+
+const PROMPT: Prompts = {
   install: {
     message:
       'Install Health Connect from the Play Store to use the steps your watch or band records.',
@@ -107,6 +115,23 @@ const PROMPT: Partial<
   },
 };
 
+/** Apple Health has no install or update rung, and is asked through iOS's own sheet. */
+const APPLE_PROMPT: Prompts = {
+  connect: {
+    message:
+      'Wear an Apple Watch? Connect Apple Health and Vokve uses its steps whenever it counted more than your iPhone.',
+    action: 'Connect',
+  },
+  settings: {
+    message:
+      'Apple Health is not sharing your steps with Vokve. Turn them on in the Health app, under Sharing → Apps → Vokve.',
+    action: 'Open Apple Health',
+  },
+};
+
+const APPLE_READ_NOTE =
+  'Vokve only reads. It never writes to Apple Health. See which apps your steps come from on the step sources page.';
+
 /** What Vokve does with Health Connect once connected, in a sentence. */
 const WRITES_NOTE: Record<HealthConnectWrites, string> = {
   on: "Vokve uses your watch's steps, and adds the steps this phone counts so your other fitness apps see them. Only what you walk while signed in is added. See which apps your steps come from on the step sources page.",
@@ -127,6 +152,7 @@ const WRITES_NOTE: Record<HealthConnectWrites, string> = {
 export const HealthConnectCard = memo(
   ({
     state,
+    name = 'Health Connect',
     writes,
     disconnectInApp,
     onConnect,
@@ -135,7 +161,8 @@ export const HealthConnectCard = memo(
     onDisconnect,
   }: Props) => {
     const { colors } = useTheme();
-    const prompt = PROMPT[state];
+    const apple = name === 'Apple Health';
+    const prompt = (apple ? APPLE_PROMPT : PROMPT)[state];
 
     return (
       <Card radius="xl" padding="base">
@@ -147,7 +174,7 @@ export const HealthConnectCard = memo(
               shape="rounded"
             />
             <VStack flex={1} gap="xxs">
-              <AppText variant="bodyStrong">Health Connect</AppText>
+              <AppText variant="bodyStrong">{name}</AppText>
               <AppText variant="caption" color="textSecondary">
                 {state !== 'connected'
                   ? 'Steps from a watch or another fitness app'
@@ -164,8 +191,8 @@ export const HealthConnectCard = memo(
 
           {state === 'unavailable' ? (
             <AppText variant="caption" color="textSecondary">
-              Health Connect is not available on this phone. Your phone's own
-              count is used.
+              {name} is not available on this {apple ? 'device' : 'phone'}. Your
+              phone's own count is used.
             </AppText>
           ) : null}
 
@@ -186,7 +213,7 @@ export const HealthConnectCard = memo(
           {state === 'connected' ? (
             <VStack gap="md">
               <AppText variant="caption" color="textSecondary">
-                {WRITES_NOTE[writes]}
+                {apple ? APPLE_READ_NOTE : WRITES_NOTE[writes]}
               </AppText>
 
               {writes === 'ask' ? (
@@ -228,8 +255,9 @@ export const HealthConnectCard = memo(
                     onPress={onManage}
                   />
                   <AppText variant="micro" color="textTertiary">
-                    To disconnect, turn off Vokve in Health Connect's app
-                    permissions.
+                    {apple
+                      ? 'To disconnect, turn off Vokve in the Health app, under Sharing → Apps.'
+                      : "To disconnect, turn off Vokve in Health Connect's app permissions."}
                   </AppText>
                 </VStack>
               )}

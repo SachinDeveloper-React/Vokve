@@ -4,7 +4,7 @@ import {
   setAnalyticsIdentity,
   track,
 } from '../services/analytics';
-import { authApi, userApi } from '../services/api/endpoints';
+import { accountApi, authApi, userApi } from '../services/api/endpoints';
 import { setOnSessionExpired } from '../services/api/client';
 import { ApiError, toApiError } from '../services/api/errors';
 import { setErrorIdentity } from '../services/errorReporting';
@@ -35,13 +35,21 @@ import { useRemindersStore } from './remindersStore';
 import { useNutritionStore } from './nutritionStore';
 import { useVitalsStore } from './vitalsStore';
 import { useWishlistStore } from './wishlistStore';
-import type { AuthTokens, User, VerificationChallenge } from '../types/models';
+import type {
+  AuthResponse,
+  AuthTokens,
+  SignInProvider,
+  User,
+  VerificationChallenge,
+} from '../types/models';
 import type { CompleteProfilePayload, SignUpPayload } from '../types/forms';
 import { logger } from '../utils/logger';
 import {
   forgetGoogleSession,
   signInWithGoogle as googleSignIn,
 } from '../services/googleSignIn';
+import { signInWithApple as appleSignIn } from '../services/appleSignIn';
+import { forgetAppleUser, rememberAppleUser } from '../services/appleCredential';
 
 /**
  * `unreachable` is a session that exists, could not be confirmed, and has
@@ -56,6 +64,39 @@ export type AuthStatus =
   | 'authenticated'
   | 'unreachable'
   | 'signed_out';
+
+/**
+ * A Google or Apple identity the server found no account for (RULES O15),
+ * held while the member says what it belongs to.
+ *
+ * `choose` is the sheet asking "new account, or one you already have?".
+ * `link` is the answer "I already have one": the token waits for the next
+ * sign-in to start a session, which then connects the identity to that
+ * account — so the relay address Apple handed over never becomes a second,
+ * empty account beside the one with the coins in it.
+ */
+export interface PendingIdentity {
+  provider: SignInProvider;
+  /** What the provider shared — a relay address, the real one, or nothing. */
+  email: string | null;
+  linkToken: string;
+  /** Epoch ms after which the server will refuse the token. */
+  expiresAt: number;
+  stage: 'choose' | 'link';
+  /**
+   * Apple's id for the member, from the sheet that raised this — kept so
+   * a session "Create a new account" starts can be checked like any
+   * other Apple session (RULES O16). Null for Google, and on Android.
+   */
+  appleUser?: string | null;
+}
+
+/** How connecting a pending identity went, for one toast once the app is open. */
+export interface IdentityLinkOutcome {
+  tone: 'success' | 'error';
+  title: string;
+  message: string;
+}
 
 interface AuthState {
   status: AuthStatus;
@@ -95,6 +136,8 @@ interface AuthState {
    * through, the sign-up code ran out. Cleared when the user dismisses it.
    */
   notice: string | null;
+  pendingIdentity: PendingIdentity | null;
+  identityLinkOutcome: IdentityLinkOutcome | null;
 
   hydrate: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<boolean>;
@@ -105,6 +148,26 @@ interface AuthState {
    * front of somebody who simply changed their mind.
    */
   signInWithGoogle: () => Promise<boolean>;
+  /**
+   * Signs in with Apple (RULES O13) — natively on iOS, through Apple's web
+   * flow on Android. Answers exactly as `signInWithGoogle` does, cancel
+   * included.
+   */
+  signInWithApple: () => Promise<boolean>;
+  /**
+   * "Create a new account" for the pending identity: the server makes it
+   * from the link token and signs in, as a plain provider sign-in would
+   * have before RULES O15.
+   */
+  createAccountFromIdentity: () => Promise<boolean>;
+  /**
+   * "I already have an account": keeps the identity until the member signs
+   * in another way, and connects it to that account then.
+   */
+  keepIdentityForExistingAccount: () => void;
+  /** Drops the pending identity — the sheet closed, or the banner was dismissed. */
+  dismissPendingIdentity: () => void;
+  clearIdentityLinkOutcome: () => void;
   signUp: (payload: SignUpPayload) => Promise<boolean>;
   verifyOtp: (code: string) => Promise<boolean>;
   resendOtp: () => Promise<boolean>;
@@ -166,7 +229,11 @@ interface AuthState {
   resetPassword: (code: string, password: string) => Promise<boolean>;
   cancelReset: () => void;
   setNotice: (notice: string | null) => void;
-  signOut: () => Promise<void>;
+  /**
+   * Ends the session. `notice` is the line the sign-in screen opens with
+   * when the app, not the member, decided — Apple revoked, say.
+   */
+  signOut: (notice?: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -194,6 +261,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isSubmitting: false,
   error: null,
   notice: null,
+  pendingIdentity: null,
+  identityLinkOutcome: null,
 
   setNotice: notice => set({ notice }),
 
@@ -313,45 +382,72 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signInWithGoogle: async () => {
     set({ isSubmitting: true, error: null });
-
     const outcome = await googleSignIn();
-    if (outcome.kind === 'cancelled') {
-      // Backing out of the Google sheet is not a failure, and a message
-      // under the button saying so would be the app arguing with them.
-      set({ isSubmitting: false });
-      return false;
-    }
-    if (outcome.kind === 'failed') {
-      // Wrapped as an `ApiError` because that is what the whole store
-      // carries and what every form reads. `unauthorized` is the honest
-      // kind: nothing reached the server, and Google would not say who
-      // this is.
-      set({
-        error: new ApiError('unauthorized', outcome.message, null, null, null),
-        isSubmitting: false,
-      });
-      return false;
-    }
+    // The token goes up untouched. Nothing read out of it here would be a
+    // fact anybody had checked.
+    // `ask`: an identity with no account comes back as a choice rather
+    // than a second account (RULES O15).
+    return finishProviderSignIn(set, 'google', outcome, signedIn =>
+      authApi.google(signedIn.idToken, 'ask'),
+    );
+  },
 
-    try {
-      // The token goes up untouched. Nothing read out of it here would
-      // be a fact anybody had checked.
-      const { user, tokens } = await authApi.google(outcome.idToken);
-      await secureStorage.saveTokens(tokens);
-      const registered = await registerOrExplain(tokens);
-      if (registered !== true) {
-        set({ error: registered, isSubmitting: false });
-        return false;
+  signInWithApple: async () => {
+    set({ isSubmitting: true, error: null });
+    const outcome = await appleSignIn();
+    // The token and the nonce it was minted for, untouched; the name only
+    // exists on the first sign-in, and is lost if it is not sent now.
+    const signedIn = await finishProviderSignIn(set, 'apple', outcome, apple =>
+      authApi.apple({
+        idToken: apple.idToken,
+        nonce: apple.nonce,
+        fullName: apple.fullName,
+        ifNew: 'ask',
+      }),
+    );
+    if (outcome.kind === 'signed_in') {
+      if (signedIn) {
+        // This session is Apple's, so Apple withdrawing it ends it (O16).
+        rememberAppleUser(outcome.appleUser);
+      } else if (get().pendingIdentity?.provider === 'apple') {
+        set({ pendingIdentity: { ...get().pendingIdentity!, appleUser: outcome.appleUser } });
       }
-      set({ status: 'authenticated', user, isSubmitting: false, notice: null });
-      hydrateUserCaches();
-      track('sign_in', { method: 'google' });
-      return true;
+    }
+    return signedIn;
+  },
+
+  createAccountFromIdentity: async () => {
+    const pending = get().pendingIdentity;
+    if (!pending) {
+      return false;
+    }
+    set({ isSubmitting: true, error: null });
+    try {
+      const response = await authApi.createFromIdentity(pending.linkToken);
+      set({ pendingIdentity: null });
+      const started = await startProviderSession(set, pending.provider, response);
+      if (started && pending.provider === 'apple') {
+        rememberAppleUser(pending.appleUser ?? null);
+      }
+      return started;
     } catch (error) {
-      set({ error: toApiError(error), isSubmitting: false });
+      // An expired token is the likely one: the sheet closes and the
+      // refusal says to press the button again.
+      set({ error: toApiError(error), isSubmitting: false, pendingIdentity: null });
       return false;
     }
   },
+
+  keepIdentityForExistingAccount: () => {
+    const pending = get().pendingIdentity;
+    if (pending) {
+      set({ pendingIdentity: { ...pending, stage: 'link' }, error: null });
+    }
+  },
+
+  dismissPendingIdentity: () => set({ pendingIdentity: null }),
+
+  clearIdentityLinkOutcome: () => set({ identityLinkOutcome: null }),
 
   signIn: async (email, password) => {
     set({ isSubmitting: true, error: null });
@@ -366,6 +462,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ status: 'authenticated', user, isSubmitting: false, notice: null });
       hydrateUserCaches();
       track('sign_in', { method: 'password' });
+      // Not an Apple session, whatever this phone signed in with last.
+      forgetAppleUser();
+      connectPendingIdentity();
       return true;
     } catch (error) {
       set({ error: toApiError(error), isSubmitting: false });
@@ -406,7 +505,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // The phone code is the one that starts a session; the device is
       // registered against it. The email code that follows only refreshes
       // tokens on a session that already exists.
-      if (get().status !== 'authenticated') {
+      const startsSession = get().status !== 'authenticated';
+      if (startsSession) {
         const registered = await registerOrExplain(tokens);
         if (registered !== true) {
           set({ error: registered, isSubmitting: false });
@@ -430,6 +530,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       hydrateUserCaches();
       track('otp_verified', { channel: pending.channel });
+      if (startsSession) {
+        forgetAppleUser();
+        connectPendingIdentity();
+      }
       return true;
     } catch (error) {
       const apiError = toApiError(error);
@@ -646,7 +750,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signOut: async () => {
+  signOut: async notice => {
     // What they did goes up first, while this session can still be used to
     // send it: afterwards the tokens are gone and the batch would be refused.
     track('sign_out');
@@ -677,7 +781,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // the button on a shared handset is signed straight back into the
     // account that just left. Never throws.
     await forgetGoogleSession();
-    await endSession(null);
+    await endSession(notice ?? null);
   },
 
   clearError: () => {
@@ -807,6 +911,137 @@ setOnSessionExpired(() => {
 });
 
 /**
+ * The half of a provider sign-in that Google and Apple share: the
+ * provider's sheet has closed, and what it answered is turned into a
+ * session — or into nothing at all.
+ *
+ * A cancel ends quietly. Backing out of the sheet is not a failure, and a
+ * message under the button saying so would be the app arguing with a
+ * decision the member just made. A failure is wrapped as an `ApiError`
+ * because that is what the whole store carries and every form reads;
+ * `unauthorized` is the honest kind, since nothing reached the server and
+ * the provider would not say who this is.
+ */
+async function finishProviderSignIn<SignedIn extends { kind: 'signed_in' }>(
+  set: (partial: Partial<AuthState>) => void,
+  method: 'google' | 'apple',
+  outcome: SignedIn | { kind: 'cancelled' } | { kind: 'failed'; message: string },
+  exchange: (signedIn: SignedIn) => Promise<AuthResponse>,
+): Promise<boolean> {
+  if (outcome.kind === 'cancelled') {
+    set({ isSubmitting: false });
+    return false;
+  }
+  if (outcome.kind === 'failed') {
+    set({
+      error: new ApiError('unauthorized', outcome.message, null, null, null),
+      isSubmitting: false,
+    });
+    return false;
+  }
+
+  try {
+    const response = await exchange(outcome as SignedIn);
+    return await startProviderSession(set, method, response);
+  } catch (error) {
+    const apiError = toApiError(error);
+    // No account for this identity yet (RULES O15). Not an error: the
+    // sheet asks the member which account it belongs to.
+    const pendingIdentity = pendingIdentityFrom(apiError);
+    if (pendingIdentity) {
+      set({ pendingIdentity, error: null, isSubmitting: false });
+      return false;
+    }
+    set({ error: apiError, isSubmitting: false });
+    return false;
+  }
+}
+
+/** The session a provider (or a link token) answered with, started. */
+async function startProviderSession(
+  set: (partial: Partial<AuthState>) => void,
+  method: 'google' | 'apple',
+  { user, tokens }: AuthResponse,
+): Promise<boolean> {
+  await secureStorage.saveTokens(tokens);
+  const registered = await registerOrExplain(tokens);
+  if (registered !== true) {
+    set({ error: registered, isSubmitting: false });
+    return false;
+  }
+  set({ status: 'authenticated', user, isSubmitting: false, notice: null });
+  hydrateUserCaches();
+  track('sign_in', { method });
+  // An Apple session is remembered by its caller, which has Apple's id.
+  forgetAppleUser();
+  connectPendingIdentity();
+  return true;
+}
+
+/** `IDENTITY_NOT_LINKED`'s details, as the identity waiting on a choice. */
+function pendingIdentityFrom(error: ApiError): PendingIdentity | null {
+  if (error.code !== 'IDENTITY_NOT_LINKED' || !error.details) {
+    return null;
+  }
+  const { provider, email, linkToken, expiresInSeconds } = error.details;
+  if ((provider !== 'google' && provider !== 'apple') || typeof linkToken !== 'string') {
+    return null;
+  }
+  const ttl = typeof expiresInSeconds === 'number' ? expiresInSeconds : 600;
+  return {
+    provider,
+    email: typeof email === 'string' ? email : null,
+    linkToken,
+    // A minute short of the server's figure, so the phone gives up first
+    // rather than sending a token that dies in flight.
+    expiresAt: Date.now() + Math.max(0, ttl - 60) * 1000,
+    stage: 'choose',
+  };
+}
+
+const PROVIDER_NAME: Record<SignInProvider, string> = { google: 'Google', apple: 'Apple' };
+
+/**
+ * After a sign-in starts a session: connects the identity the member said
+ * belongs to an account they already have (RULES O15). Never holds up or
+ * undoes the sign-in — the member is in their account either way, and the
+ * outcome is one toast. A pending identity still at `choose` is dropped:
+ * the member signed in some other way instead of answering.
+ */
+function connectPendingIdentity(): void {
+  const pending = useAuthStore.getState().pendingIdentity;
+  if (!pending) {
+    return;
+  }
+  useAuthStore.setState({ pendingIdentity: null });
+  if (pending.stage !== 'link') {
+    return;
+  }
+  const name = PROVIDER_NAME[pending.provider];
+  const failed = (message: string) =>
+    useAuthStore.setState({
+      identityLinkOutcome: { tone: 'error', title: `${name} was not connected`, message },
+    });
+  if (Date.now() > pending.expiresAt) {
+    failed(`That ${name} sign-in expired. Connect it from Account → Security.`);
+    return;
+  }
+  accountApi
+    .connectIdentity(pending.linkToken)
+    .then(() => {
+      useAuthStore.setState({
+        identityLinkOutcome: {
+          tone: 'success',
+          title: `${name} connected`,
+          message: `Sign in with ${name} now opens this account.`,
+        },
+      });
+      track('identity_linked', { provider: pending.provider });
+    })
+    .catch(error => failed(toApiError(error).message));
+}
+
+/**
  * Registers the device after a session starts, and turns the one failure
  * that should stop the sign-in into an error the screen can show.
  *
@@ -859,6 +1094,8 @@ async function endSession(notice: string | null): Promise<void> {
     user: null,
     pendingVerification: null,
     pendingReset: null,
+    pendingIdentity: null,
+    identityLinkOutcome: null,
     stepUpToken: null,
     isSessionUnconfirmed: false,
     error: null,
@@ -866,6 +1103,7 @@ async function endSession(notice: string | null): Promise<void> {
   });
   // Nothing may use this session again, whatever happens below — neither
   // the tokens nor the snapshot the app would otherwise open on offline.
+  forgetAppleUser();
   await secureStorage.clearTokens();
   await secureStorage.clearUser();
   // Nobody is left to count for, and a notification that says otherwise is
@@ -920,6 +1158,7 @@ export const useCurrentUser = () => useAuthStore(s => s.user);
 export const usePendingVerification = () =>
   useAuthStore(s => s.pendingVerification);
 export const usePendingReset = () => useAuthStore(s => s.pendingReset);
+export const usePendingIdentity = () => useAuthStore(s => s.pendingIdentity);
 
 /** Whether the email step is still owed (D-20): signed in, but the server has not seen the code. */
 export const useIsEmailVerified = () =>

@@ -2,6 +2,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import {
   AuthorizationStatus,
   deleteToken,
+  getAPNSToken,
   getInitialNotification,
   getMessaging,
   getToken,
@@ -106,9 +107,15 @@ async function sendToken(token: string | null): Promise<void> {
  * install whose notifications are refused (`pushRow`), so a refusal still
  * means feed rows only.
  *
- * On iOS a refusal means no token either: FCM cannot mint one without APNs,
- * which needs the permission. That is the platform's rule, not ours, and it
- * costs nothing here — counting is Android-only.
+ * **On iOS the token waits on APNs, not on the permission.** iOS hands an
+ * app its APNs device token whether or not notifications are allowed, and
+ * FCM cannot mint a token until it has that one. It arrives after launch,
+ * on Apple's schedule, so a `getToken` that runs first fails outright
+ * ("No APNS token specified before fetching FCM Token") — which a restored
+ * session on a cold start easily does. So the refresh listener goes on
+ * *before* the token is asked for (Firebase mints one the moment APNs
+ * answers and reports it there), and on iOS the ask itself waits a moment
+ * for APNs (`waitForApnsToken`).
  *
  * Firebase rotates tokens; the listener keeps the server current for as
  * long as the app runs.
@@ -121,6 +128,15 @@ export async function registerForPush({
       ? await ensurePermission()
       : await notificationsAllowed();
     const messaging = getMessaging();
+    stopRefreshListener?.();
+    stopRefreshListener = onTokenRefresh(messaging, fresh => {
+      if (fresh !== registeredToken) {
+        sendToken(fresh);
+      }
+    });
+    if (Platform.OS === 'ios') {
+      await waitForApnsToken(messaging);
+    }
     const token = await getToken(messaging);
     if (token !== registeredToken) {
       await sendToken(token);
@@ -131,18 +147,36 @@ export async function registerForPush({
         'Notifications not permitted; the token stands for the silent sync',
       );
     }
-    stopRefreshListener?.();
-    stopRefreshListener = onTokenRefresh(messaging, fresh => {
-      if (fresh !== registeredToken) {
-        sendToken(fresh);
-      }
-    });
     return allowed;
   } catch (error) {
     // Firebase not configured on this build, an emulator without Play
     // services, a flaky network: none of these should reach the user.
     logger.warn('push', 'Push registration skipped', error);
     return false;
+  }
+}
+
+/** How long `registerForPush` gives APNs to answer, and how often it looks. */
+const APNS_WAIT_MS = 10_000;
+const APNS_POLL_MS = 250;
+
+/**
+ * Resolves once iOS has handed this app its APNs device token, or after
+ * `APNS_WAIT_MS` either way. Gives up quietly: past it, `getToken` fails as
+ * it would have, and the listener `registerForPush` set first still carries
+ * the token to the server whenever APNs does answer. Never true on a
+ * simulator build, whose bundle id is not the one push is set up for.
+ */
+async function waitForApnsToken(
+  messaging: ReturnType<typeof getMessaging>,
+): Promise<void> {
+  const deadline = Date.now() + APNS_WAIT_MS;
+  while (!(await getAPNSToken(messaging))) {
+    if (Date.now() >= deadline) {
+      logger.warn('push', 'APNs gave no device token in time');
+      return;
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, APNS_POLL_MS));
   }
 }
 

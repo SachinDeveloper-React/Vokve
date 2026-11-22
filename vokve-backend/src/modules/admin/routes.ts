@@ -1,9 +1,7 @@
-import { Router } from 'express';
 import { z } from 'zod';
 import { notificationPreferenceSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
 import { pageFields } from './paging.js';
-import { requireAdmin } from '../../middleware/admin.js';
 import { validate } from '../../middleware/validate.js';
 import { confirmFlag, dismissFlag, fraudCase, fraudQueue, rescoreDay } from './fraud.service.js';
 import {
@@ -15,7 +13,16 @@ import {
   updatePolicyBody,
 } from './releases.service.js';
 import { analyticsOverview, recentSignups } from './analytics.service.js';
+import {
+  addIconWindow,
+  appIconSettings,
+  iconWindowBody,
+  removeIconWindow,
+  setAppIcon,
+  setAppIconBody,
+} from '../devices/appIcon.service.js';
 import { broadcastBody, previewBroadcast, segmentSchema, sendBroadcast } from './broadcast.service.js';
+import { guardedRouter } from '../staff/guard.js';
 import {
   catalogueQuery,
   deleteItem,
@@ -240,6 +247,7 @@ import {
 } from './member.service.js';
 import { fleetHealth, userProblems } from './problems.service.js';
 import { shadowReport } from './shadow.service.js';
+import { phonesView } from './phones.service.js';
 import { rejectionBody, setDayRejections } from './rejection.service.js';
 import { stepsTimeline, timelineQuery } from './timeline.service.js';
 import {
@@ -269,8 +277,9 @@ import {
  * writes are the verdict on a flag and a re-score of a day, and both are
  * about our own judgement rather than about their account.
  */
-export const adminUsersRouter = Router();
-adminUsersRouter.use('/admin', requireAdmin);
+// Every route checks its own permission (RULES Z9); the gate that says who
+// is asking is mounted once, in front of every admin router, in app.ts.
+export const adminUsersRouter = guardedRouter();
 
 const usersQuery = z.object({
   /** An id, an email, a phone or part of a name. Empty lists the newest accounts. */
@@ -1190,6 +1199,14 @@ adminUsersRouter.get('/admin/config/steps', async (_req, res) => {
 });
 
 /**
+ * The fleet by platform — Android and iPhone — and what vouches for each
+ * phone's key: how many are attested, and why the rest are not (D-104).
+ */
+adminUsersRouter.get('/admin/steps/phones', async (_req, res) => {
+  res.json(await phonesView());
+});
+
+/**
  * Changes some of them. A patch is merged onto the live config and
  * validated **before** it is written: `validate()` runs on read, so an
  * invalid document would fail every request in the process rather than the
@@ -1523,4 +1540,25 @@ adminUsersRouter.put('/admin/config', validate('body', setAppConfigBody), async 
 
 adminUsersRouter.put('/admin/app/update-policy', validate('body', updatePolicyBody), async (req, res) => {
   res.json(await setUpdatePolicy(req.ctx.adminActor!, req.body));
+});
+
+/**
+ * The launcher icon (RULES DV13): the base, a festive one switched on by
+ * hand, and the festive windows. Every key is checked against the icons a
+ * build can carry; windows may not overlap.
+ */
+adminUsersRouter.get('/admin/app-icon', async (_req, res) => {
+  res.json(await appIconSettings());
+});
+
+adminUsersRouter.put('/admin/app-icon', validate('body', setAppIconBody), async (req, res) => {
+  res.json(await setAppIcon(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.post('/admin/app-icon/schedule', validate('body', iconWindowBody), async (req, res) => {
+  res.status(201).json(await addIconWindow(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.delete('/admin/app-icon/schedule/:windowId', async (req, res) => {
+  res.json(await removeIconWindow(req.ctx.adminActor!, String(req.params.windowId)));
 });

@@ -155,27 +155,31 @@ describe('sign-in screen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('SignUp');
   });
 
-  test('Google signs in rather than apologising, and the others still say so', async () => {
-    const signInWithGoogle = jest
-      .spyOn(useAuthStore.getState(), 'signInWithGoogle')
-      .mockResolvedValue(true);
-    useAuthStore.setState({ signInWithGoogle });
+  test('Google and Apple sign in rather than apologising, and Facebook still says so', async () => {
+    const signInWithGoogle = jest.fn().mockResolvedValue(true);
+    const signInWithApple = jest.fn().mockResolvedValue(true);
+    useAuthStore.setState({ signInWithGoogle, signInWithApple });
 
     const tree = await render();
     await ReactTestRenderer.act(() => {
       pressableFor(tree, 'Continue with Google').props.onPress();
     });
-
-    expect(signInWithGoogle).toHaveBeenCalledTimes(1);
-    // And no apology for the one that works.
-    expect(textOf(tree, RNText)).not.toContain('Google sign-in is not connected');
-
-    // Apple and Facebook are not wired, and say so rather than doing
-    // nothing at all when pressed.
     await ReactTestRenderer.act(() => {
       pressableFor(tree, 'Continue with Apple').props.onPress();
     });
-    expect(textOf(tree, RNText)).toContain('Apple sign-in is not connected');
+
+    expect(signInWithGoogle).toHaveBeenCalledTimes(1);
+    expect(signInWithApple).toHaveBeenCalledTimes(1);
+    // And no apology for the ones that work.
+    expect(textOf(tree, RNText)).not.toContain('Google sign-in is not connected');
+    expect(textOf(tree, RNText)).not.toContain('Apple sign-in is not connected');
+
+    // Facebook is not wired, and says so rather than doing nothing at all
+    // when pressed.
+    await ReactTestRenderer.act(() => {
+      pressableFor(tree, 'Continue with Facebook').props.onPress();
+    });
+    expect(textOf(tree, RNText)).toContain('Facebook sign-in is not connected');
   });
 
   test('forgot password leads to the reset flow rather than a dead-end notice', async () => {
@@ -191,5 +195,72 @@ describe('sign-in screen', () => {
     mockRouteParams = { notice: 'Your password has been updated.' };
     const tree = await render();
     expect(textOf(tree, RNText)).toContain('Your password has been updated.');
+  });
+});
+
+describe('an Apple ID with no account yet (RULES O15)', () => {
+  const pending = {
+    provider: 'apple' as const,
+    email: 'x7k2p9@privaterelay.appleid.com',
+    linkToken: 'link-1',
+    expiresAt: Date.now() + 600_000,
+    stage: 'choose' as const,
+  };
+
+  // Trees from every test in this file stay mounted and subscribed to the
+  // store, so these are unmounted and the store reset inside `act`: outside
+  // it, a re-render lands after the test environment is gone and takes the
+  // jest worker down with it.
+  const trees: ReactTestRenderer.ReactTestRenderer[] = [];
+  const renderTracked = async () => {
+    const tree = await render();
+    trees.push(tree);
+    return tree;
+  };
+
+  afterEach(async () => {
+    await ReactTestRenderer.act(async () => {
+      trees.splice(0).forEach(tree => tree.unmount());
+      useAuthStore.setState({ pendingIdentity: null });
+    });
+  });
+
+  const pressLabelled = async (tree: ReactTestRenderer.ReactTestRenderer, label: string) => {
+    const node = tree.root
+      .findAll(n => n.props?.label === label && typeof n.props.onPress === 'function')
+      .at(-1)!;
+    await ReactTestRenderer.act(async () => {
+      node.props.onPress();
+    });
+  };
+
+  test('asks before making a second account, naming what Apple shared', async () => {
+    useAuthStore.setState({ pendingIdentity: pending });
+    const tree = await renderTracked();
+    const text = textOf(tree, RNText);
+
+    expect(text).toContain('New to VOKVE?');
+    expect(text).toContain('There is no VOKVE account for this Apple ID yet.');
+    expect(text).toContain('x7k2p9@privaterelay.appleid.com');
+  });
+
+  test('"I already have an account" turns the sheet into a line over the form', async () => {
+    useAuthStore.setState({ pendingIdentity: pending });
+    const tree = await renderTracked();
+
+    await pressLabelled(tree, 'I already have an account');
+
+    expect(useAuthStore.getState().pendingIdentity?.stage).toBe('link');
+    expect(textOf(tree, RNText)).toContain('Sign in to connect Apple');
+  });
+
+  test('"Create a new account" hands the choice to the store', async () => {
+    const createAccountFromIdentity = jest.fn().mockResolvedValue(true);
+    useAuthStore.setState({ pendingIdentity: pending, createAccountFromIdentity });
+    const tree = await renderTracked();
+
+    await pressLabelled(tree, 'Create a new account');
+
+    expect(createAccountFromIdentity).toHaveBeenCalledTimes(1);
   });
 });

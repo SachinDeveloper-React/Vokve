@@ -1,6 +1,7 @@
 import { offeredMethods, PAYMENT_METHODS } from '../lib/payments.js';
 import { supportCategorySchema, supportIconSchema, supportTintSchema, supportTopicKindSchema } from '../contracts/index.js';
 import { COIN_SOURCES } from '../modules/economy/models.js';
+import { appIconKeys } from '../modules/devices/appIcons.js';
 import { AppConfigModel } from '../modules/platform/models.js';
 import { CONFIG_DEFAULTS, type AppConfig } from './defaults.js';
 
@@ -325,5 +326,39 @@ function validate(config: AppConfig): void {
   // which reads as tracking and is not.
   if (trackingUrlTemplate !== null && !trackingUrlTemplate.includes('{ref}')) {
     throw new Error("commerce.trackingUrlTemplate: must hold '{ref}', the order's tracking reference");
+  }
+  validateAppIcon(config.app.icon);
+}
+
+/**
+ * The launcher icon (RULES DV13). A key no build carries would leave every
+ * phone on its base icon while the panel said otherwise, and two festive
+ * windows that overlap would make the one on show depend on list order.
+ */
+function validateAppIcon(icon: AppConfig['app']['icon']): void {
+  const bases = appIconKeys('base');
+  const festive = appIconKeys('festive');
+  if (!bases.includes(icon.base)) {
+    throw new Error(`app.icon.base: '${icon.base}' is not a base icon. One of ${bases.join(', ')}.`);
+  }
+  if (icon.festive !== null && !festive.includes(icon.festive)) {
+    throw new Error(`app.icon.festive: '${icon.festive}' is not a festive icon. One of ${festive.join(', ')}, or none.`);
+  }
+  const windows = icon.schedule.map(entry => ({ ...entry, from: Date.parse(entry.startsAt), to: Date.parse(entry.endsAt) }));
+  for (const entry of windows) {
+    if (!festive.includes(entry.icon)) {
+      throw new Error(`app.icon.schedule[${entry.id}]: '${entry.icon}' is not a festive icon. One of ${festive.join(', ')}.`);
+    }
+    if (!Number.isFinite(entry.from) || !Number.isFinite(entry.to) || entry.to <= entry.from) {
+      throw new Error(`app.icon.schedule[${entry.id}]: ${entry.startsAt} – ${entry.endsAt} is not a window that opens before it closes`);
+    }
+  }
+  const sorted = [...windows].sort((a, b) => a.from - b.from);
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i].from < sorted[i - 1].to) {
+      throw new Error(
+        `app.icon.schedule: ${sorted[i - 1].icon} (until ${sorted[i - 1].endsAt}) and ${sorted[i].icon} (from ${sorted[i].startsAt}) overlap — one icon at a time`,
+      );
+    }
   }
 }

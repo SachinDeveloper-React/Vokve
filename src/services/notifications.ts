@@ -101,6 +101,14 @@ const FALLBACK_CHANNEL_ID = `${CHANNEL_PREFIX}fallback`;
 export const DEFAULT_CHANNEL_ID = 'vokve.default';
 
 /**
+ * The status-bar glyph and its tint for every notification this app draws
+ * itself: the white V from `android/app/src/main/res/drawable-*` (written
+ * by scripts/write-app-icons.mjs). Without it notifee falls back to the
+ * launcher icon, which Android reduces to a white square.
+ */
+const SMALL_ICON = { smallIcon: 'ic_notification', color: '#E60000' } as const;
+
+/**
  * The preview in the sound picker, cleared again a moment later.
  *
  * Deliberately outside `ALARM_ID_PREFIX`: a sample is not a reminder, and an
@@ -207,6 +215,7 @@ export async function displayPushNotification(message: {
       body,
       data,
       android: {
+        ...SMALL_ICON,
         channelId: DEFAULT_CHANNEL_ID,
         pressAction: { id: 'default' },
       },
@@ -469,6 +478,7 @@ function notificationFor(
     // one, so both land on the same screen.
     data: { topic: 'hydration', kind: 'reminder', time: alarm.time },
     android: {
+      ...SMALL_ICON,
       channelId,
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
@@ -617,6 +627,7 @@ async function displayPreview(
     title: 'Time for water 💧',
     body: 'This is how your reminder will sound.',
     android: {
+      ...SMALL_ICON,
       channelId,
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },

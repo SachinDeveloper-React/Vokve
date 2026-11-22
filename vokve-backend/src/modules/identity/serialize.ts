@@ -27,5 +27,6 @@ export function toUser(doc: UserDoc | (Record<string, unknown> & { _id: string }
     phoneVerifiedAt: iso(u.phoneVerifiedAt),
     emailVerifiedAt: iso(u.emailVerifiedAt),
     trustTier: u.trust?.tier ?? 'normal',
+    emailForwardingOff: Boolean(u.emailForwardingOffAt),
   });
 }

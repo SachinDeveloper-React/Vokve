@@ -1,8 +1,9 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
+import { env } from '../src/config/env.js';
 import { AppConfigModel } from '../src/modules/platform/models.js';
 import { invalidateConfig } from '../src/config/remote.js';
-import { CouponModel, CouponUsageModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel } from '../src/modules/commerce/models.js';
+import { CouponModel, CouponUsageModel, OrderModel, PaymentRefundModel, ReviewModel, ShopInventoryModel, ShopItemModel } from '../src/modules/commerce/models.js';
 import { expireUnpaidOrders } from '../src/modules/commerce/service.js';
 import { CoinLedgerModel } from '../src/modules/economy/models.js';
 import { credit } from '../src/modules/economy/service.js';
@@ -597,24 +598,43 @@ describe('commerce: orders, cancellation and expiry (RULES R5–R7)', () => {
     expect(cancelled.body.order).toMatchObject({ status: 'cancelled', payment: { status: 'pending' } });
     expect(cancelled.body.balance).toBe(900);
 
-    // The window closes on the other: the sweep lets it go, and a late payment is refused.
+    // The window closes on the other: the sweep lets it go. A payment that
+    // arrives after that has been taken from the member and has nothing to
+    // pay for, so it is refused *and sent back* rather than kept.
     await OrderModel.updateOne({ _id: b.body.order.id }, { $set: { 'payment.expiresAt': new Date(Date.now() - 1000) } });
-    expect(await expireUnpaidOrders()).toEqual({ released: 1 });
+    expect(await expireUnpaidOrders()).toEqual({ released: 1, paid: 0 });
     expect((await request(app).get(`/v1/orders/${b.body.order.id}`).set(authed(session))).body.status).toBe('cancelled');
     expect((await request(app).get('/v1/wallet').set(authed(session))).body.balance).toBe(1_000);
     expect((await ShopInventoryModel.findById('cap').lean())!.onHand).toBe(before);
     const late = await request(app).post(`/v1/orders/${b.body.order.id}/pay`).set(authed(session)).send({ providerPaymentId: 'pay_late' });
     expect(late.status).toBe(409);
-    expect(late.body.error.code).toBe('ORDER_NOT_PENDING');
+    expect(late.body.error).toMatchObject({ code: 'PAYMENT_REFUNDED', details: { status: 'cancelled', refund: 'refunded' } });
+    expect(await PaymentRefundModel.findById(`${b.body.order.id}:pay_late`).lean()).toMatchObject({ status: 'refunded', reason: 'late_payment' });
     expect(await NotificationModel.countDocuments({ userId: session.userId, title: 'Order expired' })).toBe(1);
+    expect(await NotificationModel.countDocuments({ userId: session.userId, title: 'Payment refunded' })).toBe(1);
 
-    // A window that has closed but not yet been swept is caught at payment time.
+    // A window that has closed but not yet been swept still has its stock
+    // and coins set aside, so a real payment arriving then is simply taken.
     const c = await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 0 });
     await OrderModel.updateOne({ _id: c.body.order.id }, { $set: { 'payment.expiresAt': new Date(Date.now() - 1000) } });
-    const expired = await request(app).post(`/v1/orders/${c.body.order.id}/pay`).set(authed(session)).send({ providerPaymentId: 'pay_x' });
-    expect(expired.status).toBe(409);
-    expect(expired.body.error.code).toBe('PAYMENT_EXPIRED');
-    expect((await ShopInventoryModel.findById('cap').lean())!.onHand).toBe(before);
+    const lateButHeld = await request(app).post(`/v1/orders/${c.body.order.id}/pay`).set(authed(session)).send({ providerPaymentId: 'pay_x' });
+    expect(lateButHeld.status).toBe(200);
+    expect(lateButHeld.body.order).toMatchObject({ status: 'placed', payment: { status: 'paid' } });
+    expect((await ShopInventoryModel.findById('cap').lean())!.onHand).toBe(before - 1);
+
+    // A proof the gateway never issued, on a closed window, still releases it.
+    // (The mock believes any proof outside production; inside it, none.)
+    const d = await request(app).post('/v1/checkout').set(authed(session)).send({ lines: [{ itemId: 'cap', quantity: 1 }], addressId, coins: 0 });
+    await OrderModel.updateOne({ _id: d.body.order.id }, { $set: { 'payment.expiresAt': new Date(Date.now() - 1000) } });
+    env.NODE_ENV = 'production';
+    try {
+      const forged = await request(app).post(`/v1/orders/${d.body.order.id}/pay`).set(authed(session)).send({ providerPaymentId: 'pay_forged' });
+      expect(forged.status).toBe(409);
+      expect(forged.body.error.code).toBe('PAYMENT_EXPIRED');
+    } finally {
+      env.NODE_ENV = 'test';
+    }
+    expect((await ShopInventoryModel.findById('cap').lean())!.onHand).toBe(before - 1);
   });
 });
 

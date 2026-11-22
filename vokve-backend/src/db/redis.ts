@@ -13,6 +13,8 @@ export interface KeyValue {
   /** Whether the key is set and has not expired. */
   has(key: string): Promise<boolean>;
   del(key: string): Promise<void>;
+  /** Whether the store answers at all — for `GET /health`. Throws or returns false when it does not. */
+  ping(): Promise<boolean>;
   quit(): Promise<void>;
 }
 
@@ -43,17 +45,29 @@ class MemoryKV implements KeyValue {
   async del(key: string) {
     this.store.delete(key);
   }
+  async ping() {
+    return true;
+  }
   async quit() {
     this.store.clear();
   }
 }
 
+/**
+ * INCR and its expiry in one step. Two round trips used to be two chances:
+ * an INCR whose EXPIRE then failed (a dropped connection, a retry budget
+ * spent) left a counter with no expiry, and a rate limit on it that never
+ * lifted — a member locked out of sign-in for good. The TTL check also
+ * heals any key already stuck that way.
+ */
+const INCR_WITH_TTL = `local v = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return v`;
+
 class RedisKV implements KeyValue {
   constructor(private client: Redis) {}
   async incrWithTtl(key: string, ttlSeconds: number) {
-    const value = await this.client.incr(key);
-    if (value === 1) await this.client.expire(key, ttlSeconds);
-    return value;
+    return Number(await this.client.eval(INCR_WITH_TTL, 1, key, ttlSeconds));
   }
   async setIfAbsent(key: string, ttlSeconds: number) {
     const result = await this.client.set(key, '1', 'EX', ttlSeconds, 'NX');
@@ -64,6 +78,9 @@ class RedisKV implements KeyValue {
   }
   async del(key: string) {
     await this.client.del(key);
+  }
+  async ping() {
+    return (await this.client.ping()) === 'PONG';
   }
   async quit() {
     await this.client.quit();

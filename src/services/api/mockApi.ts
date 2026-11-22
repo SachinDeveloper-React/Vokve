@@ -104,6 +104,9 @@ import {
   type Review,
   type ShopConfig,
   type ShopItem,
+  type DeletionConfirmation,
+  type SignInMethods,
+  type SignInProvider,
   type SupportFaq,
   type SupportTopic,
   type SupportTicket,
@@ -309,6 +312,43 @@ export const mockAuthApi: AuthApi = {
       phoneVerifiedAt: null,
       emailVerifiedAt: currentUser.emailVerifiedAt ?? new Date().toISOString(),
     };
+    return makeAuthResponse(currentUser);
+  },
+
+  /**
+   * Apple, the same way: any non-empty token and nonce sign the mock
+   * member in, with a proved email and no phone. The name Apple hands
+   * over on a first sign-in names an account that has none, as the
+   * server does, and never renames one.
+   */
+  async apple({ idToken, nonce, fullName }) {
+    await delay();
+    if (!idToken || !nonce) {
+      throw new ApiError('unauthorized', 'That Apple sign-in could not be verified.', 401);
+    }
+    currentUser = currentUser ?? makeUser();
+    const name = [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' ');
+    currentUser = {
+      ...currentUser,
+      name: currentUser.name || name,
+      phone: null,
+      phoneVerifiedAt: null,
+      emailVerifiedAt: currentUser.emailVerifiedAt ?? new Date().toISOString(),
+    };
+    return makeAuthResponse(currentUser);
+  },
+
+  /**
+   * The mock always knows the identity, so it never answers
+   * `IDENTITY_NOT_LINKED`; this is only reached with a token a real server
+   * handed out, and signs the mock member in the same way.
+   */
+  async createFromIdentity(linkToken) {
+    await delay();
+    if (!linkToken) {
+      throw new ApiError('unknown', 'That sign-in has expired. Connect it again from Account → Security.', 410, null, 'IDENTITY_LINK_EXPIRED');
+    }
+    currentUser = currentUser ?? makeUser();
     return makeAuthResponse(currentUser);
   },
 
@@ -825,6 +865,10 @@ export const mockDeviceApi: DeviceApi = {
     return { ok: true };
   },
   async setLocalReminders() {
+    await delay();
+    return { ok: true };
+  },
+  async setAppIcon() {
     await delay();
     return { ok: true };
   },
@@ -5815,6 +5859,26 @@ const MOCK_GUIDE: AppGuide = {
   ],
 };
 
+/** The mock member signed up with a password; Google and Apple start unconnected. */
+const mockLinked: Record<SignInProvider, boolean> = { google: false, apple: false };
+
+function mockConfirmWith(): DeletionConfirmation {
+  return mockLinked.apple ? 'apple' : 'password';
+}
+
+function mockSignInMethods(): SignInMethods {
+  const ways = 1 + Number(mockLinked.google) + Number(mockLinked.apple);
+  return {
+    password: true,
+    confirmChangesWith: 'password',
+    providers: (['google', 'apple'] as const).map(provider => ({
+      provider,
+      linked: mockLinked[provider],
+      canDisconnect: mockLinked[provider] && ways > 1,
+    })),
+  };
+}
+
 export const mockAccountApi: AccountApi = {
   async profile() {
     await delay();
@@ -5891,6 +5955,81 @@ export const mockAccountApi: AccountApi = {
     }
     return contactChallenge(phone, 'sms', 'change_phone');
   },
+  /**
+   * The server's rules for a number (RULES O14), on the mock member: a
+   * number carrying the taken marker is someone else's, and replacing the
+   * number on file asks for the password.
+   */
+  async checkPhone({ phone, password }) {
+    await delay();
+    if (phone.includes(MOCK_RULES.takenMarker)) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422, {
+        phone: 'That number is already registered to another account.',
+      });
+    }
+    const onFile = currentUser?.phone ?? null;
+    if (onFile && onFile !== phone && password !== MOCK_CURRENT_PASSWORD) {
+      throw new ApiError('validation', 'Check the highlighted fields.', 422, {
+        password: password ? 'That is not your password.' : 'Enter your password to change your number.',
+      });
+    }
+    return { ok: true as const };
+  },
+  /**
+   * The mock cannot read a Firebase token, so it takes the number from the
+   * last check — what matters here is the shape: the account comes back
+   * with the number on it, verified.
+   */
+  async verifyPhone({ idToken }) {
+    await delay();
+    if (!idToken) {
+      throw new ApiError('unauthorized', 'That number could not be confirmed. Please send a new code.', 401);
+    }
+    currentUser = currentUser ?? makeUser();
+    currentUser = {
+      ...currentUser,
+      phone: currentUser.phone ?? '+919876543210',
+      phoneVerifiedAt: new Date().toISOString(),
+    };
+    return currentUser;
+  },
+  async signInMethods() {
+    await delay();
+    return mockSignInMethods();
+  },
+  async connectGoogle(idToken) {
+    await delay();
+    if (!idToken) throw new ApiError('unauthorized', 'That Google sign-in could not be verified.', 401);
+    mockLinked.google = true;
+    return mockSignInMethods();
+  },
+  async connectApple({ idToken, nonce }) {
+    await delay();
+    if (!idToken || !nonce) throw new ApiError('unauthorized', 'That Apple sign-in could not be verified.', 401);
+    mockLinked.apple = true;
+    return mockSignInMethods();
+  },
+  async connectIdentity(linkToken) {
+    await delay();
+    if (!linkToken) {
+      throw new ApiError('unknown', 'That sign-in has expired. Connect it again from Account → Security.', 410, null, 'IDENTITY_LINK_EXPIRED');
+    }
+    mockLinked.apple = true;
+    return mockSignInMethods();
+  },
+  /** The server's one rule, on the mock member: never the last way in. */
+  async disconnect(provider, apple) {
+    await delay();
+    if (provider === 'apple' && mockLinked.apple && !apple) {
+      throw new ApiError('validation', 'Confirm with Apple to disconnect it.', 422, { confirmWith: 'apple' }, 'CONFIRMATION_REQUIRED');
+    }
+    const methods = mockSignInMethods();
+    if (!methods.providers.find(p => p.provider === provider)?.canDisconnect && mockLinked[provider]) {
+      throw new ApiError('unknown', 'That is the only way into this account. Set a password first — sign out and use Forgot password — so you can still sign in.', 409, null, 'LAST_SIGN_IN_METHOD');
+    }
+    mockLinked[provider] = false;
+    return mockSignInMethods();
+  },
   async sessions() {
     await delay();
     return mockSessions;
@@ -5917,11 +6056,16 @@ export const mockAccountApi: AccountApi = {
   },
   async deletion() {
     await delay();
-    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS };
+    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS, confirmWith: mockConfirmWith() };
   },
-  async scheduleDeletion({ password, reason }) {
+  /** The server's proof rule (RULES O16): Apple wherever it is connected. */
+  async scheduleDeletion({ password, apple, reason }) {
     await delay();
-    if (password !== MOCK_CURRENT_PASSWORD) {
+    if (mockConfirmWith() === 'apple') {
+      if (!apple?.idToken || !apple.authorizationCode) {
+        throw new ApiError('validation', 'Confirm with Apple — it is how this account signs in.', 422, { confirmWith: 'apple' }, 'CONFIRMATION_REQUIRED');
+      }
+    } else if (password !== MOCK_CURRENT_PASSWORD) {
       throw new ApiError(
         'validation',
         'That is not your password.',
@@ -5938,12 +6082,12 @@ export const mockAccountApi: AccountApi = {
       ).toISOString(),
       reason: reason ?? null,
     };
-    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS };
+    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS, confirmWith: mockConfirmWith() };
   },
   async cancelDeletion() {
     await delay();
     mockDeletion = { scheduledAt: null, purgeAt: null, reason: null };
-    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS };
+    return { ...mockDeletion, graceDays: MOCK_DELETION_GRACE_DAYS, confirmWith: mockConfirmWith() };
   },
 };
 
@@ -6073,6 +6217,17 @@ export const mockSupportApi: SupportApi = {
 };
 
 export const mockAppApi: AppApi = {
+  /**
+   * The everyday icon and nothing festive: a mock session should never
+   * change the launcher icon behind the developer's back. Point
+   * `config.apiBaseUrl` at a real server and set one from the panel to see
+   * a switch.
+   */
+  async icon() {
+    await delay();
+    return { base: 'redfield', festive: null };
+  },
+
   /**
    * Silence, like a build that is current. The mock has no releases behind
    * it, and an app that nagged about an update nobody published would make

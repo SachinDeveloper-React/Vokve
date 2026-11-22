@@ -152,6 +152,13 @@ const settle = async () => {
 
 const INITIAL = useStepsStore.getState();
 
+/** Undone after the test that asked, pass or fail (Platform is not restored otherwise). */
+const undo: (() => void)[] = [];
+const afterThisTest = (fn: () => void) => undo.push(fn);
+afterEach(() => {
+  while (undo.length > 0) undo.pop()!();
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   useStepsStore.setState(INITIAL, true);
@@ -349,6 +356,8 @@ describe('a step session', () => {
   });
 
   test('sends the same snapshot again with a Play Integrity token when asked', async () => {
+    const os = jest.replaceProperty(Platform, 'OS', 'android');
+    afterThisTest(() => os.restore());
     mockActivityApi.ingest
       .mockRejectedValueOnce(
         new ApiError(
@@ -379,6 +388,37 @@ describe('a step session', () => {
     // One snapshot, so one nonce: the refusal did not spend it.
     expect(mockActivityApi.ingestNonce).toHaveBeenCalledTimes(1);
     expect(useStepsStore.getState().cloudProjectNumber).toBe(42);
+  });
+
+  test('on an iPhone the token is an App Attest assertion, asked for with no Play project', async () => {
+    const os = jest.replaceProperty(Platform, 'OS', 'ios');
+    afterThisTest(() => os.restore());
+    mockActivityApi.ingest
+      .mockRejectedValueOnce(
+        new ApiError(
+          'forbidden',
+          'Fresh integrity check needed.',
+          403,
+          null,
+          'INTEGRITY_REQUIRED',
+        ),
+      )
+      .mockResolvedValueOnce(ingested(500));
+
+    await startStepSession(PROFILE);
+    await settle();
+
+    expect(tracker.requestIntegrityToken).toHaveBeenCalledWith({
+      requestHash: 'abc123',
+    });
+    expect(mockActivityApi.ingest).toHaveBeenLastCalledWith(
+      {
+        date: today,
+        snapshot: SIGNATURE,
+        integrity: { token: 'mock-integrity-token' },
+      },
+      { idempotencyKey: expect.any(String) },
+    );
   });
 
   test('attests again, once, when the server has no key on file', async () => {

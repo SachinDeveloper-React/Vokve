@@ -11,6 +11,8 @@ import {
   Snowflake,
 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
+import { useHealthConnectStatus } from '../../stores/stepsStore';
+import { healthStoreName } from '../../utils/healthStore';
 import { Divider } from '../layout/Divider';
 import { VStack } from '../layout/Stack';
 import { Card } from '../ui/Card';
@@ -58,6 +60,7 @@ export const AccountMenuList = memo(
     onPressLogOut,
   }: Props) => {
     const { colors } = useTheme();
+    const healthName = healthStoreName(useHealthConnectStatus());
 
     return (
       <Card radius="xl" padding="base">
@@ -106,7 +109,7 @@ export const AccountMenuList = memo(
             icon={Footprints}
             tint={colors.brandAccent}
             title="Step Tracking"
-            subtitle="Step counting, Health Connect and sync"
+            subtitle={`Step counting, ${healthName} and sync`}
             onPress={onPressStepTracking}
           />
 

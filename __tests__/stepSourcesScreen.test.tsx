@@ -202,7 +202,7 @@ describe('StepSourcesScreen', () => {
 
   test('names what a vehicle shook out of the count, and only when there was some', async () => {
     // A day with no gate figure says nothing about it.
-    expect(textOf(await render(), RNText)).not.toContain('Shaken by a vehicle');
+    expect(textOf(await render(), RNText)).not.toContain('In a vehicle');
 
     mockSources.mockResolvedValue({
       ...REPORT,
@@ -214,7 +214,7 @@ describe('StepSourcesScreen', () => {
       ],
     });
     const text = textOf(await render(), RNText);
-    expect(text).toContain('Shaken by a vehicle, not counted');
+    expect(text).toContain('In a vehicle, not counted');
     // No minus sign: they were never in the 7,000 above.
     expect(text).toContain('3,600');
     expect(text).not.toContain('− 3,600');

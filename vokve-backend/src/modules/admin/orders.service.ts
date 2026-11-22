@@ -4,7 +4,7 @@ import { toCoins, toMilli } from '../../lib/coins.js';
 import { Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
-import { refundGatewayPayment } from '../../lib/payments.js';
+import { attemptRefund, queueRefund } from '../commerce/refunds.service.js';
 import { cancelOrderAsOperator } from '../commerce/service.js';
 import { OrderModel, ShopInventoryModel } from '../commerce/models.js';
 import { CoinBalanceModel, CoinLedgerModel } from '../economy/models.js';
@@ -305,28 +305,38 @@ export async function refundOrder(actor: string, orderId: string, body: RefundBo
       const balance = await CoinBalanceModel.findById(order.userId).session(session).lean();
       balanceMc = balance?.balanceMc ?? 0;
     }
-    await OrderModel.updateOne(
-      { _id: orderId },
+    // Only from the state the checks above were made on. The member's own
+    // cancel (or the unpaid-order sweep) landing in between already put the
+    // coins back under its own ledger reference, and both together would pay
+    // them out twice.
+    const moved = await OrderModel.updateOne(
+      { _id: orderId, status: order.status },
       {
         $set: { status: 'refunded', ...(ledgerId ? { refundLedgerId: ledgerId } : {}) },
         $push: { events: { from: order.status, to: 'refunded', actor: 'admin', at: new Date() } },
       },
       { session },
     );
-    return { ledgerId, balance: toCoins(balanceMc) };
+    if (moved.modifiedCount === 0) {
+      throw Errors.conflict('ORDER_CHANGED', 'That order changed while it was being refunded. Open it again and check before refunding.');
+    }
+    // The money owed back, in the same commit as the coins (RULES R6): a
+    // gateway that refuses, or a crash before it is asked, leaves this to
+    // be retried by the hourly sweep rather than forgotten.
+    const refundId = paidWithMoney && order.payment?.providerPaymentId
+      ? await queueRefund({
+          orderId, userId: order.userId, provider: order.payment.provider ?? null, providerPaymentId: order.payment.providerPaymentId,
+          amount: body.amount ?? refundable, currency: order.payment.currency ?? 'INR', reason: 'admin_refund',
+        }, session)
+      : null;
+    return { ledgerId, refundId, balance: toCoins(balanceMc) };
   });
 
   let money: 'refunded' | 'failed' | 'none' = 'none';
-  if (paidWithMoney && order.payment?.providerPaymentId) {
-    money = await refundGatewayPayment({
-      providerPaymentId: order.payment.providerPaymentId,
-      amountPaise: body.amount ?? refundable,
-    });
-    if (money === 'refunded') {
-      await OrderModel.updateOne({ _id: orderId }, { $set: { 'payment.status': 'refunded', 'payment.refundedAt': new Date() } });
-    } else {
-      logger.error({ orderId, paymentId: order.payment.providerPaymentId }, 'admin.refund_failed');
-    }
+  if (result.refundId) {
+    // `failed` covers "not yet": the row is retried with backoff and an alert.
+    money = (await attemptRefund(result.refundId)) === 'refunded' ? 'refunded' : 'failed';
+    if (money === 'failed') logger.error({ orderId, paymentId: order.payment?.providerPaymentId }, 'admin.refund_failed');
   }
 
   await AuditLogModel.create({
@@ -347,7 +357,8 @@ export async function refundOrder(actor: string, orderId: string, body: RefundBo
       .filter(Boolean)
       .join(', and ') || 'We have put it right.',
     dedupeKey: `order-refunded:${orderId}`,
-  });
+    // The refund is done; a notifier failing must not answer it with a 500.
+  }).catch(err => logger.error({ err, orderId }, 'admin.refund_notify_failed'));
 
   return {
     id: orderId,

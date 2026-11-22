@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { Platform } from 'react-native';
 import {
   BatteryCharging,
   Flame,
@@ -13,7 +14,8 @@ import { enableStepCounting } from '../../services/steps';
 import { useTheme } from '../../theme';
 
 /**
- * Physical activity — Android's name for step counting — and counting on.
+ * Physical activity — Android's name for step counting, Motion & Fitness on
+ * iOS — and counting on.
  * The system dialog says only "Allow Vokve to access your physical
  * activity?", so this says what that means first: the phone's own sensor,
  * all day, nothing about where the user is.
@@ -87,11 +89,17 @@ export const ActivityPermissionScreen = () => {
           text: 'Only your steps are counted — never your location',
         },
       ]}
-      allowLabel="Allow physical activity"
+      allowLabel={
+        Platform.OS === 'ios' ? 'Allow Motion & Fitness' : 'Allow physical activity'
+      }
       onAllow={onAllow}
       busy={busy}
       onSkip={onSkip}
-      footnote={'Android will ask to allow "Physical activity".'}
+      footnote={
+        Platform.OS === 'ios'
+          ? 'iOS will ask to allow "Motion & Fitness".'
+          : 'Android will ask to allow "Physical activity".'
+      }
     />
   );
 };

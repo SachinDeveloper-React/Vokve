@@ -357,10 +357,21 @@ describe('sign-up screen', () => {
     expect(textOf(tree, RNText)).not.toContain('Google sign-up is not connected');
   });
 
+  test('Apple signs in from here too', async () => {
+    const signInWithApple = jest.fn().mockResolvedValue(true);
+    useAuthStore.setState({ signInWithApple });
+
+    const tree = await render();
+    await press(tree, 'Continue with Apple');
+
+    expect(signInWithApple).toHaveBeenCalledTimes(1);
+    expect(textOf(tree, RNText)).not.toContain('Apple sign-up is not connected');
+  });
+
   test('the flows that are not wired up still say so', async () => {
     const tree = await render();
 
-    await press(tree, 'Continue with Apple');
-    expect(textOf(tree, RNText)).toContain('Apple sign-up is not connected');
+    await press(tree, 'Continue with Facebook');
+    expect(textOf(tree, RNText)).toContain('Facebook sign-up is not connected');
   });
 });

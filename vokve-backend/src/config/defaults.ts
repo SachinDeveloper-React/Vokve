@@ -645,38 +645,42 @@ export const CONFIG_DEFAULTS = {
       fraudDetection: { enabled: true, mode: 'flag' as 'flag' | 'exclude' },
       motionSampling: { enabled: true, windowSeconds: 10, intervalMinutes: 5 },
       /**
-       * **Steps a vehicle shook out of the phone are not steps** (A29,
-       * tracker 2.8). Android's step counter is a pedometer inside the
-       * sensor hub, and a bus seat, a car's floor or a bicycle's frame feeds
-       * it a rhythm it reports as walking — the oldest complaint there is,
-       * and one nothing after the fact can undo, because the counter hands
-       * over a number and not a waveform. On, the tracker watches the
-       * accelerometer while it counts and holds back the steps that arrive
-       * while the phone is being vibrated rather than walked; they stay in
-       * the snapshot's raw `deviceSteps` and arrive as `gatedSteps`, which
-       * the scoring takes off before a day is shown, verified or paid.
+       * **Steps a vehicle shook out of the phone are not steps** (A29).
+       * Android's step counter is a pedometer inside the sensor hub, and a
+       * bus seat, a car's floor or a motorbike feeds it a rhythm it reports
+       * as walking. From tracker 2.9 the phone holds those steps back the
+       * way Google Fit does: only while Google's Activity Recognition says
+       * it is in a vehicle or on a bicycle (the app ships
+       * play-services-location for this), giving back the walk away from
+       * the ride when it ends. Held steps stay in the snapshot's raw
+       * `deviceSteps` and arrive as `gatedSteps`, which the scoring takes
+       * off before a day is shown, verified or paid. The first minute of a
+       * ride is counted - Activity Recognition's latency.
        *
-       * The cost is one accelerometer registration for as long as counting
-       * runs, which is battery — worth it here, because these are steps
-       * Vokve would otherwise pay coins for. Off turns the whole thing off
-       * without an app release.
+       * **On a 2.8.x tracker this gate loses real steps**: it held steps on
+       * the accelerometer's word alone, which measured 15% (2.8.0) and 3.5%
+       * (2.8.2) of real walking thrown away, most of a walk with the phone
+       * in a back pocket. This switch is one for every build, so a build
+       * still on 2.8.x (the app moved to 2.9 on 2026-11-14, before any
+       * public release) has to be updated, not configured around. Off
+       * turns the whole thing off without an app release.
        *
-       * The thresholds are the tracker's own defaults and are meant to be
-       * tuned against real devices: sit in a bus with the steps debug report
-       * on screen and watch the verdict move from `gait` to `vibration`.
-       * Every one of them is clamped again inside the tracker.
+       * Only `enabled` and `stillVariance` are read from 2.9; the other
+       * thresholds tuned the 2.8 classifier and are accepted and ignored.
+       * They stay in the shape so a stored override and an older app's
+       * schema both still parse.
        */
       motionGate: {
         enabled: true,
-        /** Seconds of accelerometer behind one verdict; 1–15. */
+        /** Unused from tracker 2.9 (was: seconds of accelerometer behind one verdict; 1–15). */
         windowSeconds: 3,
-        /** (m/s²)² below which the phone is still — and a still phone is never gated. */
+        /** (m/s²)² below which the phone is still; five still minutes end a ride nobody reported the end of. */
         stillVariance: 0.02,
-        /** Share of the band's energy a gait peak must hold; higher gates more, and eventually gates walks. */
+        /** Unused from tracker 2.9 (was: the gait peak's share of the band's energy). */
         minPeakRatio: 0.12,
-        /** Mean crossings a second above which it is engine buzz, not a cadence. */
+        /** Unused from tracker 2.9 (was: crossings a second above which it is engine buzz). */
         maxZeroCrossingRate: 9,
-        /** Seconds of unbroken vibration before a step is held back — what keeps the first steps off a bus. */
+        /** Unused from tracker 2.9 (was: seconds of vibration before a step was held back). */
         engageSeconds: 2,
       },
     },
@@ -829,6 +833,12 @@ export const CONFIG_DEFAULTS = {
         'com.withings.wiscale2',
         'fi.polar.polarflow',
         'com.stt.android.suunto',
+        /**
+         * Apple Health's own sources on iOS (react-native-step-tracker-pro-ios):
+         * the iPhone and a paired Apple Watch, each `com.apple.health.<UUID>`.
+         * Typed-in entries are kept apart by the tracker as `manualSteps`.
+         */
+        'com.apple.health.*',
       ],
       /** Known step-fabrication packages (A14): never counted, and their presence is flagged. */
       deny: [] as string[],
@@ -918,6 +928,20 @@ export const CONFIG_DEFAULTS = {
       /** SHA-256 (hex) of the release signing certificate(s). Empty skips the check — dev builds. */
       signingCertSha256: [] as string[],
     },
+    /**
+     * Apple App Attest (react-native-step-tracker-pro-ios): what a genuine
+     * install's attestation must name. `teamId` is the developer team the
+     * app is signed by — `APPLE_TEAM_ID` overrides it — and with neither set
+     * an iPhone's key is kept as unattested rather than refused.
+     * `environments`: the aaguids accepted. The app ships the `production`
+     * entitlement for every build; `development` is accepted outside
+     * production as well, for a build run with the sandbox entitlement.
+     */
+    ios: {
+      bundleId: 'com.vokve.fitness',
+      teamId: 'ZL38K343UT' as string | null,
+      environments: ['production'] as ('development' | 'production')[],
+    },
     playIntegrity: {
       /**
        * The Cloud project linked to the app in Play Console. Null, with no
@@ -985,6 +1009,21 @@ export const CONFIG_DEFAULTS = {
       softMessage: 'Version {latest} is ready. Updating takes a moment and your place is kept.',
       actionLabel: 'Update now',
       laterLabel: 'Later',
+    },
+    /**
+     * Which launcher icon phones show (RULES DV13), set from the panel's
+     * App icon page — `PUT /admin/app-icon`, which checks every key against
+     * `devices/appIcons.ts`; the generic config page leaves it alone.
+     *
+     * `base` is the everyday icon. `festive` is one switched on by hand and
+     * wins over the schedule; `schedule` turns festive icons on and off by
+     * itself, one window at a time (windows may not overlap). A member who
+     * has turned festive icons off in the app keeps the base.
+     */
+    icon: {
+      base: 'redfield' as string,
+      festive: null as string | null,
+      schedule: [] as { id: string; icon: string; startsAt: string; endsAt: string; note: string | null }[],
     },
   },
   /**

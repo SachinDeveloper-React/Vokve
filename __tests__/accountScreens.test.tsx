@@ -57,6 +57,11 @@ jest.mock('@react-navigation/native', () => ({
   useRoute: () => ({ params: mockRouteParams }),
 }));
 
+jest.mock('../src/services/appleSignIn', () => ({ signInWithApple: jest.fn() }));
+const { signInWithApple: mockAppleSheet } = jest.requireMock(
+  '../src/services/appleSignIn',
+) as { signInWithApple: jest.Mock };
+
 jest.mock('react-native-image-picker', () => ({
   launchCamera: jest.fn(),
   launchImageLibrary: jest.fn(),
@@ -72,6 +77,11 @@ jest.mock('../src/services/api/endpoints', () => ({
     changePhone: jest.fn(),
     sessions: jest.fn(),
     revokeOtherSessions: jest.fn(),
+    signInMethods: jest.fn(),
+    connectGoogle: jest.fn(),
+    connectApple: jest.fn(),
+    connectIdentity: jest.fn(),
+    disconnect: jest.fn(),
     exportData: jest.fn(),
     deletion: jest.fn(),
     scheduleDeletion: jest.fn(),
@@ -523,6 +533,159 @@ describe('EditProfileScreen', () => {
 });
 
 describe('SecurityScreen', () => {
+  const methods = (
+    over: { password?: boolean; google?: [boolean, boolean]; apple?: [boolean, boolean] } = {},
+  ) => ({
+    password: over.password ?? true,
+    providers: [
+      { provider: 'google', linked: over.google?.[0] ?? false, canDisconnect: over.google?.[1] ?? false },
+      { provider: 'apple', linked: over.apple?.[0] ?? false, canDisconnect: over.apple?.[1] ?? false },
+    ],
+  });
+
+  test('connects Apple to this account with a fresh Apple sign-in (RULES O15)', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods());
+    mockAppleSheet.mockResolvedValue({
+      kind: 'signed_in',
+      idToken: 'id-token',
+      nonce: 'raw-nonce',
+      fullName: null,
+    });
+    accountApi.connectApple.mockResolvedValue(methods({ apple: [true, true] }));
+    const tree = await render(<SecurityScreen />);
+
+    expect(allText(tree)).toContain('Sign-in methods');
+    await pressButton(tree, 'Connect'); // the last is Apple's
+
+    expect(accountApi.connectApple).toHaveBeenCalledWith({
+      idToken: 'id-token',
+      nonce: 'raw-nonce',
+      fullName: null,
+    });
+    const text = allText(tree);
+    expect(text).toContain('Apple connected');
+    expect(text).toContain('Sign in with Apple now opens this account.');
+  });
+
+  test('says who already has the identity when another account does', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods());
+    mockAppleSheet.mockResolvedValue({ kind: 'signed_in', idToken: 't', nonce: 'n', fullName: null });
+    accountApi.connectApple.mockRejectedValue(
+      new ApiError(
+        'unknown',
+        'This Apple ID already signs in to another VOKVE account (x•••@privaterelay.appleid.com).',
+        409,
+        { provider: 'apple', account: 'x•••@privaterelay.appleid.com' },
+        'IDENTITY_IN_USE',
+      ),
+    );
+    const tree = await render(<SecurityScreen />);
+
+    await pressButton(tree, 'Connect');
+
+    expect(allText(tree)).toContain('x•••@privaterelay.appleid.com');
+  });
+
+  test('never offers to disconnect the only way in', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods({ password: false, apple: [true, false] }));
+    const tree = await render(<SecurityScreen />);
+
+    const text = allText(tree);
+    expect(text).toContain('Connected · your only way in');
+    expect(text).toContain('No password on this account');
+    expect(
+      tree.root.findAll(n => n.props?.label === 'Disconnect' && typeof n.props.onPress === 'function'),
+    ).toHaveLength(0);
+  });
+
+  test('says when Apple stopped forwarding to the relay address (RULES O17)', async () => {
+    useAuthStore.setState({ user: { ...user, emailForwardingOff: true } as unknown as User });
+    const tree = await render(<SecurityScreen />);
+
+    expect(allText(tree)).toContain('Apple is not forwarding mail to this address');
+  });
+
+  test('an account with no password changes its email by confirming with Apple', async () => {
+    accountApi.signInMethods.mockResolvedValue({
+      ...methods({ password: false, apple: [true, false] }),
+      confirmChangesWith: 'apple',
+    });
+    mockAppleSheet.mockResolvedValue({
+      kind: 'signed_in',
+      idToken: 'fresh-token',
+      nonce: 'raw-nonce',
+      fullName: null,
+      authorizationCode: 'one-time-code',
+      appleUser: null,
+    });
+    accountApi.changeEmail.mockResolvedValue({
+      verificationId: 'vrf-2',
+      phone: '',
+      channel: 'email' as const,
+      target: 'r•••@example.com',
+      codeLength: 6,
+      expiresInSeconds: 300,
+      resendInSeconds: 30,
+      devCode: null,
+      purpose: 'change_email' as const,
+    });
+    const tree = await render(<SecurityScreen />);
+
+    const changeButtons = tree.root.findAll(
+      n => n.props?.label === 'Change' && typeof n.props.onPress === 'function',
+    );
+    await ReactTestRenderer.act(async () => {
+      changeButtons[0].props.onPress();
+    });
+    await settle();
+    expect(allText(tree)).toContain('This account has no password, so you confirm with Apple instead.');
+    await type(tree, 'New email', 'rana@example.com');
+    await pressButton(tree, 'Confirm with Apple');
+
+    expect(accountApi.changeEmail).toHaveBeenCalledWith({
+      email: 'rana@example.com',
+      apple: { idToken: 'fresh-token', nonce: 'raw-nonce', authorizationCode: 'one-time-code' },
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('Auth', { screen: 'VerifyOtp' });
+  });
+
+  test('disconnecting Apple asks Apple, and sends its confirmation to be revoked (RULES O16)', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods({ apple: [true, true] }));
+    accountApi.disconnect.mockResolvedValue(methods());
+    mockAppleSheet.mockResolvedValue({
+      kind: 'signed_in',
+      idToken: 'fresh-token',
+      nonce: 'raw-nonce',
+      fullName: null,
+      authorizationCode: 'one-time-code',
+      appleUser: null,
+    });
+    const tree = await render(<SecurityScreen />);
+
+    await pressButton(tree, 'Disconnect');
+    await press(tree, 'Disconnect Apple');
+
+    expect(accountApi.disconnect).toHaveBeenCalledWith('apple', {
+      idToken: 'fresh-token',
+      nonce: 'raw-nonce',
+      authorizationCode: 'one-time-code',
+    });
+    expect(allText(tree)).toContain('Apple disconnected');
+  });
+
+  test('disconnects only after the member confirms', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods({ google: [true, true] }));
+    accountApi.disconnect.mockResolvedValue(methods());
+    const tree = await render(<SecurityScreen />);
+
+    await pressButton(tree, 'Disconnect');
+    expect(accountApi.disconnect).not.toHaveBeenCalled();
+    await press(tree, 'Disconnect Google');
+
+    expect(accountApi.disconnect).toHaveBeenCalledWith('google');
+    expect(allText(tree)).toContain('Google disconnected');
+  });
+
   test('lists the devices, marks the current one, and signs the rest out', async () => {
     accountApi.revokeOtherSessions.mockResolvedValue({ signedOut: 1 });
     const tree = await render(<SecurityScreen />);
@@ -539,7 +702,25 @@ describe('SecurityScreen', () => {
     expect(accountApi.sessions).toHaveBeenCalledTimes(2); // re-read after
   });
 
+  test('an account made with Google has no password row to change (nor its sheet)', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods({ password: false, google: [true, false] }));
+    const tree = await render(<SecurityScreen />);
+
+    const text = allText(tree);
+    expect(text).not.toContain('Changing it signs every other device out.');
+    expect(text).not.toContain('Current password');
+    expect(text).toContain('No password on this account');
+  });
+
+  test('shows no password row until the server says the account has one', async () => {
+    accountApi.signInMethods.mockRejectedValue(new Error('offline'));
+    const tree = await render(<SecurityScreen />);
+
+    expect(allText(tree)).not.toContain('Changing it signs every other device out.');
+  });
+
   test('a wrong current password lands on its own field, not in a toast', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods());
     accountApi.changePassword.mockRejectedValue(
       new ApiError(
         'validation',
@@ -565,6 +746,7 @@ describe('SecurityScreen', () => {
   });
 
   test('a changed password says how many devices it signed out', async () => {
+    accountApi.signInMethods.mockResolvedValue(methods());
     accountApi.changePassword.mockResolvedValue({
       ok: true,
       signedOutSessions: 2,
@@ -597,7 +779,8 @@ describe('SecurityScreen', () => {
     accountApi.changeEmail.mockResolvedValue(challenge);
     const tree = await render(<SecurityScreen />);
 
-    // The email row's Change is the first of the three.
+    // The email row's Change is the first: the phone row's button says
+    // "Verify" in this fixture, and the password's is the last.
     const changeButtons = tree.root.findAll(
       n => n.props?.label === 'Change' && typeof n.props.onPress === 'function',
     );
@@ -620,6 +803,23 @@ describe('SecurityScreen', () => {
       verificationId: 'vrf-1',
     });
     expect(mockNavigate).toHaveBeenCalledWith('Auth', { screen: 'VerifyOtp' });
+  });
+
+  test('the phone row leads to its own screen, worded for the number it has (RULES O14)', async () => {
+    const tree = await render(<SecurityScreen />);
+
+    // On file but not proved: "Verify", not "Change".
+    await pressButton(tree, 'Verify');
+    expect(mockNavigate).toHaveBeenCalledWith('VerifyPhone');
+  });
+
+  test('a Google or Apple member with no number is offered to add one', async () => {
+    useAuthStore.setState({ user: { ...user, phone: null } as unknown as User });
+    const tree = await render(<SecurityScreen />);
+
+    expect(allText(tree)).toContain('No number yet');
+    await pressButton(tree, 'Add');
+    expect(mockNavigate).toHaveBeenCalledWith('VerifyPhone');
   });
 
   test('shows which contacts are verified', async () => {
@@ -687,6 +887,51 @@ describe('PrivacyScreen', () => {
     await press(tree, 'Keep my account');
     expect(accountApi.cancelDeletion).toHaveBeenCalled();
     expect(allText(tree)).toContain('Deletion cancelled');
+  });
+
+  test('an account with Apple on it confirms the deletion with Apple, which revokes it (RULES O16)', async () => {
+    const appleDeletion = { scheduledAt: null, purgeAt: null, reason: null, graceDays: 14, confirmWith: 'apple' as const };
+    accountApi.deletion.mockResolvedValue(appleDeletion);
+    accountApi.scheduleDeletion.mockResolvedValue({
+      ...appleDeletion,
+      scheduledAt: new Date().toISOString(),
+      purgeAt: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+    });
+    mockAppleSheet.mockResolvedValue({
+      kind: 'signed_in',
+      idToken: 'fresh-token',
+      nonce: 'raw-nonce',
+      fullName: null,
+      authorizationCode: 'one-time-code',
+      appleUser: '001234.apple-sub',
+    });
+    const tree = await render(<PrivacyScreen />);
+
+    await pressButton(tree, 'Delete my account');
+    // No password field: this account's proof is Apple.
+    expect(
+      tree.root.findAll(n => n.props?.label === 'Your password' && typeof n.props.onChangeText === 'function'),
+    ).toHaveLength(0);
+    expect(allText(tree)).toContain('This also removes VOKVE from your Apple ID');
+    await pressButton(tree, 'Confirm with Apple');
+
+    expect(accountApi.scheduleDeletion).toHaveBeenCalledWith({
+      apple: { idToken: 'fresh-token', nonce: 'raw-nonce', authorizationCode: 'one-time-code' },
+      reason: undefined,
+    });
+    expect(allText(tree)).toContain('Deletion scheduled');
+  });
+
+  test('backing out of Apple’s sheet schedules nothing and says nothing', async () => {
+    accountApi.deletion.mockResolvedValue({ scheduledAt: null, purgeAt: null, reason: null, graceDays: 14, confirmWith: 'apple' });
+    mockAppleSheet.mockResolvedValue({ kind: 'cancelled' });
+    const tree = await render(<PrivacyScreen />);
+
+    await pressButton(tree, 'Delete my account');
+    await pressButton(tree, 'Confirm with Apple');
+
+    expect(accountApi.scheduleDeletion).not.toHaveBeenCalled();
+    expect(allText(tree)).not.toContain("Couldn't schedule it");
   });
 
   test('a wrong password on the deletion sheet stays on the field', async () => {

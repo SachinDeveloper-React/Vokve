@@ -18,6 +18,7 @@ import {
   useHealthConnectWrites,
 } from '../../stores/stepsStore';
 import { useTheme } from '../../theme';
+import { isAppleHealth } from '../../utils/healthStore';
 
 /** The button for each rung of Health Connect's ladder. */
 const ALLOW_LABEL = {
@@ -25,6 +26,16 @@ const ALLOW_LABEL = {
   update: 'Update Health Connect',
   settings: 'Open Health Connect',
 } as const;
+
+/** Apple Health's points: read only, always (the iPhone writes its own steps). */
+const APPLE_POINTS = [
+  { icon: Watch, text: 'Works with Apple Watch and apps that share steps with Apple Health' },
+  {
+    icon: ShieldCheck,
+    text: 'Vokve only reads steps and distance — it never writes or changes your data',
+  },
+  { icon: ToggleRight, text: 'Optional — turn it off anytime in the Health app' },
+];
 
 /**
  * Health Connect — how a watch's steps reach Vokve, and how the steps this
@@ -43,8 +54,13 @@ export const HealthConnectPermissionScreen = () => {
   const [busy, setBusy] = useState(false);
 
   const rung = healthConnectCardState(status);
-  const allowLabel =
-    rung === 'install' || rung === 'update' || rung === 'settings'
+  // On an iPhone the same screen asks for Apple Health, which Vokve only reads.
+  const apple = isAppleHealth(status);
+  const allowLabel = apple
+    ? rung === 'settings'
+      ? 'Open Apple Health'
+      : 'Connect Apple Health'
+    : rung === 'install' || rung === 'update' || rung === 'settings'
       ? ALLOW_LABEL[rung]
       : 'Connect Health Connect';
 
@@ -63,14 +79,14 @@ export const HealthConnectPermissionScreen = () => {
     } catch {
       recordPermissionAnswer('healthConnect', 'failed');
       toast.show({
-        title: "Couldn't open Health Connect",
+        title: apple ? "Couldn't open Apple Health" : "Couldn't open Health Connect",
         message: 'You can connect it later from Step tracking.',
         tone: 'error',
       });
     } finally {
       setBusy(false);
     }
-  }, [next, toast]);
+  }, [apple, next, toast]);
 
   const onSkip = useCallback(() => {
     recordPermissionAnswer('healthConnect', 'skipped');
@@ -84,8 +100,12 @@ export const HealthConnectPermissionScreen = () => {
       icon={HeartPulse}
       tint={colors.avatarPink}
       title="Connect your watch"
-      message="Wear a watch or band? Health Connect lets Vokve read its steps, so a walk your phone missed still counts."
-      points={[
+      message={
+        apple
+          ? 'Wear an Apple Watch? Apple Health lets Vokve read its steps, so a walk your iPhone missed still counts.'
+          : 'Wear a watch or band? Health Connect lets Vokve read its steps, so a walk your phone missed still counts.'
+      }
+      points={apple ? APPLE_POINTS : [
         {
           icon: Watch,
           text: 'Works with watch apps like Google Fit and Fitbit',
@@ -112,12 +132,21 @@ export const HealthConnectPermissionScreen = () => {
           text: 'Optional — turn it off anytime in Health Connect',
         },
       ]}
-      note={{
-        icon: Info,
-        title: 'Using Google Fit?',
-        message:
-          "In Google Fit's settings, turn on syncing with Health Connect so your watch's steps reach it.",
-      }}
+      note={
+        apple
+          ? {
+              icon: Info,
+              title: 'Another watch?',
+              message:
+                "Turn on its app's sharing with Apple Health, so your watch's steps reach it.",
+            }
+          : {
+              icon: Info,
+              title: 'Using Google Fit?',
+              message:
+                "In Google Fit's settings, turn on syncing with Health Connect so your watch's steps reach it.",
+            }
+      }
       allowLabel={allowLabel}
       onAllow={onAllow}
       busy={busy}

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -36,6 +37,19 @@ const EXTENSION: Record<ImageType, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
 };
+
+/**
+ * What the first bytes say a file is, whatever its name or its declared type
+ * says. A `.jpg` that is really HTML or a PDF is not an image, and a public
+ * bucket must not serve one as if it were.
+ */
+export function sniffImage(buffer: Buffer): ImageType | null {
+  if (buffer.length < 12) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  return null;
+}
 
 /** The most one catalogue image may weigh. A product photo is not a RAW file. */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -128,6 +142,20 @@ export async function describeObject(key: string): Promise<StoredObject | null> 
   } catch {
     // A missing object is an answer, not a fault: it is what a confirmation
     // for an upload that never completed looks like.
+    return null;
+  }
+}
+
+/** The object's first bytes, for `sniffImage` — a ranged read, never the whole file. */
+export async function readObjectStart(key: string, bytes = 16): Promise<Buffer | null> {
+  try {
+    const out = await s3().send(
+      new GetObjectCommand({ Bucket: env.AWS_S3_BUCKET!, Key: key, Range: `bytes=0-${bytes - 1}` }),
+    );
+    const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+    if (!body?.transformToByteArray) return null;
+    return Buffer.from(await body.transformToByteArray());
+  } catch {
     return null;
   }
 }

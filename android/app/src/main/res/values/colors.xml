@@ -1,0 +1,4 @@
+<resources>
+    <!-- The red of the VOKVE field, which tints the white V in the status bar. -->
+    <color name="notification_accent">#E60000</color>
+</resources>

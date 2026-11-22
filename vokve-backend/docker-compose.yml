@@ -2,7 +2,9 @@ services:
   mongo:
     image: mongo:7
     command: ["--replSet", "rs0", "--bind_ip_all"]
-    ports: ["27017:27017"]
+    # Loopback only: neither has a password, and a laptop on café Wi-Fi
+    # should not be offering its database to the room.
+    ports: ["127.0.0.1:27017:27017"]
     volumes: [mongo-data:/data/db]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
@@ -19,6 +21,6 @@ services:
       "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] }) }"
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
 volumes:
   mongo-data:

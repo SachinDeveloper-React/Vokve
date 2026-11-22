@@ -533,7 +533,7 @@ describe('reading steps back: config, ranges and sources', () => {
     expect(report.uploads[0]).toMatchObject({ phoneSteps: 5_000 });
     const said = report.explanation.join(' ');
     expect(said).toContain('counted 5,000 steps with its own sensor');
-    expect(said).toContain('reported 3,600 steps while the phone was being shaken by a vehicle');
+    expect(said).toContain('reported 3,600 steps while the phone could tell you were riding');
   });
 
   it('a watch relayed by Google Fit, its steps with no recording method: the day shows it, the phone’s count verifies, and the page says why (D-51)', async () => {

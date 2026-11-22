@@ -1,11 +1,12 @@
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
-import { verifyGoogleIdToken, type GoogleIdentity } from '../../lib/googleIdentity.js';
+import { verifyAppleIdToken } from '../../lib/appleIdentity.js';
+import { verifyGoogleIdToken } from '../../lib/googleIdentity.js';
 import { getConfig } from '../../config/remote.js';
 import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
-import { hashToken, newRefreshToken, signAccessToken, signStepUpToken } from '../../lib/tokens.js';
+import { hashToken, IDENTITY_LINK_TTL_SECONDS, newRefreshToken, signAccessToken, signIdentityLinkToken, signStepUpToken } from '../../lib/tokens.js';
 import { authResponseSchema, genderSchema, type AuthResponse } from '../../contracts/index.js';
 import { clearPushToken, startCounting, stopCounting } from '../devices/service.js';
 import { CoinBalanceModel } from '../economy/models.js';
@@ -13,6 +14,7 @@ import { AuditLogModel } from '../platform/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from './models.js';
 import { consumeChallenge, createChallenge, findLiveChallenge, isChannelDeliverable, isChannelUsable } from './otp.service.js';
 import { toUser } from './serialize.js';
+import { identityFromLinkToken, PROVIDER_LABEL, type ProviderIdentity } from './linking.service.js';
 import { applyCodeAtSignUp, findCode } from '../social/service.js';
 
 // ─── Request shapes (mirror src/types/forms.ts on the client) ───────────────
@@ -35,19 +37,24 @@ export type SignUpBody = z.infer<typeof signUpBody>;
 
 export const signInBody = z.object({
   /** The client's field is called `email` but holds an email or a phone. */
-  email: z.string().trim().min(1, 'Enter your email or phone number'),
-  password: z.string().min(1, 'Enter your password'),
+  email: z.string().trim().min(1, 'Enter your email or phone number').max(254, 'That is too long for an email or phone number'),
+  // Bounded: bcrypt reads 72 bytes and no more, and an unbounded string is
+  // also an unbounded rate-limit key.
+  password: z.string().min(1, 'Enter your password').max(256, 'That is too long for a password'),
 });
 
-export const verifyOtpBody = z.object({ verificationId: z.string().min(1), code: z.string().regex(/^\d{4,8}$/) });
-export const resendOtpBody = z.object({ verificationId: z.string().min(1) });
-export const refreshBody = z.object({ refreshToken: z.string().min(1) });
+export const verifyOtpBody = z.object({ verificationId: z.string().min(1).max(128), code: z.string().regex(/^\d{4,8}$/) });
+export const resendOtpBody = z.object({ verificationId: z.string().min(1).max(128) });
+export const refreshBody = z.object({ refreshToken: z.string().min(1).max(256) });
 // Bounded: the identifier is also the key of a rate limit, and an email or a
 // phone number is never longer than this.
 export const otpRequestBody = z.object({ identifier: z.string().trim().min(1).max(254), purpose: z.enum(['login', 'reset_password']) });
 export const resetPasswordBody = z.object({ verificationId: z.string().min(1), code: z.string().regex(/^\d{4,8}$/), password: signUpBody.shape.password });
 
-interface Meta { deviceId?: string; ip?: string; appVersion?: string }
+/** How a session began (RULES O17). In-session codes inherit the session's own. */
+export type SessionMethod = 'password' | 'otp' | 'google' | 'apple';
+
+interface Meta { deviceId?: string; ip?: string; appVersion?: string; method?: SessionMethod }
 
 // ─── Sign-up → phone OTP → (account) → email OTP ───────────────────────────
 
@@ -139,7 +146,7 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
         await applyCodeAtSignUp(userId, p.referralCode, config.locale.timezone, meta.deviceId);
       }
       const user = (await UserModel.findById(userId))!;
-      const session = await issueSession(user, meta);
+      const session = await issueSession(user, { ...meta, method: 'password' });
       // The other contact is proven the same way, right after (RULES O4) —
       // sent now so the app can ask for it without another round-trip. Only
       // if that channel can actually deliver: a code nobody can receive is
@@ -176,7 +183,7 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
       const user = await UserModel.findById(challenge.userId);
       if (!user || user.deletedAt) throw Errors.unauthorized();
       await signedInOn(user, meta);
-      return issueSession(user, meta);
+      return issueSession(user, { ...meta, method: 'otp' });
     }
     case 'step_up': {
       // A second factor for one action (RULES O8): the session is refreshed
@@ -227,7 +234,7 @@ export async function signIn(identifier: string, password: string, meta: Meta): 
     throw new ApiError(403, 'CONTACT_NOT_VERIFIED', 'Verify your email or phone number to continue.');
   }
   await signedInOn(user, meta);
-  return issueSession(user, meta);
+  return issueSession(user, { ...meta, method: 'password' });
 }
 
 /**
@@ -251,23 +258,109 @@ export async function signIn(identifier: string, password: string, meta: Meta): 
  * Google member walks and earns from the first minute and is asked for a
  * number when they come to spend.
  */
-export async function signInWithGoogle(idToken: string, meta: Meta): Promise<AuthResponse> {
+export async function signInWithGoogle(idToken: string, meta: Meta, ifNew: IfNew = 'create'): Promise<AuthResponse> {
+  return signInWithIdentity(await googleIdentity(idToken), ifNew, meta);
+}
+
+/** A Google ID token, verified, as the identity sign-in and linking both take. */
+export async function googleIdentity(idToken: string): Promise<ProviderIdentity> {
   const identity = await verifyGoogleIdToken(idToken);
+  return {
+    provider: 'google',
+    providerId: identity.googleId,
+    email: identity.email,
+    name: identity.name,
+    avatarUrl: identity.picture,
+  };
+}
 
-  let user = await UserModel.findOne({ googleId: identity.googleId });
+/**
+ * Signing in with Apple (RULES O13).
+ *
+ * The Google rule, with Apple's two differences. Only the token says who
+ * this is: the account is matched on `appleId` (the token's `sub`) and
+ * then on the token's *verified* email. The one thing taken from the body
+ * is the member's name, because Apple hands it to the app once — on the
+ * very first authorisation — and never puts it in a token; it is a
+ * display name the member could type into their profile anyway, so it
+ * names a new account and fills an empty one, and never renames anybody.
+ *
+ * The email may be a private relay address. It still matches only the
+ * account that was created from it, which is right: a member who hid
+ * their address from us has not told us which password account is
+ * theirs. And it may be missing altogether — Apple leaves it out when
+ * the app was first authorised without the email scope — which is fine
+ * for a member we already know by `appleId`, and the one case we cannot
+ * make an account for, since every account needs an address.
+ */
+export const appleBody = z
+  .object({
+    idToken: z.string().trim().min(1).max(4000),
+    /** The raw nonce the phone made; the token carries its SHA-256. */
+    nonce: z.string().trim().min(16).max(128),
+    fullName: z
+      .object({
+        givenName: z.string().trim().max(60).nullish(),
+        familyName: z.string().trim().max(60).nullish(),
+      })
+      .strict()
+      .nullish(),
+    ifNew: z.enum(['create', 'ask']).optional(),
+  })
+  .strict();
+export type AppleBody = z.infer<typeof appleBody>;
 
-  if (!user) {
+export async function signInWithApple(body: AppleBody, meta: Meta): Promise<AuthResponse> {
+  return signInWithIdentity(await appleIdentity(body), body.ifNew ?? 'create', meta);
+}
+
+/** An Apple identity token, verified against its nonce, plus the once-only name. */
+export async function appleIdentity(body: Pick<AppleBody, 'idToken' | 'nonce' | 'fullName'>): Promise<ProviderIdentity> {
+  const identity = await verifyAppleIdToken(body.idToken, body.nonce);
+  return {
+    provider: 'apple',
+    providerId: identity.appleId,
+    email: identity.email,
+    name: displayName(body.fullName),
+    avatarUrl: null,
+  };
+}
+
+/**
+ * What a new client asks for when an identity matches no account: `create`
+ * makes one, as every build before RULES O15 expects; `ask` answers
+ * `IDENTITY_NOT_LINKED` with a link token instead, so the member can say
+ * whether they already have an account before a second one exists.
+ */
+export type IfNew = 'create' | 'ask';
+
+/**
+ * The sign-in half of O12 and O13, which is the same for both providers.
+ *
+ * Matched on the provider's id first and its verified email after. An
+ * email match is linked rather than refused — unless that account already
+ * holds a different id from the same provider, which is left where it is:
+ * the email proves the member, and overwriting would lock the other
+ * identity out. No match at all either makes the account or, when the
+ * phone asked to be asked, hands back a link token and lets the member
+ * choose (O15).
+ */
+async function signInWithIdentity(identity: ProviderIdentity, ifNew: IfNew, meta: Meta): Promise<AuthResponse> {
+  const field = identity.provider === 'google' ? 'googleId' : 'appleId';
+  let user = await UserModel.findOne({ [field]: identity.providerId });
+
+  if (!user && identity.email) {
     // Case-insensitive, with the same collation the unique index uses, or
     // `Someone@gmail.com` would make a second account beside `someone@`.
     user = await UserModel.findOne({ email: identity.email }).collation({ locale: 'en', strength: 2 });
-    if (user) {
+    if (user && !user.deletedAt) {
       // Linking rather than refusing: somebody who signed up with a
-      // password and later presses the Google button means to reach the
-      // same account, and telling them "that email is taken" by their own
-      // account is the most confusing answer there is.
-      user.googleId = identity.googleId;
+      // password and later presses the provider's button means to reach
+      // the same account, and telling them "that email is taken" by their
+      // own account is the most confusing answer there is.
+      if (!user[field]) user.set(field, identity.providerId);
       user.emailVerifiedAt = user.emailVerifiedAt ?? new Date();
-      if (!user.avatarUrl && identity.picture) user.avatarUrl = identity.picture;
+      if (!user.avatarUrl && identity.avatarUrl) user.avatarUrl = identity.avatarUrl;
       if (!user.name && identity.name) user.name = identity.name;
       await user.save();
     }
@@ -278,36 +371,89 @@ export async function signInWithGoogle(idToken: string, meta: Meta): Promise<Aut
   }
 
   if (!user) {
-    user = await createGoogleUser(identity, meta);
+    if (ifNew === 'ask') {
+      throw new ApiError(
+        409,
+        'IDENTITY_NOT_LINKED',
+        `There is no VOKVE account for this ${PROVIDER_LABEL[identity.provider]} yet.`,
+        {
+          provider: identity.provider,
+          email: identity.email,
+          linkToken: signIdentityLinkToken(identity),
+          expiresInSeconds: IDENTITY_LINK_TTL_SECONDS,
+        },
+      );
+    }
+    if (!identity.email) {
+      throw new ApiError(
+        401,
+        'APPLE_EMAIL_MISSING',
+        'Apple did not share an email address for this account. Stop using Sign in with Apple for VOKVE (on an iPhone: Settings → your name → Sign in with Apple; anywhere else: account.apple.com), then try again and share an email.',
+      );
+    }
+    user = await createProviderUser(
+      { provider: identity.provider, providerId: identity.providerId, email: identity.email, name: identity.name, avatarUrl: identity.avatarUrl },
+      meta,
+    );
   }
 
   await signedInOn(user, meta);
-  return issueSession(user, meta);
+  return issueSession(user, { ...meta, method: identity.provider });
 }
 
 /**
- * A brand-new account from a Google token.
+ * "Create a new account" after `IDENTITY_NOT_LINKED` (RULES O15): the
+ * identity the link token holds, signed in as if it had just been
+ * presented with `create`. If an account for it appeared in between, this
+ * signs in to that one rather than making a second.
+ */
+export async function createFromLinkToken(linkToken: string, meta: Meta): Promise<AuthResponse> {
+  return signInWithIdentity(identityFromLinkToken(linkToken), 'create', meta);
+}
+
+/** "Rana" + "Jay" → "Rana Jay"; nothing usable → null. Same bounds as `PATCH /me`. */
+function displayName(fullName: AppleBody['fullName']): string | null {
+  const joined = [fullName?.givenName, fullName?.familyName]
+    .filter(part => typeof part === 'string' && part.length > 0)
+    .join(' ')
+    .trim()
+    .slice(0, 60);
+  return joined.length >= 2 ? joined : null;
+}
+
+/**
+ * A brand-new account from a provider's token (Google, O12; Apple, O13).
  *
  * The password hash is a string bcrypt can never match, the way a deleted
  * account's is: it keeps the field a string for the six places that
  * compare against it, and means the password sign-in simply does not
  * match rather than needing a special case at each one. Somebody who
  * wants a password can set one through the ordinary reset, which proves
- * the same address Google just did.
+ * the same address the provider just did.
  */
-async function createGoogleUser(identity: GoogleIdentity, meta: Meta): Promise<UserDoc> {
+async function createProviderUser(
+  account: {
+    provider: 'google' | 'apple';
+    providerId: string;
+    email: string;
+    name: string | null;
+    avatarUrl: string | null;
+  },
+  meta: Meta,
+): Promise<UserDoc> {
   const config = await getConfig();
   const userId = newId('usr');
+  const idField = account.provider === 'google' ? 'googleId' : 'appleId';
 
   let user: UserDoc;
   try {
     user = await UserModel.create({
       _id: userId,
-      email: identity.email,
-      googleId: identity.googleId,
-      passwordHash: `google:${identity.googleId}`,
-      name: identity.name ?? '',
-      avatarUrl: identity.picture ?? null,
+      email: account.email,
+      [idField]: account.providerId,
+      passwordHash: `${account.provider}:${account.providerId}`,
+      name: account.name ?? '',
+      avatarUrl: account.avatarUrl,
       emailVerifiedAt: new Date(),
       phoneVerifiedAt: null,
       country: config.locale.country,
@@ -319,7 +465,7 @@ async function createGoogleUser(identity: GoogleIdentity, meta: Meta): Promise<U
     // first wrote rather than answering "already registered" to somebody
     // who is doing nothing wrong.
     if ((error as { code?: number }).code === 11000) {
-      const existing = await UserModel.findOne({ googleId: identity.googleId });
+      const existing = await UserModel.findOne({ [idField]: account.providerId });
       if (existing) return existing;
     }
     throw error;
@@ -331,7 +477,7 @@ async function createGoogleUser(identity: GoogleIdentity, meta: Meta): Promise<U
     CoinBalanceModel.create({ _id: userId }),
     AuditLogModel.create({
       actorType: 'user', actorId: userId, deviceId: meta.deviceId,
-      action: 'user.signup_google', subjectType: 'user', subjectId: userId,
+      action: `user.signup_${account.provider}`, subjectType: 'user', subjectId: userId,
     }),
   ]);
 
@@ -431,17 +577,28 @@ export async function resetPassword(verificationId: string, code: string, passwo
 export async function issueSession(user: UserDoc, meta: Meta): Promise<AuthResponse> {
   const access = signAccessToken({ sub: user._id, tier: user.trust?.tier ?? 'normal' });
   const refresh = newRefreshToken();
+  // A code passed inside a session (a step-up, a contact change) issues a
+  // fresh row for the same phone: it is the same session, begun the same way.
+  const method = meta.method ?? (await sessionMethodOn(user._id, meta.deviceId));
   await RefreshTokenModel.create({
     userId: user._id,
     deviceId: meta.deviceId ?? null,
     tokenHash: refresh.hash,
     expiresAt: new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
+    method,
   });
   return authResponseSchema.parse({
     user: toUser(user),
     tokens: { accessToken: access.token, refreshToken: refresh.token, expiresAt: access.expiresAt },
     emailVerification: null,
   });
+}
+
+/** How the live session on this phone began, for a row issued inside it. */
+async function sessionMethodOn(userId: string, deviceId: string | undefined): Promise<string | null> {
+  if (!deviceId) return null;
+  const live = await RefreshTokenModel.findOne({ userId, deviceId, revokedAt: null }, { method: 1 }).sort({ createdAt: -1 }).lean();
+  return live?.method ?? null;
 }
 
 /**
@@ -476,6 +633,7 @@ export async function refreshSession(refreshToken: string, meta: Meta) {
   const created = await RefreshTokenModel.create({
     userId: user._id, deviceId: row.deviceId ?? meta.deviceId ?? null, tokenHash: next.hash,
     expiresAt: new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
+    method: row.method ?? null,
   });
   if (!row.supersededBy) {
     await RefreshTokenModel.updateOne({ _id: row._id }, { $set: { supersededBy: created._id.toString() } });
@@ -528,10 +686,11 @@ export async function sendPhoneOtp(userId: string, meta: Meta) {
 /**
  * The account's phone, where it has one.
  *
- * An account that arrived through Google has none (RULES O12), and every
- * caller here is about to send it a text. Refusing in words is the point:
- * without this the number is `undefined`, the code goes nowhere, and the
- * member waits for a message that was never addressed to anybody.
+ * An account that arrived through Google or Apple has none (RULES O12,
+ * O13), and every caller here is about to send it a text. Refusing in
+ * words is the point: without this the number is `undefined`, the code
+ * goes nowhere, and the member waits for a message that was never
+ * addressed to anybody.
  */
 function phoneOf(user: UserDoc): string {
   if (!user.phone) {

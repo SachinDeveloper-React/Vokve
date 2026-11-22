@@ -115,22 +115,58 @@ export function paymentProvider(): PaymentProvider {
   return env.PAYMENT_PROVIDER;
 }
 
+/**
+ * Whether an order that owes money can be taken at all.
+ *
+ * Not with the mock in production. `ALLOW_MOCK_PAYMENTS_IN_PRODUCTION` lets
+ * the server boot while the gateway is not wired, on the understanding that
+ * the shop stays coins-only — but nothing held it to that: one item set to
+ * `money` or `mixed` and any member could place the order and "pay" it with
+ * a made-up payment id, because the mock believes every proof. Now the
+ * order is refused before anything is reserved, and the proof is refused
+ * too, for an order that was already waiting (RULES R12).
+ */
+export function moneyPaymentsAccepted(): boolean {
+  // Read per call rather than from `isProduction`, so a test can stand in production.
+  return !(env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'mock');
+}
+
 export function paymentKeyId(): string | null {
   return env.PAYMENT_PROVIDER === 'razorpay' ? env.RAZORPAY_KEY_ID ?? null : null;
+}
+
+/**
+ * How long one call to the gateway may take. Every one of them sits inside a
+ * member's request, and the app gives up on a request after 15 s — a
+ * gateway that hangs past that turns a checkout that worked into one the
+ * member is told failed, which is how a second order gets placed.
+ */
+const GATEWAY_TIMEOUT_MS = 10_000;
+
+function razorpayAuth(): string {
+  return `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64')}`;
 }
 
 export async function createGatewayOrder(input: { orderId: string; amountPaise: number; currency: string; method?: PaymentMethod | null }): Promise<GatewayOrder> {
   if (env.PAYMENT_PROVIDER === 'mock') {
     return { provider: 'mock', providerOrderId: `mockord_${input.orderId}`, keyId: null };
   }
-  const auth = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
-  const res = await fetch('https://api.razorpay.com/v1/orders', {
-    method: 'POST',
-    headers: { authorization: `Basic ${auth}`, 'content-type': 'application/json' },
-    // `method` locks the gateway order to the one the member picked, so the
-    // sheet cannot be paid a way the order was not quoted for.
-    body: JSON.stringify({ amount: input.amountPaise, currency: input.currency, receipt: input.orderId, notes: { orderId: input.orderId }, method: gatewayMethodHint(input.method) }),
-  });
+  let res: Response;
+  try {
+    res = await fetch('https://api.razorpay.com/v1/orders', {
+      method: 'POST',
+      headers: { authorization: razorpayAuth(), 'content-type': 'application/json' },
+      // `method` locks the gateway order to the one the member picked, so the
+      // sheet cannot be paid a way the order was not quoted for.
+      body: JSON.stringify({ amount: input.amountPaise, currency: input.currency, receipt: input.orderId, notes: { orderId: input.orderId }, method: gatewayMethodHint(input.method) }),
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // Unreachable or too slow: the same answer as a refusal, so the order is
+    // released rather than left waiting on a gateway order that may not exist.
+    logger.error({ err, orderId: input.orderId }, 'payments.razorpay.order_unreachable');
+    throw new ApiError(502, 'PAYMENT_UNAVAILABLE', 'Payments are unavailable right now. Please try again in a moment.');
+  }
   if (!res.ok) {
     logger.error({ status: res.status, body: await res.text().catch(() => '') }, 'payments.razorpay.order_failed');
     throw new ApiError(502, 'PAYMENT_UNAVAILABLE', 'Payments are unavailable right now. Please try again in a moment.');
@@ -142,7 +178,7 @@ export async function createGatewayOrder(input: { orderId: string; amountPaise: 
 /** True when the proof the app sent is the gateway's own for this order. */
 export function verifyPaymentProof(providerOrderId: string, proof: PaymentProof): boolean {
   if (env.PAYMENT_PROVIDER === 'mock') {
-    return proof.providerPaymentId.length > 0;
+    return moneyPaymentsAccepted() && proof.providerPaymentId.length > 0;
   }
   if (!proof.signature || !env.RAZORPAY_KEY_SECRET) return false;
   const expected = createHmac('sha256', env.RAZORPAY_KEY_SECRET).update(`${providerOrderId}|${proof.providerPaymentId}`).digest('hex');
@@ -151,22 +187,100 @@ export function verifyPaymentProof(providerOrderId: string, proof: PaymentProof)
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+export interface GatewayRefund {
+  status: 'refunded' | 'failed';
+  /** What went wrong, for the refund row support reads; null when it went through. */
+  error: string | null;
+}
+
 /**
- * Sends the money back after a cancellation. The mock is instant; Razorpay
- * takes the refund request and settles it in its own time, which is why the
- * order records `refunded` on our side once the request is accepted.
+ * Sends the money back. The mock is instant; Razorpay takes the refund
+ * request and settles it in its own time, which is why the order records
+ * `refunded` on our side once the request is accepted.
+ *
+ * Never throws. It runs after the cancel has already been committed, so an
+ * exception here used to answer the member's cancel with a 500 for an order
+ * that *was* cancelled — and the refund was then never tried again. A
+ * failure is an answer the caller records and retries (RULES R6).
  */
-export async function refundGatewayPayment(input: { providerPaymentId: string; amountPaise: number }): Promise<'refunded' | 'failed'> {
-  if (env.PAYMENT_PROVIDER === 'mock') return 'refunded';
-  const auth = Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString('base64');
-  const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(input.providerPaymentId)}/refund`, {
-    method: 'POST',
-    headers: { authorization: `Basic ${auth}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ amount: input.amountPaise }),
-  });
-  if (!res.ok) {
-    logger.error({ status: res.status, paymentId: input.providerPaymentId }, 'payments.razorpay.refund_failed');
-    return 'failed';
+export async function refundGatewayPayment(input: { providerPaymentId: string; amountPaise: number }): Promise<GatewayRefund> {
+  if (env.PAYMENT_PROVIDER === 'mock') return { status: 'refunded', error: null };
+  try {
+    const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(input.providerPaymentId)}/refund`, {
+      method: 'POST',
+      headers: { authorization: razorpayAuth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ amount: input.amountPaise }),
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      logger.error({ status: res.status, paymentId: input.providerPaymentId, body }, 'payments.razorpay.refund_failed');
+      return { status: 'failed', error: `Gateway answered ${res.status}${body ? `: ${body.slice(0, 300)}` : ''}` };
+    }
+    return { status: 'refunded', error: null };
+  } catch (err) {
+    logger.error({ err, paymentId: input.providerPaymentId }, 'payments.razorpay.refund_unreachable');
+    return { status: 'failed', error: err instanceof Error ? err.message : 'Gateway unreachable' };
   }
-  return 'refunded';
+}
+
+/**
+ * How much of a payment the gateway has already sent back, in paise, or
+ * null when that cannot be told (the mock, or the gateway not answering).
+ *
+ * Asked before a refund is *retried*: the first attempt may have reached the
+ * gateway and only its answer been lost, and a second partial refund of the
+ * same payment would go through.
+ */
+export async function gatewayRefundedAmount(providerPaymentId: string): Promise<number | null> {
+  if (env.PAYMENT_PROVIDER === 'mock') return null;
+  try {
+    const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(providerPaymentId)}`, {
+      headers: { authorization: razorpayAuth() },
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { amount_refunded?: unknown };
+    return typeof body.amount_refunded === 'number' ? body.amount_refunded : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface CapturedPayment {
+  providerPaymentId: string;
+  /** Paise. */
+  amount: number;
+}
+
+/**
+ * The payments the gateway has captured against one of its orders, or null
+ * when that cannot be told.
+ *
+ * This is how an order the member *did* pay for is told apart from one they
+ * walked away from, when the app's proof never arrived — the phone died, the
+ * app was killed, the network dropped after the sheet closed. Without asking,
+ * the unpaid-order sweep would release the order and keep the money (RULES
+ * R12). The mock has no money and no sheet, so nothing is ever captured there
+ * without the app's own proof.
+ */
+export async function capturedPayments(providerOrderId: string): Promise<CapturedPayment[] | null> {
+  if (env.PAYMENT_PROVIDER === 'mock') return [];
+  try {
+    const res = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(providerOrderId)}/payments`, {
+      headers: { authorization: razorpayAuth() },
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      logger.warn({ status: res.status, providerOrderId }, 'payments.razorpay.lookup_failed');
+      return null;
+    }
+    const body = (await res.json()) as { items?: { id?: unknown; amount?: unknown; status?: unknown }[] };
+    return (body.items ?? [])
+      .filter(p => p.status === 'captured' && typeof p.id === 'string' && typeof p.amount === 'number')
+      .map(p => ({ providerPaymentId: p.id as string, amount: p.amount as number }));
+  } catch (err) {
+    logger.warn({ err, providerOrderId }, 'payments.razorpay.lookup_unreachable');
+    return null;
+  }
 }

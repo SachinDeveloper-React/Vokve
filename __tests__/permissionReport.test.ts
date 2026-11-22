@@ -150,10 +150,12 @@ test('a tracker that has not answered yet is unknown, which is not a refusal', a
   expect(stateOf(entries, 'batteryUnrestricted')).toBe('unknown');
 });
 
-test('iOS reports the Android-only ones as unavailable rather than leaving them out', async () => {
+test('iOS reports Motion & Fitness from the tracker, and what it cannot have as unavailable', async () => {
   jest.replaceProperty(Platform, 'OS', 'ios');
   const entries = await collectPermissions();
-  expect(stateOf(entries, 'activityRecognition')).toBe('unavailable');
+  // Motion & Fitness, as react-native-step-tracker-pro-ios reads it.
+  expect(stateOf(entries, 'activityRecognition')).toBe('granted');
+  // Apple Health is read only.
   expect(stateOf(entries, 'healthConnectWriteSteps')).toBe('unavailable');
   expect(stateOf(entries, 'batteryUnrestricted')).toBe('unavailable');
 });

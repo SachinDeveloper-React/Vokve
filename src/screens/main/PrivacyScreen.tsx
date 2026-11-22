@@ -30,8 +30,11 @@ import { AppText } from '../../components/ui/AppText';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Screen } from '../../components/ui/Screen';
+import { AppleMark } from '../../components/auth/SocialAuthRow';
 import { accountApi } from '../../services/api/endpoints';
 import { toApiError } from '../../services/api/errors';
+import { forgetAppleUser } from '../../services/appleCredential';
+import { confirmWithProvider } from '../../services/providerConfirmation';
 import {
   useAccountDeletion,
   useAccountStore,
@@ -39,8 +42,7 @@ import {
 } from '../../stores/accountStore';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { changeEmailSchema } from '../../types/forms';
-import type { PrivacySettings } from '../../types/models';
+import type { DeletionConfirmation, PrivacySettings } from '../../types/models';
 import { formatDaysUntil, formatRelativeDay } from '../../utils/format';
 import { z } from 'zod';
 
@@ -51,11 +53,30 @@ const makeStyles = ({ spacing }: ThemeShape) =>
     grow: { flex: 1 },
   });
 
-/** The password the deletion sheet asks for again, and why. */
+/**
+ * The deletion sheet's fields. The password is only asked for on an account
+ * whose proof it is (`confirmWith`, RULES O16) — the others confirm with
+ * Apple or Google — so it is checked in the handler rather than here.
+ */
 const deleteSchema = z.object({
-  password: changeEmailSchema.shape.password,
+  password: z.string().optional(),
   reason: z.string().trim().max(280, 'Keep it under 280 characters').optional(),
 });
+
+/** The words for each way of confirming, on the sheet and its button. */
+const CONFIRM_COPY: Record<
+  Exclude<DeletionConfirmation, 'password'>,
+  { button: string; note: string }
+> = {
+  apple: {
+    button: 'Confirm with Apple',
+    note: 'Sign in with Apple once more to confirm. This also removes VOKVE from your Apple ID, so Apple stops sharing anything with us.',
+  },
+  google: {
+    button: 'Confirm with Google',
+    note: 'Sign in with Google once more to confirm — it is how this account signs in.',
+  },
+};
 type DeleteValues = z.infer<typeof deleteSchema>;
 
 interface SwitchSpec {
@@ -190,13 +211,42 @@ export const PrivacyScreen = () => {
     }
   }, [toast]);
 
+  const confirmWith: DeletionConfirmation = deletion?.confirmWith ?? 'password';
+
+  /**
+   * The proof the account gives (RULES O16): its password, or a fresh sign-in
+   * with its provider. Null when there is nothing to send — the member backed
+   * out of Apple's or Google's sheet, which is a decision, not an error.
+   */
+  const confirmation = useCallback(
+    async (
+      values: DeleteValues,
+    ): Promise<Parameters<typeof accountApi.scheduleDeletion>[0] | null> => {
+      const reason = values.reason || undefined;
+      if (confirmWith === 'password') {
+        if (!values.password) {
+          form.setError('password', { message: 'Enter your password' });
+          return null;
+        }
+        return { password: values.password, reason };
+      }
+      const proof = await confirmWithProvider(confirmWith);
+      return proof ? { ...proof, reason } : null;
+    },
+    [confirmWith, form],
+  );
+
   const onSubmitDelete = form.handleSubmit(async values => {
     setDeleting(true);
     try {
-      const result = await accountApi.scheduleDeletion({
-        password: values.password,
-        reason: values.reason || undefined,
-      });
+      const input = await confirmation(values);
+      if (!input) return;
+      const result = await accountApi.scheduleDeletion(input);
+      if (confirmWith === 'apple') {
+        // The server just revoked VOKVE from this Apple ID on purpose; the
+        // credential watch must not read that as the member walking out.
+        forgetAppleUser();
+      }
       setDeletion(result);
       form.reset();
       setDeleteOpen(false);
@@ -385,14 +435,20 @@ export const PrivacyScreen = () => {
             title={`This takes effect in ${deletion?.graceDays ?? 14} days`}
             message="Until then you can cancel it from this screen and nothing is lost. After that your profile, activity, workouts and saved addresses are erased."
           />
-          <FormInput
-            control={form.control}
-            name="password"
-            label="Your password"
-            helper="Asked for again because this cannot be undone once the window closes."
-            secureTextEntry
-            textContentType="password"
-          />
+          {confirmWith === 'password' ? (
+            <FormInput
+              control={form.control}
+              name="password"
+              label="Your password"
+              helper="Asked for again because this cannot be undone once the window closes."
+              secureTextEntry
+              textContentType="password"
+            />
+          ) : (
+            <AppText variant="caption" color="textSecondary">
+              {CONFIRM_COPY[confirmWith].note}
+            </AppText>
+          )}
           <FormInput
             control={form.control}
             name="reason"
@@ -400,11 +456,22 @@ export const PrivacyScreen = () => {
             placeholder="Anything you tell us helps"
           />
           <Button
-            label="Schedule deletion"
+            label={
+              confirmWith === 'password'
+                ? 'Schedule deletion'
+                : CONFIRM_COPY[confirmWith].button
+            }
             variant="destructive"
             fullWidth
             loading={isDeleting}
             disabled={isDeleting}
+            // Apple's mark takes the label's colour; Google's is fixed
+            // colours that would sit badly on red, so its words carry it.
+            icon={
+              confirmWith === 'apple' ? (
+                <AppleMark color={colors.primaryForeground} />
+              ) : undefined
+            }
             onPress={() => onSubmitDelete()}
           />
         </VStack>

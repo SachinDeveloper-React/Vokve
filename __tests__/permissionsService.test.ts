@@ -13,7 +13,7 @@ import {
   AuthorizationStatus,
   hasPermission,
 } from '@react-native-firebase/messaging';
-import StepTracker from 'react-native-step-tracker-pro';
+import StepTracker, { isSupported } from 'react-native-step-tracker-pro';
 import {
   pendingPermissionSteps,
   stepGoalNeedsChoosing,
@@ -93,12 +93,35 @@ test('Health Connect is left out where this phone cannot have it', async () => {
   expect(await pendingPermissionSteps()).toEqual(['notifications']);
 });
 
-test('off Android only notifications are asked about', async () => {
+test('an iPhone without the iOS tracker linked is asked about notifications only', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  (isSupported as jest.Mock).mockReturnValue(false);
   (hasPermission as jest.Mock).mockResolvedValueOnce(
     AuthorizationStatus.NOT_DETERMINED,
   );
 
   expect(await pendingPermissionSteps()).toEqual(['notifications']);
+  (isSupported as jest.Mock).mockReturnValue(true);
+});
+
+test('an iPhone with react-native-step-tracker-pro-ios gets Motion & Fitness and Apple Health', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  (hasPermission as jest.Mock).mockResolvedValueOnce(
+    AuthorizationStatus.AUTHORIZED,
+  );
+  tracker.checkPermissions.mockResolvedValueOnce({
+    activityRecognition: false,
+    postNotifications: true,
+    foregroundServiceHealth: true,
+    allGranted: false,
+  });
+  tracker.getHealthConnectStatus.mockResolvedValueOnce({
+    provider: 'healthkit',
+    availability: 'available',
+    stepsGranted: false,
+  });
+
+  expect(await pendingPermissionSteps()).toEqual(['activity', 'healthConnect']);
 });
 
 describe('the step goal at the end of the set-up', () => {

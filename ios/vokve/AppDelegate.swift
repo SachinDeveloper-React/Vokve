@@ -3,6 +3,7 @@ import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 import Firebase
+import FirebaseAuth
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -32,6 +33,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     )
 
     return true
+  }
+
+  /// URLs opened into the app. Firebase Auth comes first: when it cannot
+  /// prove the phone silently (always on the Simulator, and on a phone where
+  /// the APNs check fails) it shows a reCAPTCHA page, and that page hands the
+  /// result back by opening `REVERSED_CLIENT_ID://firebaseauth/link?...`.
+  ///
+  /// This method must be written out here. Firebase's AppDelegate swizzling
+  /// only wraps `application(_:open:options:)` when the app already
+  /// implements it; without it the callback is dropped, the reCAPTCHA sheet
+  /// sits on a blank page and no SMS is ever sent.
+  ///
+  /// Once this exists the swizzled copy also hands the URL to Firebase before
+  /// calling here, so by now `canHandle` may already have consumed it and
+  /// answer false; the `firebaseauth` host check keeps that link out of JS.
+  func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    if Auth.auth().canHandle(url) || url.host == "firebaseauth" {
+      return true
+    }
+    return RCTLinkingManager.application(app, open: url, options: options)
   }
 }
 

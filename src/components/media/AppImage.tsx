@@ -8,6 +8,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { mediaUri } from '../../services/api/mediaUri';
 import { radius as radiusTokens, useTheme } from '../../theme';
 import type { RadiusToken } from '../layout/Box';
 
@@ -27,18 +28,25 @@ interface Props extends Omit<ImageProps, 'source' | 'style'> {
  * Width and height are required on purpose: an image without an intrinsic size
  * lays out at zero and then jumps to full size once it decodes, which shifts
  * everything below it. Reserving the space up front avoids that jump.
+ *
+ * Loading and failure are recorded against the address they happened to,
+ * not as booleans. A new address (a photo the member just uploaded) then
+ * starts out loading by itself. When a failure was kept as a boolean, one
+ * failed photo left the frame empty for every later photo until the screen
+ * was rebuilt.
  */
 export const AppImage = memo(
   ({ uri, width, height, radius = 'md', fallback, style, ...rest }: Props) => {
     const { colors } = useTheme();
-    const [isLoading, setIsLoading] = useState(Boolean(uri));
-    const [hasFailed, setHasFailed] = useState(false);
+    const source = uri ? mediaUri(uri) : null;
+    const [settled, setSettled] = useState<string | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
 
-    const onLoadEnd = useCallback(() => setIsLoading(false), []);
+    const onLoadEnd = useCallback(() => setSettled(source), [source]);
     const onError = useCallback(() => {
-      setIsLoading(false);
-      setHasFailed(true);
-    }, []);
+      setSettled(source);
+      setFailed(source);
+    }, [source]);
 
     const frame = {
       width,
@@ -47,7 +55,7 @@ export const AppImage = memo(
       backgroundColor: colors.muted,
     };
 
-    if (!uri || hasFailed) {
+    if (!source || failed === source) {
       return (
         <View style={[styles.center, frame]}>
           {fallback ?? null}
@@ -58,14 +66,14 @@ export const AppImage = memo(
     return (
       <View style={frame}>
         <Image
-          source={{ uri }}
+          source={{ uri: source }}
           style={[styles.fill, { borderRadius: radiusTokens[radius] }, style]}
           onLoadEnd={onLoadEnd}
           onError={onError}
           accessibilityIgnoresInvertColors
           {...rest}
         />
-        {isLoading ? (
+        {settled !== source ? (
           <View style={[styles.center, styles.overlay]}>
             <ActivityIndicator size="small" color={colors.textTertiary} />
           </View>

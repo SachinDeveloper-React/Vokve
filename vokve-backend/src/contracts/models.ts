@@ -2143,6 +2143,12 @@ export const userSchema = z.object({
   trustTier: z
     .enum(['trusted', 'normal', 'watch', 'restricted', 'banned'])
     .default('normal'),
+  /**
+   * Apple's Hide My Email has stopped forwarding to this account's relay
+   * address (RULES O17), so nothing sent to it arrives. The app asks for an
+   * address the member reads.
+   */
+  emailForwardingOff: z.boolean().default(false),
 });
 export type User = z.infer<typeof userSchema>;
 
@@ -2479,6 +2485,15 @@ export type AccountSession = z.infer<typeof accountSessionSchema>;
  * grace window is what makes a tap in anger recoverable, and signing in
  * during it is enough to call it off.
  */
+/**
+ * How the member proves it is them before deleting (RULES O16): the
+ * account's own way in. `apple` wherever Apple is connected — that sign-in
+ * is also what lets the server revoke the Apple authorisation — then the
+ * password, then Google for an account that has neither.
+ */
+export const deletionConfirmationSchema = z.enum(['password', 'apple', 'google']);
+export type DeletionConfirmation = z.infer<typeof deletionConfirmationSchema>;
+
 export const accountDeletionSchema = z.object({
   /** ISO-8601 when it was asked for, or null when nothing is scheduled. */
   scheduledAt: z.string().nullable(),
@@ -2486,8 +2501,32 @@ export const accountDeletionSchema = z.object({
   purgeAt: z.string().nullable(),
   reason: z.string().nullable(),
   graceDays: z.number().int().positive(),
+  confirmWith: deletionConfirmationSchema.default('password'),
 });
 export type AccountDeletion = z.infer<typeof accountDeletionSchema>;
+
+/**
+ * The ways into an account (RULES O15): a password, and each provider
+ * identity connected to it. `canDisconnect` is the server's answer to
+ * "would this leave the account with no way in", so the app does not keep
+ * its own copy of that rule.
+ */
+export const signInProviderSchema = z.enum(['google', 'apple']);
+export type SignInProvider = z.infer<typeof signInProviderSchema>;
+
+export const signInMethodsSchema = z.object({
+  password: z.boolean(),
+  /** How a change to the account — its email — is confirmed (RULES O17). */
+  confirmChangesWith: z.enum(['password', 'apple', 'google']).default('password'),
+  providers: z.array(
+    z.object({
+      provider: signInProviderSchema,
+      linked: z.boolean(),
+      canDisconnect: z.boolean(),
+    }),
+  ),
+});
+export type SignInMethods = z.infer<typeof signInMethodsSchema>;
 
 export const supportCategorySchema = z.enum([
   'account',
@@ -2745,6 +2784,22 @@ export const appUpdateSchema = z.object({
   reason: z.string().nullable(),
 });
 export type AppUpdate = z.infer<typeof appUpdateSchema>;
+
+// ─── The launcher icon ─────────────────────────────────────────────────────
+
+/**
+ * `GET /app/icon` — which launcher icon this phone should show (RULES DV13).
+ *
+ * Keys, not pictures: an icon has to be inside the build to be shown, so a
+ * key this build does not carry is ignored and the phone keeps `base`.
+ */
+export const appIconSchema = z.object({
+  /** The everyday icon. */
+  base: z.string(),
+  /** A festive icon that is on right now, or null. A member may turn these off. */
+  festive: z.string().nullable(),
+});
+export type AppIconDecision = z.infer<typeof appIconSchema>;
 
 // ─── Streak ────────────────────────────────────────────────────────────────
 

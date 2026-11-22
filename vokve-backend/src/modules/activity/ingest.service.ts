@@ -134,7 +134,10 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
     throw new ApiError(422, 'SNAPSHOT_DATE_OUT_OF_RANGE', 'That day can no longer be synced.', { date: parsed.date, today });
   }
 
-  const cloudProjectNumber = await playIntegrityProjectNumber();
+  // Play Integrity is Android's. An iPhone's key (attested or not) went
+  // through App Attest, whose answer is its verdict; there is no Play to ask.
+  const appAttested = key.provider === 'app_attest';
+  const cloudProjectNumber = appAttested ? null : await playIntegrityProjectNumber();
   if (
     cloudProjectNumber &&
     !body.integrity &&
@@ -149,7 +152,7 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
   let play: DeviceProof['play'] = device?.playIntegrity?.verdict
     ? { verdict: device.playIntegrity.verdict, reasons: device.playIntegrity.reasons ?? [] }
     : null;
-  if (body.integrity) {
+  if (body.integrity && !appAttested) {
     const verdict = await recordPlayIntegrity(ctx.userId, ctx.deviceId, body.integrity, payloadSha256);
     play = { verdict: verdict.verdict, reasons: verdict.reasons };
   }
@@ -192,8 +195,9 @@ export async function ingestSnapshot(ctx: IngestContext, body: IngestBody, now =
         failure: key.failure ?? null,
         verifiedBootState: key.verifiedBootState ?? null,
         deviceLocked: key.deviceLocked ?? null,
+        provider: appAttested ? 'app_attest' : 'key_attestation',
       },
-      play,
+      play: appAttested ? null : play,
     },
     now,
   });

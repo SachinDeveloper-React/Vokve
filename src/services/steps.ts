@@ -154,10 +154,13 @@ const NOTIFICATION_COPY = {
  * remove nothing, `split` recovery, and the vehicle gate on, as it stands
  * by default), the notification's words, and the user's own body and goal.
  *
- * The gate (`motionGate`, tracker 2.8) is why a bus ride adds nothing: the
+ * The gate (`motionGate`, tracker 2.9) is why a bus ride adds nothing: the
  * phone's step counter is a pedometer in the sensor hub and a vehicle's
- * vibration feeds it a rhythm it reports as walking, so the tracker watches
- * the accelerometer while it counts and keeps those steps out of every
+ * vibration feeds it a rhythm it reports as walking, so while Google's
+ * Activity Recognition says the phone is in a vehicle or on a bicycle -
+ * which needs play-services-location, in android/app/build.gradle - the
+ * tracker holds the steps that arrive, gives back the walk away from the
+ * ride when it is over, and keeps the rest out of every
  * figure — the live count, the notification, what is written to Health
  * Connect and what is uploaded. They arrive at the server as `gatedSteps`,
  * out of the day it scores. Nothing here is this app's judgement: every
@@ -894,12 +897,41 @@ function startFailure(error: unknown): EnableTrackingResult {
 /** Physical activity is a runtime permission from Android 10. */
 const ACTIVITY_PERMISSION_FROM_API = 29;
 
-const hasActivityPermission = async (): Promise<boolean> =>
-  Platform.OS === 'android' &&
-  (Number(Platform.Version) < ACTIVITY_PERMISSION_FROM_API ||
-    (await PermissionsAndroid.check(
+/**
+ * Physical activity on Android; Motion & Fitness on iOS, which only the
+ * tracker can read (react-native-step-tracker-pro-ios answers it as
+ * `activityRecognition`).
+ */
+const hasActivityPermission = async (): Promise<boolean> => {
+  if (Platform.OS === 'ios') {
+    return (await StepTracker.checkPermissions()).activityRecognition;
+  }
+  return (
+    Platform.OS === 'android' &&
+    (Number(Platform.Version) < ACTIVITY_PERMISSION_FROM_API ||
+      (await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+      )))
+  );
+};
+
+/**
+ * Asks for what counting needs. Android's physical activity dialog is the
+ * app's own to raise; on iOS CoreMotion has no request call, and the
+ * tracker raises Motion & Fitness's prompt with a pedometer query.
+ */
+const requestActivityPermission = async (): Promise<boolean> => {
+  if (Platform.OS === 'ios') {
+    const permissions = await StepTracker.requestPermissions();
+    useStepsStore.setState({ permissions });
+    return permissions.activityRecognition;
+  }
+  return (
+    (await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
-    )));
+    )) === PermissionsAndroid.RESULTS.GRANTED
+  );
+};
 
 /**
  * Counting asked for while the session that follows a sign-in was still
@@ -914,15 +946,13 @@ let startWhenReady = false;
  * then starts with it, so the user is never sent back to switch it on.
  */
 export async function enableStepCounting(): Promise<EnableTrackingResult> {
-  if (Platform.OS !== 'android' || !isSupported()) {
+  // Android, or an iPhone with react-native-step-tracker-pro-ios linked.
+  if (!isSupported()) {
     return 'no_sensor';
   }
   try {
     const allowed =
-      (await hasActivityPermission()) ||
-      (await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
-      )) === PermissionsAndroid.RESULTS.GRANTED;
+      (await hasActivityPermission()) || (await requestActivityPermission());
     if (!allowed) {
       return 'permission_denied';
     }
@@ -938,7 +968,7 @@ export async function enableStepCounting(): Promise<EnableTrackingResult> {
 
 /** Whether the permission screens should ask about counting: this phone can, and is not yet. */
 export async function countingNeedsTurningOn(): Promise<boolean> {
-  if (Platform.OS !== 'android' || !isSupported()) {
+  if (!isSupported()) {
     return false;
   }
   try {
@@ -956,7 +986,7 @@ export async function countingNeedsTurningOn(): Promise<boolean> {
  * allowed. Its status is kept for the screen that asks.
  */
 export async function healthConnectNeedsConnecting(): Promise<boolean> {
-  if (Platform.OS !== 'android' || !isSupported()) {
+  if (!isSupported()) {
     return false;
   }
   try {
@@ -1661,6 +1691,10 @@ async function integrityFor(
   snapshot: SnapshotSignature,
   details: Record<string, unknown> | null,
 ): Promise<IngestIntegrity> {
+  // iOS answers with an App Attest assertion, which needs no Play project.
+  if (Platform.OS === 'ios') {
+    return integrityToken(snapshot, undefined);
+  }
   const named = details?.cloudProjectNumber;
   if (typeof named === 'number' && named !== steps().cloudProjectNumber) {
     useStepsStore.setState({ cloudProjectNumber: named });
@@ -1673,10 +1707,18 @@ async function integrityFor(
   if (!cloudProjectNumber) {
     return { error: 'NO_CLOUD_PROJECT', retryable: false };
   }
+  return integrityToken(snapshot, cloudProjectNumber);
+}
+
+/** The tracker's token for one snapshot, or why it gave none. */
+async function integrityToken(
+  snapshot: SnapshotSignature,
+  cloudProjectNumber: number | undefined,
+): Promise<IngestIntegrity> {
   try {
     const { token } = await StepTracker.requestIntegrityToken({
       requestHash: snapshot.payloadSha256,
-      cloudProjectNumber,
+      ...(cloudProjectNumber ? { cloudProjectNumber } : {}),
     });
     return { token };
   } catch (error) {
@@ -1723,6 +1765,9 @@ async function attest(deviceId: string): Promise<boolean> {
       attested: key.attested,
       securityLevel: key.securityLevel,
       createdAt: key.createdAt,
+      // iOS: the App Attest object that binds this Secure Enclave key to a
+      // genuine install — what the certificate chain is on Android.
+      ...(key.appAttest ? { appAttest: key.appAttest } : {}),
     });
     useStepsStore.setState({ attestedDeviceId: deviceId });
     return true;

@@ -1,5 +1,6 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { env } from '../config/env.js';
+import { getKV } from '../db/redis.js';
 import { logger } from './logger.js';
 
 /**
@@ -39,6 +40,20 @@ function getTransporter(): Transporter {
   return transporter;
 }
 
+/**
+ * How many emails this server has sent today (UTC), counted after each
+ * successful send — OTPs and ops alerts alike, because the provider's daily
+ * limit counts both (RULES P20). Shared across instances through the KV;
+ * `null` when the KV cannot be reached, which must never fail the send.
+ */
+async function countSent(): Promise<number | null> {
+  try {
+    return await getKV().incrWithTtl(`mail:sent:${new Date().toISOString().slice(0, 10)}`, 26 * 60 * 60);
+  } catch {
+    return null;
+  }
+}
+
 export type OtpEmailPurpose =
   | 'signup'
   | 'verify_email'
@@ -65,7 +80,8 @@ const INTROS: Record<OtpEmailPurpose, string> = {
   step_up: 'Enter this code in the app to confirm this action.',
 };
 
-export async function sendOtpEmail(to: string, code: string, purpose: OtpEmailPurpose, ttlMinutes: number): Promise<void> {
+/** Sends the code, and answers how many emails have gone out today (`null` if that is unknown). */
+export async function sendOtpEmail(to: string, code: string, purpose: OtpEmailPurpose, ttlMinutes: number): Promise<number | null> {
   const subject = SUBJECTS[purpose];
   const intro = INTROS[purpose];
   const text = `${intro}\n\nYour code: ${code}\n\nIt expires in ${ttlMinutes} minutes. Never share it with anyone — VOKVE will never ask you for it.\n\nMove • Earn • Achieve`;
@@ -79,7 +95,9 @@ export async function sendOtpEmail(to: string, code: string, purpose: OtpEmailPu
   </div></body></html>`;
 
   await getTransporter().sendMail({ from: env.MAIL_FROM, to, subject, text, html });
-  logger.info({ to: to.replace(/^(.).*(@.*)$/, '$1•••$2'), purpose }, 'mail.sent');
+  const sentToday = await countSent();
+  logger.info({ to: to.replace(/^(.).*(@.*)$/, '$1•••$2'), purpose, sentToday }, 'mail.sent');
+  return sentToday;
 }
 
 /**
@@ -91,5 +109,6 @@ export async function sendOtpEmail(to: string, code: string, purpose: OtpEmailPu
  */
 export async function sendOperationalEmail(to: string, subject: string, text: string): Promise<void> {
   await getTransporter().sendMail({ from: env.MAIL_FROM, to, subject, text });
+  await countSent();
   logger.info({ to, subject }, 'mail.ops_sent');
 }

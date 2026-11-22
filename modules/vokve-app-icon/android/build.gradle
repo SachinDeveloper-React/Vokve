@@ -1,0 +1,69 @@
+// VOKVE's launcher-icon module. Built only inside the app (autolinked from
+// modules/vokve-app-icon), so the host's Android, Kotlin and React Native
+// Gradle plugins are already on the classpath.
+
+/**
+ * AGP 9 compiles Kotlin itself unless the app sets
+ * `android.builtInKotlin=false` (this app does). With it on, applying the
+ * Kotlin plugin is an error; with it off, or on AGP 8, the plugin is needed.
+ */
+def usesBuiltInKotlin() {
+    def major = 8
+    try {
+        major = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize(".")[0].toInteger()
+    } catch (Throwable ignored) {
+    }
+    if (major < 9) return false
+    def flag = project.findProperty("android.builtInKotlin")
+    return flag == null || flag.toString() != "false"
+}
+
+apply plugin: "com.android.library"
+if (!usesBuiltInKotlin()) {
+    apply plugin: "org.jetbrains.kotlin.android"
+}
+// The new architecture is the only one from React Native 0.82; codegen
+// writes NativeVokveAppIconSpec from src/NativeVokveAppIcon.ts.
+apply plugin: "com.facebook.react"
+
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
+
+android {
+    namespace "com.vokve.appicon"
+    compileSdk safeExtGet("compileSdkVersion", 36)
+
+    defaultConfig {
+        minSdk safeExtGet("minSdkVersion", 26)
+        targetSdk safeExtGet("targetSdkVersion", 36)
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            def generated = layout.buildDirectory.dir("generated/source/codegen/java").get().asFile
+            java.srcDirs += [generated]
+            kotlin.srcDirs += [generated]
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation "com.facebook.react:react-android"
+}

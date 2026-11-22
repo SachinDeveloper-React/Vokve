@@ -15,13 +15,22 @@ const { seed } = await import('./seed/seed.js');
 await seed();
 const { createApp } = await import('./app.js');
 const { env } = await import('./config/env.js');
-const { logger } = await import('./lib/logger.js');
+const { logger, logListening } = await import('./lib/logger.js');
 const { startScheduler } = await import('./jobs/scheduler.js');
 const { configurePlayIntegrityFromEnv } = await import('./lib/playIntegrity.js');
 await configurePlayIntegrityFromEnv();
 
-createApp().listen(env.PORT, () => {
-  logger.info({ port: env.PORT, mongo: 'in-memory replica set', otpEcho: env.OTP_DEV_ECHO }, 'vokve-backend listening (dev:memory)');
+createApp().listen(env.PORT, err => {
+  if (err) {
+    logger.fatal({ err }, `could not listen on port ${env.PORT} — is another server still running? lsof -nP -iTCP:${env.PORT} -sTCP:LISTEN`);
+    process.exit(1);
+  }
+  logListening(env.PORT, {
+    Environment: env.NODE_ENV,
+    MongoDB: 'in-memory replica set (wiped on exit)',
+    'OTP echo': env.OTP_DEV_ECHO ? 'on' : 'off',
+    'Log level': env.LOG_LEVEL,
+  }, 'vokve-backend (dev:memory) is running');
 });
 startScheduler();
 

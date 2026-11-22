@@ -1,12 +1,46 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { getConfig } from '../../config/remote.js';
+import { getKV } from '../../db/redis.js';
 import { isChannelDeliverable } from '../identity/otp.service.js';
 
 export const platformRouter = Router();
 
-platformRouter.get('/health', (_req, res) => {
-  res.json({ ok: true, mongo: mongoose.connection.readyState === 1, at: new Date().toISOString() });
+/** How long either store may take to answer a health check before it counts as down. */
+const HEALTH_TIMEOUT_MS = 3_000;
+
+async function answers(check: () => Promise<unknown>): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<false>(resolve => {
+      timer = setTimeout(() => resolve(false), HEALTH_TIMEOUT_MS);
+    });
+    return Boolean(await Promise.race([check(), timeout]));
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * What an uptime monitor polls (RULES P20). It answers 503 unless the
+ * database and the KV both answer a ping, because a monitor reads the status
+ * and nothing else: this route used to say 200 with `mongo: false` inside,
+ * which every monitor reads as "up" while every member's request fails.
+ * A real ping rather than the driver's `readyState`, which stays "connected"
+ * for a while after the cluster has gone.
+ */
+platformRouter.get('/health', async (_req, res) => {
+  const [mongo, redis] = await Promise.all([
+    answers(async () => mongoose.connection.readyState === 1 && (await mongoose.connection.db?.admin().command({ ping: 1 }))?.ok === 1),
+    answers(() => getKV().ping()),
+  ]);
+  const ok = mongo && redis;
+  res
+    .status(ok ? 200 : 503)
+    .set('Cache-Control', 'no-store')
+    .json({ ok, mongo, redis, at: new Date().toISOString() });
 });
 
 /** Public: earn rates, caps, milestones, min version — everything ⚙. */

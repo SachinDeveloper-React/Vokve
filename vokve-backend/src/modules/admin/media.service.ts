@@ -9,7 +9,9 @@ import {
   isStorageConfigured,
   keyFor,
   publicUrl,
+  readObjectStart,
   signUpload,
+  sniffImage,
   type ImageType,
 } from '../../lib/storage.js';
 import { AuditLogModel, MediaAssetModel } from '../platform/models.js';
@@ -99,6 +101,11 @@ export async function confirmMediaUpload(
 ): Promise<MediaAssetView> {
   if (!isStorageConfigured()) throw storageMissing();
 
+  // Only a key this API could have signed for this shelf: `signMediaUpload`
+  // names every key `<kind>/…`, so anything else is somebody else's object
+  // in the bucket being claimed as a catalogue image.
+  if (!body.key.startsWith(`${body.kind}/`) || body.key.includes('..')) throw Errors.notFound('That upload');
+
   const stored = await describeObject(body.key);
   if (!stored) throw Errors.notFound('That upload');
 
@@ -111,6 +118,13 @@ export async function confirmMediaUpload(
   if (!IMAGE_TYPES.includes(stored.contentType as ImageType)) {
     await deleteObject(body.key);
     throw Errors.validation({ file: 'That file is not a JPEG, PNG or WebP.' });
+  }
+  // The type S3 reports is the one the upload *declared*. The bytes are
+  // what a browser will be handed, so they are what is checked.
+  const start = await readObjectStart(body.key);
+  if (!start || sniffImage(start) !== stored.contentType) {
+    await deleteObject(body.key);
+    throw Errors.validation({ file: 'That file is not really a JPEG, PNG or WebP image.' });
   }
 
   const asset = await MediaAssetModel.create({

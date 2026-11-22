@@ -8,7 +8,7 @@ import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import {
-  createGatewayOrder, knownMethods, methodsForOrder, offeredMethods, paymentKeyId, paymentProvider, refundGatewayPayment, spendsCoins, verifyPaymentProof,
+  capturedPayments, createGatewayOrder, knownMethods, methodsForOrder, moneyPaymentsAccepted, offeredMethods, paymentKeyId, paymentProvider, spendsCoins, verifyPaymentProof,
   type PaymentMethod, type PaymentProof,
 } from '../../lib/payments.js';
 import { STEP_UP_TTL_SECONDS, verifyStepUpToken } from '../../lib/tokens.js';
@@ -57,6 +57,7 @@ import {
   AddressModel, CartModel, CouponModel, CouponUsageModel, DeliveryPreferencesModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel,
   WishlistModel,
 } from './models.js';
+import { attemptRefund, queueRefund, type RefundOutcome } from './refunds.service.js';
 import { ensureShelves } from './shelves.js';
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -524,14 +525,22 @@ export async function setDeliveryPreferences(userId: string, patch: DeliveryPref
 
 /**
  * Tells the member about their order: in the app, and by WhatsApp too when
- * the order asked for it and the channel can deliver. A WhatsApp failure is
- * logged and never undoes what the order already did.
+ * the order asked for it and the channel can deliver.
+ *
+ * Never throws. Every caller has already committed what it is telling them
+ * about — the order placed, the coins back — and a notifier failing used to
+ * turn that into a 500. The app reads a 500 as "not placed", its retry ran
+ * the checkout again, and the member was charged twice for one tap.
  */
 async function notifyOrder(
   order: { userId: string; delivery?: { whatsappUpdates?: boolean } | null },
   note: { title: string; message: string; dedupeKey: string },
 ): Promise<void> {
-  await notify({ userId: order.userId, topic: 'reward', preference: 'orders', ...note });
+  try {
+    await notify({ userId: order.userId, topic: 'reward', preference: 'orders', ...note });
+  } catch (err) {
+    logger.error({ err, dedupeKey: note.dedupeKey }, 'commerce.notify_failed');
+  }
   if (!order.delivery?.whatsappUpdates || !isWhatsAppUsable()) return;
   try {
     const user = await UserModel.findById(order.userId, { phone: 1 }).lean();
@@ -1071,6 +1080,8 @@ type OrderRow = {
   coupon?: { code: string; title: string; discount: number } | null;
   inCoins?: Quote['inCoins'];
   delivery?: DeliveryPreferences | null;
+  ledgerId?: string | null;
+  idempotencyKey?: string | null;
 };
 
 /** When the order first reached each state, from the events it kept (RULES R5). */
@@ -1399,9 +1410,94 @@ function resolveMethod(chosen: PaymentMethod | undefined, q: Quote, cfg: Commerc
   return chosen;
 }
 
+/** Mongo's duplicate-key error, which a unique index raises inside a transaction too. */
+function isDuplicateKey(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
+}
+
+/**
+ * Asks the gateway for its order, for an order of ours that owes money, and
+ * answers with what the app opens the payment sheet with.
+ *
+ * A gateway that cannot be reached leaves nothing sold: the order is
+ * released — coins, stock and coupon back — before the error goes to the
+ * member, which is also what frees its idempotency key for their retry.
+ */
+async function openGatewayOrder(row: OrderRow): Promise<NonNullable<CheckoutResult['payment']>> {
+  const p = row.payment;
+  try {
+    const gateway = await createGatewayOrder({ orderId: row._id, amountPaise: p.amount, currency: p.currency, method: p.method ?? null });
+    // Recorded only if none is yet. The proof is checked against the
+    // recorded id, so a replay that swapped it under a member already on the
+    // payment sheet would make their real payment fail to verify.
+    const recorded = await OrderModel.updateOne(
+      { _id: row._id, 'payment.providerOrderId': null },
+      { $set: { 'payment.providerOrderId': gateway.providerOrderId, 'payment.provider': gateway.provider } },
+    );
+    let providerOrderId = gateway.providerOrderId;
+    let provider = gateway.provider;
+    if (recorded.modifiedCount === 0) {
+      const current = (await OrderModel.findById(row._id, { payment: 1 }).lean()) as unknown as Pick<OrderRow, 'payment'> | null;
+      if (current?.payment.providerOrderId) {
+        providerOrderId = current.payment.providerOrderId;
+        provider = current.payment.provider as GatewayProviderName;
+      }
+    }
+    p.providerOrderId = providerOrderId;
+    p.provider = provider;
+    return {
+      provider, method: p.method ?? null, orderId: row._id, providerOrderId,
+      amount: p.amount, currency: p.currency, keyId: gateway.keyId, expiresAt: p.expiresAt!.toISOString(),
+    };
+  } catch (err) {
+    await releaseOrder(row._id, row.userId, 'system', 'payment_unavailable');
+    throw err;
+  }
+}
+
+/**
+ * The answer a checkout already gave, for a retry under the same key
+ * (RULES R2).
+ *
+ * The request-level replay (`idempotent`) covers a retry whose first answer
+ * was stored. This covers the rest: an answer lost because the request
+ * failed *after* the order was committed, or because the process died
+ * mid-request. Either way the order is here under the key, and the member
+ * gets it back — with the payment sheet to open, if it still owes money —
+ * instead of a second order and a second deduction.
+ *
+ * Asked before any of the checkout's gates, because a placed order has
+ * already changed what they would say: the basket it came from is empty
+ * and the wallet is lighter.
+ */
+async function replayCheckout(userId: string, key: string | undefined, cfg: CommerceConfig): Promise<CheckoutResult | null> {
+  if (!key) return null;
+  const row = (await OrderModel.findOne({ userId, idempotencyKey: key }).lean()) as unknown as OrderRow | null;
+  if (!row) return null;
+  let payment: CheckoutResult['payment'] = null;
+  if (row.status === 'pending_payment') {
+    const p = row.payment;
+    payment = p.provider && p.providerOrderId && p.expiresAt
+      ? {
+          provider: p.provider as GatewayProviderName, method: p.method ?? null, orderId: row._id, providerOrderId: p.providerOrderId,
+          amount: p.amount, currency: p.currency, keyId: paymentKeyId(), expiresAt: p.expiresAt.toISOString(),
+        }
+      // Committed, and the process stopped before the gateway was asked.
+      : await openGatewayOrder(row);
+  }
+  const balance = toCoins((await CoinBalanceModel.findById(userId).lean())?.balanceMc ?? 0);
+  logger.info({ userId, orderId: row._id }, 'commerce.checkout_replayed');
+  return checkoutResultSchema.parse({ order: toOrder(row, cfg), balance, payment });
+}
+
+type GatewayProviderName = NonNullable<CheckoutResult['payment']>['provider'];
+
 export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
   const cfg = await commerceConfig();
   const config = await getConfig();
+
+  const replayed = await replayCheckout(input.userId, input.idempotencyKey, cfg);
+  if (replayed) return replayed;
 
   const tier = input.trustTier ?? 'normal';
   if (!config.trust.shadow && RESTRICTED_TIERS.has(tier)) {
@@ -1444,6 +1540,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
   if (soldOut) throw new ApiError(409, 'OUT_OF_STOCK', `${soldOut.title} is sold out.`, { itemId: soldOut.itemId });
 
   const paymentMethod = resolveMethod(input.paymentMethod, q, cfg);
+  if (q.payable > 0 && !moneyPaymentsAccepted()) {
+    throw new ApiError(503, 'PAYMENT_UNAVAILABLE', 'Paying with money is not available yet. Only items bought with coins can be ordered for now.', { payable: q.payable });
+  }
 
   // Spending coins no longer asks for a code (D-66): coins are the shop's
   // own currency, the app confirms the deduction with the member before it
@@ -1489,7 +1588,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
     );
   }
 
-  const result = await withTransaction(async session => {
+  const placeInTransaction = () => withTransaction(async session => {
     let balanceMc = toMilli(balance);
     let ledgerId: string | null = null;
     if (coupon) {
@@ -1520,9 +1619,14 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
       }
       balanceMc = bal.balanceMc;
       ledgerId = newId('led');
+      // The key lives on the order, not on this row: the order is written in
+      // this same transaction under a unique (member, key), which refuses a
+      // second order and with it this deduction — and a released order can
+      // give its key back for the member's next attempt, which a ledger row
+      // (written once, never edited) could not.
       await CoinLedgerModel.create([{
         _id: ledgerId, userId: input.userId, amountMc: -coinsMc, source: 'purchase', title,
-        referenceType: 'order', referenceId: orderId, idempotencyKey: input.idempotencyKey ?? null,
+        referenceType: 'order', referenceId: orderId,
         actor: 'user', deviceId: input.deviceId, appVersion: input.appVersion,
       }], { session });
     }
@@ -1558,6 +1662,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
         coinsUsed: q.lines[index].coinsUsed, coinsValue: q.lines[index].coinsValue, moneyPaid: q.lines[index].moneyPaid,
       })),
       addressSnapshot: snapshot, addressId: address._id, placedAt: now, ledgerId,
+      idempotencyKey: input.idempotencyKey ?? null,
       events: [{ from: null, to: status, actor: 'user', at: now }],
     }], { session });
     if (input.fromCart) {
@@ -1571,18 +1676,23 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
     return { order: order.toObject() as unknown as OrderRow, balance: toCoins(balanceMc) };
   });
 
+  let result: Awaited<ReturnType<typeof placeInTransaction>>;
+  try {
+    result = await placeInTransaction();
+  } catch (err) {
+    // The same key got there first — a retry racing its own original past
+    // the request-level guard. That order is the answer; nothing was taken
+    // twice, because this transaction rolled back whole.
+    if (isDuplicateKey(err)) {
+      const again = await replayCheckout(input.userId, input.idempotencyKey, cfg);
+      if (again) return again;
+    }
+    throw err;
+  }
+
   let payment: CheckoutResult['payment'] = null;
   if (pending) {
-    try {
-      const gateway = await createGatewayOrder({ orderId, amountPaise: q.payable, currency: q.currency, method: paymentMethod });
-      await OrderModel.updateOne({ _id: orderId }, { $set: { 'payment.providerOrderId': gateway.providerOrderId, 'payment.provider': gateway.provider } });
-      result.order.payment.providerOrderId = gateway.providerOrderId;
-      result.order.payment.provider = gateway.provider;
-      payment = { provider: gateway.provider, method: paymentMethod, orderId, providerOrderId: gateway.providerOrderId, amount: q.payable, currency: q.currency, keyId: gateway.keyId, expiresAt: expiresAt!.toISOString() };
-    } catch (err) {
-      await releaseOrder(orderId, input.userId, 'system', 'payment_unavailable');
-      throw err;
-    }
+    payment = await openGatewayOrder(result.order);
   } else {
     await notifyOrder({ userId: input.userId, delivery }, {
       title: 'Order placed',
@@ -1608,44 +1718,137 @@ async function consumeStepUp(userId: string, token: string | undefined, threshol
   if (!fresh) throw new ApiError(403, 'STEP_UP_INVALID', 'That confirmation was already used. Please confirm again.', details);
 }
 
+/** A sum of paise as the member reads it: ₹373 or ₹373.50. */
+function rupees(paise: number): string {
+  return `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
+/** What became of a payment the gateway took for one of our orders. */
+type Settlement =
+  /** It paid the order — now, or on an earlier try. */
+  | { kind: 'paid'; row: OrderRow }
+  /** The order was already paid by another payment; this second one is being sent back. */
+  | { kind: 'duplicate'; row: OrderRow; refund: RefundOutcome }
+  /** The order had been released (cancelled, expired) before it arrived; it is being sent back. */
+  | { kind: 'returned'; row: OrderRow; refund: RefundOutcome };
+
+/**
+ * Applies a payment the gateway has captured to its order (RULES R12) —
+ * whoever learned of it: the app with its proof, or the unpaid-order sweep
+ * asking the gateway.
+ *
+ * The order moves from `pending_payment` to `placed` in one conditional
+ * write, so of a proof, a second proof, a cancel and the sweep arriving
+ * together exactly one wins. A payment that loses has been taken from the
+ * member and has no order to pay for, so it is refunded rather than kept:
+ *
+ *   - the order was already paid by another payment → a double charge;
+ *   - the order had been released — the member cancelled, or its window
+ *     closed and the sweep let it go — before the money came through.
+ *
+ * A late payment on an order that is *still held* is simply taken: the
+ * stock and the coins are still set aside for it, and a member who paid in
+ * good faith a minute after the window is better served by their order
+ * than by a refund.
+ */
+async function settleCapturedPayment(
+  orderId: string, userId: string, payment: { providerPaymentId: string; amount?: number }, actor: 'user' | 'system',
+): Promise<Settlement> {
+  const now = new Date();
+  const claimed = (await OrderModel.findOneAndUpdate(
+    { _id: orderId, userId, status: 'pending_payment', 'payment.status': 'pending' },
+    {
+      $set: { status: 'placed', 'payment.status': 'paid', 'payment.providerPaymentId': payment.providerPaymentId, 'payment.paidAt': now },
+      $push: { events: { from: 'pending_payment', to: 'placed', actor, at: now } },
+    },
+    { new: true },
+  ).lean()) as unknown as OrderRow | null;
+
+  if (claimed) {
+    await AuditLogModel.create({
+      actorType: actor, actorId: actor === 'user' ? userId : 'scheduler', action: 'order.paid', subjectType: 'order', subjectId: orderId,
+      after: { providerPaymentId: payment.providerPaymentId, amount: claimed.payment.amount },
+    }).catch(err => logger.error({ err, orderId }, 'commerce.audit_failed'));
+    const first = claimed.items[0];
+    await notifyOrder({ userId, delivery: claimed.delivery ?? null }, {
+      title: 'Order placed',
+      message: `${first ? (claimed.items.length > 1 ? `${first.title} + ${claimed.items.length - 1} more` : first.title) : 'Your order'} is on its way to ${claimed.addressSnapshot.name}.`,
+      dedupeKey: `order-placed:${orderId}`,
+    });
+    return { kind: 'paid', row: claimed };
+  }
+
+  const current = (await OrderModel.findOne({ _id: orderId, userId }).lean()) as unknown as OrderRow | null;
+  if (!current) throw Errors.notFound('That order');
+  // This very payment, recorded on an earlier try: the same answer again.
+  if (current.payment.providerPaymentId === payment.providerPaymentId) return { kind: 'paid', row: current };
+
+  const duplicate = current.payment.providerPaymentId !== null;
+  const amount = payment.amount ?? current.payment.amount;
+  const refundId = await queueRefund({
+    orderId, userId, provider: current.payment.provider, providerPaymentId: payment.providerPaymentId,
+    amount, currency: current.payment.currency, reason: duplicate ? 'duplicate_payment' : 'late_payment',
+  });
+  const refund = await attemptRefund(refundId);
+  await AuditLogModel.create({
+    actorType: actor, actorId: actor === 'user' ? userId : 'scheduler', action: duplicate ? 'order.duplicate_payment' : 'order.late_payment',
+    subjectType: 'order', subjectId: orderId, after: { providerPaymentId: payment.providerPaymentId, amount, refund, status: current.status },
+  }).catch(err => logger.error({ err, orderId }, 'commerce.audit_failed'));
+  logger.warn({ orderId, providerPaymentId: payment.providerPaymentId, duplicate, refund }, 'commerce.stray_payment_refunded');
+  await notifyOrder({ userId, delivery: current.delivery ?? null }, {
+    title: duplicate ? 'Extra payment refunded' : 'Payment refunded',
+    message: duplicate
+      ? `Order ${current.number} was already paid for, so the second payment of ${rupees(amount)} is being refunded to you.`
+      : `Order ${current.number} had already been ${current.status === 'cancelled' ? 'cancelled' : 'closed'} when your payment of ${rupees(amount)} arrived, so it is being refunded to you.`,
+    dedupeKey: `payment-refunded:${refundId}`,
+  });
+  return duplicate ? { kind: 'duplicate', row: current, refund } : { kind: 'returned', row: current, refund };
+}
+
 /**
  * Marks an order paid on the app's proof from the gateway (RULES R12) and
- * moves it to `placed`. Idempotent: an order already paid answers with
- * itself, so a retry after a dropped connection is not a second capture.
+ * moves it to `placed`. Idempotent: the same proof again answers with the
+ * order, so a retry after a dropped connection is not a second capture.
+ *
+ * The proof is checked *first*. A proof the gateway really issued means the
+ * member's money has been taken, whatever state the order is in now, and
+ * that money is either applied to the order or sent back — never kept for
+ * nothing, which is what checking the window first used to do: an order
+ * paid a minute late was released and its payment simply kept.
  */
 export async function payOrder(userId: string, id: string, proof: PaymentProof): Promise<{ order: Order; balance: number }> {
   const cfg = await commerceConfig();
-  const order = await OrderModel.findOne({ _id: id, userId });
+  const order = (await OrderModel.findOne({ _id: id, userId }).lean()) as unknown as OrderRow | null;
   if (!order) throw Errors.notFound('That order');
-  const balance = toCoins((await CoinBalanceModel.findById(userId).lean())?.balanceMc ?? 0);
-  if (order.payment.status === 'paid') return { order: toOrder(order.toObject() as unknown as OrderRow, cfg), balance };
-  if (order.status !== 'pending_payment') {
-    throw Errors.conflict('ORDER_NOT_PENDING', `This order is ${order.status.replace('_', ' ')} and has no payment to take.`, { status: order.status });
-  }
-  if (order.payment.expiresAt && order.payment.expiresAt.getTime() < Date.now()) {
-    await releaseOrder(order._id, userId, 'system', 'payment_expired');
-    throw Errors.conflict('PAYMENT_EXPIRED', 'The payment window for this order has closed. Please order again.');
-  }
+  const balanceNow = async () => toCoins((await CoinBalanceModel.findById(userId).lean())?.balanceMc ?? 0);
+  const answer = async (row: OrderRow) => ({ order: toOrder(row, cfg), balance: await balanceNow() });
+
+  if (order.payment.providerPaymentId === proof.providerPaymentId) return answer(order);
+
   if (!verifyPaymentProof(order.payment.providerOrderId ?? '', proof)) {
+    // Not the gateway's: nothing was taken, so nothing is owed back.
+    if (order.payment.status === 'paid') return answer(order);
+    if (order.status !== 'pending_payment') {
+      throw Errors.conflict('ORDER_NOT_PENDING', `This order is ${order.status.replace('_', ' ')} and has no payment to take.`, { status: order.status });
+    }
+    if (order.payment.expiresAt && order.payment.expiresAt.getTime() < Date.now()) {
+      await releaseOrder(order._id, userId, 'system', 'payment_expired');
+      throw Errors.conflict('PAYMENT_EXPIRED', 'The payment window for this order has closed. Please order again.');
+    }
     throw new ApiError(422, 'PAYMENT_INVALID', 'That payment could not be verified.');
   }
 
-  const now = new Date();
-  order.payment.status = 'paid';
-  order.payment.providerPaymentId = proof.providerPaymentId;
-  order.payment.paidAt = now;
-  order.status = 'placed';
-  order.events.push({ from: 'pending_payment', to: 'placed', actor: 'user', at: now });
-  await order.save();
-  await AuditLogModel.create({ actorType: 'user', actorId: userId, action: 'order.paid', subjectType: 'order', subjectId: order._id, after: { providerPaymentId: proof.providerPaymentId, amount: order.payment.amount } });
-
-  const first = order.items[0];
-  await notifyOrder({ userId, delivery: order.delivery as DeliveryPreferences | null }, {
-    title: 'Order placed',
-    message: `${first ? (order.items.length > 1 ? `${first.title} + ${order.items.length - 1} more` : first.title) : 'Your order'} is on its way to ${(order.addressSnapshot as { name: string }).name}.`,
-    dedupeKey: `order-placed:${order._id}`,
-  });
-  return { order: toOrder(order.toObject() as unknown as OrderRow, cfg), balance };
+  const settled = await settleCapturedPayment(id, userId, { providerPaymentId: proof.providerPaymentId }, 'user');
+  if (settled.kind === 'returned') {
+    throw Errors.conflict(
+      'PAYMENT_REFUNDED',
+      `This order was ${settled.row.status === 'cancelled' ? 'cancelled' : 'closed'} before your payment reached us, so the ${rupees(settled.row.payment.amount)} is being refunded to you.`,
+      { status: settled.row.status, refund: settled.refund },
+    );
+  }
+  // Paid — by this payment, or already by another one, in which case this
+  // one is on its way back and the member is told so separately.
+  return answer(settled.row);
 }
 
 /**
@@ -1672,10 +1875,16 @@ export async function cancelOrder(userId: string, id: string, deviceId?: string)
 /**
  * The one way an order is undone, whoever asks: the user cancelling, the
  * scheduler timing out an unpaid one, the checkout unwinding after a
- * gateway failure. Coins and stock go back inside a transaction; the money
- * goes back through the gateway afterwards, and a refund the gateway
- * refuses leaves the order cancelled with the payment still marked paid,
- * which is what support looks for.
+ * gateway failure. Coins and stock go back inside a transaction, and so
+ * does a note of the money owed (`payment_refunds`); the money itself goes
+ * back through the gateway after the commit. A refund the gateway refuses
+ * leaves the order cancelled with the payment still marked paid — what
+ * support looks for — and the note keeps it being retried, with an alert,
+ * until it goes through.
+ *
+ * The order gives up its idempotency key: it is no longer the answer to the
+ * checkout that placed it, and a member who taps "Pay" again under that key
+ * means a new order, not this cancelled one shown back to them as placed.
  */
 async function releaseOrder(id: string, userId: string, actor: 'user' | 'system' | 'admin', reason: string, deviceId?: string): Promise<{ order: Order; balance: number; already: boolean }> {
   const result = await withTransaction(async session => {
@@ -1683,7 +1892,7 @@ async function releaseOrder(id: string, userId: string, actor: 'user' | 'system'
     if (!order) throw Errors.notFound('That order');
     if (order.status === 'cancelled') {
       const bal = await CoinBalanceModel.findById(userId).session(session).lean();
-      return { row: order.toObject() as unknown as OrderRow, balance: toCoins(bal?.balanceMc ?? 0), already: true, paidId: null as string | null };
+      return { row: order.toObject() as unknown as OrderRow, balance: toCoins(bal?.balanceMc ?? 0), already: true, refundId: null as string | null };
     }
     if (!CANCELLABLE.includes(order.status as OrderStatus)) {
       throw Errors.conflict('ORDER_NOT_CANCELLABLE', `An order that is ${order.status} can no longer be cancelled.`, { status: order.status });
@@ -1713,8 +1922,19 @@ async function releaseOrder(id: string, userId: string, actor: 'user' | 'system'
       await CouponModel.updateOne({ _id: coupon.code, redemptions: { $gt: 0 } }, { $inc: { redemptions: -1 } }, { session });
       await CouponUsageModel.updateOne({ _id: `${coupon.code}:${userId}`, count: { $gt: 0 } }, { $inc: { count: -1 } }, { session });
     }
+    // The money, when some was taken: owed back from this moment, in the
+    // same commit as the coins, so a crash before the gateway call below
+    // still leaves it owed (and the sweep pays it).
+    let refundId: string | null = null;
+    if (order.payment.status === 'paid' && order.payment.providerPaymentId && order.payment.amount > 0) {
+      refundId = await queueRefund({
+        orderId: order._id, userId, provider: order.payment.provider ?? null, providerPaymentId: order.payment.providerPaymentId,
+        amount: order.payment.amount, currency: order.payment.currency ?? 'INR', reason: 'cancelled',
+      }, session);
+    }
     const from = order.status;
     order.status = 'cancelled';
+    order.set('idempotencyKey', null);
     order.events.push({ from, to: 'cancelled', actor, at: new Date() });
     await order.save({ session });
     await AuditLogModel.create([{
@@ -1723,17 +1943,12 @@ async function releaseOrder(id: string, userId: string, actor: 'user' | 'system'
       deviceId, action: 'order.cancelled', subjectType: 'order', subjectId: order._id,
       before: { status: from }, after: { status: 'cancelled', reason },
     }], { session });
-    return { row: order.toObject() as unknown as OrderRow, balance: toCoins(balanceMc), already: false, paidId: order.payment.status === 'paid' ? order.payment.providerPaymentId : null };
+    return { row: order.toObject() as unknown as OrderRow, balance: toCoins(balanceMc), already: false, refundId };
   });
 
-  if (!result.already && result.paidId) {
-    const outcome = await refundGatewayPayment({ providerPaymentId: result.paidId, amountPaise: result.row.payment.amount });
-    if (outcome === 'refunded') {
-      await OrderModel.updateOne({ _id: id }, { $set: { 'payment.status': 'refunded', 'payment.refundedAt': new Date() } });
-      result.row.payment.status = 'refunded';
-    } else {
-      logger.error({ orderId: id, paymentId: result.paidId }, 'commerce.refund_failed');
-    }
+  if (!result.already && result.refundId) {
+    // Never throws: the cancel above is committed whatever the gateway says.
+    if ((await attemptRefund(result.refundId)) === 'refunded') result.row.payment.status = 'refunded';
   }
   return { order: toOrder(result.row, await commerceConfig()), balance: result.balance, already: result.already };
 }
@@ -1767,16 +1982,49 @@ export async function cancelOrderAsOperator(
 }
 
 /**
+ * How long past its window an order may be kept while the gateway cannot be
+ * asked about it. Past this it is released anyway — the stock and coins
+ * cannot be held forever on a gateway outage — and a payment that turns up
+ * later is refunded by the late-payment path.
+ */
+const GATEWAY_LOOKUP_GRACE_MS = 6 * 60 * 60_000;
+
+/**
  * Lets go of orders whose payment window closed without a payment: the
  * stock back on the shelf, the coins back in the wallet. Run by the
  * scheduler; each is released alone, so one that fails does not hold the
  * rest.
+ *
+ * "Without a payment" is asked of the gateway first (RULES R12). The app's
+ * proof is not the only sign an order was paid: a member can pay and lose
+ * the phone, the network or the app before the proof is sent. Released
+ * blind, that order's money would be kept for nothing. A captured payment
+ * found here pays the order instead; a second one found beside it is a
+ * double charge and is refunded.
  */
-export async function expireUnpaidOrders(now = new Date()): Promise<{ released: number }> {
-  const rows = await OrderModel.find({ status: 'pending_payment', 'payment.expiresAt': { $lt: now } }, { _id: 1, userId: 1 }).lean();
+export async function expireUnpaidOrders(now = new Date()): Promise<{ released: number; paid: number }> {
+  const rows = await OrderModel.find(
+    { status: 'pending_payment', 'payment.expiresAt': { $lt: now } },
+    { _id: 1, userId: 1, 'payment.providerOrderId': 1, 'payment.expiresAt': 1 },
+  ).lean();
   let released = 0;
+  let paid = 0;
   for (const row of rows) {
     try {
+      if (row.payment?.providerOrderId) {
+        const captured = await capturedPayments(row.payment.providerOrderId);
+        if (captured === null) {
+          const overdue = now.getTime() - (row.payment.expiresAt?.getTime() ?? now.getTime());
+          if (overdue < GATEWAY_LOOKUP_GRACE_MS) continue; // ask again next hour
+          logger.warn({ orderId: row._id }, 'commerce.expire_without_gateway_answer');
+        } else if (captured.length > 0) {
+          for (const payment of captured) {
+            const settled = await settleCapturedPayment(row._id, row.userId, payment, 'system');
+            if (settled.kind === 'paid') paid += 1;
+          }
+          continue;
+        }
+      }
       const result = await releaseOrder(row._id, row.userId, 'system', 'payment_expired');
       if (!result.already) {
         released += 1;
@@ -1790,5 +2038,5 @@ export async function expireUnpaidOrders(now = new Date()): Promise<{ released: 
       logger.error({ err, orderId: row._id }, 'commerce.expire_failed');
     }
   }
-  return { released };
+  return { released, paid };
 }

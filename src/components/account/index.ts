@@ -8,7 +8,6 @@ export { ProfileStat } from './ProfileStat';
 export { LevelBadge } from './LevelBadge';
 export { AccountShortcut } from './AccountShortcut';
 export { AccountShortcutsRow } from './AccountShortcutsRow';
-export { PremiumUpsellCard } from './PremiumUpsellCard';
 export { AccountMenuRow } from './AccountMenuRow';
 export { AccountMenuList } from './AccountMenuList';
 export { DataSafetyNote } from './DataSafetyNote';

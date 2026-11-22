@@ -22,7 +22,10 @@
     "plans": "tsx src/scripts/diet-plans.ts",
     "lint": "eslint src test --ext .ts",
     "dev:memory": "tsx src/dev-memory.ts",
-    "users:reindex": "tsx src/scripts/reindex-users.ts"
+    "users:reindex": "tsx src/scripts/reindex-users.ts",
+    "alerts:test": "tsx src/scripts/test-alert.ts",
+    "admin:totp": "tsx src/scripts/admin-totp.ts",
+    "staff:create-admin": "tsx src/scripts/staff-create-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",
@@ -40,7 +43,7 @@
     "ioredis": "^5.7.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.19.0",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.6.1",
     "pino": "^9.9.0",
     "pino-http": "^10.5.0",
     "uuid": "^13.0.0",
@@ -59,6 +62,6 @@
     "supertest": "^7.1.4",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^5.1.1"
   }
 }

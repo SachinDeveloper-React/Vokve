@@ -303,6 +303,31 @@ export async function userOverview(userId: string) {
         checkedAt: iso(device.integrity?.checkedAt),
         attested: device.attestation?.attested ?? null,
         securityLevel: device.attestation?.securityLevel ?? null,
+        /**
+         * The signing key, and what vouched for it: Google's key attestation
+         * on Android, Apple's App Attest on an iPhone. `failure` says why a
+         * key was kept unattested; the boot state is Android's alone, and
+         * the App Attest environment iOS's.
+         */
+        key: device.attestation?.keyId
+          ? {
+              keyId: device.attestation.keyId,
+              provider: device.attestation.provider ?? (device.platform === 'ios' ? 'app_attest' : 'key_attestation'),
+              failure: device.attestation.failure ?? null,
+              verifiedBootState: device.attestation.verifiedBootState ?? null,
+              deviceLocked: device.attestation.deviceLocked ?? null,
+              appAttestEnvironment: device.attestation.appAttest?.environment ?? null,
+              verifiedAt: iso(device.attestation.verifiedAt),
+            }
+          : null,
+        /** The latest Play Integrity verdict a snapshot carried — Android only. */
+        play: device.playIntegrity?.verdict
+          ? {
+              verdict: device.playIntegrity.verdict,
+              reasons: device.playIntegrity.reasons ?? [],
+              checkedAt: iso(device.playIntegrity.checkedAt),
+            }
+          : null,
       },
       signals: {
         rooted: device.signals?.rooted ?? null,

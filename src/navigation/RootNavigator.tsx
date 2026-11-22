@@ -52,6 +52,7 @@ import { PrivacyScreen } from '../screens/main/PrivacyScreen';
 import { ProductDetailScreen } from '../screens/main/ProductDetailScreen';
 import { ReviewsScreen } from '../screens/main/ReviewsScreen';
 import { SecurityScreen } from '../screens/main/SecurityScreen';
+import { VerifyPhoneScreen } from '../screens/main/VerifyPhoneScreen';
 import { SupportTicketScreen } from '../screens/main/SupportTicketScreen';
 import { ShopBrowseScreen } from '../screens/main/ShopBrowseScreen';
 import { ShopSearchScreen } from '../screens/main/ShopSearchScreen';
@@ -72,6 +73,9 @@ import { UpdateSheet } from '../components/system/UpdateSheet';
 import { useUpgradeRequired } from '../stores/appStatusStore';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
 import { useSessionRecovery } from '../hooks/useSessionRecovery';
+import { useIdentityLinkToast } from '../hooks/useIdentityLinkToast';
+import { useAppleCredentialWatch } from '../hooks/useAppleCredentialWatch';
+import { useAppIconSync } from '../hooks/useAppIconSync';
 import { useAppUpdate } from '../hooks/useAppUpdate';
 import { usePermissionReporting } from '../hooks/usePermissionReporting';
 import { useDeviceHealthReporting } from '../hooks/useDeviceHealthReporting';
@@ -189,6 +193,12 @@ export const RootNavigator = () => {
   // A session the app opened on its stored snapshot is asked about again the
   // moment the phone can reach the server, whatever is on screen.
   useSessionRecovery();
+  // "I already have an account" connects Google or Apple once the sign-in
+  // lands (RULES O15); this says whether it worked.
+  useIdentityLinkToast();
+  // A session Apple was the way into ends when the member withdraws VOKVE
+  // from their Apple ID (RULES O16).
+  useAppleCredentialWatch();
 
   // Step counting follows the session, not any one screen.
   useStepTrackingSession();
@@ -203,6 +213,10 @@ export const RootNavigator = () => {
   // What this build should do about its own version (RULES DV12): asked on
   // launch and on every foreground, before anything has been refused.
   const { update: softUpdate, dismiss: dismissUpdate } = useAppUpdate();
+
+  // Which launcher icon to show (RULES DV13) — the everyday one, or a
+  // festive one the panel has put on — asked at the same moments.
+  useAppIconSync();
 
   // The same for hydration reminders: the plan stays scheduled with the OS
   // whatever is on screen, and a tapped reminder opens the water log.
@@ -419,6 +433,11 @@ export const RootNavigator = () => {
               <Stack.Screen
                 name="Security"
                 component={SecurityScreen}
+                options={{ animation: 'slide_from_right' }}
+              />
+              <Stack.Screen
+                name="VerifyPhone"
+                component={VerifyPhoneScreen}
                 options={{ animation: 'slide_from_right' }}
               />
               <Stack.Screen

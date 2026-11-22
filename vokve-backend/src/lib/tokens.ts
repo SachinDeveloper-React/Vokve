@@ -26,9 +26,26 @@ export function signAccessToken(claims: AccessClaims): { token: string; expiresA
  */
 const VERIFY = { issuer: 'vokve', algorithms: ['HS256'] } satisfies jwt.VerifyOptions;
 
+/**
+ * Checks a token against the current secret and, during a rotation, the one
+ * before it (RULES Z1). Only a bad *signature* falls back: an expired token
+ * is expired whichever secret signed it.
+ */
+function verifySigned(token: string, options: jwt.VerifyOptions = VERIFY): string | jwt.JwtPayload {
+  try {
+    return jwt.verify(token, env.JWT_SECRET, options);
+  } catch (error) {
+    const signatureOnly = error instanceof jwt.JsonWebTokenError
+      && !(error instanceof jwt.TokenExpiredError)
+      && !(error instanceof jwt.NotBeforeError);
+    if (!env.JWT_SECRET_PREVIOUS || !signatureOnly) throw error;
+    return jwt.verify(token, env.JWT_SECRET_PREVIOUS, options);
+  }
+}
+
 export function verifyAccessToken(token: string): AccessClaims | null {
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET, VERIFY);
+    const payload = verifySigned(token);
     if (typeof payload === 'string' || typeof payload.sub !== 'string') return null;
     // An access token carries no `kind`. Every other token this server
     // signs does — a step-up token is `kind: 'step_up'` — and is signed
@@ -77,10 +94,102 @@ export function signStepUpToken(userId: string): string {
 
 export function verifyStepUpToken(token: string): StepUpClaims | null {
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET, VERIFY);
+    const payload = verifySigned(token);
     if (typeof payload === 'string' || typeof payload.sub !== 'string' || typeof payload.jti !== 'string') return null;
     if ((payload as Record<string, unknown>).kind !== 'step_up') return null;
     return { sub: payload.sub, jti: payload.jti };
+  } catch {
+    return null;
+  }
+}
+
+/** How long the choice "new account, or connect it to mine?" stays open (RULES O15). */
+export const IDENTITY_LINK_TTL_SECONDS = 15 * 60;
+
+/**
+ * A Google or Apple identity the server has just verified and found no
+ * account for, held while the member decides what it belongs to.
+ */
+export interface IdentityLinkClaims {
+  provider: 'google' | 'apple';
+  /** The provider's `sub`. */
+  providerId: string;
+  /** The provider-verified email, where it gave one. */
+  email: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+/**
+ * The proof that somebody just signed in with that identity (RULES O15).
+ * Signed rather than stored, like the step-up token, and with a `kind` so
+ * `verifyAccessToken` refuses it as a session.
+ *
+ * Not bound to the device: the phone's device id is per account and
+ * install, so the one it carried while signed out is not the one it has
+ * after signing in to the account the identity is meant for. Nor does it
+ * need to be — whoever holds it could already link the identity with the
+ * provider token it was made from, which is the same proof for longer.
+ */
+export function signIdentityLinkToken(claims: IdentityLinkClaims): string {
+  return jwt.sign(
+    { kind: 'identity_link', p: claims.provider, pid: claims.providerId, em: claims.email, nm: claims.name, av: claims.avatarUrl },
+    env.JWT_SECRET,
+    { algorithm: 'HS256', expiresIn: IDENTITY_LINK_TTL_SECONDS, issuer: 'vokve' },
+  );
+}
+
+export function verifyIdentityLinkToken(token: string): IdentityLinkClaims | null {
+  try {
+    const payload = verifySigned(token);
+    if (typeof payload === 'string') return null;
+    const p = payload as Record<string, unknown>;
+    if (p.kind !== 'identity_link') return null;
+    if (p.p !== 'google' && p.p !== 'apple') return null;
+    if (typeof p.pid !== 'string' || !p.pid) return null;
+    const text = (v: unknown) => (typeof v === 'string' && v ? v : null);
+    return { provider: p.p, providerId: p.pid, email: text(p.em), name: text(p.nm), avatarUrl: text(p.av) };
+  } catch {
+    return null;
+  }
+}
+
+/** How long an operator's panel session lasts: a working day (RULES Z7). */
+export const ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60;
+
+/**
+ * The key admin sessions are signed with, derived from both secrets: a
+ * member token can never verify as one (different key), and rotating either
+ * the JWT secret or the admin key signs every operator out at once.
+ */
+function adminSessionKey(): string {
+  return crypto.createHmac('sha256', env.JWT_SECRET).update(`vokve-admin-session:${env.ADMIN_API_KEY ?? ''}`).digest('base64url');
+}
+
+const ADMIN_VERIFY = { issuer: 'vokve', audience: 'vokve-admin', algorithms: ['HS256'] } satisfies jwt.VerifyOptions;
+
+/**
+ * What the panel holds after signing in with the admin key (and, where it
+ * is set up, the authenticator code): a twelve-hour proof that both passed,
+ * so the key itself never has to sit in a browser cookie.
+ */
+export function signAdminSession(mfa: boolean): { token: string; expiresAt: number } {
+  const expiresAt = Date.now() + ADMIN_SESSION_TTL_SECONDS * 1000;
+  const token = jwt.sign({ kind: 'admin_session', mfa, jti: crypto.randomBytes(16).toString('hex') }, adminSessionKey(), {
+    algorithm: 'HS256',
+    expiresIn: ADMIN_SESSION_TTL_SECONDS,
+    issuer: 'vokve',
+    audience: 'vokve-admin',
+  });
+  return { token, expiresAt };
+}
+
+export function verifyAdminSession(token: string): { mfa: boolean } | null {
+  if (!env.ADMIN_API_KEY) return null;
+  try {
+    const payload = jwt.verify(token, adminSessionKey(), ADMIN_VERIFY);
+    if (typeof payload === 'string' || (payload as Record<string, unknown>).kind !== 'admin_session') return null;
+    return { mfa: (payload as Record<string, unknown>).mfa === true };
   } catch {
     return null;
   }

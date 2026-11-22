@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   accountDeletionSchema,
+  signInMethodsSchema,
   achievementDetailSchema,
   achievementSchema,
   accountSessionSchema,
@@ -9,6 +10,7 @@ import {
   addressSchema,
   deliveryPreferencesSchema,
   appAboutSchema,
+  appIconSchema,
   appNotificationSchema,
   attestationChallengeSchema,
   authResponseSchema,
@@ -163,8 +165,16 @@ export function shouldUseMockApi(): boolean {
  * Screens and stores call these; nothing else should touch `apiClient`.
  */
 const realAuthApi: AuthApi = {
-  google: idToken =>
-    request(authResponseSchema, client => client.post('/auth/google', { idToken })),
+  google: (idToken, ifNew) =>
+    request(authResponseSchema, client =>
+      client.post('/auth/google', ifNew ? { idToken, ifNew } : { idToken }),
+    ),
+  apple: payload =>
+    request(authResponseSchema, client => client.post('/auth/apple', payload)),
+  createFromIdentity: linkToken =>
+    request(authResponseSchema, client =>
+      client.post('/auth/identity/create', { linkToken }),
+    ),
   signIn: (email: string, password: string): Promise<AuthResponse> =>
     request(authResponseSchema, client =>
       client.post('/auth/sign-in', { email, password }),
@@ -239,6 +249,12 @@ const realDeviceApi: DeviceApi = {
     request(okSchema, client =>
       client.patch(`/devices/${encodeURIComponent(deviceId)}`, {
         localReminders: scheduled,
+      }),
+    ),
+  setAppIcon: (deviceId, icon) =>
+    request(okSchema, client =>
+      client.patch(`/devices/${encodeURIComponent(deviceId)}`, {
+        appIcon: icon,
       }),
     ),
   attestationChallenge: deviceId =>
@@ -552,6 +568,33 @@ const realAccountApi: AccountApi = {
     request(verificationChallengeSchema, client =>
       client.post('/me/phone', input),
     ),
+  checkPhone: input =>
+    request(z.object({ ok: z.literal(true) }), client =>
+      client.post('/me/phone/check', input),
+    ),
+  signInMethods: () =>
+    request(signInMethodsSchema, client => client.get('/me/sign-in-methods')),
+  connectGoogle: idToken =>
+    request(signInMethodsSchema, client =>
+      client.post('/me/sign-in-methods/google', { idToken }),
+    ),
+  connectApple: payload =>
+    request(signInMethodsSchema, client =>
+      client.post('/me/sign-in-methods/apple', payload),
+    ),
+  connectIdentity: linkToken =>
+    request(signInMethodsSchema, client =>
+      client.post('/me/sign-in-methods/link', { linkToken }),
+    ),
+  disconnect: (provider, apple) =>
+    request(signInMethodsSchema, client =>
+      client.delete(
+        `/me/sign-in-methods/${provider}`,
+        apple ? { data: { apple } } : undefined,
+      ),
+    ),
+  verifyPhone: input =>
+    request(userSchema, client => client.post('/me/phone/verify', input)),
   sessions: () =>
     request(pageSchema(accountSessionSchema), client =>
       client.get('/me/sessions'),
@@ -609,6 +652,7 @@ const realSupportApi: SupportApi = {
 const realAppApi: AppApi = {
   about: () => request(appAboutSchema, client => client.get('/app/about')),
   update: () => request(appUpdateSchema, client => client.get('/app/update')),
+  icon: () => request(appIconSchema, client => client.get('/app/icon')),
 };
 
 const realNotificationPreferencesApi: NotificationPreferencesApi = {
@@ -944,7 +988,11 @@ const pick = <K extends keyof MockApis>(
 };
 
 export const authApi: AuthApi = {
-  google: idToken => pick('mockAuthApi', realAuthApi).google(idToken),
+  google: (idToken, ifNew) =>
+    pick('mockAuthApi', realAuthApi).google(idToken, ifNew),
+  apple: payload => pick('mockAuthApi', realAuthApi).apple(payload),
+  createFromIdentity: linkToken =>
+    pick('mockAuthApi', realAuthApi).createFromIdentity(linkToken),
   signIn: (email, password) =>
     pick('mockAuthApi', realAuthApi).signIn(email, password),
   signUp: payload => pick('mockAuthApi', realAuthApi).signUp(payload),
@@ -972,6 +1020,8 @@ export const deviceApi: DeviceApi = {
     pick('mockDeviceApi', realDeviceApi).setPushToken(deviceId, pushToken),
   setLocalReminders: (deviceId, scheduled) =>
     pick('mockDeviceApi', realDeviceApi).setLocalReminders(deviceId, scheduled),
+  setAppIcon: (deviceId, icon) =>
+    pick('mockDeviceApi', realDeviceApi).setAppIcon(deviceId, icon),
   attestationChallenge: deviceId =>
     pick('mockDeviceApi', realDeviceApi).attestationChallenge(deviceId),
   submitAttestation: (deviceId, attestation) =>
@@ -1208,6 +1258,17 @@ export const accountApi: AccountApi = {
     pick('mockAccountApi', realAccountApi).changePassword(input),
   changeEmail: input => pick('mockAccountApi', realAccountApi).changeEmail(input),
   changePhone: input => pick('mockAccountApi', realAccountApi).changePhone(input),
+  checkPhone: input => pick('mockAccountApi', realAccountApi).checkPhone(input),
+  signInMethods: () => pick('mockAccountApi', realAccountApi).signInMethods(),
+  connectGoogle: idToken =>
+    pick('mockAccountApi', realAccountApi).connectGoogle(idToken),
+  connectApple: payload =>
+    pick('mockAccountApi', realAccountApi).connectApple(payload),
+  connectIdentity: linkToken =>
+    pick('mockAccountApi', realAccountApi).connectIdentity(linkToken),
+  disconnect: (provider, apple) =>
+    pick('mockAccountApi', realAccountApi).disconnect(provider, apple),
+  verifyPhone: input => pick('mockAccountApi', realAccountApi).verifyPhone(input),
   sessions: () => pick('mockAccountApi', realAccountApi).sessions(),
   revokeOtherSessions: () =>
     pick('mockAccountApi', realAccountApi).revokeOtherSessions(),
@@ -1233,4 +1294,5 @@ export const supportApi: SupportApi = {
 export const appApi: AppApi = {
   about: () => pick('mockAppApi', realAppApi).about(),
   update: () => pick('mockAppApi', realAppApi).update(),
+  icon: () => pick('mockAppApi', realAppApi).icon(),
 };

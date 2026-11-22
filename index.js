@@ -2,6 +2,14 @@
  * @format
  */
 
+// Loaded for its side effect, and first: it hands the API client the
+// X-Vokve-* headers (platform, app version, device) every request carries.
+// Metro's inline requires defer a module until one of its exports is first
+// *used*, and nothing uses this one before sign-in — so without this line a
+// signed-out launch sent `GET /app/update` bare, the server read the
+// missing version as 0.0.0, and the "Update VOKVE to continue" wall came up
+// on every fresh install. A bare import is never deferred.
+import './src/services/device';
 import { AppRegistry } from 'react-native';
 import notifee from '@notifee/react-native';
 import {

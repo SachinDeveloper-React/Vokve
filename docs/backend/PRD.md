@@ -28,7 +28,7 @@ The client is complete: 30 screens, every flow navigable. **The backend's job is
 
 ## 3. Non-goals (v1)
 
-- Premium subscription / IAP (card exists, no design behind it)
+- Premium subscription / IAP (there is none; the client's placeholder card was removed 2026-11-22, D-17)
 - Social features beyond referral (no friends, feeds, comments)
 - Live camera heart-rate measurement (the "Live Measure" card opens a manual log sheet)
 - Wearable-specific integrations (they arrive through Health Connect / HealthKit)

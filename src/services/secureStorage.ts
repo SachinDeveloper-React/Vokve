@@ -9,6 +9,16 @@ import {
 import { logger } from '../utils/logger';
 
 const TOKEN_SERVICE = 'vokve.auth.tokens';
+
+/**
+ * iOS: readable once the phone has been unlocked after a boot — the
+ * background step sync needs the token while the screen is locked — and
+ * never copied off this phone. Without `THIS_DEVICE_ONLY` the session and
+ * the cached profile rode along in a device backup and woke up signed in on
+ * whatever phone it was restored to. Android ignores it; the Keystore key
+ * already never leaves the device.
+ */
+const ACCESSIBLE = Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY;
 const USER_SERVICE = 'vokve.auth.user';
 
 /**
@@ -84,6 +94,7 @@ export const secureStorage = {
     try {
       await Keychain.setGenericPassword('tokens', JSON.stringify(tokens), {
         service: TOKEN_SERVICE,
+        accessible: ACCESSIBLE,
       });
     } catch (error) {
       logger.error('secureStorage', 'Failed to persist auth tokens', error);
@@ -125,7 +136,7 @@ export const secureStorage = {
       await Keychain.setGenericPassword(
         'user',
         JSON.stringify({ at: Date.now(), user }),
-        { service: USER_SERVICE },
+        { service: USER_SERVICE, accessible: ACCESSIBLE },
       );
     } catch (error) {
       logger.error('secureStorage', 'Failed to persist the session user', error);

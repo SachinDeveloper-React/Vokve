@@ -308,6 +308,11 @@ export const PaymentScreen = () => {
           });
           navigation.navigate('AddressForm');
           return;
+        case 'phone_required':
+          // Nothing was placed. Once the number is verified the member comes
+          // back here with the basket as it was and presses pay again.
+          navigation.navigate('VerifyPhone', { reason: 'redeem' });
+          return;
         case 'payment_pending':
           toast.show({
             title: 'Order saved, payment pending',
@@ -320,6 +325,20 @@ export const PaymentScreen = () => {
           // Held but not paid for: the confirmation page words that, and
           // carries the way to finish it.
           navigation.replace('OrderConfirmation', { id: outcome.order.id });
+          return;
+        case 'busy':
+          // A second press while the first is still going: it did nothing.
+          return;
+        case 'unconfirmed':
+          // The answer was lost, not refused: the order may be placed. The
+          // store kept the attempt's key, so pressing Pay again for the same
+          // thing finds that order instead of placing another.
+          toast.show({
+            title: 'Checking your order',
+            message: outcome.error.message,
+            tone: 'warning',
+            durationMs: 8000,
+          });
           return;
         case 'failed': {
           const code = outcome.error.code ?? '';

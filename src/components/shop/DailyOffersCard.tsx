@@ -15,8 +15,8 @@ interface Props {
 /**
  * The nudge to come back tomorrow.
  *
- * Tinted like the account screen's premium card and for the same reason: it
- * is a prompt, not a settings group, and it has to read as one against the
+ * Tinted rather than another neutral card for a reason: it is a prompt,
+ * not a settings group, and it has to read as one against the
  * neutral cards around it. The button is the outlined orange rather than the
  * filled one — the filled orange is what "View Details" wears on every card
  * in the row above, and a second filled button in a different place would

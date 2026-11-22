@@ -18,6 +18,7 @@
  *   iOS      plist CLIENT_ID                ────► Info.plist URL scheme
  *   iOS      plist BUNDLE_ID                ────► Xcode bundle id
  *   Android  google-services package_name   ────► Gradle applicationId
+ *   Android  registered SHA-1s              ────► debug + upload keystores
  *
  * Two tiers, deliberately. A `✗` is config that cannot work and fails
  * the command. A `⚠` is config that *works*, for the platforms it has
@@ -31,6 +32,7 @@
  * the drift happens.
  */
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -44,9 +46,38 @@ const fail = (what, detail) => problems.push({ what, detail });
 const warn = (what, detail) => warnings.push({ what, detail });
 const read = path => (existsSync(join(root, path)) ? readFileSync(join(root, path), 'utf8') : null);
 
+/** A keystore's SHA-1 as lower-case hex without colons (how google-services.json writes it), or null. */
+function keystoreSha1(path, password) {
+  if (!existsSync(path)) return null;
+  try {
+    const out = execFileSync('keytool', ['-list', '-v', '-keystore', path, '-storepass', password], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.match(/SHA1:\s*([0-9A-F:]+)/i)?.[1].replace(/:/g, '').toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The form the Firebase console shows and asks for: AB:CD:… */
+const colonHex = hex => hex.toUpperCase().match(/../g).join(':');
+
 /** The plist files here are flat `<key>/<string>` pairs, so a regex is honest. */
 const plistValue = (text, key) =>
   text?.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`))?.[1] ?? null;
+
+// ── The app's own config ─────────────────────────────────────────────
+// `googleSignIn.ensureConfigured` passes `config.googleWebClientId` (and
+// `googleIosClientId`) when set, and only falls back to `autoDetect` —
+// which reads the bundled files — when they are not. So where the config
+// names a client, that is the one every token carries, and a bundled file
+// without it is no fault.
+const appConfig = read('src/constants/config.ts') ?? '';
+const configValue = key => appConfig.match(new RegExp(`${key}:\\s*["']([^"']+)["']`))?.[1] ?? null;
+const configWebClient = configValue('googleWebClientId');
+const configIosClient = configValue('googleIosClientId');
+if (configWebClient) notes.push(`web client set in config.ts (${configWebClient.split('-')[0]}-…), so autoDetect is not used`);
 
 // ── Android ──────────────────────────────────────────────────────────
 const androidRaw = read('android/app/google-services.json');
@@ -66,7 +97,7 @@ if (!androidRaw) {
   // client_type 3 is the web client; it is what the Google Services
   // Gradle plugin writes out as `default_web_client_id`, and therefore
   // the audience every Android token will carry.
-  androidWebClient = oauth.find(entry => entry.client_type === 3)?.client_id ?? null;
+  androidWebClient = configWebClient ?? oauth.find(entry => entry.client_type === 3)?.client_id ?? null;
   if (!androidWebClient) {
     fail('Android web client', 'no client_type 3 entry — `autoDetect` will have no id to find');
   }
@@ -79,6 +110,38 @@ if (!androidRaw) {
   } else {
     notes.push(`${signed.length} signing certificate(s) registered`);
   }
+
+  // *Some* SHA-1 is not enough: it has to be the one the build is signed
+  // with. A key that is missing does not fail loudly — the account sheet
+  // opens, the member picks an account, Play services logs
+  // UNREGISTERED_ON_API_CONSOLE, and Credential Manager reports it to the
+  // app as a *cancel*, so the screen says nothing at all. (2026-11-15: the
+  // new Firebase project had only the upload key, and every debug build
+  // went back to the sign-in screen in silence.)
+  const registered = new Set(signed.map(entry => entry.android_info.certificate_hash.toLowerCase()));
+  const keys = [['debug', 'android/app/debug.keystore', 'android']];
+  const upload = Object.fromEntries(
+    (read('android/keystore.properties') ?? '')
+      .split('\n')
+      .map(line => line.match(/^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/))
+      .filter(Boolean)
+      .map(match => [match[1], match[2]]),
+  );
+  if (upload.MYAPP_UPLOAD_STORE_FILE && upload.MYAPP_UPLOAD_STORE_PASSWORD) {
+    // Gradle resolves it with app/build.gradle's file(), i.e. from android/app.
+    keys.push(['release (upload key)', join('android/app', upload.MYAPP_UPLOAD_STORE_FILE), upload.MYAPP_UPLOAD_STORE_PASSWORD]);
+  }
+  for (const [name, path, password] of keys) {
+    const sha1 = keystoreSha1(join(root, path), password);
+    if (!sha1) {
+      notes.push(`${name} key: could not read ${path} with keytool, so its SHA-1 was not checked`);
+    } else if (!registered.has(sha1)) {
+      fail(
+        `Android ${name} SHA-1`,
+        `${colonHex(sha1)} is not registered for ${pkg} — the account sheet opens and then returns to the app as a cancel, with no error. Add it in Firebase → Project settings → your Android app → Add fingerprint, then re-download google-services.json`,
+      );
+    }
+  }
 }
 
 // ── iOS ──────────────────────────────────────────────────────────────
@@ -87,11 +150,17 @@ let iosWebClient = null;
 if (!service) {
   fail('ios/GoogleService-Info.plist', 'missing — Google sign-in cannot work on iOS');
 } else {
-  iosWebClient = plistValue(service, 'WEB_CLIENT_ID');
-  const iosClient = plistValue(service, 'CLIENT_ID');
+  iosWebClient = configWebClient ?? plistValue(service, 'WEB_CLIENT_ID');
+  const plistIosClient = plistValue(service, 'CLIENT_ID');
+  const iosClient = configIosClient ?? plistIosClient;
   const bundleId = plistValue(service, 'BUNDLE_ID');
 
-  if (!iosWebClient) fail('iOS web client', 'plist has no WEB_CLIENT_ID — `autoDetect` has nothing to read');
+  if (!iosWebClient) {
+    fail('iOS web client', 'neither config.googleWebClientId nor the plist WEB_CLIENT_ID is set — `autoDetect` has nothing to read');
+  }
+  if (configIosClient && plistIosClient && configIosClient !== plistIosClient) {
+    warn('iOS client', `config.ts names ${configIosClient} but the plist was issued for ${plistIosClient} — one of them is from another project`);
+  }
 
   // The plist has to be in the Resources build phase or it is simply
   // not in the shipped app, however correct its contents.

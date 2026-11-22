@@ -32,6 +32,11 @@ export interface DeviceInput {
     failure: string | null;
     verifiedBootState: string | null;
     deviceLocked: boolean | null;
+    /**
+     * What vouched for the key: Android's key attestation chain, or Apple's
+     * App Attest (iOS). Absent on days proved before iOS: key attestation.
+     */
+    provider?: 'key_attestation' | 'app_attest';
   } | null;
   play: { verdict: string; reasons: string[] } | null;
   /**
@@ -182,7 +187,9 @@ export function scoreDevice(
       l0 = Math.min(l0, 40);
       flag('L0', 'key_not_attested', 'soft', { failure: key.failure });
     }
-  } else if (key.verifiedBootState !== 'verified' || key.deviceLocked === false) {
+  } else if (key.provider !== 'app_attest' && (key.verifiedBootState !== 'verified' || key.deviceLocked === false)) {
+    // App Attest says nothing about a bootloader: iOS has none to unlock, and
+    // Apple only issues the attestation to a genuine app on a genuine device.
     // An unlocked bootloader or an OS its maker did not sign: the phone can
     // be made to say anything.
     l0 = 10;
@@ -391,7 +398,7 @@ export function scoreDevice(
     flag('L2', 'clock_ahead', 'hard', { signedAt: ev.signedAt, serverAt: now.getTime() });
   }
   if (ev.checks.resets > 0) flag('L2', 'counter_reset', 'info', { resets: ev.checks.resets });
-  if (winner && winner.distanceSource === 'health_connect' && winner.distance > 0 && best!.steps > 0) {
+  if (winner && (winner.distanceSource === 'health_connect' || winner.distanceSource === 'healthkit') && winner.distance > 0 && best!.steps > 0) {
     const stride = winner.distance / best!.steps;
     if (stride < t.strideMeters.min || stride > t.strideMeters.max) {
       l2 = Math.max(0, l2 - 20);
@@ -402,7 +409,12 @@ export function scoreDevice(
   // ─── L4 · motion signature ──────────────────────────────────────────────
   let l4: number | null = null;
   const motionAsked = config.activity.tracker.motionSampling.enabled;
-  if (ev.motion.status !== 'enabled') {
+  if (ev.motion.status === 'unsupported' && input.key?.provider === 'app_attest' && input.key.attested) {
+    // iOS has no background accelerometer, so an iPhone never has windows to
+    // send. Believed only of a key Apple attested: anything else saying so is
+    // a phone that would rather not, and scores as one below.
+    flag('L4', 'motion_unsupported', 'info', { platform: ev.platform ?? 'ios' });
+  } else if (ev.motion.status !== 'enabled') {
     // Opting out lowers trust, never blocks (D-23) — but it has to *lower*
     // something. A layer left out of the mean scored better than an honest
     // phone with a few shaken windows in it, which made switching the

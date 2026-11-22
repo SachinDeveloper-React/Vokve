@@ -34,6 +34,23 @@ export const EMPTY_PHONE: PhoneValue = {
 export const formatPhone = ({ country, number }: PhoneValue): string =>
   number ? `${findCountry(country).dialCode}${number}` : '';
 
+/**
+ * The other way: a stored E.164 number back into the field's two halves, so
+ * a form can open on the number already on the account. The longest dial
+ * code that fits wins (+880 before +8…); one shared by two countries (+1)
+ * goes to the first listed. Anything that matches none keeps the default
+ * country and every digit, for the member to correct.
+ */
+export const parsePhone = (e164: string | null | undefined): PhoneValue => {
+  if (!e164) return EMPTY_PHONE;
+  const match = [...COUNTRIES]
+    .sort((a, b) => b.dialCode.length - a.dialCode.length)
+    .find(country => e164.startsWith(country.dialCode));
+  return match
+    ? { country: match.code, number: e164.slice(match.dialCode.length) }
+    : { country: DEFAULT_COUNTRY_CODE, number: e164.replace(/\D/g, '') };
+};
+
 interface Props
   extends Omit<
       TextInputProps,

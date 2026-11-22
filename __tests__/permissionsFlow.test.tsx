@@ -13,7 +13,7 @@
  */
 
 import React from 'react';
-import { Text } from 'react-native';
+import { Platform, Text } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -173,6 +173,7 @@ const press = async (
 const done = () => useOnboardingStore.getState().permissionsDoneFor;
 
 test('asks for each permission in turn, saying why first, then lets the app open', async () => {
+  const os = jest.replaceProperty(Platform, 'OS', 'android');
   pendingPermissionSteps.mockResolvedValue([
     'activity',
     'notifications',
@@ -203,6 +204,32 @@ test('asks for each permission in turn, saying why first, then lets the app open
 
   expect(steps.connectHealthConnect).toHaveBeenCalledTimes(1);
   expect(done()).toEqual(['usr_1']);
+  os.restore();
+});
+
+test('on an iPhone it asks for Motion & Fitness, then Apple Health', async () => {
+  const os = jest.replaceProperty(Platform, 'OS', 'ios');
+  pendingPermissionSteps.mockResolvedValue(['activity', 'healthConnect']);
+  useStepsStore.setState({
+    healthConnect: status({ provider: 'healthkit', availability: 'available' }),
+  });
+  steps.connectHealthConnect.mockResolvedValue(
+    status({ provider: 'healthkit', stepsGranted: true }),
+  );
+  const tree = await render();
+
+  expect(textOf(tree)).toContain('iOS will ask to allow "Motion & Fitness"');
+  await press(tree, 'Allow Motion & Fitness');
+  expect(steps.enableStepCounting).toHaveBeenCalledTimes(1);
+
+  const text = textOf(tree);
+  expect(text).toContain('Wear an Apple Watch?');
+  expect(text).not.toContain('Google Fit');
+  await press(tree, 'Connect Apple Health');
+
+  expect(steps.connectHealthConnect).toHaveBeenCalledTimes(1);
+  expect(done()).toEqual(['usr_1']);
+  os.restore();
 });
 
 test('a permission already granted is not asked again, and "Not now" moves on', async () => {

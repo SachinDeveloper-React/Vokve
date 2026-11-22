@@ -9,6 +9,7 @@ import { hashToken } from '../../lib/tokens.js';
 import { attestationBody, issueAttestationChallenge, submitAttestation } from '../integrity/service.js';
 import { AppReleaseModel, DeviceModel } from './models.js';
 import { claimPushToken, listDevices, registerDevice, registerDeviceBody, revokeDevice } from './service.js';
+import { appIcon } from './appIcon.service.js';
 import { appUpdate } from './update.service.js';
 
 export const devicesRouter = Router();
@@ -30,6 +31,12 @@ const heartbeatBody = z.object({
    * rather than taking one from the client.
    */
   localReminders: z.boolean().optional(),
+  /**
+   * The launcher icon this install is showing (RULES DV13), so the panel
+   * can say how many phones a change has reached. Reported by the app after
+   * it has asked for one, not trusted for anything else.
+   */
+  appIcon: z.string().regex(/^[a-z][a-z0-9]{0,31}$/).optional(),
 });
 
 devicesRouter.patch('/devices/:deviceId', requireAuth, validate('body', heartbeatBody), async (req, res) => {
@@ -42,6 +49,7 @@ devicesRouter.patch('/devices/:deviceId', requireAuth, validate('body', heartbea
   if (req.body.pushToken !== undefined) set['push'] = req.body.pushToken
     ? { token: req.body.pushToken, provider: 'fcm', updatedAt: new Date() } : { token: null, invalidAt: new Date() };
   if (req.body.localReminders !== undefined) set.remindersScheduledAt = req.body.localReminders ? new Date() : null;
+  if (req.body.appIcon) set['app.icon'] = req.body.appIcon;
   const updated = await DeviceModel.updateOne({ _id: String(req.params.deviceId), userId: req.ctx.userId, revokedAt: null }, { $set: set });
   // The heartbeat is how a token usually arrives, so it is where a token
   // that has changed hands is usually taken off its old row (RULES DV7).
@@ -105,6 +113,14 @@ devicesRouter.delete('/me/devices/:deviceId', requireAuth, requireDevice, async 
  */
 devicesRouter.get('/app/update', async (req, res) => {
   res.json(await appUpdate({ platform: req.ctx.platform, appVersion: req.ctx.appVersion, build: req.ctx.build }));
+});
+
+/**
+ * Which launcher icon to show (RULES DV13). Public: the icon is the same
+ * before and after sign-in, and a fresh install should get it on first run.
+ */
+devicesRouter.get('/app/icon', async (_req, res) => {
+  res.set('Cache-Control', 'no-store').json(await appIcon());
 });
 
 devicesRouter.get('/releases', async (req, res) => {

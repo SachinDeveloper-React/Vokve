@@ -1,0 +1,15 @@
+{
+  "$comment": "Every launcher icon this build carries. `npm run icons:app` turns the art into Android and iOS assets and checks the manifest aliases and the Xcode build setting against this list. The backend keeps the same keys in src/modules/devices/appIcons.ts — a key the server names that a build does not carry is ignored by that build. Never remove an entry once a build has shipped it — an Android phone showing that icon would be left with no launcher entry; stop offering it from the backend instead.",
+  "default": "redfield",
+  "icons": [
+    { "key": "redfield", "kind": "base", "label": "Red field", "art": "base/Vokve_A_RedField" },
+    { "key": "classic", "kind": "base", "label": "Classic", "art": "base/Vokve_B_Classic" },
+    { "key": "night", "kind": "base", "label": "Night", "art": "base/Vokve_C_Night" },
+    { "key": "christmas", "kind": "festive", "label": "Christmas", "art": "festive/Vokve_Christmas" },
+    { "key": "diwali", "kind": "festive", "label": "Diwali", "art": "festive/Vokve_Diwali" },
+    { "key": "eid", "kind": "festive", "label": "Eid", "art": "festive/Vokve_Eid" },
+    { "key": "holi", "kind": "festive", "label": "Holi", "art": "festive/Vokve_Holi" },
+    { "key": "independence", "kind": "festive", "label": "Independence Day", "art": "festive/Vokve_IndependenceDay" },
+    { "key": "newyear", "kind": "festive", "label": "New Year 2027", "art": "festive/Vokve_NewYear" }
+  ]
+}

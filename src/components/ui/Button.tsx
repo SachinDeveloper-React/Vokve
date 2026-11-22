@@ -57,9 +57,9 @@ const makeStyles = ({ colors, spacing, radius }: ThemeShape) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: 'transparent',
     },
-    // `xs` is for a call to action that shares a row with the copy selling it
-    // — the premium card's upgrade pill. At `sm` the button takes so much of a
-    // 375pt row that the sentence beside it wraps to four lines.
+    // `xs` is for a call to action that shares a row with the copy beside it.
+    // At `sm` the button takes so much of a 375pt row that the sentence beside
+    // it wraps to four lines.
     xs: { paddingVertical: spacing.xs, paddingHorizontal: spacing.md, minHeight: 30 },
     sm: { paddingVertical: spacing.sm, paddingHorizontal: spacing.base, minHeight: 36 },
     md: { paddingVertical: spacing.md, paddingHorizontal: spacing.xl, minHeight: 48 },

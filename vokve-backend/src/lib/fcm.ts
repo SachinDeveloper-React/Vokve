@@ -1,4 +1,4 @@
-import { resolveServiceAccount } from '../config/serviceAccount.js';
+import { firebaseAdminApp } from './firebaseAdmin.js';
 import { logger } from './logger.js';
 import type { PushMessage, PushResult, PushTransport } from './push.js';
 
@@ -20,15 +20,11 @@ const DEAD_TOKEN_CODES = new Set([
  * Every other per-token failure is logged and counted as not sent.
  */
 export async function createFcmTransport(): Promise<PushTransport | null> {
-  const credential = resolveServiceAccount('FIREBASE');
-  if (!credential) return null;
+  const firebase = await firebaseAdminApp();
+  if (!firebase) return null;
 
-  const admin = await import('firebase-admin');
-  const app = admin.default.apps.length
-    ? admin.default.app()
-    : admin.default.initializeApp({ credential: admin.default.credential.cert(credential as never) });
-  const messaging = admin.default.messaging(app);
-  logger.info({ project: credential.project_id }, 'push.fcm_ready');
+  const messaging = firebase.app.messaging();
+  logger.info({ project: firebase.projectId }, 'push.fcm_ready');
 
   return {
     async send(tokens: string[], message: PushMessage): Promise<PushResult> {

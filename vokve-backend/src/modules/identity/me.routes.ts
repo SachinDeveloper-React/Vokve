@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { activityLevelSchema, fitnessGoalSchema, genderSchema, unitSystemSchema } from '../../contracts/index.js';
 import { Errors } from '../../lib/errors.js';
+import { isAvatarUrl } from '../../lib/urls.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { validate } from '../../middleware/validate.js';
@@ -23,7 +24,7 @@ meRouter.get('/me', async (req, res) => {
 /** Whitelisted patch — `profileCompletedAt`, verification stamps and trust are server-only (RULES P1). */
 const patchMeBody = z.object({
   name: z.string().trim().min(2).max(60).optional(),
-  avatarUrl: z.string().url().nullable().optional(),
+  avatarUrl: z.string().max(2048).url().refine(isAvatarUrl, 'Upload a photo rather than linking one.').nullable().optional(),
   heightCm: z.number().min(90).max(250).nullable().optional(),
   weightKg: z.number().min(25).max(300).nullable().optional(),
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),

@@ -58,6 +58,23 @@ const envSchema = z.object({
   MONGODB_URI: z.string().default('mongodb://localhost:27017/vokve?replicaSet=rs0&directConnection=true'),
   REDIS_URL: z.string().optional(),
   JWT_SECRET: z.string().min(16).default('dev-only-secret-change-me-please'),
+  /**
+   * The secret being rotated out (RULES Z1). Tokens it signed are still
+   * believed — signing always uses `JWT_SECRET` — so a rotation is: move the
+   * old value here, put a new one in `JWT_SECRET`, deploy, and delete this
+   * line once the longest-lived token it signed has expired (15 minutes for
+   * a session; an admin session lasts 12 hours). Refresh tokens are opaque
+   * and unaffected.
+   */
+  JWT_SECRET_PREVIOUS: unsetWhenBlank(z.string().min(16)),
+  /**
+   * Browser origins allowed to read this API's answers (CORS), comma
+   * separated, matched exactly: `https://admin.vokve.app`. The app is native
+   * and the panel calls from its server, so neither needs one — unset means
+   * no browser origin is allowed, except on public media (avatars), which
+   * any page may show.
+   */
+  CORS_ORIGINS: unsetWhenBlank(z.string().min(1)),
   /** Where a referral link points (RULES F6). The page redirects to the store until deep links exist. */
   SHARE_URL_BASE: blankIsDefault(z.string().url(), 'https://vokve.app/r'),
   /**
@@ -115,6 +132,13 @@ const envSchema = z.object({
     .optional()
     .transform(v => v !== 'false' && v !== '0'),
   LOG_LEVEL: z.string().default('info'),
+  /**
+   * `pretty` prints coloured one-line logs (errors red, warnings orange,
+   * success green, every request with its status and error code); `json`
+   * prints one JSON object a line for a log collector. `auto` is pretty in
+   * a terminal and JSON anywhere else.
+   */
+  LOG_FORMAT: z.enum(['auto', 'pretty', 'json']).default('auto'),
 
   /**
    * The operator's key for the admin HTTP API (`/v1/admin/*`), which is how
@@ -125,6 +149,14 @@ const envSchema = z.object({
   ADMIN_API_KEY: z.string().min(24).optional(),
   /** Who the audit log records for admin writes. */
   ADMIN_ACTOR: z.string().default('admin'),
+  /**
+   * The operator's second factor (RULES Z7): a base32 TOTP secret, the one
+   * an authenticator app is enrolled with (`npm run admin:totp` makes one).
+   * Set, the admin key alone opens nothing — the panel signs in with key +
+   * six-digit code at `POST /v1/admin/session` and uses the session that
+   * returns. Unset, the key alone still works, as it always has.
+   */
+  ADMIN_TOTP_SECRET: unsetWhenBlank(z.string().regex(/^[A-Za-z2-7]{16,}=*$/, 'must be a base32 secret of at least 16 characters (npm run admin:totp)')),
 
   /** Email channel (OTP). Any SMTP — Gmail app password works for dev. Unset = no email channel. */
   SMTP_HOST: z.string().optional(),
@@ -132,19 +164,31 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().optional(),
+  /**
+   * How many emails the SMTP account may send in a day, for the early
+   * warning at 80% of it (RULES P20). A personal Gmail stops at about 500
+   * and then refuses everything — every sign-up, sign-in and reset code —
+   * for up to a day, so with `SMTP_HOST=smtp.gmail.com` and this unset, 500
+   * is assumed. Set it for anything else (Google Workspace: 2000; SES: the
+   * account's own quota); unset on a non-Gmail host means no warning.
+   */
+  MAIL_DAILY_LIMIT: unsetWhenBlank(z.coerce.number().int().positive()),
 
   /**
-   * Where the fleet's alarms go (RULES P17).
+   * Where the alarms go (RULES P19, P20).
    *
-   * Two channels, both optional, because an operator who gets neither still
-   * has the panel — the alarms exist so that nobody has to be *watching* the
-   * panel for the app to be broken for an afternoon without anyone knowing.
-   * The webhook takes a Slack-shaped `{ text }`, which Slack, Discord and
-   * most of the rest accept; the email goes through the same SMTP the OTPs
-   * use. With neither set the checks still run and still log, and nothing is
-   * sent.
+   * Three channels, all optional, because an operator who gets none still
+   * has the panel and the log — the alarms exist so that nobody has to be
+   * *watching* for the app to be broken for an afternoon without anyone
+   * knowing. The webhook posts `{ text, content }`, which Slack, Discord,
+   * Google Chat and most of the rest accept; Telegram needs a bot token and
+   * the chat to post to; the email goes through the same SMTP the OTPs use,
+   * which is why it cannot carry the one alarm about that SMTP failing. With
+   * none set the checks still run and still log, and nothing is sent.
    */
   OPS_WEBHOOK_URL: unsetWhenBlank(z.string().url()),
+  OPS_TELEGRAM_BOT_TOKEN: unsetWhenBlank(z.string().min(20)),
+  OPS_TELEGRAM_CHAT_ID: unsetWhenBlank(z.string().min(1)),
   OPS_EMAIL: unsetWhenBlank(z.string().email()),
 
   /**
@@ -195,12 +239,56 @@ const envSchema = z.object({
   GOOGLE_WEB_CLIENT_ID: unsetWhenBlank(z.string().min(1)),
 
   /**
+   * Who an Apple identity token may be addressed to (RULES O13): a
+   * **comma-separated list** of our own Apple client ids, each matched
+   * exactly against the token's `aud`.
+   *
+   * A list because the two platforms honestly mint different audiences.
+   * iOS signs in natively and Apple addresses the token to the app's
+   * **bundle id** (`com.vokve.fitness`); Android has no native Apple
+   * sign-in, goes through Apple's web flow, and that token is addressed
+   * to the **Services ID** the web flow was opened with. Both are ours.
+   * Unset means `POST /auth/apple` answers 503 rather than accepting
+   * anything.
+   */
+  APPLE_CLIENT_IDS: unsetWhenBlank(z.string().min(1)),
+  /**
+   * The Sign in with Apple private key (the `.p8` file's contents), its
+   * key id and the team id — what the server signs its `client_secret`
+   * with to talk to Apple's token endpoints. Needed for one thing: revoking
+   * a member's Apple authorisation when they delete their account or
+   * disconnect Apple (App Store Review Guideline 5.1.1(v), RULES O16). All
+   * three or none; without them deletion still works and says so in the
+   * log and the ops alert.
+   */
+  APPLE_TEAM_ID: unsetWhenBlank(z.string().min(1)),
+  APPLE_KEY_ID: unsetWhenBlank(z.string().min(1)),
+  APPLE_PRIVATE_KEY: unsetWhenBlank(z.string().min(1)),
+  /**
+   * The return URL the Android app opens Apple's web flow with
+   * (`appleRedirectUri` in the app's config). Apple asks for it again when
+   * a code from that flow is exchanged; native iOS codes have none.
+   */
+  APPLE_REDIRECT_URI: unsetWhenBlank(z.string().url()),
+
+  /**
    * Who collects the money side of an order. `mock` captures every payment
    * at once (dev and test); `razorpay` creates a gateway order and verifies
    * the checkout signature, and needs both keys. Refused in production
    * unless it is a real provider.
    */
   PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
+  /**
+   * TEMPORARY bypass while the gateway is not wired yet: lets
+   * `PAYMENT_PROVIDER=mock` boot in production instead of refusing.
+   * The mock accepts any payment id, so a money order is marked paid
+   * without money — keep the shop coins-only while this is on, and
+   * delete this line from `.env` the day Razorpay keys go in.
+   */
+  ALLOW_MOCK_PAYMENTS_IN_PRODUCTION: z
+    .string()
+    .optional()
+    .transform(v => v === 'true' || v === '1'),
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
 
@@ -208,7 +296,21 @@ const envSchema = z.object({
   SMS_PROVIDER: z.enum(['msg91', 'twilio']).optional(),
 });
 
-export const env = envSchema.parse(process.env);
+/**
+ * Stops the boot with a readable reason. Runs before the logger exists (the
+ * logger reads this file), so it is plain stderr — red in a terminal.
+ */
+function refuseToStart(lines: string[]): never {
+  const red = (s: string) => (process.stderr.isTTY && !('NO_COLOR' in process.env) ? `\x1b[31m${s}\x1b[0m` : s);
+  process.stderr.write(`${red('✗ vokve-backend cannot start:')}\n${red(lines.map(l => `  • ${l}`).join('\n'))}\n`);
+  process.exit(1);
+}
+
+const parsed = envSchema.safeParse(process.env);
+if (!parsed.success) {
+  refuseToStart(parsed.error.issues.map(i => `${i.path.join('.') || '(env)'}: ${i.message}`));
+}
+export const env = parsed.data;
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
@@ -220,14 +322,24 @@ export const isTest = env.NODE_ENV === 'test';
 export const devRoutesEnabled = !isProduction && env.DEV_ROUTES;
 
 if (isProduction && env.OTP_DEV_ECHO) {
-  throw new Error('OTP_DEV_ECHO must not be enabled in production');
+  refuseToStart(['OTP_DEV_ECHO must not be enabled in production']);
 }
-if (isProduction && env.JWT_SECRET === 'dev-only-secret-change-me-please') {
-  throw new Error('JWT_SECRET must be set in production');
+/**
+ * A value copied from `.env.example` or the code's own fallback. Those are
+ * public — they are in the repository — so a server signing with one is a
+ * server anybody can mint sessions for.
+ */
+const isPlaceholder = (value: string) => /change-me|dev-only|example|placeholder/i.test(value);
+
+if (isProduction && (env.JWT_SECRET.length < 32 || isPlaceholder(env.JWT_SECRET))) {
+  refuseToStart(['JWT_SECRET must be a random value of at least 32 characters in production (openssl rand -base64 48)']);
 }
-if (isProduction && env.PAYMENT_PROVIDER === 'mock') {
-  throw new Error('PAYMENT_PROVIDER must be a real gateway in production');
+if (isProduction && env.ADMIN_API_KEY && isPlaceholder(env.ADMIN_API_KEY)) {
+  refuseToStart(['ADMIN_API_KEY is still the placeholder from .env.example (openssl rand -base64 36)']);
+}
+if (isProduction && env.PAYMENT_PROVIDER === 'mock' && !env.ALLOW_MOCK_PAYMENTS_IN_PRODUCTION) {
+  refuseToStart(['PAYMENT_PROVIDER must be a real gateway in production']);
 }
 if (env.PAYMENT_PROVIDER === 'razorpay' && (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET)) {
-  throw new Error('RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENT_PROVIDER=razorpay');
+  refuseToStart(['RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are required when PAYMENT_PROVIDER=razorpay']);
 }

@@ -70,7 +70,7 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
 
   const devices = await DeviceModel.find(
     { _id: { $in: scoring.map(d => d.deviceId) } },
-    { installId: 1, vendorId: 1, firstSeenAt: 1, 'attestation.keyId': 1 },
+    { installId: 1, vendorId: 1, firstSeenAt: 1, 'attestation.keyId': 1, 'attestation.provider': 1 },
   ).lean();
   // Whether this server asks for a Play verdict at all: only then is a day
   // that carried none the phone's silence rather than our own choice (A24).
@@ -101,7 +101,9 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
         sharedAccounts,
         keySharedAccounts,
         firstSeenAt: device?.firstSeenAt ?? null,
-        integrityExpected,
+        // Never of an iPhone: Play Integrity does not exist there, and App
+        // Attest already vouched for its key (proof.key.provider).
+        integrityExpected: integrityExpected && device?.attestation?.provider !== 'app_attest',
       };
     }),
   );
@@ -170,7 +172,9 @@ export async function rollupDay(userId: string, localDay: string, now = new Date
     ? hoursOf(score.union.minutes, hourFinder(bestEvidence.timezone, bestEvidence.utcOffsetMinutes))
     : best.winner?.hourlySteps ?? shown?.hourlySteps ?? counting.hourly;
 
-  const measured = best.winner && best.winner.distanceSource === 'health_connect' && best.winner.distance > 0;
+  // A watch's own distance, from Health Connect or Apple Health.
+  const measured = best.winner && (best.winner.distanceSource === 'health_connect' || best.winner.distanceSource === 'healthkit') &&
+    best.winner.distance > 0;
   const distanceKm = measured
     ? best.winner!.distance / 1000
     : (score.displaySteps * strideMetres(user?.heightCm)) / 1000;

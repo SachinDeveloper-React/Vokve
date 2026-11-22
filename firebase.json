@@ -1,6 +1,7 @@
 {
   "react-native": {
     "messaging_android_notification_channel_id": "vokve.default",
+    "messaging_android_notification_color": "@color/notification_accent",
     "android_task_executor_maximum_pool_size": 10,
     "android_task_executor_keep_alive_seconds": 3
   }

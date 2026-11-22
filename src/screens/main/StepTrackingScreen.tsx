@@ -48,6 +48,7 @@ import {
   useTrackingState,
 } from '../../stores/stepsStore';
 import { useThemedStyles, type ThemeShape } from '../../theme';
+import { healthStoreName } from '../../utils/healthStore';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -186,6 +187,7 @@ export const StepTrackingScreen = () => {
   );
 
   const hcState = healthConnectCardState(healthStatus);
+  const healthName = healthStoreName(healthStatus);
   const onConnectHealth = useCallback(
     () =>
       run(() =>
@@ -287,6 +289,7 @@ export const StepTrackingScreen = () => {
         {countingState !== 'unsupported' ? (
           <HealthConnectCard
             state={hcState}
+            name={healthName}
             writes={hcWrites}
             disconnectInApp={DISCONNECT_IN_APP}
             onConnect={onConnectHealth}
@@ -322,7 +325,7 @@ export const StepTrackingScreen = () => {
       <ActionSheet
         visible={isDisconnectOpen}
         onClose={() => setDisconnectOpen(false)}
-        title="Disconnect Health Connect?"
+        title={`Disconnect ${healthName}?`}
         message="Vokve stops reading steps from your watch and other apps. Your phone keeps counting."
         actions={disconnectActions}
         cancelLabel="Stay connected"

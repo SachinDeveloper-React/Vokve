@@ -479,6 +479,17 @@ export const changePhoneSchema = z.object({
 });
 export type ChangePhoneValues = z.infer<typeof changePhoneSchema>;
 
+/**
+ * The phone verification form (RULES O14). The password is optional here
+ * because only replacing the number already on the account needs it; the
+ * screen asks for it in that case and the server is the one that decides.
+ */
+export const verifyPhoneSchema = z.object({
+  phone: phoneSchema,
+  password: z.string(),
+});
+export type VerifyPhoneValues = z.infer<typeof verifyPhoneSchema>;
+
 /** The support ticket form, with the server's own floors on it. */
 export const supportTicketSchema = z.object({
   subject: z

@@ -1,5 +1,8 @@
 import { PermissionsAndroid, Platform } from 'react-native';
-import type { HealthConnectStatus } from 'react-native-step-tracker-pro';
+import StepTracker, {
+  isSupported,
+  type HealthConnectStatus,
+} from 'react-native-step-tracker-pro';
 import { getMMKV } from '../stores';
 import { useStepsStore } from '../stores/stepsStore';
 import type { PermissionEntry, PermissionState } from '../types/models';
@@ -120,10 +123,22 @@ export async function collectPermissions(): Promise<PermissionEntry[]> {
   const entries: PermissionEntry[] = [];
 
   if (!android) {
+    // Motion & Fitness, which only the tracker (react-native-step-tracker-pro-ios)
+    // can read; without it linked this phone cannot count at all.
+    const allowed = isSupported()
+      ? await StepTracker.checkPermissions().then(
+          answer => answer.activityRecognition,
+          () => permissions?.activityRecognition ?? null,
+        )
+      : null;
     entries.push({
       key: 'activityRecognition',
-      state: 'unavailable',
-      detail: 'iOS counts through HealthKit',
+      state: !isSupported()
+        ? 'unavailable'
+        : allowed === null
+          ? 'unknown'
+          : granted(allowed),
+      detail: 'Motion & Fitness',
     });
   } else {
     // Asked of the OS, not of the store: this is the one permission whose
@@ -198,11 +213,30 @@ function healthConnectEntries(
 ): PermissionEntry[] {
   const keys = ['healthConnectReadSteps', 'healthConnectWriteSteps'] as const;
   if (!android) {
-    return keys.map(key => ({
-      key,
-      state: 'unavailable' as PermissionState,
-      detail: 'Android only',
-    }));
+    // Apple Health stands in for Health Connect on iOS. Read only: Vokve
+    // never writes there, because the iPhone already writes its own steps.
+    const write: PermissionEntry = {
+      key: 'healthConnectWriteSteps',
+      state: 'unavailable',
+      detail: 'Apple Health: read only',
+    };
+    if (!status) {
+      return [{ key: 'healthConnectReadSteps', state: 'unknown', detail: 'Apple Health' }, write];
+    }
+    if (status.availability !== 'available') {
+      return [
+        { key: 'healthConnectReadSteps', state: 'unavailable', detail: 'Apple Health not available' },
+        write,
+      ];
+    }
+    return [
+      {
+        key: 'healthConnectReadSteps',
+        state: granted(status.stepsGranted ?? status.canRead),
+        detail: 'Apple Health',
+      },
+      write,
+    ];
   }
   if (!status) {
     return keys.map(key => ({ key, state: 'unknown' as PermissionState }));

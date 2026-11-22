@@ -43,8 +43,10 @@ export function setOnUpgradeRequired(
  * The device module supplies these rather than being imported: it needs the
  * endpoints, the endpoints need this client, and this client needing the
  * device module would close the loop. Both are registered by `device.ts` at
- * import, which happens before the first request because the auth store
- * imports it.
+ * import, and `index.js` imports it bare before anything else. That bare
+ * import is what guarantees it: an ordinary `import { x }` from the auth
+ * store is not enough, because Metro's inline requires delay the module
+ * until `x` is first called — which, signed out, is after the first request.
  */
 let requestHeadersProvider: () => Record<string, string> = () => ({});
 let deviceReregistrar:

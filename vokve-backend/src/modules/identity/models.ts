@@ -34,6 +34,20 @@ const userSchema = new Schema(
      * cannot.
      */
     googleId: { type: String, default: undefined },
+    /**
+     * Apple's stable id for this account (the identity token's `sub`),
+     * where the member has signed in with Apple (RULES O13). Matched on
+     * before the email for the same reason as `googleId`, and more so:
+     * an Apple member may have given us a private relay address that
+     * matches nothing else.
+     */
+    appleId: { type: String, default: undefined },
+    /**
+     * When Apple said it stopped forwarding mail to this account's private
+     * relay address (RULES O17, `email-disabled`); cleared by
+     * `email-enabled`. Only ever set while `email` is that relay address.
+     */
+    emailForwardingOffAt: { type: Date, default: null },
     profileCompletedAt: { type: Date, default: null },
     trust: { score: { type: Number, default: 60 }, tier: { type: String, default: 'normal' }, updatedAt: Date },
     flags: { frozen: { type: Boolean, default: false }, legalHold: { type: Boolean, default: false } },
@@ -63,6 +77,7 @@ userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 // of null would put every password account in this unique index under the
 // same value and the second sign-up would collide.
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
+userSchema.index({ appleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ country: 1 });
 userSchema.index({ 'trust.tier': 1 });
 userSchema.index({ 'deletion.purgeAt': 1 }, { sparse: true });
@@ -77,6 +92,13 @@ const refreshTokenSchema = new Schema(
     expiresAt: { type: Date, required: true },
     supersededBy: { type: String, default: null },
     revokedAt: { type: Date, default: null },
+    /**
+     * How the session began — `password`, `otp`, `google`, `apple` — carried
+     * across every rotation, so Apple withdrawing consent can end exactly
+     * the sessions Apple was the way into (RULES O17). Null on rows from
+     * before it was recorded.
+     */
+    method: { type: String, default: null },
   },
   { timestamps: true, collection: 'refresh_tokens' },
 );

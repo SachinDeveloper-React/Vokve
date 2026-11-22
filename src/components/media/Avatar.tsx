@@ -92,39 +92,46 @@ export const Avatar = memo(({ name, uri, size = 'md', status, ring }: Props) => 
 
   const dotSize = Math.max(8, Math.round(dimension * 0.28));
 
+  const initialsDisc = (
+    <View
+      style={[
+        styles.initials,
+        {
+          width: dimension,
+          height: dimension,
+          borderRadius: dimension / 2,
+          backgroundColor: background,
+        },
+      ]}
+      accessibilityRole="image"
+      accessibilityLabel={name}
+    >
+      <Text
+        style={[
+          styles.initialsText,
+          { fontSize: dimension * 0.38, color: colors.primaryForeground },
+        ]}
+        maxFontSizeMultiplier={1.2}
+      >
+        {initials}
+      </Text>
+    </View>
+  );
+
   const content = (
     <View style={{ width: dimension, height: dimension }}>
       {uri ? (
+        // A photo that will not load shows the initials, as if there were no
+        // photo, rather than an empty grey disc.
         <AppImage
           uri={uri}
           width={dimension}
           height={dimension}
           radius="pill"
+          fallback={initialsDisc}
         />
       ) : (
-        <View
-          style={[
-            styles.initials,
-            {
-              width: dimension,
-              height: dimension,
-              borderRadius: dimension / 2,
-              backgroundColor: background,
-            },
-          ]}
-          accessibilityRole="image"
-          accessibilityLabel={name}
-        >
-          <Text
-            style={[
-              styles.initialsText,
-              { fontSize: dimension * 0.38, color: colors.primaryForeground },
-            ]}
-            maxFontSizeMultiplier={1.2}
-          >
-            {initials}
-          </Text>
-        </View>
+        initialsDisc
       )}
 
       {status ? (

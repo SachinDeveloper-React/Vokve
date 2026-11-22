@@ -184,11 +184,21 @@ export const OrderConfirmationScreen = () => {
   const onPay = useCallback(async () => {
     if (!order) return;
     const result = await payPending(order);
-    if (result.status === 'failed') {
+    if (result.status === 'unconfirmed') {
       toast.show({
-        title: "Couldn't take the payment",
+        title: 'Checking your payment',
         message: result.error.message,
-        tone: 'error',
+        tone: 'warning',
+        durationMs: 8000,
+      });
+      return;
+    }
+    if (result.status === 'failed') {
+      const refunded = result.error.code === 'PAYMENT_REFUNDED';
+      toast.show({
+        title: refunded ? 'Payment refunded' : "Couldn't take the payment",
+        message: result.error.message,
+        tone: refunded ? 'info' : 'error',
       });
       return;
     }

@@ -8,11 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		0B5CD7E5CE5B91495116F5A5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		0E12CCD9439C9BE13E967AD3 /* chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = 8C49F8F53AEB4F2385671EAC /* chime.wav */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		13C7703730A03FEE009FB38F /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 13C7703630A03FEE009FB38F /* GoogleService-Info.plist */; };
+		13EC818530AAD70800D49AE7 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 13EC818430AAD70800D49AE7 /* GoogleService-Info.plist */; };
 		1FFBB886DE66F2136C0A16EE /* Pods_vokve.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 327D53C5C0F2330944491494 /* Pods_vokve.framework */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		932F27364B36A1D5DC2051CF /* bell.wav in Resources */ = {isa = PBXBuildFile; fileRef = 415191B822A44A95343946E9 /* bell.wav */; };
+		CEACE30792A8548B065E1187 /* water_drop.wav in Resources */ = {isa = PBXBuildFile; fileRef = B342CB2C980E84EDBC11243D /* water_drop.wav */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,12 +23,16 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = vokve/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = vokve/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = vokve/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		13C7703630A03FEE009FB38F /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		13EC818430AAD70800D49AE7 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		327D53C5C0F2330944491494 /* Pods_vokve.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_vokve.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		415191B822A44A95343946E9 /* bell.wav */ = {isa = PBXFileReference; includeInIndex = 1; path = bell.wav; sourceTree = "<group>"; };
 		50A655775831ECE4E479C302 /* Pods-vokve.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-vokve.debug.xcconfig"; path = "Target Support Files/Pods-vokve/Pods-vokve.debug.xcconfig"; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = vokve/AppDelegate.swift; sourceTree = "<group>"; };
+		77256167FDA6FC96D91D1012 /* vokve.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = vokve.entitlements; path = vokve/vokve.entitlements; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = vokve/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		8C49F8F53AEB4F2385671EAC /* chime.wav */ = {isa = PBXFileReference; includeInIndex = 1; path = chime.wav; sourceTree = "<group>"; };
 		A18904ED9014DE462664D4FE /* Pods-vokve.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-vokve.release.xcconfig"; path = "Target Support Files/Pods-vokve/Pods-vokve.release.xcconfig"; sourceTree = "<group>"; };
+		B342CB2C980E84EDBC11243D /* water_drop.wav */ = {isa = PBXFileReference; includeInIndex = 1; path = water_drop.wav; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -47,8 +54,10 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
+				77256167FDA6FC96D91D1012 /* vokve.entitlements */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
+				5752B874C3729C2050CDBAAE /* Sounds */,
 			);
 			name = vokve;
 			sourceTree = "<group>";
@@ -62,6 +71,17 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		5752B874C3729C2050CDBAAE /* Sounds */ = {
+			isa = PBXGroup;
+			children = (
+				415191B822A44A95343946E9 /* bell.wav */,
+				8C49F8F53AEB4F2385671EAC /* chime.wav */,
+				B342CB2C980E84EDBC11243D /* water_drop.wav */,
+			);
+			name = Sounds;
+			path = vokve/Sounds;
+			sourceTree = "<group>";
+		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
 			isa = PBXGroup;
 			children = (
@@ -72,7 +92,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				13C7703630A03FEE009FB38F /* GoogleService-Info.plist */,
+				13EC818430AAD70800D49AE7 /* GoogleService-Info.plist */,
 				13B07FAE1A68108700A75B9A /* vokve */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
@@ -166,9 +186,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
-				13C7703730A03FEE009FB38F /* GoogleService-Info.plist in Resources */,
+				13EC818530AAD70800D49AE7 /* GoogleService-Info.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				0B5CD7E5CE5B91495116F5A5 /* PrivacyInfo.xcprivacy in Resources */,
+				932F27364B36A1D5DC2051CF /* bell.wav in Resources */,
+				0E12CCD9439C9BE13E967AD3 /* chime.wav in Resources */,
+				CEACE30792A8548B065E1187 /* water_drop.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -332,13 +355,17 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 50A655775831ECE4E479C302 /* Pods-vokve.debug.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-classic AppIcon-night AppIcon-christmas AppIcon-diwali AppIcon-eid AppIcon-holi AppIcon-independence AppIcon-newyear";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = vokve/vokve.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 78K4ML2KHZ;
+				DEVELOPMENT_TEAM = ZL38K343UT;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = vokve/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Vokve;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -350,8 +377,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = "org.react-native.vokve";
+				PRODUCT_BUNDLE_IDENTIFIER = com.vokve.fitness;
 				PRODUCT_NAME = vokve;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
@@ -367,12 +393,16 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A18904ED9014DE462664D4FE /* Pods-vokve.release.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-classic AppIcon-night AppIcon-christmas AppIcon-diwali AppIcon-eid AppIcon-holi AppIcon-independence AppIcon-newyear";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = vokve/vokve.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 78K4ML2KHZ;
+				DEVELOPMENT_TEAM = ZL38K343UT;
 				INFOPLIST_FILE = vokve/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Vokve;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -384,8 +414,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
-				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = "org.react-native.vokve";
+				PRODUCT_BUNDLE_IDENTIFIER = com.vokve.fitness;
 				PRODUCT_NAME = vokve;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;

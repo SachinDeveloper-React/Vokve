@@ -44,6 +44,7 @@ import {
 import { useTheme } from '../../theme';
 import { DEFAULT_COUNTRY_CODE } from '../../constants/countries';
 import { useAuthStore } from '../../stores/authStore';
+import { IdentityChoiceSheet } from '../../components/auth/IdentityChoiceSheet';
 import { describeAuthError } from '../../utils/authErrors';
 import type { Gender } from '../../types/models';
 import {
@@ -79,6 +80,7 @@ export const SignUpScreen = () => {
 
   const signUp = useAuthStore(s => s.signUp);
   const signInWithGoogle = useAuthStore(s => s.signInWithGoogle);
+  const signInWithApple = useAuthStore(s => s.signInWithApple);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
@@ -171,11 +173,11 @@ export const SignUpScreen = () => {
   );
 
   /**
-   * Google signs somebody straight in rather than starting a sign-up
-   * (RULES O12): the server makes the account from the token if there is
-   * none, so there is nothing left for this form to ask. An email the
-   * app already knows is linked to the account that holds it rather
-   * than refused as taken.
+   * Google and Apple sign somebody straight in rather than starting a
+   * sign-up (RULES O12, O13). An email the app already knows is linked to
+   * the account that holds it rather than refused as taken; an identity
+   * the server knows nothing about opens the sheet below, which asks
+   * whether this is a new member before making the account (O15).
    */
   const onSocialSelect = useCallback(
     (provider: SocialProvider) => {
@@ -183,10 +185,20 @@ export const SignUpScreen = () => {
         signInWithGoogle();
         return;
       }
+      if (provider === 'apple') {
+        signInWithApple();
+        return;
+      }
       setNotice(`${PROVIDER_NAMES[provider]} sign-up is not connected yet.`);
     },
-    [signInWithGoogle],
+    [signInWithApple, signInWithGoogle],
   );
+
+  // "I already have an account" (RULES O15): the sign-in form is where
+  // that account is opened, and where the identity gets connected to it.
+  const goToSignIn = useCallback(() => {
+    navigation.navigate('SignIn');
+  }, [navigation]);
 
   const showTerms = useCallback(() => {
     setNotice('The full terms open on vokve.com for now.');
@@ -419,6 +431,7 @@ export const SignUpScreen = () => {
           <SocialAuthRow onSelect={onSocialSelect} disabled={isSubmitting} />
         </VStack>
       </KeyboardAwareScrollView>
+      <IdentityChoiceSheet onChoseExistingAccount={goToSignIn} />
     </Screen>
   );
 };

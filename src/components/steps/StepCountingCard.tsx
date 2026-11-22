@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { Platform } from 'react-native';
 import { Footprints } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { formatGrouped } from '../../utils/format';
@@ -99,9 +100,9 @@ export const StepCountingCard = memo(
 
           {state === 'off' ? (
             <AppText variant="caption" color="textSecondary">
-              Vokve counts your steps with your phone's own motion sensor, even
-              when the app is closed. A small notification shows while it
-              counts, and you can turn it off here at any time.
+              {Platform.OS === 'ios'
+                ? "Vokve counts your steps with your iPhone's own motion sensor, even when the app is closed. You can turn it off here at any time."
+                : "Vokve counts your steps with your phone's own motion sensor, even when the app is closed. A small notification shows while it counts, and you can turn it off here at any time."}
             </AppText>
           ) : null}
 
@@ -113,16 +114,16 @@ export const StepCountingCard = memo(
 
           {state === 'unsupported' ? (
             <AppText variant="caption" color="textSecondary">
-              Step counting needs an Android phone for now. Support for iPhone
-              is on its way.
+              This device has no step sensor Vokve can count with.
             </AppText>
           ) : null}
 
           {state === 'off' && permissionDenied ? (
             <VStack gap="sm">
               <AppText variant="caption" color="warning">
-                Vokve needs the Physical activity permission to count steps. If
-                the dialog no longer appears, allow it in settings.
+                {Platform.OS === 'ios'
+                  ? 'Vokve needs Motion & Fitness to count steps. Allow it for Vokve in Settings.'
+                  : 'Vokve needs the Physical activity permission to count steps. If the dialog no longer appears, allow it in settings.'}
               </AppText>
               <Button
                 label="Open settings"

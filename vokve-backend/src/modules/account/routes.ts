@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { ApiError, Errors } from '../../lib/errors.js';
@@ -6,15 +5,18 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
-import { signUpBody } from '../identity/auth.service.js';
+import { appleBody, appleIdentity, googleIdentity, signUpBody } from '../identity/auth.service.js';
+import { getSignInMethods, identityFromLinkToken, linkIdentity, unlinkIdentity } from '../identity/linking.service.js';
+import { confirmationFields, confirmMember } from '../identity/confirm.service.js';
 import { UserModel } from '../identity/models.js';
 import { createChallenge, isChannelUsable } from '../identity/otp.service.js';
-import { supportCategorySchema } from '../../contracts/index.js';
+import { signInProviderSchema, supportCategorySchema } from '../../contracts/index.js';
 import {
   appGuide, avatarBody, cancelDeletion, changePassword, changePasswordBody, createTicket, deleteAccountBody, exportAccount, getAbout,
   getDeletion, getMedia, getPrivacy, getProfileSummary, getTicket, listFaqs, listSessions, listTickets, privacyBody,
   removeAvatar, replyBody, replyToTicket, scheduleDeletion, setAvatar, signOutOtherSessions, supportHome, ticketBody, updatePrivacy,
 } from './service.js';
+import { checkPhone, phoneCheckBody, phoneVerifyBody, verifyPhone } from './phone.service.js';
 
 export const accountRouter = Router();
 
@@ -78,14 +80,20 @@ accountRouter.put(
 
 // ─── Changing the email or the phone (RULES O2) ────────────────────────────
 
+/**
+ * The proof is the account's own (RULES O17): its password, or — for an
+ * account made with Apple or Google, which has none — a fresh sign-in with
+ * that provider. Without the second, a member whose Hide My Email relay
+ * had stopped forwarding could not move to an address they read.
+ */
 const changeEmailBody = z.object({
   email: signUpBody.shape.email,
-  password: z.string().min(1, 'Enter your password'),
+  ...confirmationFields,
 }).strict();
 
 const changePhoneBody = z.object({
   phone: signUpBody.shape.phone,
-  password: z.string().min(1, 'Enter your password'),
+  ...confirmationFields,
 }).strict();
 
 const contactChangeLimit = rateLimit({ name: 'contact-change-user', max: 5, windowSeconds: 3600, by: 'user' });
@@ -106,9 +114,7 @@ async function requestContactChange(req: Request, res: Response, kind: 'email' |
   if (!user || user.deletedAt) throw Errors.unauthorized();
   const next = kind === 'email' ? (req.body.email as string) : (req.body.phone as string);
 
-  if (!(await bcrypt.compare(req.body.password, user.passwordHash))) {
-    throw new ApiError(422, 'PASSWORD_INCORRECT', 'That is not your password.', { password: 'That is not your password.' });
-  }
+  await confirmMember(user, req.body, { platform: req.ctx.platform }, 'change');
   if (next === (kind === 'email' ? user.email : user.phone)) {
     throw Errors.validation({ [kind]: `That is already your ${kind === 'email' ? 'email address' : 'number'}.` });
   }
@@ -141,6 +147,67 @@ accountRouter.post('/me/phone', contactChangeLimit, validate('body', changePhone
   await requestContactChange(req, res, 'phone');
 });
 
+// ─── Verifying the phone through Firebase (RULES O14) ──────────────────────
+
+/**
+ * The app's way to add, prove or change the number while this server has no
+ * SMS sender: Firebase texts the code, the phone confirms it, and the token
+ * Firebase hands back is the proof (`phone.service`). `check` is asked first
+ * so a taken number or a wrong password is said before an SMS is paid for.
+ */
+const phoneLimit = rateLimit({ name: 'phone-firebase-user', max: 10, windowSeconds: 3600, by: 'user' });
+
+accountRouter.post('/me/phone/check', phoneLimit, validate('body', phoneCheckBody), async (req, res) => {
+  res.json(await checkPhone(req.ctx.userId!, req.body));
+});
+
+accountRouter.post('/me/phone/verify', phoneLimit, validate('body', phoneVerifyBody), async (req, res) => {
+  res.json(await verifyPhone(req.ctx.userId!, req.body, { deviceId: req.ctx.deviceId }));
+});
+
+// ─── Sign-in methods: Google and Apple on an existing account (RULES O15) ──
+
+/**
+ * Connecting proves the identity, not the member — they are already signed
+ * in. From Security the phone sends a fresh provider token; after sign-in
+ * answered `IDENTITY_NOT_LINKED` and the member chose "I already have an
+ * account", it sends the link token that answer carried.
+ */
+const signInMethodLimit = rateLimit({ name: 'sign-in-methods-user', max: 10, windowSeconds: 3600, by: 'user' });
+const connectGoogleBody = z.object({ idToken: z.string().trim().min(1).max(4000) }).strict();
+const connectAppleBody = appleBody.pick({ idToken: true, nonce: true, fullName: true }).strict();
+const connectLinkBody = z.object({ linkToken: z.string().trim().min(1).max(4000) }).strict();
+
+accountRouter.get('/me/sign-in-methods', async (req, res) => {
+  res.json(await getSignInMethods(req.ctx.userId!));
+});
+
+accountRouter.post('/me/sign-in-methods/google', signInMethodLimit, validate('body', connectGoogleBody), async (req, res) => {
+  res.json(await linkIdentity(req.ctx.userId!, await googleIdentity(req.body.idToken), { deviceId: req.ctx.deviceId }));
+});
+
+accountRouter.post('/me/sign-in-methods/apple', signInMethodLimit, validate('body', connectAppleBody), async (req, res) => {
+  res.json(await linkIdentity(req.ctx.userId!, await appleIdentity(req.body), { deviceId: req.ctx.deviceId }));
+});
+
+accountRouter.post('/me/sign-in-methods/link', signInMethodLimit, validate('body', connectLinkBody), async (req, res) => {
+  const identity = identityFromLinkToken(req.body.linkToken);
+  res.json(await linkIdentity(req.ctx.userId!, identity, { deviceId: req.ctx.deviceId }));
+});
+
+/** Apple's needs a fresh Apple sign-in in the body, to revoke with (RULES O16); Google's needs nothing. */
+const disconnectBody = z
+  .object({ apple: connectAppleBody.pick({ idToken: true, nonce: true }).extend({ authorizationCode: z.string().trim().min(1).max(2000) }).strict().optional() })
+  .strict();
+
+accountRouter.delete('/me/sign-in-methods/:provider', signInMethodLimit, async (req, res) => {
+  const provider = signInProviderSchema.safeParse(req.params.provider);
+  if (!provider.success) throw Errors.notFound('That sign-in method');
+  const body = disconnectBody.safeParse(req.body ?? {});
+  if (!body.success) throw Errors.validation({ apple: 'That Apple confirmation is not valid.' });
+  res.json(await unlinkIdentity(req.ctx.userId!, provider.data, body.data.apple, { deviceId: req.ctx.deviceId, platform: req.ctx.platform }));
+});
+
 // ─── Sessions ──────────────────────────────────────────────────────────────
 
 accountRouter.get('/me/sessions', async (req, res) => {
@@ -171,7 +238,7 @@ accountRouter.post(
   rateLimit({ name: 'account-delete-user', max: 5, windowSeconds: 3600, by: 'user' }),
   validate('body', deleteAccountBody),
   async (req, res) => {
-    res.json(await scheduleDeletion(req.ctx.userId!, req.body, { deviceId: req.ctx.deviceId }));
+    res.json(await scheduleDeletion(req.ctx.userId!, req.body, { deviceId: req.ctx.deviceId, platform: req.ctx.platform }));
   },
 );
 

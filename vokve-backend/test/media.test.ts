@@ -26,6 +26,9 @@ const adminHeaders = () => ({ 'x-admin-key': 'test-admin-key-test-admin-key' });
 
 /** What the bucket says about an object, for the double to answer with. */
 let head: { ContentLength: number; ContentType: string } | null = null;
+/** What a ranged read of the object's first bytes returns: a JPEG's header unless a test says otherwise. */
+const JPEG_START = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01]);
+let start: Buffer = JPEG_START;
 let deleted: string[] = [];
 
 beforeEach(() => {
@@ -35,6 +38,7 @@ beforeEach(() => {
   env.AWS_SECRET_ACCESS_KEY = 'secret';
   env.AWS_S3_PUBLIC_BASE = 'https://cdn.vokve.test';
   head = { ContentLength: 120_000, ContentType: 'image/jpeg' };
+  start = JPEG_START;
   deleted = [];
 
   setStorageClient({
@@ -43,6 +47,9 @@ beforeEach(() => {
       if (name === 'HeadObjectCommand') {
         if (!head) throw new Error('NotFound');
         return head;
+      }
+      if (name === 'GetObjectCommand') {
+        return { Body: { transformToByteArray: async () => new Uint8Array(start) } };
       }
       if (name === 'DeleteObjectCommand') {
         deleted.push(command.input.Key);
@@ -108,6 +115,30 @@ describe('recording an upload', () => {
 
     expect(response.status).toBe(422);
     expect(deleted).toContain('shop/doc.jpg');
+  });
+
+  it('reads the bytes, not the declared type: HTML uploaded as image/jpeg is deleted', async () => {
+    // The signed PUT pins the Content-Type header, not what is in the body,
+    // so a page of script can arrive labelled as a photo. The bucket is
+    // public; serving it is serving somebody else's page from our domain.
+    start = Buffer.from('<!doctype html><script>alert(1)</script>');
+
+    const response = await confirm({ key: 'shop/2026-11-21/fake.jpg', kind: 'shop', filename: 'fake.jpg' });
+
+    expect(response.status).toBe(422);
+    expect(deleted).toContain('shop/2026-11-21/fake.jpg');
+    expect(await MediaAssetModel.countDocuments({})).toBe(0);
+  });
+
+  it('will not record an object from another shelf, or outside any', async () => {
+    // Every key this API signs starts with its kind; anything else is
+    // another object in the bucket being claimed.
+    for (const key of ['avatars/2026-11-21/x.jpg', '../shop/x.jpg', 'shop/../secrets/x.jpg']) {
+      const response = await confirm({ key, kind: 'shop', filename: 'x.jpg' });
+      expect(response.status).toBe(404);
+    }
+    expect(deleted).toEqual([]);
+    expect(await MediaAssetModel.countDocuments({})).toBe(0);
   });
 });
 

@@ -87,7 +87,8 @@ it('hands back what a sign-in saved, not what was read before it', async () => {
   expect(setGenericPassword).toHaveBeenCalledWith(
     'tokens',
     JSON.stringify(NEWER),
-    { service: 'vokve.auth.tokens' },
+    // Never into a device backup, still readable for the locked-screen sync.
+    { service: 'vokve.auth.tokens', accessible: 'AccessibleAfterFirstUnlockThisDeviceOnly' },
   );
 });
 

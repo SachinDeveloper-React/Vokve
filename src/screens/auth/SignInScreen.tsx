@@ -25,11 +25,15 @@ import { Icon } from '../../components/media/Icon';
 import { Wordmark } from '../../components/brand/Wordmark';
 import { AuthHeroBackdrop } from '../../components/auth/AuthHeroBackdrop';
 import {
+  IdentityChoiceSheet,
+  pendingLinkNotice,
+} from '../../components/auth/IdentityChoiceSheet';
+import {
   SocialAuthRow,
   type SocialProvider,
 } from '../../components/auth/SocialAuthRow';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
-import { useAuthStore } from '../../stores/authStore';
+import { useAuthStore, usePendingIdentity } from '../../stores/authStore';
 import { describeAuthError } from '../../utils/authErrors';
 import { signInSchema, type SignInValues } from '../../types/forms';
 import type {
@@ -110,6 +114,7 @@ export const SignInScreen = () => {
 
   const signIn = useAuthStore(s => s.signIn);
   const signInWithGoogle = useAuthStore(s => s.signInWithGoogle);
+  const signInWithApple = useAuthStore(s => s.signInWithApple);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
@@ -117,6 +122,14 @@ export const SignInScreen = () => {
   // revoked, the sign-up code ran out. Set by the store, shown once.
   const storeNotice = useAuthStore(s => s.notice);
   const setStoreNotice = useAuthStore(s => s.setNotice);
+  // A Google or Apple identity the member said belongs to an account they
+  // already have (RULES O15): signing in below connects it.
+  const pendingIdentity = usePendingIdentity();
+  const dismissPendingIdentity = useAuthStore(s => s.dismissPendingIdentity);
+  const linkNotice =
+    pendingIdentity?.stage === 'link'
+      ? pendingLinkNotice(pendingIdentity.provider)
+      : null;
 
   const { params } = useRoute<AuthStackScreenProps<'SignIn'>['route']>();
   const [isPasswordVisible, setPasswordVisible] = useState(false);
@@ -157,11 +170,11 @@ export const SignInScreen = () => {
   }, [navigation]);
 
   /**
-   * Google is wired; the other two are not, and say so rather than
-   * doing nothing when pressed (RULES O12).
+   * Google and Apple are wired (RULES O12, O13); Facebook is not, and
+   * says so rather than doing nothing when pressed.
    *
    * Nothing is shown for a cancel. The store leaves `error` null when
-   * somebody backs out of the Google sheet, and a notice saying
+   * somebody backs out of the provider's sheet, and a notice saying
    * "cancelled" under the button would be the app arguing with a
    * decision they just made.
    */
@@ -171,9 +184,13 @@ export const SignInScreen = () => {
         signInWithGoogle();
         return;
       }
+      if (provider === 'apple') {
+        signInWithApple();
+        return;
+      }
       setNotice(`${PROVIDER_NAMES[provider]} sign-in is not connected yet.`);
     },
-    [signInWithGoogle],
+    [signInWithApple, signInWithGoogle],
   );
 
   const dismissNotice = useCallback(() => {
@@ -216,6 +233,15 @@ export const SignInScreen = () => {
 
         {visibleNotice ? (
           <Alert tone="info" title={visibleNotice} onDismiss={dismissNotice} />
+        ) : null}
+
+        {linkNotice ? (
+          <Alert
+            tone="info"
+            title={linkNotice.title}
+            message={linkNotice.message}
+            onDismiss={dismissPendingIdentity}
+          />
         ) : null}
 
         <Card radius="xl" padding="lg" style={styles.card}>
@@ -349,6 +375,7 @@ export const SignInScreen = () => {
           </View>
         </Card>
       </KeyboardAwareScrollView>
+      <IdentityChoiceSheet />
     </Screen>
   );
 };

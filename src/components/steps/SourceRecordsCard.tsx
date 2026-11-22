@@ -3,6 +3,8 @@ import { StyleSheet } from 'react-native';
 import { Database } from 'lucide-react-native';
 import type { StepSourcesReport } from '../../types/models';
 import { useTheme } from '../../theme';
+import { useHealthConnectStatus } from '../../stores/stepsStore';
+import { healthStoreName } from '../../utils/healthStore';
 import { formatGrouped } from '../../utils/format';
 import { Divider } from '../layout/Divider';
 import { HStack, VStack } from '../layout/Stack';
@@ -20,6 +22,7 @@ interface Props {
  */
 export const SourceRecordsCard = memo(({ records }: Props) => {
   const { colors } = useTheme();
+  const healthName = healthStoreName(useHealthConnectStatus());
 
   return (
     <Card radius="xl" padding="base">
@@ -29,14 +32,14 @@ export const SourceRecordsCard = memo(({ records }: Props) => {
           <VStack flex={1} gap="xxs">
             <AppText variant="bodyStrong">Raw records</AppText>
             <AppText variant="caption" color="textSecondary">
-              Health Connect records the server received
+              {healthName} records the server received
             </AppText>
           </VStack>
         </HStack>
 
         {records.length === 0 ? (
           <AppText variant="caption" color="textSecondary">
-            No Health Connect records for this day.
+            No {healthName} records for this day.
           </AppText>
         ) : (
           records.map((entry, index) => (

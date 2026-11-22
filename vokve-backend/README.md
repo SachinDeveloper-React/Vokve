@@ -91,6 +91,26 @@ curl -s $B/dev/jobs/coin-expiry -H "$H" -H "authorization: Bearer <access>" -H "
 
 `src/jobs/scheduler.ts` ticks hourly inside the API process. Daily jobs run once per UTC day (claim key in Redis/memory KV, so two instances never both run one): the coin expiry warnings (`warnExpiringWallets`, RULES E10 — feed row + push at 14 and 3 days) and then the idle-expiry sweep (`expireIdleWallets`, RULES E9). Hourly, unclaimed: `flushDeferredPushes` sends the pushes quiet hours held back, `expireUnpaidOrders` releases unpaid orders, `releaseDueHolds` pays step coins out of escrow once their window has passed — or, out of shadow mode, voids a hold whose day has since been found wanting (RULES E15) — `warnStreaksAtRisk` tells each member whose streak is not yet covered, at 19:00 in their zone (RULES S10), and `closeDueWeeks` freezes and pays last week's country leaderboard a few hours into Monday (RULES L6, L10). Runs on boot too, so a process started at 00:05 does not wait a day.
 
+## Knowing when it breaks
+
+Nobody has to be watching (RULES P19, P20). What raises an alarm, and how soon:
+
+| What broke | Alarm | How soon |
+|---|---|---|
+| The whole server, the database or Redis | an outside uptime monitor on `GET /v1/health` (503 unless Mongo and Redis both answer a ping) | the monitor's interval, 1–5 min |
+| A route throws (any 500) | `server.error:…` — route, error, first `src/` frame, request id | at once; then quiet an hour per route |
+| OTP email refused (Gmail limit, bad app password, SMTP down) | `mail.failed:quota / login / unreachable / refused`, each with its fix | at once |
+| OTP email at 80% of the day's limit | `mail.quota_near` (critical from 95%) | at once |
+| Crashing build, dead step services, stalled uploads, undelivered pushes | the hourly fleet sweep (`telemetry.*`) | within the hour, once 25+ installs report |
+
+Set up once:
+
+1. **Telegram** (the channel that does not depend on Gmail): @BotFather → `/newbot` → copy the token; send the new bot any message; open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `chat.id`. Put `OPS_TELEGRAM_BOT_TOKEN` and `OPS_TELEGRAM_CHAT_ID` in `.env` **and in Vercel** (Settings → Environment Variables), redeploy, then `npm run alerts:test`. A Slack/Discord/Google Chat webhook in `OPS_WEBHOOK_URL` works the same way.
+2. **Uptime monitor**: UptimeRobot or Better Stack (both free) → HTTP monitor on `https://<api host>/v1/health`, alert on any status other than 200, to the same phone.
+3. **`REDIS_URL` in production.** Without it each serverless instance keeps its own cooldowns and its own mail count, so an alarm can repeat and the 80% warning can come late.
+
+The boot banner prints `Alerts:` and `Mail limit:`; in production it warns when email is the only channel.
+
 ## Steps (Phase 2 — shadow mode)
 
 The app counts with react-native-step-tracker-pro and sends one **signed snapshot** per day (BACKEND §7.3, §15):
@@ -129,6 +149,40 @@ the operator's key alone — `ADMIN_API_KEY`, sent as `X-Admin-Key` — so no
 member token can reach it, and with no key configured every admin route
 answers 404 rather than advertising a door. Every write lands in `audit_log`
 with the plan before and after it.
+
+**Staff accounts — admin → manager → agent (RULES Z9).** People sign in to
+the panel with their own email, password and authenticator code; the admin
+key is only the owner's break-glass door. To start:
+
+```sh
+npm run staff:create-admin -- owner@vokve.app "Owner Name"   # prints a temporary password once
+```
+
+Sign in to the panel with it: you choose your own password and scan a QR code
+into an authenticator app, then Team → Staff → *Add a person*. Admins create
+managers (and tick what each may do, or start from a preset); managers create
+their own agents and can give them only what they hold. Every admin route
+checks a permission listed in `src/modules/staff/permissions.ts` — **a new
+admin route must be added to `ROUTE_PERMISSIONS` or the server will not
+start**. Team → Activity log shows every request and sign-in by whom.
+
+**Signing in with the key, and its second factor (RULES Z7).** The panel does not keep the
+key: it posts it once to `POST /v1/admin/session` (`{ key, code? }`) and keeps
+the 12-hour session it gets back, sent as `X-Admin-Session`. To turn on the
+authenticator, run `npm run admin:totp`, add the setup key to an
+authenticator app, check the code it prints matches, then set
+`ADMIN_TOTP_SECRET` on the API. From then on the session needs the six-digit
+code, and a bare `X-Admin-Key` answers `401 ADMIN_MFA_REQUIRED` — so the curl
+recipes below take a session instead:
+
+```sh
+S=$(curl -s -X POST $A/admin/session -H 'content-type: application/json' \
+  -d "{\"key\":\"$ADMIN_API_KEY\",\"code\":\"123456\"}" | jq -r .token)
+K="x-admin-session: $S"
+```
+
+Twenty wrong keys, sessions or codes from one address lock it out for fifteen
+minutes (`429`).
 
 ### Checking the coins add up
 
@@ -1308,6 +1362,41 @@ build. The wording and the quiet window are config too —
 `{"softTitle":"…","hardMessage":"Purana version {version} band ho gaya. {latest} install karein.","remindAfterHours":48}`
 on the same call, and `{"nudgeOnNewer":false}` if only a `deprecated` version
 should knock rather than every release.
+
+## The launcher icon: everyday and festive
+
+RULES DV13. The app asks `GET /app/icon` on launch and on every foreground and
+gets two keys back — `{ base, festive }` — and shows the festive one unless the
+member turned festive icons off in the app (About → Festive app icon). Every
+icon is **inside the build** (neither OS puts a downloaded picture on a home
+screen), so the server only ever names keys from `devices/appIcons.ts`, and a
+build that does not carry a key keeps its base icon. iOS switches at once and
+shows its own alert; Android switches when the member next leaves the app.
+
+```sh
+A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
+
+# the everyday icon: redfield | classic | night
+curl -s -X PUT "$A/admin/app-icon" -H "$K" -H 'Content-Type: application/json' -d '{"base":"night"}' | jq .live
+
+# a festive icon on by hand — wins over the schedule until it is taken off
+curl -s -X PUT "$A/admin/app-icon" -H "$K" -H 'Content-Type: application/json' -d '{"festive":"diwali"}' | jq .live
+curl -s -X PUT "$A/admin/app-icon" -H "$K" -H 'Content-Type: application/json' -d '{"festive":null}' | jq .live
+
+# or on a schedule (windows may not overlap)
+curl -s -X POST "$A/admin/app-icon/schedule" -H "$K" -H 'Content-Type: application/json' \
+  -d '{"icon":"newyear","startsAt":"2026-12-31T00:00:00+05:30","endsAt":"2027-01-02T00:00:00+05:30","note":"New Year"}' | jq .schedule
+curl -s -X DELETE "$A/admin/app-icon/schedule/<id>" -H "$K" | jq .schedule
+
+# what a phone is told, and how many phones say they show each icon
+curl -s "$A/app/icon" -H 'x-vokve-platform: android' -H 'x-vokve-app-version: 1.0.0' | jq
+curl -s "$A/admin/app-icon" -H "$K" | jq '{live, devices}'
+```
+
+A new icon is new art in the app's `assets/app-icons/` (`npm run icons:app`
+there), a build, and a line in `devices/appIcons.ts` — in that order. A key is
+never removed once shipped: an Android phone showing it would be left with no
+launcher entry. The generic config page refuses `app.icon.*` and points here.
 
 ## Notifications and push
 

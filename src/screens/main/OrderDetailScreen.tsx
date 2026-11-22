@@ -247,18 +247,29 @@ export const OrderDetailScreen = () => {
           'The order is still waiting for its payment.',
         tone: 'info',
       });
+    } else if (outcome.status === 'unconfirmed') {
+      toast.show({
+        title: 'Checking your payment',
+        message: outcome.error.message,
+        tone: 'warning',
+        durationMs: 8000,
+      });
     } else if (outcome.status === 'failed') {
+      const refunded = outcome.error.code === 'PAYMENT_REFUNDED';
       toast.show({
         title:
           outcome.error.code === 'PAYMENT_EXPIRED'
             ? 'Payment window closed'
+            : refunded
+            ? 'Payment refunded'
             : "Couldn't take the payment",
         message: outcome.error.message,
-        tone: 'error',
+        tone: refunded ? 'info' : 'error',
       });
       if (
         outcome.error.code === 'PAYMENT_EXPIRED' ||
-        outcome.error.code === 'ORDER_NOT_PENDING'
+        outcome.error.code === 'ORDER_NOT_PENDING' ||
+        refunded
       ) {
         orderApi
           .get(order.id)

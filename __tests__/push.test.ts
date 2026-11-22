@@ -31,6 +31,7 @@ import { Platform } from 'react-native';
 import notifee from '@notifee/react-native';
 import {
   AuthorizationStatus,
+  getAPNSToken,
   getInitialNotification,
   getToken,
   hasPermission,
@@ -162,6 +163,66 @@ test('a Firebase that is not set up on this build is not an error the user sees'
   (getToken as jest.Mock).mockRejectedValue(new Error('No Firebase App'));
 
   expect(await registerForPush()).toBe(false);
+});
+
+// FCM can only mint an iOS token once APNs has handed over the device
+// token, which lands after launch on Apple's schedule. A restored session
+// asks for the token straight away, so losing that race is the normal
+// cold start, not an edge case.
+describe('iOS: the token waits on APNs', () => {
+  const apns = getAPNSToken as jest.Mock;
+  let os: jest.ReplaceProperty<typeof Platform.OS>;
+
+  beforeEach(() => {
+    os = jest.replaceProperty(Platform, 'OS', 'ios');
+    apns.mockReset().mockResolvedValue('apns-test-token');
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    os.restore();
+  });
+
+  test('asks for the FCM token only once APNs has answered', async () => {
+    apns.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    jest.useFakeTimers();
+
+    const registering = registerForPush();
+    await jest.advanceTimersByTimeAsync(1_000);
+
+    expect(await registering).toBe(true);
+    expect(apns).toHaveBeenCalledTimes(3);
+    expect(deviceApi.setPushToken).toHaveBeenCalledWith('dev_1', 'fcm-test-token');
+  });
+
+  test('when APNs never answers, the token Firebase mints later still reaches the server', async () => {
+    apns.mockResolvedValue(null);
+    (getToken as jest.Mock).mockRejectedValue(
+      new Error('No APNS token specified before fetching FCM Token'),
+    );
+    jest.useFakeTimers();
+
+    const registering = registerForPush();
+    await jest.advanceTimersByTimeAsync(11_000);
+    expect(await registering).toBe(false);
+    expect(deviceApi.setPushToken).not.toHaveBeenCalled();
+
+    // APNs answers at last; Firebase mints the token and says so here.
+    const listener = (onTokenRefresh as jest.Mock).mock.calls[0][1] as (
+      token: string,
+    ) => void;
+    listener('fcm-after-apns');
+    await Promise.resolve();
+    expect(deviceApi.setPushToken).toHaveBeenCalledWith('dev_1', 'fcm-after-apns');
+  });
+
+  test('Android never waits on APNs', async () => {
+    os.replaceValue('android');
+
+    await registerForPush();
+
+    expect(apns).not.toHaveBeenCalled();
+  });
 });
 
 describe('the server’s silent “sync now” message (A28)', () => {

@@ -15,6 +15,7 @@ import { notify } from '../notifications/service.js';
 import { AuditLogModel } from '../platform/models.js';
 import { logReading } from '../vitals/service.js';
 import { page, pageFields } from './paging.js';
+import { isWebUrl } from '../../lib/urls.js';
 
 /**
  * The things an operator may change about an account, kept in their own file
@@ -220,7 +221,7 @@ export const profileBody = z
     name: z.string().trim().min(2).max(60).optional(),
     email: z.string().trim().toLowerCase().email('That does not look like an email address').optional(),
     phone: z.string().trim().regex(/^\+[1-9]\d{6,14}$/, 'A number looks like +919876543210').optional(),
-    avatarUrl: z.string().url().nullable().optional(),
+    avatarUrl: z.string().max(2048).url().refine(isWebUrl, 'A photo address starts with https://').nullable().optional(),
     heightCm: z.number().min(90).max(250).nullable().optional(),
     weightKg: z.number().min(25).max(300).nullable().optional(),
     dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'A date looks like 1994-03-21').nullable().optional(),

@@ -1017,7 +1017,7 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
     expect(checkoutApi.pay).toHaveBeenCalledWith(
       'ord-1',
       { providerPaymentId: expect.stringMatching(/^mockpay_/) },
-      { idempotencyKey: 'ord-1:pay' },
+      { idempotencyKey: expect.stringMatching(/^ord-1:pay:mockpay_/) },
     );
     expect(cachedOrders()[0]).toMatchObject({
       id: 'ord-1',
@@ -1173,6 +1173,29 @@ describe('CheckoutScreen (RULES R11–R13, O8)', () => {
       null,
     );
     expect(allText(payment)).toContain('₹363.50');
+  });
+
+  test('a member with no verified phone is sent to add one rather than only told no (RULES O14)', async () => {
+    mockRouteParams = { fromCart: true };
+    useAddressesStore.setState({ addresses: [HOME] });
+    useCartStore.setState({ cart: cartWith(cap, 1) });
+    checkoutApi.quote.mockResolvedValue(quoteFor(cap));
+    checkoutApi.place.mockRejectedValueOnce(
+      new ApiError(
+        'forbidden',
+        'Verify your phone number to continue.',
+        403,
+        null,
+        'PHONE_NOT_VERIFIED',
+      ),
+    );
+
+    const tree = await render(<CheckoutScreen />);
+    const payment = await handOff(tree);
+    await pressButton(payment, 'Pay Now');
+
+    expect(mockNavigate).toHaveBeenCalledWith('VerifyPhone', { reason: 'redeem' });
+    expect(allText(payment)).not.toContain("Couldn't place the order");
   });
 
   test('spending coins asks for no code: the order is placed and the gateway opens (D-66)', async () => {
@@ -1704,7 +1727,7 @@ describe('OrderConfirmationScreen (RULES R5, R12)', () => {
     expect(checkoutApi.pay).toHaveBeenCalledWith(
       'ord-1',
       { providerPaymentId: expect.stringMatching(/^mockpay_/) },
-      { idempotencyKey: 'ord-1:pay' },
+      { idempotencyKey: expect.stringMatching(/^ord-1:pay:mockpay_/) },
     );
     expect(flatText(tree)).toContain('Order Confirmed!');
   });

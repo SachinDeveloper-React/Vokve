@@ -5,6 +5,7 @@ import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import { generateOtp, hashOtp, maskTarget } from '../../lib/otp.js';
 import { isEmailConfigured, sendOtpEmail, type OtpEmailPurpose } from '../../lib/mail.js';
+import { alertMailFailure, warnIfNearMailLimit } from '../../lib/mailHealth.js';
 import { isProduction } from '../../config/env.js';
 import { verificationChallengeSchema, type VerificationChallenge } from '../../contracts/index.js';
 import { OtpChallengeModel, type OtpPurpose } from './models.js';
@@ -124,8 +125,9 @@ async function deliver(channel: 'sms' | 'email', target: string, code: string, p
 
   if (channel === 'email' && isEmailConfigured()) {
     const { otp } = await getConfig();
+    let sentToday: number | null;
     try {
-      await sendOtpEmail(target, code, purpose as OtpEmailPurpose, Math.round(otp.ttlSeconds / 60));
+      sentToday = await sendOtpEmail(target, code, purpose as OtpEmailPurpose, Math.round(otp.ttlSeconds / 60));
     } catch (error) {
       // The provider's own answer, flattened onto the log line. `err.code`
       // alone would not do: the logger redacts `*.code` to keep OTP codes out
@@ -137,8 +139,12 @@ async function deliver(channel: 'sms' | 'email', target: string, code: string, p
         err: error, purpose,
         smtpCode: smtp.code, smtpStatus: smtp.responseCode, smtpCommand: smtp.command, smtpResponse: smtp.response,
       }, 'mail.failed');
+      // Awaited, not fired and forgotten: on a serverless host the instance
+      // can be frozen the moment the 503 goes out (RULES P20).
+      await alertMailFailure(error, purpose);
       throw new ApiError(503, 'EMAIL_UNAVAILABLE', 'We could not send the email right now. Please try again in a moment.');
     }
+    await warnIfNearMailLimit(sentToday);
     return;
   }
   if (channel === 'sms' && env.SMS_PROVIDER) {
@@ -168,19 +174,37 @@ export async function consumeChallenge(verificationId: string, code: string, exp
   if (challenge.expiresAt < new Date()) {
     throw new ApiError(410, 'OTP_EXPIRED', 'This code has expired. Request a new one.');
   }
-  if (challenge.attempts >= otp.maxAttempts) {
-    throw new ApiError(429, 'OTP_TOO_MANY_ATTEMPTS', 'Too many wrong attempts. Request a new code.', { attemptsRemaining: 0 });
-  }
+  const tooMany = () =>
+    new ApiError(429, 'OTP_TOO_MANY_ATTEMPTS', 'Too many wrong attempts. Request a new code.', { attemptsRemaining: 0 });
+  if (challenge.attempts >= otp.maxAttempts) throw tooMany();
+
+  // The attempt is claimed in the database *before* the code is compared.
+  // Read-compare-save let a burst of parallel guesses all read the same
+  // count and all be compared, so `maxAttempts` held for one request at a
+  // time and not for a thousand at once — and a six-digit code is a
+  // thousand-to-one shot per guess (RULES O6).
+  const claimed = await OtpChallengeModel.findOneAndUpdate(
+    { _id: challenge._id, consumedAt: null, attempts: { $lt: otp.maxAttempts } },
+    { $inc: { attempts: 1 } },
+    { new: true },
+  );
+  if (!claimed) throw tooMany();
+
   if (hashOtp(code, challenge._id) !== challenge.codeHash) {
-    challenge.attempts += 1;
-    await challenge.save();
     throw new ApiError(422, 'OTP_INVALID', 'That code is not right. Check it and try again.', {
-      attemptsRemaining: otp.maxAttempts - challenge.attempts,
+      attemptsRemaining: Math.max(0, otp.maxAttempts - claimed.attempts),
     });
   }
-  challenge.consumedAt = new Date();
-  await challenge.save();
-  return challenge;
+  // A right code still costs its attempt, which is harmless: it is spent
+  // here, once — the conditional write means two requests carrying it
+  // cannot both come away with a session.
+  const consumed = await OtpChallengeModel.findOneAndUpdate(
+    { _id: challenge._id, consumedAt: null },
+    { $set: { consumedAt: new Date() } },
+    { new: true },
+  );
+  if (!consumed) throw new ApiError(404, 'OTP_NOT_FOUND', 'This code is no longer valid. Request a new one.');
+  return consumed;
 }
 
 export async function findLiveChallenge(verificationId: string) {

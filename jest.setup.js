@@ -15,6 +15,7 @@ jest.mock('react-native-keyboard-controller', () =>
 require('@shopify/flash-list/jestSetup');
 
 jest.mock('react-native-keychain', () => ({
+  ACCESSIBLE: { AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'AccessibleAfterFirstUnlockThisDeviceOnly' },
   setGenericPassword: jest.fn().mockResolvedValue(true),
   getGenericPassword: jest.fn().mockResolvedValue(false),
   resetGenericPassword: jest.fn().mockResolvedValue(true),
@@ -58,6 +59,7 @@ jest.mock('@react-native-firebase/messaging', () => ({
   AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2, EPHEMERAL: 3 },
   getMessaging: jest.fn(() => ({})),
   getToken: jest.fn().mockResolvedValue('fcm-test-token'),
+  getAPNSToken: jest.fn().mockResolvedValue('apns-test-token'),
   deleteToken: jest.fn().mockResolvedValue(undefined),
   hasPermission: jest.fn().mockResolvedValue(1),
   requestPermission: jest.fn().mockResolvedValue(1),
@@ -113,6 +115,84 @@ jest.mock('react-native-nitro-google-signin', () => {
       SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED',
       DEVELOPER_ERROR: 'DEVELOPER_ERROR',
     },
+  };
+});
+
+// Apple sign-in's iOS half is a native module and its Android half is read
+// off `NativeModules` at import, so neither exists under Jest. The double
+// answers a signed-in response on both; a test about cancelling or failing
+// says so for itself.
+jest.mock('@invertase/react-native-apple-authentication', () => ({
+  appleAuth: {
+    isSupported: true,
+    performRequest: jest.fn().mockResolvedValue({
+      identityToken: 'apple-identity-token',
+      nonce: 'apple-raw-nonce-0123456789',
+      fullName: { givenName: null, familyName: null },
+      email: null,
+      user: 'apple-user',
+      authorizationCode: 'apple-code',
+    }),
+    Operation: { IMPLICIT: 0, LOGIN: 1, REFRESH: 2, LOGOUT: 3 },
+    Scope: { EMAIL: 0, FULL_NAME: 1 },
+    State: { REVOKED: 0, AUTHORIZED: 1, NOT_FOUND: 2, TRANSFERRED: 3 },
+    getCredentialStateForUser: jest.fn().mockResolvedValue(1),
+    onCredentialRevoked: jest.fn(() => jest.fn()),
+    Error: {
+      UNKNOWN: '1000',
+      CANCELED: '1001',
+      INVALID_RESPONSE: '1002',
+      NOT_HANDLED: '1003',
+      FAILED: '1004',
+    },
+  },
+  appleAuthAndroid: {
+    isSupported: true,
+    configure: jest.fn(),
+    signIn: jest.fn().mockResolvedValue({
+      id_token: 'apple-identity-token',
+      nonce: 'apple-raw-nonce-0123456789',
+      state: 'state',
+      code: 'apple-code',
+    }),
+    Error: {
+      NOT_CONFIGURED: 'E_NOT_CONFIGURED_ERROR',
+      SIGNIN_FAILED: 'E_SIGNIN_FAILED_ERROR',
+      SIGNIN_CANCELLED: 'E_SIGNIN_CANCELLED_ERROR',
+    },
+    Scope: { ALL: 'ALL', EMAIL: 'EMAIL', NAME: 'NAME' },
+    ResponseType: { ALL: 'ALL', CODE: 'CODE', ID_TOKEN: 'ID_TOKEN' },
+  },
+}));
+
+// Firebase Auth is used for phone verification only (RULES O14), and is a
+// native module. The double sends a code, and confirms any code into a
+// Firebase user holding the number it was sent to; a test about Android's
+// auto-verification or a refused code says so for itself.
+jest.mock('@react-native-firebase/auth', () => {
+  const auth = { currentUser: null };
+  const listeners = new Set();
+  const setUser = user => {
+    auth.currentUser = user;
+    listeners.forEach(listener => listener(user));
+  };
+  return {
+    __setUser: setUser,
+    getAuth: jest.fn(() => auth),
+    getIdToken: jest.fn(async user => `firebase-id-token:${user.phoneNumber}`),
+    signInWithPhoneNumber: jest.fn(async (_auth, phoneNumber) => ({
+      verificationId: 'verification-id',
+      confirm: jest.fn(async () => {
+        const user = { uid: 'firebase-uid', phoneNumber };
+        setUser(user);
+        return { user };
+      }),
+    })),
+    signOut: jest.fn(async () => setUser(null)),
+    onAuthStateChanged: jest.fn((_auth, listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }),
   };
 });
 

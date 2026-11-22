@@ -50,6 +50,10 @@ export type ApiErrorCode =
   | 'PAYMENT_INVALID'
   | 'PAYMENT_UNAVAILABLE'
   | 'PAYMENT_PROVIDER_UNAVAILABLE'
+  /** A payment arrived for an order already released; it is being sent back. */
+  | 'PAYMENT_REFUNDED'
+  /** The same idempotency key is still being worked on — ask again shortly. */
+  | 'IN_PROGRESS'
   | 'COINS_OVER_LIMIT'
   | 'CART_EMPTY'
   | 'SIZE_REQUIRED'

@@ -189,6 +189,7 @@ const FLAG_MESSAGES: Record<string, string> = {
   counter_reset: 'The step counter was reset during the day.',
   stride_incoherent: 'The distance does not fit the number of steps.',
   motion_disabled: 'Motion sampling is turned off.',
+  motion_unsupported: 'iPhones have no motion sampling; the day is judged without it.',
   motion_non_walk: 'Most of the motion looked like shaking or standing still, not walking.',
   shake_windows: 'Some of the motion looked like the phone being shaken.',
   night_steps: 'A lot of the steps were taken between 1 and 5 in the morning.',
@@ -297,13 +298,14 @@ function explain(
   }
   const phone = best.phone;
   lines.push(`${name} counted ${plural(phone.counted, 'step', 'steps')} with its own sensor.`);
-  // A29: the sensor reported them, the phone decided they were a vehicle
-  // shaking it, and they were never part of the count above. Said plainly,
+  // A29: the sensor reported them while the phone's Activity Recognition
+  // said it was in a vehicle or on a bike (tracker 2.9), so the phone held
+  // them back and they were never part of the count above. Said plainly,
   // because an hour in a bus that adds nothing is the one figure a member
   // comes to this page to ask about.
   if ((phone.gated ?? 0) > 0) {
     lines.push(
-      `Its sensor also reported ${plural(phone.gated ?? 0, 'step', 'steps')} while the phone was being shaken by a vehicle rather than walked — a bus, a car or a bike — so those were never counted.`,
+      `Its sensor also reported ${plural(phone.gated ?? 0, 'step', 'steps')} while the phone could tell you were riding — in a bus, a car or on a bike — so those were never counted.`,
     );
   }
   if (phone.recovered > 0) {

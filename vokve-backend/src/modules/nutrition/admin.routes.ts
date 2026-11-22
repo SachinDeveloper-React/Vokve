@@ -1,6 +1,4 @@
-import { Router } from 'express';
 import { z } from 'zod';
-import { requireAdmin } from '../../middleware/admin.js';
 import { validate } from '../../middleware/validate.js';
 import {
   adminCreateFood,
@@ -21,6 +19,7 @@ import {
   adminUpdatePlan,
 } from './admin.service.js';
 import { adminFoodBody, adminPlanBody } from './admin.schemas.js';
+import { guardedRouter } from '../staff/guard.js';
 
 /**
  * The admin HTTP API for the content a member eats by: the food library
@@ -29,8 +28,9 @@ import { adminFoodBody, adminPlanBody } from './admin.schemas.js';
  * Mounted under `/v1/admin` and gated by the operator's key alone — no member
  * token reaches it, and with no key configured every route here answers 404.
  */
-export const adminNutritionRouter = Router();
-adminNutritionRouter.use('/admin', requireAdmin);
+// Every route checks its own permission (RULES Z9); the gate that says who
+// is asking is mounted once, in front of every admin router, in app.ts.
+export const adminNutritionRouter = guardedRouter();
 
 /**
  * What the nutrition side is made of: the library, the plans, and what
