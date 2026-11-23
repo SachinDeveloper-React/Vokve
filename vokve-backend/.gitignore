@@ -17,3 +17,6 @@ dist
 secrets/
 *service-account*.json
 *firebase-adminsdk*.json
+
+# macOS Finder metadata.
+.DS_Store
