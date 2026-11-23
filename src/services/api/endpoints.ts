@@ -11,6 +11,7 @@ import {
   deliveryPreferencesSchema,
   appAboutSchema,
   appIconSchema,
+  appStatusSchema,
   appNotificationSchema,
   attestationChallengeSchema,
   authResponseSchema,
@@ -653,6 +654,7 @@ const realAppApi: AppApi = {
   about: () => request(appAboutSchema, client => client.get('/app/about')),
   update: () => request(appUpdateSchema, client => client.get('/app/update')),
   icon: () => request(appIconSchema, client => client.get('/app/icon')),
+  status: () => request(appStatusSchema, client => client.get('/app/status')),
 };
 
 const realNotificationPreferencesApi: NotificationPreferencesApi = {
@@ -1295,4 +1297,5 @@ export const appApi: AppApi = {
   about: () => pick('mockAppApi', realAppApi).about(),
   update: () => pick('mockAppApi', realAppApi).update(),
   icon: () => pick('mockAppApi', realAppApi).icon(),
+  status: () => pick('mockAppApi', realAppApi).status(),
 };

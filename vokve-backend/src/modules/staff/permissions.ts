@@ -132,6 +132,8 @@ export const PERMISSION_GROUPS = [
       { key: 'releases.edit', label: 'record a release or move the update wall' },
       { key: 'appicon.view', label: 'read the app icon schedule' },
       { key: 'appicon.edit', label: 'change the app icon or its schedule' },
+      { key: 'maintenance.view', label: 'read maintenance mode and its testers' },
+      { key: 'maintenance.edit', label: 'switch maintenance mode on or off, and choose its testers' },
     ],
   },
   {
@@ -235,7 +237,7 @@ export const PERMISSION_PRESETS: Array<{ key: string; label: string; forRole: Ar
     label: 'Operations manager',
     forRole: ['manager'],
     permissions: ALL_PERMISSIONS.filter(
-      p => !['config.edit', 'steps.edit', 'releases.edit', 'appicon.edit', 'catalogue.delete', 'nutrition.delete', 'challenges.delete'].includes(p),
+      p => !['config.edit', 'steps.edit', 'releases.edit', 'appicon.edit', 'maintenance.edit', 'catalogue.delete', 'nutrition.delete', 'challenges.delete'].includes(p),
     ),
   },
 ];
@@ -456,6 +458,12 @@ export const ROUTE_PERMISSIONS: Record<string, RouteRule> = {
   'GET /admin/releases': 'releases.view',
   'POST /admin/releases': 'releases.edit',
   'PUT /admin/app/update-policy': 'releases.edit',
+  'GET /admin/maintenance': 'maintenance.view',
+  // Every signed-in person: the header warns whoever is looking that members are kept out.
+  'GET /admin/maintenance/flag': '@self',
+  'PUT /admin/maintenance': 'maintenance.edit',
+  'POST /admin/maintenance/testers': 'maintenance.edit',
+  'DELETE /admin/maintenance/testers/:userId': 'maintenance.edit',
   'GET /admin/app-icon': 'appicon.view',
   'PUT /admin/app-icon': 'appicon.edit',
   'POST /admin/app-icon/schedule': 'appicon.edit',

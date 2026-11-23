@@ -131,6 +131,30 @@ export function moneyPaymentsAccepted(): boolean {
   return !(env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'mock');
 }
 
+type SaleMode = 'coins' | 'money' | 'mixed';
+
+/**
+ * How the shop sells, once the gateway is accounted for (D-109): what ⚙
+ * `commerce.paymentMode` says — or coins, whatever it says, while money
+ * cannot be taken.
+ *
+ * Refusing money orders at the till was not enough on its own: the default
+ * mode is `mixed`, so with no gateway nearly every product could be put in a
+ * basket and then not bought (`PAYMENT_UNAVAILABLE`). Read as coins, every
+ * product can be bought, nothing anywhere quotes or asks for money, and the
+ * stored modes are left alone — the day a real gateway is configured they
+ * are in force again without anybody re-entering them.
+ */
+export function shopModeInForce(configured: SaleMode): SaleMode {
+  return moneyPaymentsAccepted() ? configured : 'coins';
+}
+
+/** One item's mode in force: its own where it has one, else the shop's — and coins, whatever either says, while there is no gateway (D-109). */
+export function itemModeInForce(own: string | null | undefined, shop: SaleMode): SaleMode {
+  if (!moneyPaymentsAccepted()) return 'coins';
+  return own === 'coins' || own === 'money' || own === 'mixed' ? own : shop;
+}
+
 export function paymentKeyId(): string | null {
   return env.PAYMENT_PROVIDER === 'razorpay' ? env.RAZORPAY_KEY_ID ?? null : null;
 }

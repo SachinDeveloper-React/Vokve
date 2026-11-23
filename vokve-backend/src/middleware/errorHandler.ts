@@ -15,7 +15,8 @@ function fail(res: Response, status: number, body: { code: string; message: stri
   res.locals.errorCode = body.code;
   res.locals.errorMessage = body.message;
   res.locals.errorDetails = body.details;
-  if (status >= 500 && cause) res.err = cause instanceof Error ? cause : new Error(String(cause));
+  // Maintenance answers 503 on purpose (RULES DV14): no stack to keep.
+  if (status >= 500 && cause && body.code !== 'MAINTENANCE') res.err = cause instanceof Error ? cause : new Error(String(cause));
   res.status(status).json({ error: body });
 }
 

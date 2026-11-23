@@ -12,6 +12,8 @@ export type ApiErrorKind =
   | 'upgrade_required'
   /** 428 — the server does not know this install; register and retry. */
   | 'device_not_registered'
+  /** 503 `MAINTENANCE` — the app is in maintenance; the details carry the screen's title and expected end. */
+  | 'maintenance'
   | 'server'
   | 'unknown';
 
@@ -38,6 +40,7 @@ export type ApiErrorCode =
   | 'TOO_MANY_DEVICES'
   | 'DEVICE_NOT_REGISTERED'
   | 'UPGRADE_REQUIRED'
+  | 'MAINTENANCE'
   | 'INSUFFICIENT_COINS'
   | 'ADDRESS_REQUIRED'
   | 'OUT_OF_STOCK'
@@ -234,7 +237,9 @@ export function toApiError(error: unknown): ApiError {
     const { status, data } = error.response;
     const server = parseServerError(data);
     return new ApiError(
-      kindForStatus(status),
+      // A 503 is only maintenance when the server says so: a proxy's 503 is
+      // the server being down, which is a different screen (RULES DV14).
+      status === 503 && server.code === 'MAINTENANCE' ? 'maintenance' : kindForStatus(status),
       server.message ?? messageForStatus(status),
       status,
       server.details,

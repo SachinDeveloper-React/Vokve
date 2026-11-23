@@ -118,6 +118,7 @@ import {
   removeBasketLine,
   removeWishlistEntry,
 } from './baskets.service.js';
+import { addTester, getMaintenance, maintenanceBody, maintenanceFlag, removeTester, setMaintenance, testerBody } from './maintenance.service.js';
 import { deleteReview, deleteReviewBody, listReviews, reviewPatch, reviewQuery, updateReview } from './reviews.service.js';
 import {
   adjustBody,
@@ -1540,6 +1541,31 @@ adminUsersRouter.put('/admin/config', validate('body', setAppConfigBody), async 
 
 adminUsersRouter.put('/admin/app/update-policy', validate('body', updatePolicyBody), async (req, res) => {
   res.json(await setUpdatePolicy(req.ctx.adminActor!, req.body));
+});
+
+// ─── Maintenance (RULES DV14) ──────────────────────────────────────────────
+
+/** The switch, the words members see while it is on, and who carries on through it. */
+adminUsersRouter.get('/admin/maintenance', async (_req, res) => {
+  res.json(await getMaintenance());
+});
+
+/** Whether it is on — read by the panel's header on every page, so nobody forgets it. */
+adminUsersRouter.get('/admin/maintenance/flag', async (_req, res) => {
+  res.set('Cache-Control', 'no-store').json(await maintenanceFlag());
+});
+
+/** On, off, or reworded. Going on stops every member request but a tester's at once. */
+adminUsersRouter.put('/admin/maintenance', validate('body', maintenanceBody), async (req, res) => {
+  res.json(await setMaintenance(req.ctx.adminActor!, req.body));
+});
+
+adminUsersRouter.post('/admin/maintenance/testers', validate('body', testerBody), async (req, res) => {
+  res.status(201).json(await addTester(req.ctx.adminActor!, req.body.identifier));
+});
+
+adminUsersRouter.delete('/admin/maintenance/testers/:userId', async (req, res) => {
+  res.json(await removeTester(req.ctx.adminActor!, String(req.params.userId)));
 });
 
 /**

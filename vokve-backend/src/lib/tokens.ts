@@ -60,6 +60,28 @@ export function verifyAccessToken(token: string): AccessClaims | null {
   }
 }
 
+/**
+ * Who an access token was issued to, even past its expiry — or null for one
+ * this server did not sign, or for any other kind of token.
+ *
+ * For the maintenance gate alone (RULES DV14): an expired session is still
+ * somebody's, and a tester's must be answered 401 — which the app refreshes
+ * — rather than 503, which it would draw as the maintenance screen. Never a
+ * session: nothing is served on this.
+ */
+export function accessTokenSubject(token: string): { sub: string; expired: boolean } | null {
+  const live = verifyAccessToken(token);
+  if (live) return { sub: live.sub, expired: false };
+  try {
+    const payload = verifySigned(token, { ...VERIFY, ignoreExpiration: true });
+    if (typeof payload === 'string' || typeof payload.sub !== 'string') return null;
+    if ((payload as Record<string, unknown>).kind !== undefined) return null;
+    return { sub: payload.sub, expired: true };
+  } catch {
+    return null;
+  }
+}
+
 /** Opaque refresh tokens: random, stored hashed (RULES Z1). */
 export function newRefreshToken(): { token: string; hash: string } {
   const token = `rt_${crypto.randomBytes(32).toString('base64url')}`;

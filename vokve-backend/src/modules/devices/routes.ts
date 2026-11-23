@@ -11,6 +11,7 @@ import { AppReleaseModel, DeviceModel } from './models.js';
 import { claimPushToken, listDevices, registerDevice, registerDeviceBody, revokeDevice } from './service.js';
 import { appIcon } from './appIcon.service.js';
 import { appUpdate } from './update.service.js';
+import { appStatus } from '../platform/maintenance.js';
 
 export const devicesRouter = Router();
 
@@ -113,6 +114,17 @@ devicesRouter.delete('/me/devices/:deviceId', requireAuth, requireDevice, async 
  */
 devicesRouter.get('/app/update', async (req, res) => {
   res.json(await appUpdate({ platform: req.ctx.platform, appVersion: req.ctx.appVersion, build: req.ctx.build }));
+});
+
+/**
+ * Whether the app is in maintenance, and whether this caller carries on
+ * through it (RULES DV14). Public and never gated: a phone on the
+ * maintenance screen asks this to learn when it is over, and a phone that
+ * is signed out has to be told too. A bearer token, where there is one, is
+ * only read to say `bypass`.
+ */
+devicesRouter.get('/app/status', async (req, res) => {
+  res.set('Cache-Control', 'no-store').json(await appStatus(req.header('authorization')));
 });
 
 /**

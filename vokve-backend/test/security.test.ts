@@ -6,7 +6,6 @@ import { env } from '../src/config/env.js';
 import { invalidateConfig } from '../src/config/remote.js';
 import { getKV } from '../src/db/redis.js';
 import { credit } from '../src/modules/economy/service.js';
-import { OrderModel } from '../src/modules/commerce/models.js';
 import { UserModel } from '../src/modules/identity/models.js';
 import { AppConfigModel } from '../src/modules/platform/models.js';
 import { verifyPaymentProof } from '../src/lib/payments.js';
@@ -191,34 +190,54 @@ describe('password guesses spread across addresses (RULES Z3)', () => {
   });
 });
 
-describe('money orders while payments are mocked (RULES R12)', () => {
-  it('refuses to take an order that owes money in production, and the mock proof with it', async () => {
+describe('the shop with no payment gateway (D-109, RULES R12)', () => {
+  it('sells every product for coins in production, so nothing is quoted in money and nothing is refused', async () => {
     const member = await signUpAndRegister();
     await UserModel.updateOne({ _id: member.userId }, { $set: { phoneVerifiedAt: new Date(), emailVerifiedAt: new Date(), name: 'Asha Verma' } });
-    await credit({ userId: member.userId, source: 'refund', referenceType: 'test', referenceId: 'fund', amount: 2_000, title: 'Test funds', localDay: '2026-09-14', exemptFromCap: true });
+    await credit({ userId: member.userId, source: 'refund', referenceType: 'test', referenceId: 'fund', amount: 10_000, title: 'Test funds', localDay: '2026-09-14', exemptFromCap: true });
     const address = await request(app).post('/v1/me/addresses').set(authed(member)).send({
       label: 'Home', name: 'Asha Verma', phone: '+919876543210', line1: '12 MG Road', line2: '', city: 'Bengaluru',
       state: 'Karnataka', postalCode: '560001', country: 'IN', isDefault: true,
     });
     expect(address.status).toBe(201);
+    // The worst case: the shop set to money, and the foam roller money-only on its own.
     await AppConfigModel.updateOne({ _id: 'commerce' }, { $set: { value: { paymentMode: 'money' } } }, { upsert: true });
     invalidateConfig();
+    const lines = [{ itemId: 'foam-roller', quantity: 1 }, { itemId: 'cap', quantity: 1 }];
 
     try {
       expect(env.PAYMENT_PROVIDER).toBe('mock');
       env.NODE_ENV = 'production';
+
+      const shop = await request(app).get('/v1/shop/config').set(authed(member));
+      expect(shop.body).toMatchObject({ paymentMode: 'coins', paymentMethods: ['coins'], coinShareMin: 1, coinShareMax: 1 });
+
+      const card = await request(app).get('/v1/shop/items/foam-roller').set(authed(member));
+      expect(card.body.paymentMode).toBe('coins');
+      expect(card.body.coinsMin).toBe(card.body.coinPrice);
+
+      const quote = await request(app).post('/v1/checkout/quote').set(authed(member)).send({ lines });
+      expect(quote.status).toBe(200);
+      expect(quote.body).toMatchObject({ paymentMode: 'coins', payable: 0, paymentMethods: ['coins'] });
+      expect(quote.body.lines.map((l: { paymentMode: string; moneyPaid: number }) => [l.paymentMode, l.moneyPaid])).toEqual([['coins', 0], ['coins', 0]]);
+
       const placed = await request(app).post('/v1/checkout').set(authed(member))
-        .send({ lines: [{ itemId: 'foam-roller', quantity: 1 }], addressId: address.body.id, coins: 0 });
-      expect(placed.status).toBe(503);
-      expect(placed.body.error.code).toBe('PAYMENT_UNAVAILABLE');
-      expect(await OrderModel.countDocuments({ userId: member.userId })).toBe(0);
+        .send({ lines, addressId: address.body.id, coins: quote.body.coinsMin, paymentMethod: 'coins' });
+      expect(placed.status).toBe(200);
+      expect(placed.body.order).toMatchObject({ status: 'placed', payable: 0 });
+      expect(placed.body.payment).toBeNull();
+      expect(placed.body.balance).toBe(10_000 - quote.body.coinsMin);
+
+      // And the mock still believes no proof, for an order left waiting from before.
       expect(verifyPaymentProof('mockord_x', { providerPaymentId: 'pay_made_up' })).toBe(false);
     } finally {
       env.NODE_ENV = 'test';
       await AppConfigModel.deleteOne({ _id: 'commerce' });
       invalidateConfig();
     }
-    // Outside production the mock still works end to end, as it must for development.
+    // Outside production the stored modes are in force again, and the mock works end to end, as development needs.
+    const card = await request(app).get('/v1/shop/items/foam-roller').set(authed(member));
+    expect(card.body.paymentMode).toBe('money');
     expect(verifyPaymentProof('mockord_x', { providerPaymentId: 'pay_made_up' })).toBe(true);
   });
 });

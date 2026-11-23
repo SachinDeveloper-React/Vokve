@@ -2828,6 +2828,27 @@ export const appIconSchema = z.object({
 });
 export type AppIconDecision = z.infer<typeof appIconSchema>;
 
+// ─── Maintenance ───────────────────────────────────────────────────────────
+
+/**
+ * `GET /app/status` — whether the app is in maintenance, and what that means
+ * for this caller (RULES DV14). Asked on launch, on every return to the
+ * foreground, and every half minute while maintenance is on.
+ */
+export const appStatusSchema = z.object({
+  maintenance: z.object({
+    /** On: members are shown the maintenance screen instead of the app. */
+    active: z.boolean(),
+    /** This caller is a tester or staff and carries on — with a strip, not the screen. */
+    bypass: z.boolean(),
+    title: z.string(),
+    message: z.string(),
+    /** When the team expects to be back, where they said; null otherwise. */
+    endsAt: z.string().nullable(),
+  }),
+});
+export type AppStatus = z.infer<typeof appStatusSchema>;
+
 // ─── Streak ────────────────────────────────────────────────────────────────
 
 /** An unbroken run of counting days, both ends included. */

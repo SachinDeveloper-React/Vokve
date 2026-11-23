@@ -13,6 +13,7 @@ import { rateLimit } from './middleware/rateLimit.js';
 import { handleAppleNotification } from './modules/identity/appleNotifications.service.js';
 import { requestContext } from './middleware/requestContext.js';
 import { versionGate } from './middleware/version.js';
+import { maintenanceGate } from './middleware/maintenance.js';
 import { accountRouter, aboutRouter } from './modules/account/routes.js';
 import { adminAutomationsRouter } from './modules/admin/automations.routes.js';
 import { adminUsersRouter } from './modules/admin/routes.js';
@@ -97,7 +98,12 @@ export function requestLogger() {
   return pinoHttp({
     logger,
     genReqId: req => (req as Request).ctx?.requestId ?? '',
-    customLogLevel: (_req, res, err) => (err || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info'),
+    customLogLevel: (_req, res, err) => {
+      // A maintenance refusal is the server doing what it was told (RULES
+      // DV14), once per member request for as long as it lasts — not an error.
+      if ((res as Response).locals?.errorCode === 'MAINTENANCE') return 'info';
+      return err || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    },
     customSuccessMessage: (req, res, ms) => line(req, res, ms),
     // pino-http passes the response time as a fourth argument its types leave out.
     customErrorMessage: (req, res, _err, ms?: number) => line(req, res, ms ?? 0),
@@ -190,6 +196,9 @@ app.get("/", (req, res) => {
   );
 
   app.use(versionGate);
+  // Maintenance (RULES DV14): after the version gate, so a retired build is
+  // still told to update; before every member route, the panel's excepted.
+  app.use(maintenanceGate);
 
   const v1 = express.Router();
   v1.use(platformRouter);

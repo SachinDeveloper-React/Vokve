@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { ApiError, Errors } from '../../lib/errors.js';
+import { itemModeInForce, moneyPaymentsAccepted, shopModeInForce } from '../../lib/payments.js';
 import { shopBadgeSchema } from '../../contracts/index.js';
 import { CartModel, OrderModel, ReviewModel, ShopInventoryModel, ShopItemModel, WishlistModel } from '../commerce/models.js';
 import { mediaByFilename } from './media.service.js';
@@ -29,6 +30,10 @@ import { assertShelf } from './categories.service.js';
  *     coins/money/mixed behaviour hangs off.
  *   - **Prices are paise.** The one place the panel shows rupees is where it
  *     draws them.
+ *   - **No gateway, no money products (D-109).** While money cannot be
+ *     taken, every item sells for coins whatever it is set to, and a write
+ *     may not newly set one to `money` or `mixed` — that is the mistake that
+ *     would turn into a real money product the day a gateway is connected.
  */
 
 const iso = (at: Date | null | undefined): string | null => at?.toISOString() ?? null;
@@ -151,6 +156,20 @@ function reasonOf(error: unknown): string {
 }
 
 /**
+ * Refuses to make something a money product while no gateway can take the
+ * money (D-109). Leaving an item on the mode it already has is allowed, so a
+ * product set to money before is still editable — it sells for coins until
+ * a gateway is connected, like everything else.
+ */
+function assertSellable(next: string | null | undefined, current: string | null | undefined): void {
+  if (moneyPaymentsAccepted() || next === undefined || next === null || next === 'coins') return;
+  if (next === (current ?? null)) return;
+  throw new ApiError(422, 'MONEY_PAYMENTS_UNAVAILABLE', 'No payment gateway is connected, so a product can only be sold for coins.', {
+    paymentMode: 'No payment gateway is connected, so a product can only be sold for coins. Pick “Coins only” or the shop’s mode.',
+  });
+}
+
+/**
  * A spreadsheet's worth of products, matched by slug.
  *
  * JSON rather than a file upload, the same as the food library's import
@@ -177,8 +196,9 @@ export async function importItems(
   options: { dryRun?: boolean } = {},
 ): Promise<ItemImportResult> {
   const dryRun = options.dryRun === true;
-  const existing = await ShopItemModel.find({}, { _id: 1 }).lean<{ _id: string }[]>();
+  const existing = await ShopItemModel.find({}, { _id: 1, paymentMode: 1 }).lean<{ _id: string; paymentMode?: string | null }[]>();
   const known = new Set(existing.map(row => row._id));
+  const modeBefore = new Map(existing.map(row => [row._id, row.paymentMode ?? null]));
   // One read for the whole sheet. A two-thousand-row import would otherwise
   // be two thousand round trips to answer a question the library can answer
   // once (RULES R18).
@@ -229,6 +249,7 @@ export async function importItems(
         // operator is most likely to hit, and finding out on the second
         // press would defeat the point of the first.
         await assertShelf(withImages.category, withImages.subcategory ?? null);
+        assertSellable(withImages.paymentMode, modeBefore.get(id));
         if (known.has(id)) updated += 1;
         else created += 1;
         continue;
@@ -239,6 +260,7 @@ export async function importItems(
       // A sheet that names the same product twice is one product: the
       // second row corrects the first rather than adding a twin.
       known.add(id);
+      modeBefore.set(id, result.item.paymentMode);
       ids.push(id);
     } catch (error) {
       failed.push({ line, title, reason: reasonOf(error) });
@@ -341,8 +363,8 @@ export async function listCatalogue(query: CatalogueQuery) {
       category: row.category,
       subcategory: row.subcategory ?? null,
       paymentMode: mode,
-      /** The mode in force: the item's own, or the shop's where it has none. */
-      effectivePaymentMode: mode ?? config.commerce.paymentMode,
+      /** The mode in force: the item's own, or the shop's where it has none — coins for everything while there is no gateway (D-109). */
+      effectivePaymentMode: itemModeInForce(mode, config.commerce.paymentMode),
       emoji: row.emoji ?? null,
       imageUrl: row.imageUrl ?? null,
       images: row.images ?? [],
@@ -380,7 +402,12 @@ export async function listCatalogue(query: CatalogueQuery) {
     limit: query.limit,
     /** The shop-wide default, so a null `paymentMode` reads as something. */
     shop: {
-      paymentMode: config.commerce.paymentMode,
+      /** In force: coins while there is no gateway, whatever ⚙ says (D-109). */
+      paymentMode: shopModeInForce(config.commerce.paymentMode),
+      /** What ⚙ `commerce.paymentMode` says — in force again once a gateway is connected. */
+      configuredPaymentMode: config.commerce.paymentMode,
+      /** Whether money can be taken at all; false = no gateway, so the panel offers coins only. */
+      moneyPayments: moneyPaymentsAccepted(),
       coinValuePaise: config.commerce.coinValuePaise,
       coinShareMin: config.commerce.coinShareMin,
       coinShareMax: config.commerce.coinShareMax,
@@ -406,6 +433,7 @@ export async function saveItem(actor: string, body: ItemBody) {
   // route is also called by hand.
   await assertShelf(fields.category, fields.subcategory ?? null);
   const before = await ShopItemModel.findById(id).lean();
+  assertSellable(fields.paymentMode, before?.paymentMode);
 
   await ShopItemModel.updateOne(
     { _id: id },
@@ -443,6 +471,7 @@ export async function patchItem(actor: string, id: string, body: ItemPatch) {
   const before = await ShopItemModel.findById(id).lean();
   if (!before) throw Errors.notFound('That item');
   const { note, onHand, lowStockAt, ...fields } = body;
+  assertSellable(fields.paymentMode, before.paymentMode);
   // Either half of the shelf may be in the patch alone, so the one that is
   // not is read off the item: moving to a shelf without saying which
   // subcategory must not check the old shelf's name against the new shelf.

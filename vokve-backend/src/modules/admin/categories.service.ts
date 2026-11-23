@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
+import { shopModeInForce } from '../../lib/payments.js';
 import { shopCategoryIconSchema } from '../../contracts/index.js';
 import { CartModel, OrderModel, ShopCategoryModel, ShopInventoryModel, ShopItemModel, WishlistModel } from '../commerce/models.js';
 import { ensureShelves, slugifyShelf, type Shelf } from '../commerce/shelves.js';
@@ -200,7 +201,7 @@ export async function listCategories() {
     /** The glyphs a shelf may be drawn with, so the panel can offer them. */
     icons: ICONS,
     shop: {
-      paymentMode: config.commerce.paymentMode,
+      paymentMode: shopModeInForce(config.commerce.paymentMode),
       coinValuePaise: config.commerce.coinValuePaise,
       currency: config.commerce.currency,
     },

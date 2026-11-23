@@ -91,5 +91,9 @@ export function describeAuthError(error: ApiError, fallbackTitle: string): Error
   if (error.kind === 'server') {
     return { title: 'VOKVE is having trouble', message: error.message };
   }
+  if (error.kind === 'maintenance') {
+    const title = error.details?.title;
+    return { title: typeof title === 'string' ? title : 'Under maintenance', message: error.message };
+  }
   return { title: fallbackTitle, message: error.message };
 }

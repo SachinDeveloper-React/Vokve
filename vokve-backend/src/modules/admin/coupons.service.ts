@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
+import { shopModeInForce } from '../../lib/payments.js';
 import { CartModel, CouponModel, CouponUsageModel, OrderModel } from '../commerce/models.js';
 import { UserModel } from '../identity/models.js';
 import { AuditLogModel } from '../platform/models.js';
@@ -170,7 +171,7 @@ export async function listCoupons(query: CouponQuery) {
     /** The shop's own switch: with coupons off, no code applies whatever is written here. */
     shop: {
       couponsEnabled: config.commerce.couponsEnabled,
-      paymentMode: config.commerce.paymentMode,
+      paymentMode: shopModeInForce(config.commerce.paymentMode),
       coinValuePaise: config.commerce.coinValuePaise,
       currency: config.commerce.currency,
     },

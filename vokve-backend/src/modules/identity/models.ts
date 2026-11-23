@@ -50,7 +50,12 @@ const userSchema = new Schema(
     emailForwardingOffAt: { type: Date, default: null },
     profileCompletedAt: { type: Date, default: null },
     trust: { score: { type: Number, default: 60 }, tier: { type: String, default: 'normal' }, updatedAt: Date },
-    flags: { frozen: { type: Boolean, default: false }, legalHold: { type: Boolean, default: false } },
+    flags: {
+      frozen: { type: Boolean, default: false },
+      legalHold: { type: Boolean, default: false },
+      /** May use the app while maintenance is on (RULES DV14), with a strip that says so. Set from the panel's Maintenance page. */
+      tester: { type: Boolean, default: false },
+    },
     /**
      * A deletion the member asked for and can still call off (RULES P5).
      * `purgeAt` is when the daily job actually anonymises the row; both are
@@ -80,6 +85,7 @@ userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ appleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ country: 1 });
 userSchema.index({ 'trust.tier': 1 });
+userSchema.index({ 'flags.tester': 1 }, { partialFilterExpression: { 'flags.tester': true } });
 userSchema.index({ 'deletion.purgeAt': 1 }, { sparse: true });
 export const UserModel = model('User', userSchema);
 export type UserDoc = InstanceType<typeof UserModel>;

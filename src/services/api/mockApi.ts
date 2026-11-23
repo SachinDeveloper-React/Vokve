@@ -6250,6 +6250,24 @@ export const mockAppApi: AppApi = {
   },
 
   /**
+   * Never in maintenance: the mock has no panel to switch it on from. Point
+   * `config.apiBaseUrl` at a real server and switch it on from the panel's
+   * Maintenance page to see the screen, or the strip as a tester.
+   */
+  async status() {
+    await delay();
+    return {
+      maintenance: {
+        active: false,
+        bypass: false,
+        title: "We'll be right back",
+        message: 'VOKVE is getting some upkeep and will be back shortly.',
+        endsAt: null,
+      },
+    };
+  },
+
+  /**
    * Silence, like a build that is current. The mock has no releases behind
    * it, and an app that nagged about an update nobody published would make
    * every mock session start with a popup. `MOCK_RULES` says how to see the

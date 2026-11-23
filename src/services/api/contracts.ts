@@ -12,6 +12,7 @@ import type {
   AppErrorIntake,
   AppUpdate,
   AppIconDecision,
+  AppStatus,
   Cart,
   Challenge,
   ChallengeDetail,
@@ -797,6 +798,12 @@ export interface AppApi {
    * festive one when there is one. Public, like `update`.
    */
   icon(): Promise<AppIconDecision>;
+  /**
+   * Whether the app is in maintenance, and whether this caller carries on
+   * through it (RULES DV14). Public and never gated, like `update`: a phone
+   * on the maintenance screen asks this to learn when it is over.
+   */
+  status(): Promise<AppStatus>;
 }
 
 export interface StreakApi {

@@ -1025,6 +1025,28 @@ export const CONFIG_DEFAULTS = {
       festive: null as string | null,
       schedule: [] as { id: string; icon: string; startsAt: string; endsAt: string; note: string | null }[],
     },
+    /**
+     * Maintenance mode (RULES DV14), switched from the panel's Maintenance
+     * page — `PUT /admin/maintenance`; the generic config page leaves it
+     * alone.
+     *
+     * While `enabled`, every member request answers `503 MAINTENANCE` and
+     * the app draws the maintenance screen with `title` and `message`;
+     * testers and staff carry on, with a strip that says it is on.
+     * `endsAt` is when the team expects to be back (an ISO instant, or null
+     * for "not said") — shown to members, never acted on: maintenance ends
+     * when somebody switches it off. `startedAt`/`startedBy` are written by
+     * the panel when it goes on.
+     */
+    maintenance: {
+      enabled: false,
+      title: "We'll be right back",
+      message:
+        'VOKVE is getting some upkeep and will be back shortly. Your steps keep counting on your phone and sync as soon as we are back.',
+      endsAt: null as string | null,
+      startedAt: null as string | null,
+      startedBy: null as string | null,
+    },
   },
   /**
    * The account's own knobs: how long a deletion can be called off for

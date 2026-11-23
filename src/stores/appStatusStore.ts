@@ -1,7 +1,13 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
-import { setOnUpgradeRequired } from '../services/api/client';
-import type { AppUpdate } from '../types/models';
+import { setOnMaintenance, setOnUpgradeRequired } from '../services/api/client';
+import type { AppStatus, AppUpdate } from '../types/models';
+
+/** Maintenance as this phone knows it (RULES DV14) — the server's own words. */
+export type MaintenanceNotice = AppStatus['maintenance'];
+
+/** What the screen says when a refusal arrives without a title of its own. */
+export const MAINTENANCE_DEFAULT_TITLE = "We'll be right back";
 
 export interface UpgradeRequirement {
   /** Where to send the user — the platform's store listing. */
@@ -34,6 +40,21 @@ interface AppStatusState {
    */
   update: AppUpdate | null;
   setUpdate: (update: AppUpdate | null) => void;
+  /**
+   * Maintenance (RULES DV14), from `GET /app/status` on launch, foreground
+   * and every half minute while it lasts — or the moment any request is
+   * refused with 503 `MAINTENANCE`, or answered with the tester's header.
+   * Null when the app is not in maintenance.
+   */
+  maintenance: MaintenanceNotice | null;
+  setMaintenance: (maintenance: MaintenanceNotice | null) => void;
+  /**
+   * "Team sign-in", pressed on the maintenance screen of a phone that is
+   * signed out: the sign-in screens are shown behind it, so a tester can get
+   * in. Anybody else who signs in is back on the screen at once.
+   */
+  maintenanceSignIn: boolean;
+  setMaintenanceSignIn: (on: boolean) => void;
 }
 
 /**
@@ -46,7 +67,77 @@ export const useAppStatusStore = create<AppStatusState>(set => ({
   setUpgradeRequired: upgradeRequired => set({ upgradeRequired }),
   update: null,
   setUpdate: update => set({ update }),
+  maintenance: null,
+  setMaintenance: maintenance =>
+    set(
+      maintenance
+        ? { maintenance }
+        : // Over: a team sign-in belongs to the maintenance it was for.
+          { maintenance: null, maintenanceSignIn: false },
+    ),
+  maintenanceSignIn: false,
+  setMaintenanceSignIn: maintenanceSignIn => set({ maintenanceSignIn }),
 }));
+
+/** The maintenance screen, for a member it keeps out; null for a tester or when there is none. */
+export const useMaintenanceWall = (): MaintenanceNotice | null => {
+  const maintenance = useAppStatusStore(s => s.maintenance);
+  return maintenance?.active && !maintenance.bypass ? maintenance : null;
+};
+
+/** Whether this member is carrying on through maintenance — a tester, or staff — and so sees the strip. */
+export const useMaintenanceBypass = (): boolean =>
+  useAppStatusStore(s =>
+    Boolean(s.maintenance?.active && s.maintenance.bypass),
+  );
+
+const sameNotice = (
+  a: MaintenanceNotice | null,
+  b: MaintenanceNotice,
+): boolean =>
+  a !== null &&
+  a.active === b.active &&
+  a.bypass === b.bypass &&
+  a.title === b.title &&
+  a.message === b.message &&
+  a.endsAt === b.endsAt;
+
+/** Takes what the server said about maintenance, leaving the store alone when nothing changed. */
+export function noteMaintenance(next: MaintenanceNotice | null): void {
+  const { maintenance, setMaintenance } = useAppStatusStore.getState();
+  if (next === null || !next.active) {
+    if (maintenance !== null) setMaintenance(null);
+    return;
+  }
+  if (!sameNotice(maintenance, next)) setMaintenance(next);
+}
+
+// A refusal draws the screen with the words it carried; a let-through answer
+// draws the strip, keeping whatever words are already known.
+setOnMaintenance(signal => {
+  const current = useAppStatusStore.getState().maintenance;
+  if ('refused' in signal) {
+    const { details, message } = signal.refused;
+    noteMaintenance({
+      active: true,
+      bypass: false,
+      title:
+        typeof details?.title === 'string'
+          ? details.title
+          : MAINTENANCE_DEFAULT_TITLE,
+      message,
+      endsAt: typeof details?.endsAt === 'string' ? details.endsAt : null,
+    });
+    return;
+  }
+  noteMaintenance({
+    active: true,
+    bypass: true,
+    title: current?.title ?? MAINTENANCE_DEFAULT_TITLE,
+    message: current?.message ?? '',
+    endsAt: current?.endsAt ?? null,
+  });
+});
 
 /**
  * The wall, from whichever side said so first: a request refused with 426,

@@ -466,6 +466,11 @@ const MANAGED_ELSEWHERE: { prefix: string; by: string; why: string }[] = [
     by: 'App icon',
     why: 'every key there is checked against the icons a build can carry, and the festive windows against each other',
   },
+  {
+    prefix: 'app.maintenance',
+    by: 'Maintenance',
+    why: 'switching it on stops every member at once, so it is done where the testers who can still get in are listed and the switch is logged',
+  },
 ];
 
 const kindOf = (value: unknown): string =>

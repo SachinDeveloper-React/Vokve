@@ -40,6 +40,32 @@ export function setOnUpgradeRequired(
 }
 
 /**
+ * Maintenance (RULES DV14), passed to the app-status store the moment the
+ * server says it, for the same no-cycle reason: a request refused with 503
+ * `MAINTENANCE` is the maintenance screen, and an answer carrying
+ * `X-Vokve-Maintenance: bypass` is a tester's — the strip.
+ */
+export type MaintenanceSignal = { refused: ApiError } | { bypass: true };
+let onMaintenance: ((signal: MaintenanceSignal) => void) | null = null;
+
+export function setOnMaintenance(
+  handler: ((signal: MaintenanceSignal) => void) | null,
+): void {
+  onMaintenance = handler;
+}
+
+/** Whether an answer was let through maintenance — the server says so on every one it lets a tester have. */
+function noteMaintenanceBypass(headers: unknown): void {
+  const value =
+    headers && typeof headers === 'object'
+      ? (headers as Record<string, unknown>)['x-vokve-maintenance']
+      : undefined;
+  if (value === 'bypass') {
+    onMaintenance?.({ bypass: true });
+  }
+}
+
+/**
  * The device module supplies these rather than being imported: it needs the
  * endpoints, the endpoints need this client, and this client needing the
  * device module would close the loop. Both are registered by `device.ts` at
@@ -151,6 +177,7 @@ apiClient.interceptors.response.use(
     // and is the only place that sees one, which is why the measurement
     // lives on the interceptor rather than in a request of its own.
     noteServerTime(response.headers?.date as string | undefined);
+    noteMaintenanceBypass(response.headers);
     return response;
   },
   async (error: AxiosError) => {
@@ -167,6 +194,15 @@ apiClient.interceptors.response.use(
       onUpgradeRequired?.(apiError);
       throw apiError;
     }
+
+    // Maintenance: nothing but the status check will succeed until it is
+    // over, so the same — the root navigator draws the maintenance screen.
+    if (apiError.kind === 'maintenance') {
+      onMaintenance?.({ refused: apiError });
+      throw apiError;
+    }
+    // A tester's refusal (a 404, a 422) still says they are let through.
+    noteMaintenanceBypass(error.response?.headers);
 
     // The server does not know this install — a reinstall, a cleared
     // server, or a revoked device. Register once and replay; a second 428 is

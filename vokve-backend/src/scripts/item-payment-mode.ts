@@ -1,5 +1,6 @@
 import { connectMongo, disconnectMongo } from '../db/mongo.js';
 import { getConfig } from '../config/remote.js';
+import { moneyPaymentsAccepted } from '../lib/payments.js';
 import { ShopItemModel } from '../modules/commerce/models.js';
 
 /**
@@ -28,6 +29,9 @@ async function list(): Promise<void> {
     .lean()) as unknown as Row[];
   const width = Math.max(...rows.map(r => r._id.length), 8);
   console.log(`\nThe shop's default is '${shopDefault}'. ${rows.length} items:\n`);
+  if (!moneyPaymentsAccepted()) {
+    console.log('  No payment gateway is connected: every item sells for coins, whatever it says below (D-109).\n');
+  }
   for (const row of rows) {
     const own = row.paymentMode ?? null;
     const effective = own ?? shopDefault;
@@ -42,6 +46,9 @@ async function list(): Promise<void> {
 
 async function set(itemId: string, mode: Mode): Promise<void> {
   const value = mode === 'default' ? null : mode;
+  if ((value === 'money' || value === 'mixed') && !moneyPaymentsAccepted()) {
+    throw new Error('No payment gateway is connected, so an item can only be sold for coins (D-109).');
+  }
   const result = await ShopItemModel.updateOne({ _id: itemId }, { $set: { paymentMode: value } });
   if (result.matchedCount === 0) {
     throw new Error(`No item with id '${itemId}'. Run with no arguments to list them.`);

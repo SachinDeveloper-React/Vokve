@@ -2,6 +2,7 @@ import type { PipelineStage } from 'mongoose';
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
+import { itemModeInForce, shopModeInForce } from '../../lib/payments.js';
 import { clearCart, getCart, listWishlist, removeCartLine, removeCoupon } from '../commerce/service.js';
 import { CartModel, OrderModel, ShopInventoryModel, ShopItemModel, WishlistModel } from '../commerce/models.js';
 import { UserModel } from '../identity/models.js';
@@ -200,7 +201,7 @@ export async function listBaskets(query: BasketQuery) {
     offset: query.offset,
     limit: query.limit,
     shop: {
-      paymentMode: config.commerce.paymentMode,
+      paymentMode: shopModeInForce(config.commerce.paymentMode),
       coinValuePaise: config.commerce.coinValuePaise,
       currency: config.commerce.currency,
       couponsEnabled: config.commerce.couponsEnabled,
@@ -319,7 +320,7 @@ export async function getBasket(userId: string) {
       // The item's own coin price where one was set, as the till charges it.
       coinPrice: item?.coinPrice ?? (price === 0 ? 0 : Math.ceil(price / config.commerce.coinValuePaise)),
       paymentMode: item?.paymentMode ?? null,
-      effectivePaymentMode: (item?.paymentMode as 'coins' | 'money' | 'mixed' | null) ?? config.commerce.paymentMode,
+      effectivePaymentMode: itemModeInForce(item?.paymentMode, config.commerce.paymentMode),
       onHand,
       /** Why a checkout would refuse this line, or null where it would not. */
       problem: !item
@@ -351,7 +352,7 @@ export async function getBasket(userId: string) {
       phone: account.phone ?? null,
     },
     shop: {
-      paymentMode: config.commerce.paymentMode,
+      paymentMode: shopModeInForce(config.commerce.paymentMode),
       coinValuePaise: config.commerce.coinValuePaise,
       currency: config.commerce.currency,
       couponsEnabled: config.commerce.couponsEnabled,

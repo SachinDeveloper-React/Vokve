@@ -281,9 +281,9 @@ const envSchema = z.object({
   /**
    * TEMPORARY bypass while the gateway is not wired yet: lets
    * `PAYMENT_PROVIDER=mock` boot in production instead of refusing.
-   * The mock accepts any payment id, so a money order is marked paid
-   * without money — keep the shop coins-only while this is on, and
-   * delete this line from `.env` the day Razorpay keys go in.
+   * The mock accepts any payment id, so while this is on the server sells
+   * every product for coins alone and the panel will not set one to money
+   * (D-109) — delete this line from `.env` the day Razorpay keys go in.
    */
   ALLOW_MOCK_PAYMENTS_IN_PRODUCTION: z
     .string()

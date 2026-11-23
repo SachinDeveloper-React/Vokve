@@ -70,7 +70,7 @@ async function main() {
   if (isProduction && env.PAYMENT_PROVIDER === 'mock') {
     // Only reachable through ALLOW_MOCK_PAYMENTS_IN_PRODUCTION — a stopgap
     // until the gateway is wired, so it says so on every boot.
-    logger.warn('payments are MOCKED in production (ALLOW_MOCK_PAYMENTS_IN_PRODUCTION) — money orders are marked paid without money');
+    logger.warn('no payment gateway in production (ALLOW_MOCK_PAYMENTS_IN_PRODUCTION) — the shop sells for coins only and no money is taken (D-109)');
   }
   if (isProduction && env.ADMIN_API_KEY && !env.ADMIN_TOTP_SECRET) {
     // One static key is the whole of the operator's door: anyone who reads

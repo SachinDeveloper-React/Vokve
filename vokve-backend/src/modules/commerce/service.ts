@@ -8,7 +8,8 @@ import { ApiError, Errors } from '../../lib/errors.js';
 import { newId } from '../../lib/ids.js';
 import { logger } from '../../lib/logger.js';
 import {
-  capturedPayments, createGatewayOrder, knownMethods, methodsForOrder, moneyPaymentsAccepted, offeredMethods, paymentKeyId, paymentProvider, spendsCoins, verifyPaymentProof,
+  capturedPayments, createGatewayOrder, itemModeInForce, knownMethods, methodsForOrder, moneyPaymentsAccepted, offeredMethods, paymentKeyId, paymentProvider,
+  shopModeInForce, spendsCoins, verifyPaymentProof,
   type PaymentMethod, type PaymentProof,
 } from '../../lib/payments.js';
 import { STEP_UP_TTL_SECONDS, verifyStepUpToken } from '../../lib/tokens.js';
@@ -66,7 +67,16 @@ type CommerceConfig = Awaited<ReturnType<typeof getConfig>>['commerce'] & { step
 
 async function commerceConfig(): Promise<CommerceConfig> {
   const config = await getConfig();
-  return { ...config.commerce, stepUpThreshold: config.coins.stepUpThreshold };
+  const { commerce } = config;
+  // No gateway, no money (D-109): the shop and every item in it sell for
+  // coins alone, and coins are the one way the payment page offers.
+  const coinsOnly = !moneyPaymentsAccepted();
+  return {
+    ...commerce,
+    paymentMode: shopModeInForce(commerce.paymentMode),
+    paymentMethods: coinsOnly ? ['coins'] : commerce.paymentMethods,
+    stepUpThreshold: config.coins.stepUpThreshold,
+  };
 }
 
 /**
@@ -123,11 +133,11 @@ function coinsFor(paise: number, cfg: CommerceConfig): number {
  * How one item may be bought (RULES R11): its own setting where it has
  * one, the shop's ⚙ `commerce.paymentMode` where it has none. An item's
  * own mode wins, so a coins-only reward can sit on the same shelf as a
- * money-only one and a shop-wide mode is only the default.
+ * money-only one and a shop-wide mode is only the default. With no gateway
+ * every item is coins-only, whatever it was set to (D-109).
  */
 function modeOf(item: { paymentMode?: string | null }, cfg: CommerceConfig): PaymentMode {
-  const own = item.paymentMode;
-  return own === 'coins' || own === 'money' || own === 'mixed' ? own : cfg.paymentMode;
+  return itemModeInForce(item.paymentMode, cfg.paymentMode);
 }
 
 /** The shares a mode puts in force for one line's worth of goods. */
@@ -1591,6 +1601,9 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
   if (soldOut) throw new ApiError(409, 'OUT_OF_STOCK', `${soldOut.title} is sold out.`, { itemId: soldOut.itemId });
 
   const paymentMethod = resolveMethod(input.paymentMethod, q, cfg);
+  // A backstop: with no gateway every line is already quoted in coins
+  // (D-109), so an order owing money cannot be reached — but if it ever
+  // were, the mock would "take" it for nothing.
   if (q.payable > 0 && !moneyPaymentsAccepted()) {
     throw new ApiError(503, 'PAYMENT_UNAVAILABLE', 'Paying with money is not available yet. Only items bought with coins can be ordered for now.', { payable: q.payable });
   }
