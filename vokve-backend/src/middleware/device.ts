@@ -45,6 +45,9 @@ export const requireDevice: RequestHandler = async (req, _res, next) => {
         lastSeenAt: new Date(),
         ...(req.ctx.appVersion ? { 'app.version': req.ctx.appVersion } : {}),
         ...(req.ctx.build ? { 'app.build': req.ctx.build } : {}),
+        // Which over-the-air update it runs (D-111); `builtin` clears it, so
+        // a rollback to the bundle inside the build shows as one.
+        ...(req.ctx.otaUpdate ? { 'app.otaUpdate': req.ctx.otaUpdate === 'builtin' ? null : req.ctx.otaUpdate } : {}),
         ...(req.ctx.osVersion ? { 'info.osVersion': req.ctx.osVersion } : {}),
         ...(req.ctx.timezone ? { 'info.timezone': req.ctx.timezone } : {}),
       },

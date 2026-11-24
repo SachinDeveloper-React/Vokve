@@ -116,12 +116,12 @@ describe('what the body may and may not say', () => {
     const response = await signInWith({
       idToken: 'tok',
       nonce: NONCE,
-      email: 'owner@vokve.app',
+      email: 'owner@vokve.com',
       appleId: 'someone-else',
     });
 
     expect(response.status).toBe(422);
-    expect(await UserModel.countDocuments({ email: 'owner@vokve.app' })).toBe(0);
+    expect(await UserModel.countDocuments({ email: 'owner@vokve.com' })).toBe(0);
   });
 
   it('refuses a sign-in with no nonce', async () => {

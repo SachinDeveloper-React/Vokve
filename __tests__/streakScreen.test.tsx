@@ -79,7 +79,7 @@ const metrics = {
 const user = {
   id: 'u-1',
   name: 'Rana Jay',
-  email: 'rana@vokve.app',
+  email: 'rana@vokve.com',
   avatarUrl: null,
 } as unknown as User;
 

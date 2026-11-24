@@ -1,6 +1,6 @@
 {
   "extends": "@react-native/typescript-config",
   "include": ["**/*.ts", "**/*.tsx"],
-  "comment": "vokve-backend and vokve-crm are separate projects with their own tsconfig, path aliases and libs; compiling them under the app's config only reports errors that are not errors there.",
-  "exclude": ["**/node_modules", "**/Pods", "vokve-backend", "vokve-crm"]
+  "comment": "vokve-backend and vokve-crm are separate projects with their own tsconfig, path aliases and libs; compiling them under the app's config only reports errors that are not errors there. hot-updater.config.ts is the OTA CLI's (Node), not the app's.",
+  "exclude": ["**/node_modules", "**/Pods", "vokve-backend", "vokve-crm", "hot-updater.config.ts", ".hot-updater"]
 }

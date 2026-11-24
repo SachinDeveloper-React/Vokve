@@ -670,7 +670,7 @@ describe('commerce: the order page — tabs, timeline, address and buy again (RU
       status: 'shipped',
       headline: 'Your order is on the way!',
       // The reference is escaped into the ⚙ template, never pasted raw.
-      trackingUrl: 'https://track.vokve.app/DL%20123%2F456',
+      trackingUrl: 'https://track.vokve.com/DL%20123%2F456',
       addressChangeable: false,
       cancellable: false,
     });

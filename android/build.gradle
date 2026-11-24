@@ -17,6 +17,10 @@ buildscript {
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
         classpath("com.google.firebase:firebase-crashlytics-gradle:3.0.8")
+        // Firebase Performance's network monitoring on Android: it rewrites
+        // OkHttp (what React Native's fetch runs on) at build time, so every
+        // API call gets a timing. iOS does the same at runtime, unasked.
+        classpath("com.google.firebase:perf-plugin:2.0.2")
     }
 }
 

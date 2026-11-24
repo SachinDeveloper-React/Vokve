@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CONFIG_DEFAULTS, type AppConfig } from '../../config/defaults.js';
 import { assertConfigValid, deepMerge, getConfig, invalidateConfig } from '../../config/remote.js';
 import { Errors } from '../../lib/errors.js';
+import { refreshWebsite } from '../../lib/website.js';
 import { AppConfigModel, AuditLogModel } from '../platform/models.js';
 
 /**
@@ -503,6 +504,58 @@ const NULLABLE = [
   'integrity.ios.teamId',
 ];
 
+const httpsUrl = z
+  .string()
+  .max(500)
+  .regex(/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/\S*)?$/i, 'A full https:// address, like https://vokve.com/privacy.');
+const e164 = z.string().regex(/^\+[1-9]\d{7,14}$/, 'A number in international form: + then the country code and the number, digits only — +919876543210.');
+const email = z.email('An email address, like support@vokve.com.').max(200);
+const line = (max: number) => z.string().trim().min(1, 'This cannot be empty.').max(max, `Keep it under ${max} characters.`);
+
+/**
+ * The keys whose *form* matters, not only their kind (RULES P21).
+ *
+ * `assertShape` stops a number becoming a string; it cannot tell that the
+ * string a member will tap is a dead link or an address mail cannot reach.
+ * These are the ones a member or a visitor acts on — every contact detail
+ * the app and the website print, and every link they open — so a typo is a
+ * 422 on the key rather than a broken "Email us" button nobody notices.
+ *
+ * Checked on write only, and only for a key the write changes: a read never
+ * fails over them, and an older stored value that predates a rule does not
+ * block an unrelated edit.
+ */
+const FORMATS: Record<string, z.ZodType> = {
+  'support.email': email,
+  'support.company': line(120),
+  'support.phone': e164.nullable(),
+  'support.whatsapp': e164.nullable(),
+  'support.hours': line(120).nullable(),
+  'support.responseTime': line(200),
+  'support.address': z.array(line(120)).min(1, 'Give at least one line.').max(6, 'Six lines at most.'),
+  'support.grievanceOfficer.name': line(120).nullable(),
+  'support.grievanceOfficer.email': email.nullable(),
+  'support.links.website': httpsUrl,
+  'support.links.privacy': httpsUrl,
+  'support.links.terms': httpsUrl,
+  'support.links.licenses': httpsUrl,
+  'support.inviteUrlBase': httpsUrl,
+  'support.social.instagram': httpsUrl.nullable(),
+  'support.social.facebook': httpsUrl.nullable(),
+  'support.social.x': httpsUrl.nullable(),
+  'support.social.youtube': httpsUrl.nullable(),
+  'support.social.linkedin': httpsUrl.nullable(),
+  'app.storeUrl.android': httpsUrl,
+  'app.storeUrl.ios': httpsUrl,
+  'commerce.trackingUrlTemplate': httpsUrl.nullable(),
+};
+
+/** What the public website reads (`GET /site/company`), so a change to it is worth telling the site about. */
+const WEBSITE_PATHS = ['support', 'app.storeUrl', 'app.storeListed'];
+
+const touches = (path: string, prefix: string) =>
+  path === prefix || path.startsWith(`${prefix}.`) || prefix.startsWith(`${path}.`);
+
 /**
  * Whether `value` could stand where `shipped` does.
  *
@@ -711,6 +764,18 @@ export async function setAppConfig(actor: string, body: SetAppConfigBody) {
   for (const path of reset) write(preview as unknown as Record<string, unknown>, path, at(CONFIG_DEFAULTS, path));
   for (const [path, value] of Object.entries(set)) write(preview as unknown as Record<string, unknown>, path, value);
 
+  // A whole branch written at once leaves out the keys it does not name, and
+  // those read as the code's defaults afterwards — so they are checked as such.
+  const filled = deepMerge(structuredClone(CONFIG_DEFAULTS), preview);
+  for (const [path, format] of Object.entries(FORMATS)) {
+    const next = at(filled, path);
+    if (JSON.stringify(next) === JSON.stringify(at(before, path))) continue;
+    const checked = format.safeParse(next);
+    if (!checked.success) {
+      throw Errors.validation({ [path]: checked.error.issues[0]?.message ?? 'That is not in the form this key needs.' });
+    }
+  }
+
   try {
     assertConfigValid(preview);
   } catch (error) {
@@ -761,5 +826,14 @@ export async function setAppConfig(actor: string, body: SetAppConfigBody) {
     },
   });
 
-  return appConfig();
+  // The website caches what it shows for an hour; a contact detail that
+  // changed is worth asking it to read again now. Every page that shows one
+  // carries the `site:company` tag. Never fails the write —
+  // the change is stored either way, and the site catches up on its own.
+  const touched = [...Object.keys(set), ...reset];
+  const website = touched.some(path => WEBSITE_PATHS.some(prefix => touches(path, prefix)))
+    ? await refreshWebsite(['site:company'])
+    : null;
+
+  return { ...(await appConfig()), website };
 }

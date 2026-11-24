@@ -10,6 +10,7 @@ import { ContentTipModel, ReferralPromoModel } from '../modules/content/models.j
 import { DietPlanModel, FoodItemModel } from '../modules/nutrition/models.js';
 import { addDays, localDayOf } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
+import { unpinRetiredDefaults } from '../config/retired.js';
 import {
   ACHIEVEMENTS, APP_RELEASES, CHALLENGES, CONTENT_TIPS, COUPONS, DIET_PLANS, EXERCISES, FOOD_ITEMS, SHOP_CATEGORIES, SHOP_ITEM_DETAILS, SHOP_ITEMS, SHOP_STOCK,
   REFERRAL_PROMOS,
@@ -138,6 +139,11 @@ export async function seed(now = new Date()): Promise<void> {
   for (const [key, value] of Object.entries(CONFIG_DEFAULTS)) {
     await AppConfigModel.updateOne({ _id: key }, { $setOnInsert: { _id: key, value, updatedBy: 'seed' } }, { upsert: true });
   }
+  // …which is also how an older seed's copy of a default outlives the code
+  // that changed it. Values exactly as an older build shipped them were
+  // never anybody's choice: unpin them so today's default applies (D-112).
+  const { unpinned } = await unpinRetiredDefaults(true);
+  if (unpinned.length > 0) logger.info({ paths: unpinned.map(row => row.path) }, 'seed.unpinned_retired_defaults');
 }
 
 const isEntry = process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js');

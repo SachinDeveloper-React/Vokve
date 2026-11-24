@@ -218,6 +218,45 @@ describe('the Saving For card', () => {
     expect(onPressItem).toHaveBeenCalledWith('wrist-wraps');
   });
 
+  test('fifteen saved, three shown: the nearest to done, whatever order they were saved in', async () => {
+    const goals = [
+      9000, 5000, 1200, 7000, 4000, 1100, 8000, 3000, 6000, 2500, 1050, 2000,
+      1500, 10_000, 1010,
+    ];
+    const saved = goals.map((coinGoal, index) => ({
+      ...item('wrist-wraps'),
+      id: `saved-${index}`,
+      title: `Reward ${coinGoal}`,
+      coinGoal,
+      // The nearest of all is sold out: it waits at the back, not in a top slot.
+      inStock: coinGoal !== 1010,
+    }));
+    const tree = await render({
+      items: saved,
+      balance: 1000,
+      onPressItem: noop,
+      onPressViewAll: noop,
+    });
+    const shown = [
+      ...new Set(
+        tree.root
+          .findAll(
+            node =>
+              typeof node.props.onPress === 'function' &&
+              node.props.accessibilityHint === 'Opens the product',
+          )
+          .map(node => String(node.props.accessibilityLabel).split('.')[0]),
+      ),
+    ];
+    expect(shown).toEqual(['Reward 1050', 'Reward 1100', 'Reward 1200']);
+    // The rest are one tap away, and the link says how many.
+    expect(
+      tree.root.findAll(
+        node => node.props.accessibilityLabel === 'View all 15 saved rewards',
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
   test('says how many are ready, and keeps to its limit', async () => {
     const tree = await render({
       items: [item('wrist-wraps'), item('socks'), item('jump-rope')],

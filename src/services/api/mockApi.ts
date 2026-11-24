@@ -3256,7 +3256,7 @@ const MOCK_ACTIVITY_CONFIG = {
       maxZeroCrossingRate: 9,
       engageSeconds: 2,
     },
-    privacyPolicyUrl: 'https://vokve.app/privacy',
+    privacyPolicyUrl: 'https://vokve.com/privacy',
   },
   sync: {
     intervalMinutes: 5,
@@ -3978,7 +3978,7 @@ function withJourney(order: Order): Order {
     timeline,
     headline: MOCK_HEADLINE[order.status],
     trackingUrl: order.trackingRef
-      ? `https://track.vokve.app/${encodeURIComponent(order.trackingRef)}`
+      ? `https://track.vokve.com/${encodeURIComponent(order.trackingRef)}`
       : null,
     returns: {
       eligible:
@@ -5386,8 +5386,8 @@ function mockProgram(): ReferralProgram {
   const rewarded = seedReferrals.filter(r => r.status === 'rewarded');
   return {
     code: referralCode,
-    shareUrl: `https://vokve.app/r/${referralCode}`,
-    shareMessage: `Join me on VOKVE — walk, train and earn coins for real rewards. Use my code ${referralCode} when you sign up and you get ${REFERRAL_REWARD_COINS} coins after your first workout: https://vokve.app/r/${referralCode}`,
+    shareUrl: `https://vokve.com/r/${referralCode}`,
+    shareMessage: `Join me on VOKVE — walk, train and earn coins for real rewards. Use my code ${referralCode} when you sign up and you get ${REFERRAL_REWARD_COINS} coins after your first workout: https://vokve.com/r/${referralCode}`,
     rewards: {
       inviter: REFERRAL_REWARD_COINS,
       invitee: REFERRAL_REWARD_COINS,
@@ -6141,8 +6141,8 @@ export const mockSupportApi: SupportApi = {
         {
           kind: 'email',
           label: 'Email us',
-          value: 'support@vokve.app',
-          url: 'mailto:support@vokve.app',
+          value: 'support@vokve.com',
+          url: 'mailto:support@vokve.com',
           note: 'We usually reply within 24 hours.',
         },
         {
@@ -6285,7 +6285,7 @@ export const mockAppApi: AppApi = {
         notes: null,
       },
       minVersion: '1.0.0',
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve',
+      storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve.fitness',
       title: 'A new VOKVE is out',
       message: `Version ${config.appVersion} is ready.`,
       actionLabel: 'Update now',
@@ -6307,7 +6307,7 @@ export const mockAppApi: AppApi = {
       minVersion: '1.0.0',
       updateRequired: false,
       updateAvailable: false,
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve',
+      storeUrl: 'https://play.google.com/store/apps/details?id=com.vokve.fitness',
       releaseNotes: [
         {
           version: config.appVersion,
@@ -6321,12 +6321,12 @@ export const mockAppApi: AppApi = {
         },
       ],
       links: {
-        privacy: 'https://vokve.app/privacy',
-        terms: 'https://vokve.app/terms',
-        licenses: 'https://vokve.app/licenses',
-        website: 'https://vokve.app',
+        privacy: 'https://vokve.com/privacy',
+        terms: 'https://vokve.com/terms',
+        licenses: 'https://vokve.com/licenses',
+        website: 'https://vokve.com',
       },
-      supportEmail: 'support@vokve.app',
+      supportEmail: 'support@vokve.com',
     };
   },
 };

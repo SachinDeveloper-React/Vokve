@@ -406,8 +406,8 @@ Midnight jobs run hourly, selecting users whose local midnight just passed (`use
 | Env | API | DB | Notes |
 |---|---|---|---|
 | local | `localhost:3000/v1` | `mongodb-memory-server` replset or Docker `mongo --replSet` | Seeded from `seedData.ts` fixtures |
-| staging | `api.staging.vokve.app/v1` | Atlas M10 | SMS/email sandbox; attestation permissive; fraud shadow |
-| production | `api.vokve.app/v1` | Atlas M30, continuous backup, PITR | Attestation enforced; trust tiers live |
+| staging | `api.staging.vokve.com/v1` | Atlas M10 | SMS/email sandbox; attestation permissive; fraud shadow |
+| production | `api.vokve.com/v1` | Atlas M30, continuous backup, PITR | Attestation enforced; trust tiers live |
 
 ## 9. Observability
 

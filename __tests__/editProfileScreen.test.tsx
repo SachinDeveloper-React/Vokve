@@ -56,7 +56,7 @@ const member = (over: Partial<User> = {}): User =>
   ({
     id: 'u-1',
     name: 'Rana Jay',
-    email: 'rana@vokve.app',
+    email: 'rana@vokve.com',
     avatarUrl: null,
     heightCm: 175,
     weightKg: 70.5,

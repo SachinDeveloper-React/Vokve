@@ -90,7 +90,7 @@ const FALLBACK_CONFIG: ActivityConfig = {
       maxZeroCrossingRate: 9,
       engageSeconds: 2,
     },
-    privacyPolicyUrl: 'https://vokve.app/privacy',
+    privacyPolicyUrl: 'https://vokve.com/privacy',
   },
   sync: {
     intervalMinutes: 5,

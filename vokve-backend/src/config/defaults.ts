@@ -555,7 +555,7 @@ export const CONFIG_DEFAULTS = {
      * yet — leaves the app with nothing to open, which is why "Track Live"
      * is drawn from this rather than guessed at.
      */
-    trackingUrlTemplate: 'https://track.vokve.app/{ref}' as string | null,
+    trackingUrlTemplate: 'https://track.vokve.com/{ref}' as string | null,
     /**
      * Offers "Notify me on WhatsApp" on the shipping page (RULES R17) —
      * and only where WhatsApp can be delivered: outside production the
@@ -984,8 +984,15 @@ export const CONFIG_DEFAULTS = {
     minVersion: { ios: '1.0.0', android: '1.0.0' },
     storeUrl: {
       ios: 'https://apps.apple.com/app/vokve',
-      android: 'https://play.google.com/store/apps/details?id=com.vokve',
+      android: 'https://play.google.com/store/apps/details?id=com.vokve.fitness',
     },
+    /**
+     * Whether each store listing is live (RULES P21). The update wall sends
+     * a build to `storeUrl` either way — that build came from the store —
+     * but the website only draws a download button for a listing that is
+     * up, and says "Coming soon" for one that is not.
+     */
+    storeListed: { ios: false, android: true },
     /**
      * What `GET /app/update` tells a build about its own version (RULES
      * DV12). Every word here is the server's, so a wall can go up, come
@@ -1063,20 +1070,51 @@ export const CONFIG_DEFAULTS = {
      */
     avatarMaxKb: 512,
   },
-  /** Where the About and Help screens point. Changed without a deploy, like every ⚙. */
+  /**
+   * How to reach the company and where its pages live (RULES P21): the
+   * app's About and Help screens, the invite links it shares, and the
+   * public website (`GET /site/company`) all read this one section, and
+   * the panel's Contact & links page edits it — so an address or a number
+   * changes everywhere at once, without a deploy or an app release.
+   */
   support: {
-    email: 'support@vokve.app',
+    email: 'support@vokve.com',
     company: 'VOKVE Fitness',
     links: {
-      privacy: 'https://vokve.app/privacy',
-      terms: 'https://vokve.app/terms',
-      licenses: 'https://vokve.app/licenses',
-      website: 'https://vokve.app',
+      privacy: 'https://vokve.com/privacy',
+      terms: 'https://vokve.com/terms',
+      licenses: 'https://vokve.com/licenses',
+      website: 'https://vokve.com',
     },
+    /**
+     * Where a member's invite link points (RULES F6) — `{base}/{code}`. The
+     * website's `/r/:code` page answers it and sends the visitor on to the
+     * store until deep links exist.
+     */
+    inviteUrlBase: 'https://vokve.com/r',
     /** E.164. Null drops that way of reaching support from the page. */
     phone: '+918000000000' as string | null,
     /** The WhatsApp number, E.164; null until a business account exists. */
     whatsapp: null as string | null,
+    /** The postal address the website prints under the company's name, one line per entry. */
+    address: ['VOKVE Fitness', 'India'] as string[],
+    /**
+     * The Grievance Officer India's IT and data-protection rules ask the
+     * site and the privacy policy to name. A null name leaves the title on
+     * its own; a null email means "write to the support address".
+     */
+    grievanceOfficer: {
+      name: null as string | null,
+      email: null as string | null,
+    },
+    /** The company's social profiles, each a full https link; null leaves that one off the website. */
+    social: {
+      instagram: null as string | null,
+      facebook: null as string | null,
+      x: null as string | null,
+      youtube: null as string | null,
+      linkedin: null as string | null,
+    },
     /** When support is at their desks; null when the line is always open. */
     hours: 'Mon–Sat, 9 am – 7 pm IST' as string | null,
     /**

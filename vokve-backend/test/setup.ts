@@ -52,6 +52,10 @@ process.env.APPLE_REDIRECT_URI = '';
 process.env.ADMIN_TOTP_SECRET = '';
 process.env.CORS_ORIGINS = '';
 process.env.JWT_SECRET_PREVIOUS = '';
+// Nor to the public website: a developer's `.env` may point the refresh hook
+// at the live site. `contactDetails.test.ts` sets its own and stubs fetch.
+process.env.SITE_REVALIDATE_URL = '';
+process.env.SITE_REVALIDATE_SECRET = '';
 
 let replSet: MongoMemoryReplSet;
 

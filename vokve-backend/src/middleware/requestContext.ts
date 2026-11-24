@@ -4,6 +4,8 @@ import { isValidTimeZone } from '../lib/dates.js';
 import { CONFIG_DEFAULTS } from '../config/defaults.js';
 
 const REQUEST_ID = /^[\w.:-]{8,128}$/;
+/** An over-the-air update id (a UUID) or `builtin` — nothing longer reaches a log line or a device row. */
+const OTA_UPDATE = /^[\w-]{1,64}$/;
 
 function requestIdOf(offered: string | undefined): string {
   return offered && REQUEST_ID.test(offered) ? offered : uuidv7();
@@ -28,6 +30,7 @@ export const requestContext: RequestHandler = (req, _res, next) => {
     platform: platform === 'ios' || platform === 'android' ? platform : undefined,
     appVersion: h('x-vokve-app-version'),
     build: h('x-vokve-build'),
+    otaUpdate: OTA_UPDATE.test(h('x-vokve-ota-update') ?? '') ? h('x-vokve-ota-update') : undefined,
     osVersion: h('x-vokve-os-version'),
     timezone: tz && isValidTimeZone(tz) ? tz : CONFIG_DEFAULTS.locale.timezone,
     locale: h('x-vokve-locale'),

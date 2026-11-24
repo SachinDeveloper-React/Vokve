@@ -69,20 +69,26 @@ const envSchema = z.object({
   JWT_SECRET_PREVIOUS: unsetWhenBlank(z.string().min(16)),
   /**
    * Browser origins allowed to read this API's answers (CORS), comma
-   * separated, matched exactly: `https://admin.vokve.app`. The app is native
+   * separated, matched exactly: `https://admin.vokve.com`. The app is native
    * and the panel calls from its server, so neither needs one — unset means
    * no browser origin is allowed, except on public media (avatars), which
    * any page may show.
    */
   CORS_ORIGINS: unsetWhenBlank(z.string().min(1)),
-  /** Where a referral link points (RULES F6). The page redirects to the store until deep links exist. */
-  SHARE_URL_BASE: blankIsDefault(z.string().url(), 'https://vokve.app/r'),
   /**
    * This API's own origin, used to build the absolute URLs it hands out for
    * media it serves (RULES P10). Behind a proxy this is the public address,
    * not the port the process listens on.
    */
   PUBLIC_BASE_URL: blankIsDefault(z.string().url(), 'http://localhost:3000'),
+  /**
+   * The public website's refresh hook (RULES P21) — `https://vokve.com/api/revalidate`
+   * — and the bearer secret it checks (the site's `CONTENT_REVALIDATE_SECRET`).
+   * Set both and a change to the contact details on the panel shows on the
+   * site at once; unset, the site picks it up within the hour it caches for.
+   */
+  SITE_REVALIDATE_URL: unsetWhenBlank(z.string().url()),
+  SITE_REVALIDATE_SECRET: unsetWhenBlank(z.string().min(16)),
   /**
    * The Firebase service account for push (FCM), as its three fields. Absent
    * means no push channel: feed rows only, and every send is logged as

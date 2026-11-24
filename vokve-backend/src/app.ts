@@ -87,6 +87,7 @@ export function requestLogger() {
       userId: r.ctx?.userId,
       deviceId: r.ctx?.deviceId,
       appVersion: r.ctx?.appVersion,
+      otaUpdate: r.ctx?.otaUpdate,
       platform: r.ctx?.platform,
       errorCode: locals.errorCode as string | undefined,
       errorMessage: locals.errorMessage as string | undefined,

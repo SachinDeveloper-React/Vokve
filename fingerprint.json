@@ -1,0 +1,555 @@
+{
+  "ios": {
+    "engine": "hot-updater/interface@1",
+    "hash": "3fff6243e1c241623890cdf2d000bf8bcc0badd32a7430caf3e0145b470c6369",
+    "sources": [
+      {
+        "type": "contents",
+        "id": "codegen-config:modules/vokve-app-icon",
+        "contents": "{\"ios\":{\"modulesProvider\":{\"VokveAppIcon\":\"VokveAppIconModule\"}},\"jsSrcsDir\":\"src\",\"name\":\"VokveAppIconSpec\",\"type\":\"modules\"}",
+        "reasons": [
+          "codegen-config"
+        ],
+        "hash": "73678ac1f01aa395a5b9a6bdfb483afdc5e7a89750f20145202059284c42141a"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@hot-updater/react-native",
+        "contents": "@hot-updater/react-native@1.1.18",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3eef270238e24d20a43f95de92b166e5680696e9e8571ec577aa7835786a27ce"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@invertase/react-native-apple-authentication",
+        "contents": "@invertase/react-native-apple-authentication@2.5.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "b76d02fcdc41ce2213e035442474a45f3974c4406af1ec617ba84fc727864a7f"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@notifee/react-native",
+        "contents": "@notifee/react-native@9.1.8",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "b304c430f80bc50b8eed69f5b7c4d487e34c3b6153a5dbab7d97c5376efcc664"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-clipboard/clipboard",
+        "contents": "@react-native-clipboard/clipboard@1.16.3",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3143886c46732fe03515e28f17ee5f736006bea6b498c7448ae437cb9437495b"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-community/netinfo",
+        "contents": "@react-native-community/netinfo@12.0.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "36017dfcab0b968688c1c7a605e1259b1ec58cbe901154c2c622a56e7289842e"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-community/slider",
+        "contents": "@react-native-community/slider@5.2.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "2f6d7a98675bd7fe433a25ced84985796da459147a7d9e24a6b055ce717f4b1c"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/app",
+        "contents": "@react-native-firebase/app@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3479d2b0caadf0c1697ebfa5c18563f82d869cfb8d219fe56e95e928296134fb"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/auth",
+        "contents": "@react-native-firebase/auth@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "7f9bb0304275e09ec63761097d108ce9fb3d2689dc56777b0d657cd387a315d2"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/crashlytics",
+        "contents": "@react-native-firebase/crashlytics@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "fe3effdae721e5ba7558d54c1c419051b267e3b367f0a7f931e68568b3260848"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/messaging",
+        "contents": "@react-native-firebase/messaging@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3fb35271342e5a2d36aa9209a898fbeb128dbdf3c55ea79a27b5d386f55c4a62"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/perf",
+        "contents": "@react-native-firebase/perf@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "a537204556b8b9ecca3c4986f496ed45396523dc87bae24d99f7476064719d8a"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-device-info",
+        "contents": "react-native-device-info@15.0.2",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "aa8918d442791ee9ae2c6aaaf82b749307d9b9a5d151caa62469516265934952"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-fbsdk-next",
+        "contents": "react-native-fbsdk-next@13.4.3",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "ad3e18d728285aa10d904f4fa04fcdc6dccf26aa2fdb60781b1072fc27fd6046"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-image-picker",
+        "contents": "react-native-image-picker@8.2.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3bbe66f84b36bd093d5e34db2c90fed3b9874fbece7c80241467321c715f0933"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-keyboard-controller",
+        "contents": "react-native-keyboard-controller@1.22.4",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "75763ffb0a8aefc235df5eae6b63b3055da41a27db7c3db1ee62bd0b92513110"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-keychain",
+        "contents": "react-native-keychain@10.0.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "2dc973e15313d3aa565b45071238ab3c478ab69da1b1c257487a7a4bf9203362"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-linear-gradient",
+        "contents": "react-native-linear-gradient@2.8.3",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "7eb3c1dab017d4bcfbbbe0609b7f5b5abc551f9ccb9c341504f82a4e9f4f75f7"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-mmkv",
+        "contents": "react-native-mmkv@4.3.2",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "cfa137b4ab26397f8a56d8f0bc777a7a8e37fbfd51ea453ba3ddd8f6a4b12567"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-nitro-google-signin",
+        "contents": "react-native-nitro-google-signin@2.3.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "8ce975d7f59fae9917b0ea2ecf59401956a3b7734f05333958397d5b478c8e8d"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-nitro-modules",
+        "contents": "react-native-nitro-modules@0.37.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "557f725682df9caec38b27aedc461b2b1e4cd048de67548db87a83ba62c123ac"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-reanimated",
+        "contents": "react-native-reanimated@4.6.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "cbc4b0e2c9ba13f99a296002fd48556ce02142bc5ebfdaa0688c89b0611fde76"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-safe-area-context",
+        "contents": "react-native-safe-area-context@5.9.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "a78e9a4ea131d3c58f7be6761e6c122997e04cee18b1c2b913ce3dd25f170dba"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-screens",
+        "contents": "react-native-screens@4.27.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "8c4dc5c4d87d1f6f99efe59466ef7ffb3b3b2d5b94ab6dda42320ea23da5acc9"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-step-tracker-pro-ios",
+        "contents": "react-native-step-tracker-pro-ios@1.1.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "f5aa7ade6280703e91e05e40fb1f4102718356ace3d50d8425a32d86dfa80e4b"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-svg",
+        "contents": "react-native-svg@15.15.5",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "1ac8060440a95ec65795fd4951e91b0d3f2a8772b55d9178f1490b54edbf3d87"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-worklets",
+        "contents": "react-native-worklets@0.12.2",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "2ea42ea7912f8cf327758c0b0f480f47adc8d5ae8149abbd1a9a0717381d3f0d"
+      },
+      {
+        "type": "contents",
+        "id": "runtime",
+        "contents": "react-native@0.87.1",
+        "reasons": [
+          "runtime"
+        ],
+        "hash": "b365f33551a2e51095b8284642d444d3bda3f8e339e8a0f3845a1079dd058f27"
+      },
+      {
+        "type": "file",
+        "filePath": "modules/vokve-app-icon/src/NativeVokveAppIcon.ts",
+        "reasons": [
+          "local-dependency-codegen-spec"
+        ],
+        "hash": "37136223475b83b5e194d7efcf123cd21150672c24c4535e6ac1dc9ca944744e"
+      }
+    ]
+  },
+  "android": {
+    "engine": "hot-updater/interface@1",
+    "hash": "3d729a430e8132a5e294478be2d03f112cba9cb12aa617f714a453c82d955fab",
+    "sources": [
+      {
+        "type": "contents",
+        "id": "codegen-config:modules/vokve-app-icon",
+        "contents": "{\"android\":{\"javaPackageName\":\"com.vokve.appicon\"},\"jsSrcsDir\":\"src\",\"name\":\"VokveAppIconSpec\",\"type\":\"modules\"}",
+        "reasons": [
+          "codegen-config"
+        ],
+        "hash": "063e7501987faebe83f6e9f368cdd757bbb0a69348adaa1be18f54ee377d5b86"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@hot-updater/react-native",
+        "contents": "@hot-updater/react-native@1.1.18",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3eef270238e24d20a43f95de92b166e5680696e9e8571ec577aa7835786a27ce"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@invertase/react-native-apple-authentication",
+        "contents": "@invertase/react-native-apple-authentication@2.5.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "b76d02fcdc41ce2213e035442474a45f3974c4406af1ec617ba84fc727864a7f"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@notifee/react-native",
+        "contents": "@notifee/react-native@9.1.8",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "b304c430f80bc50b8eed69f5b7c4d487e34c3b6153a5dbab7d97c5376efcc664"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-clipboard/clipboard",
+        "contents": "@react-native-clipboard/clipboard@1.16.3",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3143886c46732fe03515e28f17ee5f736006bea6b498c7448ae437cb9437495b"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-community/netinfo",
+        "contents": "@react-native-community/netinfo@12.0.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "36017dfcab0b968688c1c7a605e1259b1ec58cbe901154c2c622a56e7289842e"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-community/slider",
+        "contents": "@react-native-community/slider@5.2.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "2f6d7a98675bd7fe433a25ced84985796da459147a7d9e24a6b055ce717f4b1c"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/app",
+        "contents": "@react-native-firebase/app@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3479d2b0caadf0c1697ebfa5c18563f82d869cfb8d219fe56e95e928296134fb"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/auth",
+        "contents": "@react-native-firebase/auth@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "7f9bb0304275e09ec63761097d108ce9fb3d2689dc56777b0d657cd387a315d2"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/crashlytics",
+        "contents": "@react-native-firebase/crashlytics@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "fe3effdae721e5ba7558d54c1c419051b267e3b367f0a7f931e68568b3260848"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/messaging",
+        "contents": "@react-native-firebase/messaging@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3fb35271342e5a2d36aa9209a898fbeb128dbdf3c55ea79a27b5d386f55c4a62"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:@react-native-firebase/perf",
+        "contents": "@react-native-firebase/perf@26.4.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "a537204556b8b9ecca3c4986f496ed45396523dc87bae24d99f7476064719d8a"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-device-info",
+        "contents": "react-native-device-info@15.0.2",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "aa8918d442791ee9ae2c6aaaf82b749307d9b9a5d151caa62469516265934952"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-fbsdk-next",
+        "contents": "react-native-fbsdk-next@13.4.3",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "ad3e18d728285aa10d904f4fa04fcdc6dccf26aa2fdb60781b1072fc27fd6046"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-image-picker",
+        "contents": "react-native-image-picker@8.2.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "3bbe66f84b36bd093d5e34db2c90fed3b9874fbece7c80241467321c715f0933"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-keyboard-controller",
+        "contents": "react-native-keyboard-controller@1.22.4",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "75763ffb0a8aefc235df5eae6b63b3055da41a27db7c3db1ee62bd0b92513110"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-keychain",
+        "contents": "react-native-keychain@10.0.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "2dc973e15313d3aa565b45071238ab3c478ab69da1b1c257487a7a4bf9203362"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-linear-gradient",
+        "contents": "react-native-linear-gradient@2.8.3",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "7eb3c1dab017d4bcfbbbe0609b7f5b5abc551f9ccb9c341504f82a4e9f4f75f7"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-mmkv",
+        "contents": "react-native-mmkv@4.3.2",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "cfa137b4ab26397f8a56d8f0bc777a7a8e37fbfd51ea453ba3ddd8f6a4b12567"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-nitro-google-signin",
+        "contents": "react-native-nitro-google-signin@2.3.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "8ce975d7f59fae9917b0ea2ecf59401956a3b7734f05333958397d5b478c8e8d"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-nitro-modules",
+        "contents": "react-native-nitro-modules@0.37.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "557f725682df9caec38b27aedc461b2b1e4cd048de67548db87a83ba62c123ac"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-reanimated",
+        "contents": "react-native-reanimated@4.6.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "cbc4b0e2c9ba13f99a296002fd48556ce02142bc5ebfdaa0688c89b0611fde76"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-safe-area-context",
+        "contents": "react-native-safe-area-context@5.9.1",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "a78e9a4ea131d3c58f7be6761e6c122997e04cee18b1c2b913ce3dd25f170dba"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-screens",
+        "contents": "react-native-screens@4.27.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "8c4dc5c4d87d1f6f99efe59466ef7ffb3b3b2d5b94ab6dda42320ea23da5acc9"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-step-tracker-pro",
+        "contents": "react-native-step-tracker-pro@2.11.0",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "833c2b6e53e624292d215d9f269a36c61c5ad72a0e6d0dc9a1276973e2f4b1df"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-svg",
+        "contents": "react-native-svg@15.15.5",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "1ac8060440a95ec65795fd4951e91b0d3f2a8772b55d9178f1490b54edbf3d87"
+      },
+      {
+        "type": "contents",
+        "id": "dependency:react-native-worklets",
+        "contents": "react-native-worklets@0.12.2",
+        "reasons": [
+          "native-dependency"
+        ],
+        "hash": "2ea42ea7912f8cf327758c0b0f480f47adc8d5ae8149abbd1a9a0717381d3f0d"
+      },
+      {
+        "type": "contents",
+        "id": "runtime",
+        "contents": "react-native@0.87.1",
+        "reasons": [
+          "runtime"
+        ],
+        "hash": "b365f33551a2e51095b8284642d444d3bda3f8e339e8a0f3845a1079dd058f27"
+      },
+      {
+        "type": "contents",
+        "id": "setting:android:hermesEnabled",
+        "contents": "true",
+        "reasons": [
+          "native-setting"
+        ],
+        "hash": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+      },
+      {
+        "type": "contents",
+        "id": "setting:android:newArchEnabled",
+        "contents": "true",
+        "reasons": [
+          "native-setting"
+        ],
+        "hash": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+      },
+      {
+        "type": "file",
+        "filePath": "modules/vokve-app-icon/src/NativeVokveAppIcon.ts",
+        "reasons": [
+          "local-dependency-codegen-spec"
+        ],
+        "hash": "37136223475b83b5e194d7efcf123cd21150672c24c4535e6ac1dc9ca944744e"
+      }
+    ]
+  },
+  "inputs": {
+    "adapter": "bare"
+  }
+}

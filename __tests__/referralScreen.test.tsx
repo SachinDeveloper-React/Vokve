@@ -92,9 +92,9 @@ const program = (
   overrides: Partial<ReferralProgram> = {},
 ): ReferralProgram => ({
   code: 'KX7M2QP',
-  shareUrl: 'https://vokve.app/r/KX7M2QP?c=sept',
+  shareUrl: 'https://vokve.com/r/KX7M2QP?c=sept',
   shareMessage:
-    'Join me on VOKVE with code KX7M2QP: https://vokve.app/r/KX7M2QP?c=sept',
+    'Join me on VOKVE with code KX7M2QP: https://vokve.com/r/KX7M2QP?c=sept',
   rewards: {
     inviter: 35,
     invitee: 45,
@@ -269,8 +269,8 @@ describe('ReferralScreen', () => {
 
     expect(share).toHaveBeenCalledWith({
       message:
-        'Join me on VOKVE with code KX7M2QP: https://vokve.app/r/KX7M2QP?c=sept',
-      url: 'https://vokve.app/r/KX7M2QP?c=sept',
+        'Join me on VOKVE with code KX7M2QP: https://vokve.com/r/KX7M2QP?c=sept',
+      url: 'https://vokve.com/r/KX7M2QP?c=sept',
     });
     share.mockRestore();
   });

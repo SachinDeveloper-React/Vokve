@@ -4,13 +4,26 @@ import React_RCTAppDelegate
 import ReactAppDependencyProvider
 import Firebase
 import FirebaseAuth
+import HotUpdater
 
+/// The app uses the UIScene life cycle. Since the iOS 27 SDK (Xcode 27) iOS
+/// refuses to launch an app built without it ("UIScene life cycle is
+/// required for apps built with this SDK"), so the window and React Native
+/// start in `SceneDelegate`, which Info.plist's `UIApplicationSceneManifest`
+/// names. Only app-wide setup stays here.
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
+  /// The scene's window, copied here by `SceneDelegate`. Libraries still
+  /// read `UIApplication.shared.delegate.window`: React Native Firebase
+  /// Messaging looks at its root view to tell a push-opened launch.
   var window: UIWindow?
 
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
+
+  /// Kept for the scene, which starts React Native once iOS gives it a
+  /// window, after this method has returned.
+  var launchOptions: [UIApplication.LaunchOptionsKey: Any]?
 
   func application(
     _ application: UIApplication,
@@ -23,40 +36,73 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     reactNativeDelegate = delegate
     reactNativeFactory = factory
-
-    window = UIWindow(frame: UIScreen.main.bounds)
-
-    factory.startReactNative(
-      withModuleName: "vokve",
-      in: window,
-      launchOptions: launchOptions
-    )
+    self.launchOptions = launchOptions
 
     return true
   }
 
-  /// URLs opened into the app. Firebase Auth comes first: when it cannot
-  /// prove the phone silently (always on the Simulator, and on a phone where
-  /// the APNs check fails) it shows a reCAPTCHA page, and that page hands the
-  /// result back by opening `REVERSED_CLIENT_ID://firebaseauth/link?...`.
+  /// URLs opened into the app. Under the scene life cycle iOS delivers them
+  /// to `SceneDelegate`, never to `application(_:open:options:)`.
   ///
-  /// This method must be written out here. Firebase's AppDelegate swizzling
-  /// only wraps `application(_:open:options:)` when the app already
-  /// implements it; without it the callback is dropped, the reCAPTCHA sheet
+  /// Firebase Auth comes first: when it cannot prove the phone silently
+  /// (always on the Simulator, and on a phone where the APNs check fails) it
+  /// shows a reCAPTCHA page, and that page hands the result back by opening
+  /// `REVERSED_CLIENT_ID://firebaseauth/link?...`. Without this the sheet
   /// sits on a blank page and no SMS is ever sent.
   ///
-  /// Once this exists the swizzled copy also hands the URL to Firebase before
-  /// calling here, so by now `canHandle` may already have consumed it and
+  /// Firebase also swizzles the scene delegate and may hand it the URL
+  /// before calling here, so `canHandle` can already have consumed it and
   /// answer false; the `firebaseauth` host check keeps that link out of JS.
-  func application(
-    _ app: UIApplication,
-    open url: URL,
-    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
-  ) -> Bool {
-    if Auth.auth().canHandle(url) || url.host == "firebaseauth" {
-      return true
+  static func isFirebaseAuthURL(_ url: URL) -> Bool {
+    Auth.auth().canHandle(url) || url.host == "firebaseauth"
+  }
+}
+
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    guard
+      let windowScene = scene as? UIWindowScene,
+      let appDelegate = UIApplication.shared.delegate as? AppDelegate,
+      let factory = appDelegate.reactNativeFactory
+    else { return }
+
+    let window = UIWindow(windowScene: windowScene)
+    self.window = window
+    appDelegate.window = window
+
+    // A link that cold-starts the app arrives here, not in the app's launch
+    // options; React Native's Linking.getInitialURL reads it from there.
+    var launchOptions = appDelegate.launchOptions ?? [:]
+    if let url = connectionOptions.urlContexts.first?.url,
+       !AppDelegate.isFirebaseAuthURL(url) {
+      launchOptions[.url] = url
     }
-    return RCTLinkingManager.application(app, open: url, options: options)
+
+    factory.startReactNative(
+      withModuleName: "vokve",
+      in: window,
+      launchOptions: launchOptions.isEmpty ? nil : launchOptions
+    )
+  }
+
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    for context in URLContexts {
+      let url = context.url
+      if AppDelegate.isFirebaseAuthURL(url) {
+        continue
+      }
+      var options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+      if let source = context.options.sourceApplication {
+        options[.sourceApplication] = source
+      }
+      _ = RCTLinkingManager.application(UIApplication.shared, open: url, options: options)
+    }
   }
 }
 
@@ -65,11 +111,15 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
     self.bundleURL()
   }
 
+  /// Over-the-air updates (D-111): a release build runs the newest
+  /// JavaScript bundle Hot Updater has downloaded for this native build, or
+  /// the one inside the app when there is none. A debug build keeps loading
+  /// from Metro.
   override func bundleURL() -> URL? {
 #if DEBUG
     RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
 #else
-    Bundle.main.url(forResource: "main", withExtension: "jsbundle")
+    HotUpdater.bundleURL()
 #endif
   }
 }

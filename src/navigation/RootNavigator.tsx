@@ -79,6 +79,7 @@ import {
   useUpgradeRequired,
 } from '../stores/appStatusStore';
 import { useMaintenance } from '../hooks/useMaintenance';
+import { useOtaUpdates } from '../hooks/useOtaUpdates';
 import { useStepTrackingSession } from '../hooks/useStepTrackingSession';
 import { useSessionRecovery } from '../hooks/useSessionRecovery';
 import { useIdentityLinkToast } from '../hooks/useIdentityLinkToast';
@@ -230,6 +231,10 @@ export const RootNavigator = () => {
   // sign-in and sign-out, on every foreground, and every half minute while
   // it lasts — which is how the maintenance screen lifts by itself.
   useMaintenance();
+
+  // Over-the-air updates (D-111): on launch and on returns to the app. An
+  // ordinary one is used from the next launch; a forced one reloads now.
+  useOtaUpdates();
 
   // Which launcher icon to show (RULES DV13) — the everyday one, or a
   // festive one the panel has put on — asked at the same moments.

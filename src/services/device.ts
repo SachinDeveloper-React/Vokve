@@ -8,6 +8,7 @@ import { setDeviceReregistrar, setRequestHeadersProvider } from './api/client';
 import { toApiError } from './api/errors';
 import { logger } from '../utils/logger';
 import { uuid } from '../utils/uuid';
+import { otaUpdater, runningOtaUpdateId } from './otaUpdates';
 
 /**
  * Who this install is, to the server (BACKEND.md §13.1).
@@ -72,6 +73,12 @@ export function requestHeaders(): Record<string, string> {
   };
   const deviceId = getDeviceId();
   if (deviceId) headers['X-Vokve-Device-Id'] = deviceId;
+  // Which over-the-air update this launch runs (D-111), so a fault or a
+  // support question can be matched to the JavaScript that was actually
+  // running: the native version alone no longer says. `builtin` is the
+  // bundle inside the build — sent rather than left out, so the server can
+  // tell a rollback from a phone that never had OTA.
+  if (otaUpdater) headers['X-Vokve-Ota-Update'] = runningOtaUpdateId ?? 'builtin';
   return headers;
 }
 

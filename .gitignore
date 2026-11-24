@@ -82,3 +82,11 @@ yarn-error.log
 vokve-backend/secrets/
 **/*firebase-adminsdk*.json
 **/*service-account*.json
+
+# Over-the-air updates (hot-updater, D-111): the Firebase settings and keys
+# init writes, a service-account file if one is ever downloaded, and the
+# bundles and logs `deploy` leaves behind.
+.env.hotupdater
+firebase-adminsdk-credentials.json
+.hot-updater/output
+.hot-updater/log

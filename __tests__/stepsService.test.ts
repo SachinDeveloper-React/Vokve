@@ -90,7 +90,7 @@ const SERVER_CONFIG = {
       maxZeroCrossingRate: 9,
       engageSeconds: 2,
     },
-    privacyPolicyUrl: 'https://vokve.app/privacy',
+    privacyPolicyUrl: 'https://vokve.com/privacy',
   },
   sync: {
     intervalMinutes: 5,
@@ -229,7 +229,7 @@ describe('a step session', () => {
           maxZeroCrossingRate: 9,
           engageSeconds: 2,
         },
-        privacyPolicyUrl: 'https://vokve.app/privacy',
+        privacyPolicyUrl: 'https://vokve.com/privacy',
       }),
     );
   });

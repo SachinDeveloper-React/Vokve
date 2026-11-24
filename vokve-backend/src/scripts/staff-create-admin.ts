@@ -5,7 +5,7 @@ import { createFirstAdmin } from '../modules/staff/service.js';
  * The first admin (RULES Z9) — or another one, when every admin is locked
  * out and the panel's break-glass key is not to hand.
  *
- *   npm run staff:create-admin -- owner@vokve.app "Owner Name"
+ *   npm run staff:create-admin -- owner@vokve.com "Owner Name"
  *
  * Prints a temporary password once. The first sign-in asks for a new one
  * and for an authenticator app, before anything else opens. Uses the

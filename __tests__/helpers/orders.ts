@@ -71,7 +71,7 @@ export function journeyOf(
     timeline,
     headline: HEADLINE[status],
     trackingUrl: trackingRef
-      ? `https://track.vokve.app/${encodeURIComponent(trackingRef)}`
+      ? `https://track.vokve.com/${encodeURIComponent(trackingRef)}`
       : null,
     returns: {
       eligible: status === 'delivered',

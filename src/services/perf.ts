@@ -4,9 +4,11 @@ import { logger } from '../utils/logger';
 /**
  * How long the things that matter actually take, on real phones (RULES P17).
  *
- * Firebase Performance was already in this app and was already collecting
- * what it collects for free: cold start, and the duration of every HTTP
- * request. Neither answers the question support is asked. "Sync is slow"
+ * Firebase Performance collects two things for free: cold start, and the
+ * duration of every HTTP request — on iOS by itself, on Android only because
+ * the `firebase-perf` Gradle plugin rewrites OkHttp at build time (without
+ * it, Android reported no network requests at all). Neither answers the
+ * question support is asked. "Sync is slow"
  * is not one request — it is reading a week of days off a native service,
  * signing each one, and posting them — and a p95 on `POST /activity/steps`
  * says nothing about the two thirds of that time spent before the request
@@ -55,6 +57,27 @@ function performance() {
     // No Firebase on this build — an emulator without Play services, or a
     // fork with no google-services.json.
     return null;
+  }
+}
+
+/**
+ * Whether this build's timings go to the console: release builds only.
+ *
+ * Crashlytics already ignores debug builds; Performance did not, so every
+ * development launch — a Metro bundle, unminified, often on an emulator —
+ * was filed beside real phones' cold starts and dragged the percentiles. The
+ * setting is kept by the SDK across launches, so it is set on every one, and
+ * a release build installed over a debug one turns itself back on.
+ *
+ * Called from `index.js`, before anything is measured.
+ */
+export function startPerformance(): void {
+  const perf = performance();
+  if (!perf) return;
+  try {
+    perf.dataCollectionEnabled = !__DEV__;
+  } catch (error) {
+    logger.debug('perf', 'Collection switch refused', error);
   }
 }
 

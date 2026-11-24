@@ -255,7 +255,7 @@ Numbered for traceability to PHASES.md and to tests. **MUST** = launch-blocking.
 | ADV3 | MUST serve remote config with feature flags, percentage rollouts and cohorts (tier, country, version); every ⚙ value lives there. |
 | ADV4 | SHOULD support push campaigns to a segment with per-category consent and quiet hours. |
 | ADV5 | SHOULD send a weekly insights digest (steps, health score trend, streak, nutrition). |
-| ADV6 | SHOULD provide referral deep links (`vokve.app/r/CODE`) with deferred attribution on first device registration. |
+| ADV6 | SHOULD provide referral deep links (`vokve.com/r/CODE`) with deferred attribution on first device registration. |
 | ADV7 | MUST enforce KYC-lite before physical shipping: verified email + phone + address + trust ≥ normal (+ step-up above threshold). |
 | ADV8 | MUST provide an admin API: user 360 (devices, ledger, holds, flags, orders, samples), order ops, config editor, fraud queue, read-only impersonation. |
 | ADV9 | MUST automate data lifecycle: per-collection retention, export bundles, deletion with legal hold. |

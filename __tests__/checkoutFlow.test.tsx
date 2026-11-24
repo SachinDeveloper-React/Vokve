@@ -475,10 +475,10 @@ beforeEach(() => {
   addressApi.list.mockReset().mockResolvedValue([]);
   appApi.about.mockReset().mockResolvedValue({
     links: {
-      privacy: 'https://vokve.app/privacy',
-      terms: 'https://vokve.app/terms',
-      licenses: 'https://vokve.app/licenses',
-      website: 'https://vokve.app',
+      privacy: 'https://vokve.com/privacy',
+      terms: 'https://vokve.com/terms',
+      licenses: 'https://vokve.com/licenses',
+      website: 'https://vokve.com',
     },
   });
   useShopStore.getState().reset();

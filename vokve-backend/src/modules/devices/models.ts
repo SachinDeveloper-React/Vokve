@@ -19,6 +19,8 @@ const deviceSchema = new Schema(
     },
     app: {
       version: String, build: String, bundleId: String, firstVersion: String,
+      /** The over-the-air update it last said it was running (D-111); null for the bundle inside the build. */
+      otaUpdate: { type: String, default: null },
       /** The launcher icon this install last said it was showing (RULES DV13). */
       icon: { type: String, default: null },
     },

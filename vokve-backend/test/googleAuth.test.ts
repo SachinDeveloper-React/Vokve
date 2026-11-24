@@ -64,13 +64,13 @@ describe('a first Google sign-in', () => {
     // believed, this would be a way to sign in as any member by name.
     const response = await signInWith({
       idToken: 'tok',
-      email: 'owner@vokve.app',
+      email: 'owner@vokve.com',
       googleId: 'some-other-sub',
     });
 
     // Refused outright: the body carries fields the route does not take.
     expect(response.status).toBe(422);
-    expect(await UserModel.countDocuments({ email: 'owner@vokve.app' })).toBe(0);
+    expect(await UserModel.countDocuments({ email: 'owner@vokve.com' })).toBe(0);
   });
 
   it('lets two phone-less accounts exist side by side', async () => {

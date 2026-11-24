@@ -10,6 +10,9 @@
 // missing version as 0.0.0, and the "Update VOKVE to continue" wall came up
 // on every fresh install. A bare import is never deferred.
 import './src/services/device';
+// Over-the-air updates (D-111): made before anything renders, so this launch
+// is read in time to roll back a bundle that cannot reach its first screen.
+import './src/services/otaUpdates';
 import { AppRegistry } from 'react-native';
 import notifee from '@notifee/react-native';
 import {
@@ -22,6 +25,7 @@ import {
   reportError,
   startErrorReporting,
 } from './src/services/errorReporting';
+import { startPerformance } from './src/services/perf';
 import { handleBackgroundMessage } from './src/services/push';
 import { runStepSyncTask } from './src/services/steps';
 import { name as appName } from './app.json';
@@ -45,10 +49,23 @@ notifee.onBackgroundEvent(handleReminderBackgroundEvent);
  * the crash worth having.
  */
 startErrorReporting();
+startPerformance();
 
+// `startErrorReporting` has just made the Crashlytics module, and making it
+// installed React Native Firebase's own handler — so `nextHandler` is that
+// one, which files the crash in Crashlytics as fatal. Ours tells the server
+// only; recording it here too filed every JS crash twice. A thrown
+// non-Error (a string, an object) is the exception: that handler only logs
+// those, so ours still records it.
 const nextHandler = ErrorUtils.getGlobalHandler?.();
 ErrorUtils.setGlobalHandler((error, isFatal) => {
-  reportError({ kind: 'js', error, scope: 'global', fatal: Boolean(isFatal) });
+  reportError({
+    kind: 'js',
+    error,
+    scope: 'global',
+    fatal: Boolean(isFatal),
+    skipCrashlytics: error instanceof Error,
+  });
   // Then whatever React Native was going to do: the red box in development,
   // and the app going down in release. Reporting must not change behaviour.
   nextHandler?.(error, isFatal);

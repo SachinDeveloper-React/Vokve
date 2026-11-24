@@ -155,7 +155,7 @@ the panel with their own email, password and authenticator code; the admin
 key is only the owner's break-glass door. To start:
 
 ```sh
-npm run staff:create-admin -- owner@vokve.app "Owner Name"   # prints a temporary password once
+npm run staff:create-admin -- owner@vokve.com "Owner Name"   # prints a temporary password once
 ```
 
 Sign in to the panel with it: you choose your own password and scan a QR code

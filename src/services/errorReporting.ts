@@ -2,11 +2,13 @@ import { AppState } from 'react-native';
 import {
   didCrashOnPreviousExecution,
   getCrashlytics,
+  log,
   recordError,
   setAttributes,
   setUserId,
 } from '@react-native-firebase/crashlytics';
 import { getMMKV } from '../stores';
+import { runningOtaUpdateId } from './otaUpdates';
 import type { AppError, AppErrorKind } from '../types/models';
 import { logger, setLoggerErrorSink } from '../utils/logger';
 import { telemetryApi } from './api/endpoints';
@@ -110,6 +112,13 @@ export interface ReportInput {
   /** It ended something: a screen replaced by the fallback, or the app. */
   fatal?: boolean;
   context?: Record<string, string | number | boolean | null | undefined>;
+  /**
+   * Crashlytics already has this one, so only the server is told. For the
+   * global handler: React Native Firebase installs its own handler beneath
+   * ours and records an uncaught error as a *fatal* crash, so recording it
+   * here as well filed every JS crash twice — once fatal, once non-fatal.
+   */
+  skipCrashlytics?: boolean;
 }
 
 /**
@@ -121,7 +130,7 @@ export function reportError(input: ReportInput): void {
   reporting = true;
   try {
     const error = asError(input.error, input.message);
-    const crash = crashlytics();
+    const crash = input.skipCrashlytics ? null : crashlytics();
     if (crash) {
       // `jsErrorName` is what groups it in the console; the scope makes a
       // `TypeError` from the step service tell itself apart from one in the
@@ -230,10 +239,20 @@ export function setErrorIdentity(
 
 /** The screen a fault is attributed to. Fed by the navigator's own tracking. */
 export function setErrorScreen(name: string | null): void {
+  const changed = name !== screen;
   screen = name;
   const crash = crashlytics();
   if (crash && name) {
     setAttributes(crash, { screen: name }).catch(() => {});
+    // The attribute is only the last screen; the log is the way there,
+    // which Crashlytics shows on the crash itself (its Logs tab).
+    if (changed) {
+      try {
+        log(crash, `screen ${name}`);
+      } catch {
+        // A breadcrumb is not worth a failure.
+      }
+    }
   }
 }
 
@@ -248,6 +267,7 @@ export function setErrorScreen(name: string | null): void {
  */
 export function startErrorReporting(): () => void {
   reportPreviousCrash();
+  tagRunningBundle();
   setLoggerErrorSink((scopeName, message, data) => {
     reportError({
       kind: 'js',
@@ -258,6 +278,18 @@ export function startErrorReporting(): () => void {
     });
   });
   return () => setLoggerErrorSink(null);
+}
+
+/**
+ * Which JavaScript this launch is running (D-111). Crashlytics files a crash
+ * under the native version, and an over-the-air update changes the code
+ * without changing that — so two different bundles' crashes read as one
+ * build's. `embedded` is the bundle inside the build.
+ */
+function tagRunningBundle(): void {
+  const crash = crashlytics();
+  if (!crash) return;
+  setAttributes(crash, { ota_update: runningOtaUpdateId ?? 'embedded' }).catch(() => {});
 }
 
 /** Whatever was thrown, as an `Error` with a usable name and message. */

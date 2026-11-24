@@ -41,6 +41,7 @@ import { useCoinBalance } from '../../stores/coinsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import type { AppAbout } from '../../types/models';
 import { formatRelativeDay } from '../../utils/format';
+import { otaUpdater, runningOtaUpdateId } from '../../services/otaUpdates';
 
 const makeStyles = ({ spacing }: ThemeShape) =>
   StyleSheet.create({
@@ -64,8 +65,21 @@ const LINKS: {
   { key: 'privacy', label: 'Privacy policy', icon: ShieldCheck },
   { key: 'terms', label: 'Terms of use', icon: FileText },
   { key: 'licenses', label: 'Open-source licences', icon: Scale },
-  { key: 'website', label: 'vokve.app', icon: ExternalLink },
+  { key: 'website', label: 'Website', icon: ExternalLink },
 ];
+
+/**
+ * `https://www.vokve.com/` → `vokve.com`. The website row names the address
+ * it opens, and the address is the server's (⚙ `support.links.website`,
+ * edited on the panel's Contact & links page) — so a new domain needs no
+ * app release to be shown right.
+ */
+export const siteHost = (url: string): string =>
+  url
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/[/?#].*$/, '');
 
 /**
  * What this build is, whether it is current, and everywhere the legal text
@@ -271,6 +285,21 @@ export const AboutScreen = () => {
                   </AppText>
                   <AppText variant="body">{about.minVersion}</AppText>
                 </HStack>
+                {otaUpdater ? (
+                  // Which over-the-air update is running (D-111): the line
+                  // support asks for, since the version above no longer
+                  // says which JavaScript is on the phone.
+                  <HStack align="center" justify="between">
+                    <AppText variant="body" color="textSecondary">
+                      Update
+                    </AppText>
+                    <AppText variant="body" selectable>
+                      {runningOtaUpdateId
+                        ? runningOtaUpdateId.slice(0, 13)
+                        : 'Built in'}
+                    </AppText>
+                  </HStack>
+                ) : null}
               </VStack>
             </Card>
 
@@ -328,7 +357,9 @@ export const AboutScreen = () => {
                           tint={colors.textSecondary}
                         />
                         <AppText variant="body" style={styles.grow}>
-                          {link.label}
+                          {link.key === 'website'
+                            ? siteHost(about.links.website) || link.label
+                            : link.label}
                         </AppText>
                         <Icon
                           as={ChevronRight}

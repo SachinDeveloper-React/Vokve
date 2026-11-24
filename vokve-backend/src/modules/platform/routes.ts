@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { getConfig } from '../../config/remote.js';
+import { siteCompanySchema } from '../../contracts/index.js';
 import { getKV } from '../../db/redis.js';
 import { isChannelDeliverable } from '../identity/otp.service.js';
 
@@ -41,6 +42,46 @@ platformRouter.get('/health', async (_req, res) => {
     .status(ok ? 200 : 503)
     .set('Cache-Control', 'no-store')
     .json({ ok, mongo, redis, at: new Date().toISOString() });
+});
+
+const SOCIAL_KINDS = ['instagram', 'facebook', 'x', 'youtube', 'linkedin'] as const;
+
+/**
+ * Public: the company's contact details and links, for the website (RULES
+ * P21). Read from the same ⚙ `support.*` the app's Help and About screens
+ * read, and edited on the panel's Contact & links page. A minute's cache is
+ * plenty — the website keeps its own copy for an hour anyway, and is told
+ * to drop it when these change.
+ */
+platformRouter.get('/site/company', async (_req, res) => {
+  const { support, app } = await getConfig();
+  res.set('Cache-Control', 'public, max-age=60').json(
+    siteCompanySchema.parse({
+      company: {
+        legalName: support.company,
+        email: support.email,
+        phone: support.phone,
+        whatsapp: support.whatsapp,
+        hours: support.hours,
+        responseTime: support.responseTime,
+        address: support.address,
+        grievanceOfficer: {
+          name: support.grievanceOfficer.name,
+          email: support.grievanceOfficer.email ?? support.email,
+        },
+      },
+      links: support.links,
+      inviteUrlBase: support.inviteUrlBase,
+      stores: {
+        android: { url: app.storeUrl.android, listed: app.storeListed.android },
+        ios: { url: app.storeUrl.ios, listed: app.storeListed.ios },
+      },
+      social: SOCIAL_KINDS.flatMap(kind => {
+        const url = support.social[kind];
+        return url ? [{ kind, url }] : [];
+      }),
+    }),
+  );
 });
 
 /** Public: earn rates, caps, milestones, min version — everything ⚙. */

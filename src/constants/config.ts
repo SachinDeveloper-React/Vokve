@@ -34,6 +34,18 @@ export const config = {
   googleIosClientId: "1098246351234-5p0j2c1lifopaf4hegnr6jr2sl7k11le.apps.googleusercontent.com" as string | null,
 
   /**
+   * Over-the-air updates (D-111, Hot Updater on Firebase): the managed
+   * Function's URL and the client API key, both printed by
+   * `npx hot-updater init --provider firebase --build bare` (the key is
+   * also in `.env.hotupdater` as `HOT_UPDATER_API_KEY`). The client key is
+   * meant to ship inside the app; the Firebase credentials never are.
+   *
+   * Null turns OTA off: the app runs the bundle inside the build, as before.
+   */
+  otaBaseUrl: 'https://hot-updater-v1-tijxznskfa-el.a.run.app' as string | null,
+  otaApiKey: 'ZUfbz42VsfFvyA5WpU8x-6vmOzS87LeQmm0yVLE50sw' as string | null,
+
+  /**
    * Apple sign-in on **Android** (RULES O13). iOS needs neither: it signs
    * in natively and Apple addresses the token to the bundle id.
    *

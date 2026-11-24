@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { env } from '../../config/env.js';
 import { getConfig } from '../../config/remote.js';
 import { localDayOf } from '../../lib/dates.js';
 import { ApiError, Errors } from '../../lib/errors.js';
@@ -67,12 +66,13 @@ export async function ensureCode(userId: string): Promise<string> {
   throw new Error('Could not allocate a referral code');
 }
 
-function shareUrlFor(code: string): string {
-  return `${env.SHARE_URL_BASE.replace(/\/$/, '')}/${code}`;
+/** `{base}/{code}`, the base being ⚙ `support.inviteUrlBase` (RULES F6, P21). */
+function shareUrlFor(base: string, code: string): string {
+  return `${base.replace(/\/+$/, '')}/${code}`;
 }
 
-function shareMessageFor(code: string, inviteeCoins: number): string {
-  return `Join me on VOKVE — walk, train and earn coins for real rewards. Use my code ${code} when you sign up and you get ${inviteeCoins} coins after your first workout: ${shareUrlFor(code)}`;
+function shareMessageFor(shareUrl: string, code: string, inviteeCoins: number): string {
+  return `Join me on VOKVE — walk, train and earn coins for real rewards. Use my code ${code} when you sign up and you get ${inviteeCoins} coins after your first workout: ${shareUrl}`;
 }
 
 type ReferralRow = {
@@ -110,7 +110,7 @@ async function namesFor(ids: string[]): Promise<Map<string, string>> {
 }
 
 export async function getProgram(userId: string, timeZone: string): Promise<ReferralProgram> {
-  const { coins } = await getConfig();
+  const { coins, support } = await getConfig();
   const [code, user, mine, applied] = await Promise.all([
     ensureCode(userId),
     UserModel.findById(userId, { createdAt: 1 }).lean(),
@@ -130,8 +130,8 @@ export async function getProgram(userId: string, timeZone: string): Promise<Refe
 
   return referralProgramSchema.parse({
     code,
-    shareUrl: shareUrlFor(code),
-    shareMessage: shareMessageFor(code, coins.referral.invitee),
+    shareUrl: shareUrlFor(support.inviteUrlBase, code),
+    shareMessage: shareMessageFor(shareUrlFor(support.inviteUrlBase, code), code, coins.referral.invitee),
     rewards: {
       inviter: coins.referral.inviter,
       invitee: coins.referral.invitee,

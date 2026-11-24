@@ -388,7 +388,7 @@ describe('OrdersScreen', () => {
 
     await pressButton(tree, 'Track Order');
     expect(Linking.openURL).toHaveBeenCalledWith(
-      'https://track.vokve.app/DL123',
+      'https://track.vokve.com/DL123',
     );
 
     await pressButton(tree, 'Buy Again');
@@ -468,7 +468,7 @@ describe('OrderDetailScreen', () => {
 
     await pressButton(tree, 'Track Live');
     expect(Linking.openURL).toHaveBeenCalledWith(
-      'https://track.vokve.app/DL123',
+      'https://track.vokve.com/DL123',
     );
   });
 

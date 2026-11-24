@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { Linking, StyleSheet, Text } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -44,6 +44,7 @@ import {
 import { useTheme } from '../../theme';
 import { DEFAULT_COUNTRY_CODE } from '../../constants/countries';
 import { useAuthStore } from '../../stores/authStore';
+import { appApi } from '../../services/api/endpoints';
 import { IdentityChoiceSheet } from '../../components/auth/IdentityChoiceSheet';
 import { describeAuthError } from '../../utils/authErrors';
 import type { Gender } from '../../types/models';
@@ -200,8 +201,16 @@ export const SignUpScreen = () => {
     navigation.navigate('SignIn');
   }, [navigation]);
 
-  const showTerms = useCallback(() => {
-    setNotice('The full terms open on vokve.com for now.');
+  // The terms are on the website, at the address the server gives (⚙
+  // `support.links.terms`, edited on the panel's Contact & links page) —
+  // asked for on the tap, since the About read is open to the signed-out.
+  const showTerms = useCallback(async () => {
+    try {
+      const about = await appApi.about();
+      await Linking.openURL(about.links.terms);
+    } catch {
+      setNotice('The terms could not be opened just now. Check your connection and try again.');
+    }
   }, []);
 
   const dismissNotice = useCallback(() => setNotice(null), []);

@@ -9,6 +9,11 @@ export interface RequestContext {
   platform?: 'ios' | 'android';
   appVersion?: string;
   build?: string;
+  /**
+   * The over-the-air update the app is running (D-111): its id, or `builtin`
+   * for the bundle inside the build. Absent from builds without OTA.
+   */
+  otaUpdate?: string;
   osVersion?: string;
   timezone: string;
   locale?: string;

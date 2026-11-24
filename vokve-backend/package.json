@@ -25,7 +25,8 @@
     "users:reindex": "tsx src/scripts/reindex-users.ts",
     "alerts:test": "tsx src/scripts/test-alert.ts",
     "admin:totp": "tsx src/scripts/admin-totp.ts",
-    "staff:create-admin": "tsx src/scripts/staff-create-admin.ts"
+    "staff:create-admin": "tsx src/scripts/staff-create-admin.ts",
+    "config:retired-defaults": "tsx src/scripts/config-retired-defaults.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",

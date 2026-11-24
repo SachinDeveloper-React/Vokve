@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { Text as RNText, TextInput } from 'react-native';
+import { Linking, Text as RNText, TextInput } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
@@ -17,6 +17,7 @@ import { SignUpScreen } from '../src/screens/auth/SignUpScreen';
 import { ThemeProvider } from '../src/theme';
 import { useAuthStore } from '../src/stores/authStore';
 import { ApiError } from '../src/services/api/errors';
+import { appApi } from '../src/services/api/endpoints';
 
 const mockGoBack = jest.fn();
 const mockNavigate = jest.fn();
@@ -366,6 +367,31 @@ describe('sign-up screen', () => {
 
     expect(signInWithApple).toHaveBeenCalledTimes(1);
     expect(textOf(tree, RNText)).not.toContain('Apple sign-up is not connected');
+  });
+
+  test('the terms link opens the address the server gives', async () => {
+    const about = jest
+      .spyOn(appApi, 'about')
+      .mockResolvedValue({ links: { terms: 'https://vokve.com/terms' } } as Awaited<ReturnType<typeof appApi.about>>);
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    const tree = await render();
+
+    const link = tree.root
+      .findAllByType(RNText)
+      .find(node => node.props.accessibilityRole === 'link' && typeof node.props.onPress === 'function')!;
+    await ReactTestRenderer.act(async () => {
+      await link.props.onPress();
+    });
+    expect(openURL).toHaveBeenCalledWith('https://vokve.com/terms');
+
+    // Offline: it says so rather than doing nothing.
+    about.mockRejectedValueOnce(new Error('Network request failed'));
+    await ReactTestRenderer.act(async () => {
+      await link.props.onPress();
+    });
+    expect(textOf(tree, RNText)).toContain('The terms could not be opened just now');
+    about.mockRestore();
+    openURL.mockRestore();
   });
 
   test('the flows that are not wired up still say so', async () => {

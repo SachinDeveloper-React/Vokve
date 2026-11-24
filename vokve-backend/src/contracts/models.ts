@@ -2764,6 +2764,48 @@ export const appAboutSchema = z.object({
 });
 export type AppAbout = z.infer<typeof appAboutSchema>;
 
+// ─── The website's facts (RULES P21) ───────────────────────────────────────
+
+const siteStoreSchema = z.object({
+  url: z.string(),
+  /** False while the listing is not live: the site says "Coming soon" instead of linking. */
+  listed: z.boolean(),
+});
+
+/**
+ * `GET /site/company` — the company's contact details and links, for the
+ * public website. Public, no device headers, open during maintenance: the
+ * website is not the app, and the page that says how to reach a person is
+ * the last one that should go dark. The same ⚙ `support.*` the app's Help
+ * and About screens read, so the two can never disagree.
+ */
+export const siteCompanySchema = z.object({
+  company: z.object({
+    legalName: z.string(),
+    email: z.string(),
+    phone: z.string().nullable(),
+    whatsapp: z.string().nullable(),
+    hours: z.string().nullable(),
+    responseTime: z.string(),
+    address: z.array(z.string()),
+    /** `email` is the support address when no separate one is set. */
+    grievanceOfficer: z.object({ name: z.string().nullable(), email: z.string() }),
+  }),
+  links: z.object({
+    website: z.string(),
+    privacy: z.string(),
+    terms: z.string(),
+    licenses: z.string(),
+  }),
+  inviteUrlBase: z.string(),
+  stores: z.object({ android: siteStoreSchema, ios: siteStoreSchema }),
+  /** Only the profiles that are set, in a fixed order. */
+  social: z.array(
+    z.object({ kind: z.enum(['instagram', 'facebook', 'x', 'youtube', 'linkedin']), url: z.string() }),
+  ),
+});
+export type SiteCompany = z.infer<typeof siteCompanySchema>;
+
 // ─── Updating the app (RULES DV12) ─────────────────────────────────────────
 
 /**

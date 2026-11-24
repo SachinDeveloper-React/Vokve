@@ -28,7 +28,7 @@ describe('referrals: code, share, apply, qualify (RULES F1–F4, F6)', () => {
     const session = await signUpAndRegister();
     const first = await program(session);
     expect(first.code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{7}$/);
-    expect(first.shareUrl).toBe(`https://vokve.app/r/${first.code}`);
+    expect(first.shareUrl).toBe(`https://vokve.com/r/${first.code}`);
     expect(first.shareMessage).toContain(first.code);
     expect(first.shareMessage).toContain('20 coins');
     expect(first.rewards).toEqual({ inviter: 20, invitee: 20, qualifier: "your friend's first workout", monthlyInviterCap: 10 });

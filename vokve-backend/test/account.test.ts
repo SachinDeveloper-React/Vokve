@@ -121,7 +121,7 @@ describe('account: profile summary (RULES P4, P6)', () => {
     const session = await signUpAndRegister();
     await UserModel.updateOne({ _id: session.userId }, {
       $set: {
-        name: 'Asha Verma', avatarUrl: 'https://cdn.vokve.app/a/1.png', heightCm: 165, weightKg: 58,
+        name: 'Asha Verma', avatarUrl: 'https://cdn.vokve.com/a/1.png', heightCm: 165, weightKg: 58,
         emailVerifiedAt: new Date(), phoneVerifiedAt: new Date(),
       },
     });
@@ -385,7 +385,7 @@ describe('account: support and about', () => {
       openTicketId: null,
     });
     expect(home.body.channels.map((c: { kind: string; url: string }) => [c.kind, c.url])).toEqual([
-      ['email', 'mailto:support@vokve.app'],
+      ['email', 'mailto:support@vokve.com'],
       ['phone', 'tel:+918000000000'],
     ]);
     expect(home.body.hours).toBe('Mon–Sat, 9 am – 7 pm IST');
@@ -469,7 +469,7 @@ describe('account: support and about', () => {
     expect(current.status).toBe(200);
     expect(current.body).toMatchObject({
       name: 'VOKVE', version: '1.0.0', minVersion: '1.0.0', updateRequired: false, updateAvailable: false,
-      supportEmail: 'support@vokve.app', links: { privacy: expect.stringContaining('http') },
+      supportEmail: 'support@vokve.com', links: { privacy: expect.stringContaining('http') },
     });
     expect(current.body.releaseNotes.length).toBeGreaterThan(0);
 

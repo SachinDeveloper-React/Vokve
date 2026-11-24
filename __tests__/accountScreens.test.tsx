@@ -163,7 +163,7 @@ const metrics = {
 const user = {
   id: 'u-1',
   name: 'Rana Jay',
-  email: 'rana@vokve.app',
+  email: 'rana@vokve.com',
   phone: '+919876543210',
   avatarUrl: null,
   heightCm: 175,
@@ -234,7 +234,7 @@ const SUPPORT_HOME: SupportHome = {
     openTicketId: null,
   },
   channels: [
-    { kind: 'email', label: 'Email us', value: 'support@vokve.app', url: 'mailto:support@vokve.app', note: 'We usually reply within 24 hours.' },
+    { kind: 'email', label: 'Email us', value: 'support@vokve.com', url: 'mailto:support@vokve.com', note: 'We usually reply within 24 hours.' },
     { kind: 'phone', label: 'Call us', value: '+918000000000', url: 'tel:+918000000000', note: 'Mon–Sat, 9 am – 7 pm IST' },
   ],
   hours: 'Mon–Sat, 9 am – 7 pm IST',
@@ -294,12 +294,12 @@ const ABOUT: AppAbout = {
     },
   ],
   links: {
-    privacy: 'https://vokve.app/privacy',
-    terms: 'https://vokve.app/terms',
-    licenses: 'https://vokve.app/licenses',
-    website: 'https://vokve.app',
+    privacy: 'https://vokve.com/privacy',
+    terms: 'https://vokve.com/terms',
+    licenses: 'https://vokve.com/licenses',
+    website: 'https://vokve.com',
   },
-  supportEmail: 'support@vokve.app',
+  supportEmail: 'support@vokve.com',
 };
 
 let mounted: ReactTestRenderer.ReactTestRenderer | null = null;
@@ -316,7 +316,7 @@ beforeEach(() => {
     .mockImplementation(async patch => ({ ...user, ...patch }));
   userApi.uploadAvatar.mockReset().mockResolvedValue({
     ...user,
-    avatarUrl: 'https://api.vokve.app/v1/media/avatars/avt_1',
+    avatarUrl: 'https://api.vokve.com/v1/media/avatars/avt_1',
   });
   userApi.removeAvatar
     .mockReset()
@@ -798,7 +798,7 @@ describe('SecurityScreen', () => {
       password: 'walk1000steps',
     });
     // The account is untouched until the code passes; the OTP screen has it.
-    expect(useAuthStore.getState().user?.email).toBe('rana@vokve.app');
+    expect(useAuthStore.getState().user?.email).toBe('rana@vokve.com');
     expect(useAuthStore.getState().pendingVerification).toMatchObject({
       verificationId: 'vrf-1',
     });
@@ -824,7 +824,7 @@ describe('SecurityScreen', () => {
 
   test('shows which contacts are verified', async () => {
     const text = allText(await render(<SecurityScreen />));
-    expect(text).toContain('rana@vokve.app');
+    expect(text).toContain('rana@vokve.com');
     expect(text).toContain('Verified');
     expect(text).toContain('Not verified'); // the phone, in this fixture
   });
@@ -1105,7 +1105,7 @@ describe('ContactUsScreen', () => {
     const text = allText(await render(<ContactUsScreen />));
 
     expect(text).toContain('Email us');
-    expect(text).toContain('support@vokve.app');
+    expect(text).toContain('support@vokve.com');
     expect(text).toContain('Call us');
     expect(text).toContain('+918000000000');
     expect(text).toContain('Mon–Sat, 9 am – 7 pm IST');
@@ -1219,7 +1219,19 @@ describe('AboutScreen', () => {
     expect(text).toContain('Shop, cart and checkout with coins.');
     expect(text).toContain('Privacy policy');
     expect(text).toContain('Open-source licences');
-    expect(text).toContain('support@vokve.app');
+    expect(text).toContain('support@vokve.com');
+    // The website row names the address the server gives, not one the app shipped with.
+    expect(text).toContain('vokve.com');
+  });
+
+  test('the website row follows the server when the address changes', async () => {
+    appApi.about.mockResolvedValue({
+      ...ABOUT,
+      links: { ...ABOUT.links, website: 'https://www.vokve.in/' },
+    });
+    const text = allText(await render(<AboutScreen />));
+    expect(text).toContain('vokve.in');
+    expect(text).not.toContain('www.vokve.in');
   });
 
   test('an unsupported build is told so in the loudest words the screen has', async () => {
@@ -1257,7 +1269,7 @@ describe('AvatarPicker on Edit Profile (RULES P10)', () => {
       contentType: 'image/jpeg',
     });
     expect(useAuthStore.getState().user?.avatarUrl).toBe(
-      'https://api.vokve.app/v1/media/avatars/avt_1',
+      'https://api.vokve.com/v1/media/avatars/avt_1',
     );
     // The completeness figure counts the photo, so it is re-read.
     expect(accountApi.profile).toHaveBeenCalled();
@@ -1291,7 +1303,7 @@ describe('AvatarPicker on Edit Profile (RULES P10)', () => {
       useAuthStore.setState({
         user: {
           ...user,
-          avatarUrl: 'https://api.vokve.app/v1/media/avatars/avt_1',
+          avatarUrl: 'https://api.vokve.com/v1/media/avatars/avt_1',
         },
       });
     });

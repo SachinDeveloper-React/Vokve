@@ -452,7 +452,7 @@ describe('reading steps back: config, ranges and sources', () => {
     expect(res.body).toMatchObject({
       tracker: {
         healthConnectReadTypes: ['steps', 'distance'], healthConnectWriteEnabled: true, healthConnectWriteGranularity: 'minute',
-        gapRecovery: 'split', privacyPolicyUrl: 'https://vokve.app/privacy',
+        gapRecovery: 'split', privacyPolicyUrl: 'https://vokve.com/privacy',
         wearableTrust: 'catalog', wearableAllowlist: ['com.google.android.apps.fitness'],
       },
       sync: { intervalMinutes: 3, maxAgeDays: 21, include: ['minutes', 'motionWindows', 'healthConnectRecords'] },

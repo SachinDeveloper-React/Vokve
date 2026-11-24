@@ -9,8 +9,8 @@
   "types": "src/index.ts",
   "license": "UNLICENSED",
   "author": "VOKVE",
-  "homepage": "https://vokve.app",
-  "repository": { "type": "git", "url": "https://vokve.app" },
+  "homepage": "https://vokve.com",
+  "repository": { "type": "git", "url": "https://vokve.com" },
   "peerDependencies": {
     "react-native": ">=0.79.0"
   },

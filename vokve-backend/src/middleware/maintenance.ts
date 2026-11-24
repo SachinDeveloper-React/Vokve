@@ -26,11 +26,20 @@ export const MAINTENANCE_HEADER = 'X-Vokve-Maintenance';
  * or not the server is in maintenance.
  *
  * The panel's routes (`/v1/admin/*`) are never stopped — it is where
- * maintenance is switched off — and nor are avatars.
+ * maintenance is switched off — and nor are avatars, or what the public
+ * website reads (`/v1/site/*`, RULES P21): the site is not the app, and the
+ * page saying how to reach a person should stay up while the app is down.
  */
 export const maintenanceGate: RequestHandler = async (req, res, next) => {
   const path = req.path;
-  if (!path.startsWith('/v1/') || path.startsWith('/v1/admin/') || path.startsWith('/v1/media/')) return next();
+  if (
+    !path.startsWith('/v1/') ||
+    path.startsWith('/v1/admin/') ||
+    path.startsWith('/v1/media/') ||
+    path.startsWith('/v1/site/')
+  ) {
+    return next();
+  }
 
   const state = await maintenanceState();
   if (!state.active) return next();

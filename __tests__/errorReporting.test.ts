@@ -14,7 +14,12 @@ jest.mock('../src/services/api/endpoints', () => ({
 }));
 jest.mock('../src/services/device', () => ({ getDeviceId: jest.fn() }));
 
-import { recordError, setUserId } from '@react-native-firebase/crashlytics';
+import {
+  log,
+  recordError,
+  setAttributes,
+  setUserId,
+} from '@react-native-firebase/crashlytics';
 import { ApiError } from '../src/services/api/errors';
 import {
   flushErrors,
@@ -40,6 +45,8 @@ beforeEach(() => {
   getMMKV().remove('vokve.errors.queue');
   telemetryApi.reportErrors.mockReset().mockResolvedValue({ accepted: 1 });
   (recordError as jest.Mock).mockClear();
+  (log as jest.Mock).mockClear();
+  (setAttributes as jest.Mock).mockClear();
   (setUserId as jest.Mock).mockClear();
   (getDeviceId as jest.Mock).mockReturnValue('dev_1');
   jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -148,4 +155,39 @@ test('a failure inside the reporting cannot report itself', async () => {
   await flushErrors();
 
   expect(sent()).toHaveLength(1);
+});
+
+test('a crash Crashlytics already has goes to the server only', async () => {
+  // The global handler's case: React Native Firebase's own handler, next in
+  // the chain, files it in Crashlytics as fatal.
+  reportError({
+    kind: 'js',
+    error: new TypeError('x is undefined'),
+    scope: 'global',
+    fatal: true,
+    skipCrashlytics: true,
+  });
+  await flushErrors();
+
+  expect(recordError).not.toHaveBeenCalled();
+  expect(sent()).toEqual([
+    expect.objectContaining({ name: 'TypeError', scope: 'global', fatal: true }),
+  ]);
+});
+
+test('each new screen leaves a breadcrumb on the crash, once', () => {
+  setErrorScreen('Shop');
+  setErrorScreen('Shop');
+  setErrorScreen('Cart');
+
+  expect((log as jest.Mock).mock.calls.map(call => call[1])).toEqual([
+    'screen Shop',
+    'screen Cart',
+  ]);
+});
+
+test('Crashlytics is told which bundle is running', () => {
+  stopSink = startErrorReporting();
+  // No over-the-air update under Jest: the bundle inside the build.
+  expect(setAttributes).toHaveBeenCalledWith({}, { ota_update: 'embedded' });
 });

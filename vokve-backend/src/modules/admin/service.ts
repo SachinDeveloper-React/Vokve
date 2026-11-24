@@ -275,6 +275,8 @@ export async function userOverview(userId: string) {
         /** The build this install was first registered with — what they installed. */
         firstVersion: device.app?.firstVersion ?? null,
         bundleId: device.app?.bundleId ?? null,
+        /** The over-the-air update it runs (D-111); null for the bundle inside the build, or a build without OTA. */
+        otaUpdate: device.app?.otaUpdate ?? null,
       },
       /** When this phone first registered against this account: the install. */
       installedAt: iso(device.firstSeenAt),

@@ -24,11 +24,11 @@ P0 Foundations ─► P1 Existing contracts ─► P2 Steps (observe) ─► P3 
 - **Device registration** (`POST /devices/register`, heartbeat, `X-Vokve-*` header capture, 428/426 gates) and `GET /releases` — every later phase depends on device attribution.
 - `POST /events` analytics sink, and `PUT /me/permissions` beside it — the trail and what each install allows (RULES P13, P14), with the operator's read-only `/admin/users…` over both (P15).
 - CI: typecheck, lint, unit, integration on a memory replica set, index/validator drift check, migration dry-run, release-flag assertion (RULES Q2).
-- Staging environment at `api.staging.vokve.app` with TLS.
+- Staging environment at `api.staging.vokve.com` with TLS.
 - `GET /health`, `GET /config` (static values from `app_config`).
 - Observability: structured logs, traces, the metric names from ARCHITECTURE §9 registered (even if zero).
 
-**Gate:** `curl https://api.staging.vokve.app/v1/health` → 200; a request with a bad body returns the client's `ApiError` shape; a request without a registered device id returns 428; CI green.
+**Gate:** `curl https://api.staging.vokve.com/v1/health` → 200; a request with a bad body returns the client's `ApiError` shape; a request without a registered device id returns 428; CI green.
 
 **Discharges:** X1, X2, X3, D1–D6, ADV2, ADV3.
 
@@ -156,7 +156,7 @@ P0 Foundations ─► P1 Existing contracts ─► P2 Steps (observe) ─► P3 
 - Fulfilment admin: list placed orders, transition states, add tracking — low-code UI over the admin API.
 
 **Work — referrals**
-- `referral_codes` on sign-up; deep links `vokve.app/r/CODE` with deferred attribution on first device registration (ADV6); `POST /referrals/apply`; qualification hook on first plausible workout (F3); payout via `economy.credit` both sides per decision; caps and ring detection (F4–F5); `GET /referrals/me`. Client sign-up form gets an optional code field.
+- `referral_codes` on sign-up; deep links `vokve.com/r/CODE` with deferred attribution on first device registration (ADV6); `POST /referrals/apply`; qualification hook on first plausible workout (F3); payout via `economy.credit` both sides per decision; caps and ring detection (F4–F5); `GET /referrals/me`. Client sign-up form gets an optional code field.
 
 **Client work:** Shop, Leaderboard, Referral, Orders screen (new), Address screen (new); delete `shopItems`, `seedLeaderboard`, `leaderboardHighlights`, `seedReferrals`, `referralCode`, `REFERRAL_REWARD_COINS`. **`seedData.ts` is now empty and deleted.**
 

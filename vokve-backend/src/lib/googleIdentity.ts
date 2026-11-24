@@ -10,7 +10,7 @@ import { logger } from './logger.js';
  * email it claims, not the name, not the id — the token is a signed
  * statement from Google and everything we act on is read out of it after
  * the signature, the issuer, the audience and the expiry have been
- * checked. A client that sent us `{ email: 'owner@vokve.app' }` with a
+ * checked. A client that sent us `{ email: 'owner@vokve.com' }` with a
  * token for somebody else would otherwise be signing in as the owner.
  *
  * `google-auth-library` does that checking: it fetches Google's signing
