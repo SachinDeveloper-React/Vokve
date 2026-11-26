@@ -22,6 +22,10 @@ export const RETIRED_DEFAULTS: Record<string, readonly unknown[]> = {
   'support.links.website': ['https://vokve.app'],
   'commerce.trackingUrlTemplate': ['https://track.vokve.app/{ref}'],
   'app.storeUrl.android': ['https://play.google.com/store/apps/details?id=com.vokve'],
+  // The Android package before `applicationId` became com.vokve.fitness.
+  // Left pinned, every phone's key attestation and Play verdict is refused
+  // as the wrong package.
+  'integrity.android.packageName': ['com.vokve'],
 };
 
 /** A domain no current default uses: a stored value still naming it is worth a line in the report. */

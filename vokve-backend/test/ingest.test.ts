@@ -70,8 +70,8 @@ function post(session: Session, body: Record<string, unknown>) {
 }
 
 const passingToken = (requestHash: string): IntegrityTokenPayload => ({
-  requestDetails: { requestPackageName: 'com.vokve', requestHash, timestampMillis: String(Date.now()) },
-  appIntegrity: { appRecognitionVerdict: 'PLAY_RECOGNIZED', packageName: 'com.vokve' },
+  requestDetails: { requestPackageName: 'com.vokve.fitness', requestHash, timestampMillis: String(Date.now()) },
+  appIntegrity: { appRecognitionVerdict: 'PLAY_RECOGNIZED', packageName: 'com.vokve.fitness' },
   deviceIntegrity: { deviceRecognitionVerdict: ['MEETS_DEVICE_INTEGRITY'] },
   accountDetails: { appLicensingVerdict: 'LICENSED' },
 });
@@ -337,7 +337,7 @@ describe('step ingest: the fraud layers (RULES A14–A20, shadow mode)', () => {
       startZoneOffsetSeconds: 19800, endZoneOffsetSeconds: 19800, lastModifiedTime: Date.now(), recordType: 'steps', count,
     });
     await post(session, await snapshotFor(session, key, {
-      deviceSteps: 3000, records: [record('own', 'com.vokve', 3000), record('fit', 'com.fitbit.FitbitMobile', 800)],
+      deviceSteps: 3000, records: [record('own', 'com.vokve.fitness', 3000), record('fit', 'com.fitbit.FitbitMobile', 800)],
     }));
 
     const report = (await request(app).get(`/v1/activity/sources?date=${today()}`).set(authed(session))).body;

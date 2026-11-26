@@ -21,7 +21,7 @@ afterEach(() => {
 
 const expectations = (overrides: Partial<KeyAttestationExpectations> = {}): KeyAttestationExpectations => ({
   challenge: 'challenge-1',
-  packageName: 'com.vokve',
+  packageName: 'com.vokve.fitness',
   signingCertSha256: [SIGNING_DIGEST.toString('hex')],
   trustedRoots: new Set([ca.rootSpkiSha256]),
   isRevoked: null,
@@ -39,7 +39,7 @@ describe('key attestation (RULES A2, DV9)', () => {
     const result = verifyKeyAttestation(key.attestation, expectations());
     expect(result).toMatchObject({
       acceptable: true, attested: true, failure: null, securityLevel: 'tee', verifiedBootState: 'verified',
-      deviceLocked: true, attestationVersion: 200, packageNames: ['com.vokve'],
+      deviceLocked: true, attestationVersion: 200, packageNames: ['com.vokve.fitness'],
     });
   });
 

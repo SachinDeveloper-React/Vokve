@@ -923,8 +923,14 @@ export const CONFIG_DEFAULTS = {
    */
   integrity: {
     android: {
-      /** The package the attestation and the Play verdict must name. */
-      packageName: 'com.vokve',
+      /**
+       * The package the attestation and the Play verdict must name: the
+       * Gradle `applicationId`, which is what a phone reports — not the
+       * Kotlin `namespace`, which stays `com.vokve`. It was `com.vokve`
+       * here until the app moved to `com.vokve.fitness` (2026-11-22), which
+       * marked every real phone's key `wrong_package`.
+       */
+      packageName: 'com.vokve.fitness',
       /** SHA-256 (hex) of the release signing certificate(s). Empty skips the check — dev builds. */
       signingCertSha256: [] as string[],
     },

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { env } from '../src/config/env.js';
-import { invalidateConfig } from '../src/config/remote.js';
+import { getConfig, invalidateConfig } from '../src/config/remote.js';
 import { unpinRetiredDefaults } from '../src/config/retired.js';
 import { forgetMaintenanceBypass } from '../src/modules/platform/maintenance.js';
 import { AppConfigModel } from '../src/modules/platform/models.js';
@@ -209,11 +209,19 @@ describe('old defaults pinned by an earlier seed (D-112)', () => {
       { _id: 'app' },
       { $set: { 'value.storeUrl.android': 'https://play.google.com/store/apps/details?id=com.vokve' } },
     );
+    // The Android package from before com.vokve.fitness: pinned, every
+    // phone's key attestation fails as the wrong package.
+    await AppConfigModel.updateOne(
+      { _id: 'integrity' },
+      { $set: { 'value.android.packageName': 'com.vokve' } },
+      { upsert: true },
+    );
     invalidateConfig();
 
     const dry = await unpinRetiredDefaults(false);
     expect(dry.unpinned.map(row => row.path).sort()).toEqual([
       'app.storeUrl.android',
+      'integrity.android.packageName',
       'support.email',
       'support.links.privacy',
       'support.links.website',
@@ -228,6 +236,7 @@ describe('old defaults pinned by an earlier seed (D-112)', () => {
     expect(site.links.privacy).toBe('https://vokve.com/privacy');
     expect(site.links.terms).toBe('https://vokve.app/legal/terms-2026');
     expect(site.stores.android.url).toBe('https://play.google.com/store/apps/details?id=com.vokve.fitness');
+    expect((await getConfig()).integrity.android.packageName).toBe('com.vokve.fitness');
 
     // A second run, and a re-seed, find nothing more to do.
     expect((await unpinRetiredDefaults(true)).unpinned).toEqual([]);

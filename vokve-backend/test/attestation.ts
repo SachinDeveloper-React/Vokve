@@ -133,7 +133,7 @@ export function attestKey(ca: TestCa, options: KeyOptions): TestKey {
     chain = [makeCertificate({ subject: 'Android Keystore Key', issuer: 'Android Keystore Key', subjectKey: key.publicKey, issuerKey: key.privateKey, serial: 9 })];
   } else {
     const applicationId = new AttestationApplicationId({
-      packageInfos: [new AttestationPackageInfo({ packageName: new OctetString(Buffer.from(options.packageName ?? 'com.vokve')), version: 1 })],
+      packageInfos: [new AttestationPackageInfo({ packageName: new OctetString(Buffer.from(options.packageName ?? 'com.vokve.fitness')), version: 1 })],
       signatureDigests: [new OctetString(options.signingDigest ?? SIGNING_DIGEST)],
     });
     const description = new KeyDescription({
