@@ -49,11 +49,6 @@ const PERKS: { icon: LucideIcon; title: string; caption: string }[] = [
   { icon: Gift, title: 'Redeem Rewards', caption: 'Get exciting products' },
 ];
 
-const PROVIDER_NAMES: Record<SocialProvider, string> = {
-  google: 'Google',
-  apple: 'Apple',
-  facebook: 'Facebook',
-};
 
 const makeStyles = ({ colors, spacing, radius }: ThemeShape) =>
   StyleSheet.create({
@@ -115,6 +110,7 @@ export const SignInScreen = () => {
   const signIn = useAuthStore(s => s.signIn);
   const signInWithGoogle = useAuthStore(s => s.signInWithGoogle);
   const signInWithApple = useAuthStore(s => s.signInWithApple);
+  const signInWithFacebook = useAuthStore(s => s.signInWithFacebook);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
@@ -122,7 +118,7 @@ export const SignInScreen = () => {
   // revoked, the sign-up code ran out. Set by the store, shown once.
   const storeNotice = useAuthStore(s => s.notice);
   const setStoreNotice = useAuthStore(s => s.setNotice);
-  // A Google or Apple identity the member said belongs to an account they
+  // A provider identity the member said belongs to an account they
   // already have (RULES O15): signing in below connects it.
   const pendingIdentity = usePendingIdentity();
   const dismissPendingIdentity = useAuthStore(s => s.dismissPendingIdentity);
@@ -170,8 +166,7 @@ export const SignInScreen = () => {
   }, [navigation]);
 
   /**
-   * Google and Apple are wired (RULES O12, O13); Facebook is not, and
-   * says so rather than doing nothing when pressed.
+   * Google, Apple and Facebook all sign in (RULES O12, O13, O18).
    *
    * Nothing is shown for a cancel. The store leaves `error` null when
    * somebody backs out of the provider's sheet, and a notice saying
@@ -188,9 +183,9 @@ export const SignInScreen = () => {
         signInWithApple();
         return;
       }
-      setNotice(`${PROVIDER_NAMES[provider]} sign-in is not connected yet.`);
+      signInWithFacebook();
     },
-    [signInWithApple, signInWithGoogle],
+    [signInWithApple, signInWithFacebook, signInWithGoogle],
   );
 
   const dismissNotice = useCallback(() => {

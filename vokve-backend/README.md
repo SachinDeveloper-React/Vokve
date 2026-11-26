@@ -1376,7 +1376,7 @@ shows its own alert; Android switches when the member next leaves the app.
 ```sh
 A=http://localhost:3000/v1 ; K="x-admin-key: $ADMIN_API_KEY"
 
-# the everyday icon: redfield | classic | night
+# the everyday icon: classic (the default) | night — redfield is retired
 curl -s -X PUT "$A/admin/app-icon" -H "$K" -H 'Content-Type: application/json' -d '{"base":"night"}' | jq .live
 
 # a festive icon on by hand — wins over the schedule until it is taken off
@@ -1417,8 +1417,12 @@ Every word on vokve.com comes from here and is edited on the panel's
 - **What is filled in on the way out** — the contact details, store links and
   social profiles (⚙ `support.*`, `app.storeUrl/storeListed`), the deletion
   grace days, the help-centre articles (`support_faqs`, for the FAQ page and
-  the home page's picked questions), the live challenge board
-  (`challenge_definitions`), and the figures written as tokens in the words:
+  the home page's picked questions; one with `website: false` stays in the
+  app only), the live challenge board (`challenge_definitions`), the home
+  page's section order (`layout` on the panel → `sections` on the site; a
+  hidden section's `/#anchor` links leave the menu, footer and announcement,
+  and Download cannot be hidden), and the figures written as tokens in the
+  words:
   `{{graceDays}}`, `{{coinValue}}`, `{{dailyCoinCap}}`, `{{stepsCoinCap}}`,
   `{{coinExpiryDays}}`, `{{inviteReward}}`, `{{inviterReward}}`,
   `{{inviteWindowDays}}`, `{{deliveryDays}}`, `{{returnWindowDays}}`,

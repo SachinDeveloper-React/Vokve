@@ -56,6 +56,13 @@ const faqSchema = new Schema(
     tags: { type: [String], default: [] },
     sort: { type: Number, default: 0 },
     active: { type: Boolean, default: true },
+    /**
+     * Whether the public website shows it too (RULES P22) — its FAQ page and
+     * the home page's questions. Off keeps an answer in the app only (one
+     * that talks about a screen, or about a member's own account). The app's
+     * help centre ignores it; `active` is the switch for both.
+     */
+    website: { type: Boolean, default: true },
   },
   { timestamps: true, collection: 'support_faqs' },
 );

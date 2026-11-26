@@ -107,7 +107,6 @@ export const StepGoalCard = memo(({ steps, goal, onEditGoal }: Props) => {
               <AppText
                 variant="h3"
                 numberOfLines={1}
-                adjustsFontSizeToFit
                 style={{ maxWidth: numberMaxWidth }}
               >
                 {formatSteps(steps)}

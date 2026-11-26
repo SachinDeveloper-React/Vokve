@@ -172,6 +172,10 @@ const realAuthApi: AuthApi = {
     ),
   apple: payload =>
     request(authResponseSchema, client => client.post('/auth/apple', payload)),
+  facebook: (proof, ifNew) =>
+    request(authResponseSchema, client =>
+      client.post('/auth/facebook', ifNew ? { ...proof, ifNew } : proof),
+    ),
   createFromIdentity: linkToken =>
     request(authResponseSchema, client =>
       client.post('/auth/identity/create', { linkToken }),
@@ -583,6 +587,10 @@ const realAccountApi: AccountApi = {
     request(signInMethodsSchema, client =>
       client.post('/me/sign-in-methods/apple', payload),
     ),
+  connectFacebook: proof =>
+    request(signInMethodsSchema, client =>
+      client.post('/me/sign-in-methods/facebook', proof),
+    ),
   connectIdentity: linkToken =>
     request(signInMethodsSchema, client =>
       client.post('/me/sign-in-methods/link', { linkToken }),
@@ -993,6 +1001,8 @@ export const authApi: AuthApi = {
   google: (idToken, ifNew) =>
     pick('mockAuthApi', realAuthApi).google(idToken, ifNew),
   apple: payload => pick('mockAuthApi', realAuthApi).apple(payload),
+  facebook: (proof, ifNew) =>
+    pick('mockAuthApi', realAuthApi).facebook(proof, ifNew),
   createFromIdentity: linkToken =>
     pick('mockAuthApi', realAuthApi).createFromIdentity(linkToken),
   signIn: (email, password) =>
@@ -1266,6 +1276,8 @@ export const accountApi: AccountApi = {
     pick('mockAccountApi', realAccountApi).connectGoogle(idToken),
   connectApple: payload =>
     pick('mockAccountApi', realAccountApi).connectApple(payload),
+  connectFacebook: proof =>
+    pick('mockAccountApi', realAccountApi).connectFacebook(proof),
   connectIdentity: linkToken =>
     pick('mockAccountApi', realAccountApi).connectIdentity(linkToken),
   disconnect: (provider, apple) =>

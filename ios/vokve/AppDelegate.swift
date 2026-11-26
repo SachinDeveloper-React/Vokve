@@ -4,6 +4,7 @@ import React_RCTAppDelegate
 import ReactAppDependencyProvider
 import Firebase
 import FirebaseAuth
+import FBSDKCoreKit
 import HotUpdater
 
 /// The app uses the UIScene life cycle. Since the iOS 27 SDK (Xcode 27) iOS
@@ -30,6 +31,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     FirebaseApp.configure()
+    // Facebook Login (RULES O18). Login only: automatic app events and the
+    // advertiser id are switched off in Info.plist, and the JS side logs in
+    // in Limited mode, so no tracking prompt is ever shown.
+    ApplicationDelegate.shared.application(application, didFinishLaunchingWithOptions: launchOptions)
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -95,6 +100,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     for context in URLContexts {
       let url = context.url
       if AppDelegate.isFirebaseAuthURL(url) {
+        continue
+      }
+      // Facebook's return from a login (`fb1351878143619705://…`). The SDK
+      // answers false for anything that is not its own, which goes on to JS.
+      if ApplicationDelegate.shared.application(
+        UIApplication.shared,
+        open: url,
+        sourceApplication: context.options.sourceApplication,
+        annotation: context.options.annotation
+      ) {
         continue
       }
       var options: [UIApplication.OpenURLOptionsKey: Any] = [:]

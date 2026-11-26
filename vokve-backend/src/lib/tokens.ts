@@ -129,14 +129,18 @@ export function verifyStepUpToken(token: string): StepUpClaims | null {
 export const IDENTITY_LINK_TTL_SECONDS = 15 * 60;
 
 /**
- * A Google or Apple identity the server has just verified and found no
- * account for, held while the member decides what it belongs to.
+ * A Google, Apple or Facebook identity the server has just verified and
+ * found no account for, held while the member decides what it belongs to.
  */
 export interface IdentityLinkClaims {
-  provider: 'google' | 'apple';
-  /** The provider's `sub`. */
+  provider: 'google' | 'apple' | 'facebook';
+  /** The provider's `sub` (Facebook's app-scoped id). */
   providerId: string;
-  /** The provider-verified email, where it gave one. */
+  /**
+   * The email the provider shared, where it gave one — verified by Google
+   * and Apple, merely reported by Facebook (RULES O18), which is why a
+   * Facebook one is never matched on.
+   */
   email: string | null;
   name: string | null;
   avatarUrl: string | null;
@@ -167,7 +171,7 @@ export function verifyIdentityLinkToken(token: string): IdentityLinkClaims | nul
     if (typeof payload === 'string') return null;
     const p = payload as Record<string, unknown>;
     if (p.kind !== 'identity_link') return null;
-    if (p.p !== 'google' && p.p !== 'apple') return null;
+    if (p.p !== 'google' && p.p !== 'apple' && p.p !== 'facebook') return null;
     if (typeof p.pid !== 'string' || !p.pid) return null;
     const text = (v: unknown) => (typeof v === 'string' && v ? v : null);
     return { provider: p.p, providerId: p.pid, email: text(p.em), name: text(p.nm), avatarUrl: text(p.av) };

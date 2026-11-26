@@ -11,7 +11,8 @@ import { UserModel, type UserDoc } from './models.js';
 import { hasPassword } from './password.js';
 
 /**
- * Connecting Google and Apple to an account that already exists (RULES O15).
+ * Connecting Google, Apple and Facebook to an account that already exists
+ * (RULES O15, O18).
  *
  * Sign-in can only link an identity to an account by its email, and a
  * member who hid their address from Apple shares none with the account
@@ -25,10 +26,20 @@ import { hasPassword } from './password.js';
 
 export type ProviderIdentity = IdentityLinkClaims;
 
-const FIELD = { google: 'googleId', apple: 'appleId' } as const satisfies Record<SignInProvider, keyof UserDoc>;
-export const PROVIDER_LABEL: Record<SignInProvider, string> = { google: 'Google account', apple: 'Apple ID' };
-const PROVIDER_NAME: Record<SignInProvider, string> = { google: 'Google', apple: 'Apple' };
-const PROVIDERS: SignInProvider[] = ['google', 'apple'];
+/** Where each provider's id lives on the account. */
+export const PROVIDER_FIELD = { google: 'googleId', apple: 'appleId', facebook: 'facebookId' } as const satisfies Record<SignInProvider, keyof UserDoc>;
+const FIELD = PROVIDER_FIELD;
+export const PROVIDER_LABEL: Record<SignInProvider, string> = { google: 'Google account', apple: 'Apple ID', facebook: 'Facebook account' };
+export const PROVIDER_NAME: Record<SignInProvider, string> = { google: 'Google', apple: 'Apple', facebook: 'Facebook' };
+const PROVIDERS: SignInProvider[] = ['google', 'apple', 'facebook'];
+
+/**
+ * Whether the email a provider shares has been proved by that provider,
+ * and so may find an existing account (O12, O13). Google says so in the
+ * token and Apple's is always its own or a relay it owns; Facebook does
+ * not say at all, so its address never finds an account (RULES O18).
+ */
+export const PROVIDER_PROVES_EMAIL: Record<SignInProvider, boolean> = { google: true, apple: true, facebook: false };
 
 export { hasPassword };
 
@@ -36,6 +47,24 @@ export { hasPassword };
 export function maskEmail(email: string): string {
   const [local = '', domain = ''] = email.split('@');
   return `${local.slice(0, 1)}•••@${domain}`;
+}
+
+/** A way into an account, as the sign-in screens name it. */
+export type SignInWay = 'password' | SignInProvider;
+
+/**
+ * How an account signs in, most specific first — what "Welcome back,
+ * continue with Google" is built from, the way large apps answer a second
+ * button pressed with the same email. Only the ways themselves, never a
+ * detail of any.
+ */
+export function signInWaysOf(user: { passwordHash: string; googleId?: string | null; appleId?: string | null; facebookId?: string | null }): SignInWay[] {
+  const ways: SignInWay[] = [];
+  if (user.googleId) ways.push('google');
+  if (user.appleId) ways.push('apple');
+  if (user.facebookId) ways.push('facebook');
+  if (user.passwordHash.startsWith('$2')) ways.push('password');
+  return ways;
 }
 
 /** Whether removing `provider` would leave the account with no way in. */

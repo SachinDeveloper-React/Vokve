@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { verifyAppleIdToken } from '../../lib/appleIdentity.js';
+import { verifyFacebookProof, type FacebookProof } from '../../lib/facebookIdentity.js';
+import { facebookProofChecks, facebookTokenFields, toFacebookProof } from './confirm.service.js';
 import { verifyGoogleIdToken } from '../../lib/googleIdentity.js';
 import { getConfig } from '../../config/remote.js';
 import { ApiError, Errors } from '../../lib/errors.js';
@@ -14,7 +16,7 @@ import { AuditLogModel } from '../platform/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from './models.js';
 import { consumeChallenge, createChallenge, findLiveChallenge, isChannelDeliverable, isChannelUsable } from './otp.service.js';
 import { toUser } from './serialize.js';
-import { identityFromLinkToken, PROVIDER_LABEL, type ProviderIdentity } from './linking.service.js';
+import { identityFromLinkToken, maskEmail, PROVIDER_FIELD, PROVIDER_LABEL, PROVIDER_NAME, PROVIDER_PROVES_EMAIL, signInWaysOf, type ProviderIdentity, type SignInWay } from './linking.service.js';
 import { applyCodeAtSignUp, findCode } from '../social/service.js';
 
 // ─── Request shapes (mirror src/types/forms.ts on the client) ───────────────
@@ -52,7 +54,7 @@ export const otpRequestBody = z.object({ identifier: z.string().trim().min(1).ma
 export const resetPasswordBody = z.object({ verificationId: z.string().min(1), code: z.string().regex(/^\d{4,8}$/), password: signUpBody.shape.password });
 
 /** How a session began (RULES O17). In-session codes inherit the session's own. */
-export type SessionMethod = 'password' | 'otp' | 'google' | 'apple';
+export type SessionMethod = 'password' | 'otp' | 'google' | 'apple' | 'facebook';
 
 interface Meta { deviceId?: string; ip?: string; appVersion?: string; method?: SessionMethod }
 
@@ -64,7 +66,7 @@ export async function signUp(body: SignUpBody, meta: Meta) {
     UserModel.exists({ phone: body.phone }),
   ]);
   const details: Record<string, string> = {};
-  if (byEmail) details.email = 'That email address is already registered.';
+  if (byEmail) details.email = await emailTakenMessage(body.email);
   if (byPhone) details['phone.number'] = 'That phone number is already registered.';
   // A bad code is refused here, on its field, while the form is still on
   // screen — not after the OTP, when the only thing left to do is shrug.
@@ -91,6 +93,23 @@ export async function signUp(body: SignUpBody, meta: Meta) {
     ip: meta.ip,
   });
 }
+
+/**
+ * "Already registered", said the way large apps say it: with the way that
+ * account signs in, so somebody who joined with Google a month ago is
+ * pointed at the Google button instead of guessing at a password they
+ * never had.
+ */
+async function emailTakenMessage(email: string): Promise<string> {
+  const holder = await UserModel.findOne({ email }, { passwordHash: 1, googleId: 1, appleId: 1, facebookId: 1 }).collation({ locale: 'en', strength: 2 }).lean();
+  const ways = holder ? signInWaysOf(holder) : [];
+  if (ways.length === 0 || ways.includes('password')) return 'That email address is already registered. Sign in instead.';
+  return `That email address is already registered with ${joinWays(ways)}. Continue with ${WAY_NAME[ways[0]!]} instead.`;
+}
+
+const WAY_NAME: Record<SignInWay, string> = { password: 'a password', google: 'Google', apple: 'Apple', facebook: 'Facebook' };
+const joinWays = (ways: SignInWay[]) =>
+  ways.length === 1 ? WAY_NAME[ways[0]!] : `${ways.slice(0, -1).map(w => WAY_NAME[w]).join(', ')} or ${WAY_NAME[ways[ways.length - 1]!]}`;
 
 export async function resendOtp(verificationId: string, meta: Meta) {
   const previous = await findLiveChallenge(verificationId);
@@ -327,6 +346,43 @@ export async function appleIdentity(body: Pick<AppleBody, 'idToken' | 'nonce' | 
 }
 
 /**
+ * Signing in with Facebook (RULES O18).
+ *
+ * The phone sends the access token Facebook Login gave it, and the server
+ * asks Facebook who that is (`lib/facebookIdentity`) — the token is not a
+ * signed statement the way Google's and Apple's are, so there is nothing
+ * to check locally. Matched on the app-scoped id **only**: Facebook does
+ * not say whether it proved the address it shares, so the address never
+ * finds an existing account — a member who already has one answers "I
+ * already have an account" and signs in to it, or connects Facebook from
+ * Security. A new account takes the address unproved, and is asked for a
+ * code before it can redeem, the way every unproved address is (O5).
+ *
+ * No picture: Facebook's are signed CDN links that stop working within
+ * days, and a profile photo that turns into a broken image is worse than
+ * the initials.
+ */
+export const facebookBody = facebookProofChecks(
+  z.object({ ...facebookTokenFields, ifNew: z.enum(['create', 'ask']).optional() }).strict(),
+).transform(v => ({ proof: toFacebookProof(v), ifNew: v.ifNew }));
+
+export async function signInWithFacebook(proof: FacebookProof, meta: Meta, ifNew: IfNew = 'create'): Promise<AuthResponse> {
+  return signInWithIdentity(await facebookIdentity(proof), ifNew, meta);
+}
+
+/** A Facebook login — Android's access token or iOS's Limited Login token — verified, as sign-in and linking both take it. */
+export async function facebookIdentity(proof: FacebookProof): Promise<ProviderIdentity> {
+  const identity = await verifyFacebookProof(proof);
+  return {
+    provider: 'facebook',
+    providerId: identity.facebookId,
+    email: identity.email,
+    name: identity.name,
+    avatarUrl: null,
+  };
+}
+
+/**
  * What a new client asks for when an identity matches no account: `create`
  * makes one, as every build before RULES O15 expects; `ask` answers
  * `IDENTITY_NOT_LINKED` with a link token instead, so the member can say
@@ -346,10 +402,21 @@ export type IfNew = 'create' | 'ask';
  * choose (O15).
  */
 async function signInWithIdentity(identity: ProviderIdentity, ifNew: IfNew, meta: Meta): Promise<AuthResponse> {
-  const field = identity.provider === 'google' ? 'googleId' : 'appleId';
+  const field = PROVIDER_FIELD[identity.provider];
   let user = await UserModel.findOne({ [field]: identity.providerId });
 
-  if (!user && identity.email) {
+  // A deleted account lets go of the identity, as connecting one already
+  // does (O15): nobody can sign in to an anonymised row, and an id left on
+  // it kept its owner out of VOKVE for good — every later press of the
+  // same button answered "password does not match". They start afresh.
+  if (user?.deletedAt) {
+    await UserModel.updateOne({ _id: user._id }, { $unset: { [field]: 1 } });
+    user = null;
+  }
+
+  // Only an address the provider itself proved may find an account
+  // (Facebook's may not, O18).
+  if (!user && identity.email && PROVIDER_PROVES_EMAIL[identity.provider]) {
     // Case-insensitive, with the same collation the unique index uses, or
     // `Someone@gmail.com` would make a second account beside `someone@`.
     user = await UserModel.findOne({ email: identity.email }).collation({ locale: 'en', strength: 2 });
@@ -371,25 +438,61 @@ async function signInWithIdentity(identity: ProviderIdentity, ifNew: IfNew, meta
   }
 
   if (!user) {
+    // An address the provider did not prove (Facebook's, O18) that an
+    // account already has: not linked on its say-so, but not a stranger
+    // either. Named, masked, so the app can say "sign in to it once"
+    // rather than offering a new account that would be refused.
+    const holder = identity.email && !PROVIDER_PROVES_EMAIL[identity.provider]
+      ? await UserModel.findOne({ email: identity.email }, { email: 1, passwordHash: 1, googleId: 1, appleId: 1, facebookId: 1 }).collation({ locale: 'en', strength: 2 }).lean()
+      : null;
+    // The other ways into that account, so the app can offer the one that
+    // opens it ("Continue with Google") rather than a form to puzzle over.
+    // Its own provider is left out: an account that already holds a
+    // different Facebook account cannot take this one too (O15).
+    const existingMethods = holder ? signInWaysOf(holder).filter(way => way !== identity.provider) : [];
     if (ifNew === 'ask') {
       throw new ApiError(
         409,
         'IDENTITY_NOT_LINKED',
-        `There is no VOKVE account for this ${PROVIDER_LABEL[identity.provider]} yet.`,
+        holder
+          ? `There is already a VOKVE account for ${maskEmail(holder.email)}. Sign in to it once and ${PROVIDER_NAME[identity.provider]} will open it from then on.`
+          : `There is no VOKVE account for this ${PROVIDER_LABEL[identity.provider]} yet.`,
         {
           provider: identity.provider,
           email: identity.email,
+          existingAccount: holder ? maskEmail(holder.email) : null,
+          existingMethods,
           linkToken: signIdentityLinkToken(identity),
           expiresInSeconds: IDENTITY_LINK_TTL_SECONDS,
         },
       );
     }
     if (!identity.email) {
+      if (identity.provider === 'facebook') {
+        throw new ApiError(
+          401,
+          'FACEBOOK_EMAIL_MISSING',
+          'Facebook did not share an email address with VOKVE, and every account needs one. Try again and allow your email address, or sign up with your email and connect Facebook later under Account → Security.',
+        );
+      }
       throw new ApiError(
         401,
         'APPLE_EMAIL_MISSING',
         'Apple did not share an email address for this account. Stop using Sign in with Apple for VOKVE (on an iPhone: Settings → your name → Sign in with Apple; anywhere else: account.apple.com), then try again and share an email.',
       );
+    }
+    if (!PROVIDER_PROVES_EMAIL[identity.provider]) {
+      // An address that is not proved cannot join the account that has it,
+      // and cannot be taken from it either: the member signs in to that
+      // account and connects the provider there (O15, O18).
+      if (holder) {
+        throw new ApiError(
+          409,
+          'EMAIL_ALREADY_REGISTERED',
+          `There is already a VOKVE account for ${maskEmail(holder.email)}. Sign in to it the way you usually do, then connect ${PROVIDER_NAME[identity.provider]} under Account → Security.`,
+          { provider: identity.provider, account: maskEmail(holder.email) },
+        );
+      }
     }
     user = await createProviderUser(
       { provider: identity.provider, providerId: identity.providerId, email: identity.email, name: identity.name, avatarUrl: identity.avatarUrl },
@@ -422,7 +525,8 @@ function displayName(fullName: AppleBody['fullName']): string | null {
 }
 
 /**
- * A brand-new account from a provider's token (Google, O12; Apple, O13).
+ * A brand-new account from a provider's token (Google, O12; Apple, O13;
+ * Facebook, O18).
  *
  * The password hash is a string bcrypt can never match, the way a deleted
  * account's is: it keeps the field a string for the six places that
@@ -433,7 +537,7 @@ function displayName(fullName: AppleBody['fullName']): string | null {
  */
 async function createProviderUser(
   account: {
-    provider: 'google' | 'apple';
+    provider: ProviderIdentity['provider'];
     providerId: string;
     email: string;
     name: string | null;
@@ -443,7 +547,7 @@ async function createProviderUser(
 ): Promise<UserDoc> {
   const config = await getConfig();
   const userId = newId('usr');
-  const idField = account.provider === 'google' ? 'googleId' : 'appleId';
+  const idField = PROVIDER_FIELD[account.provider];
 
   let user: UserDoc;
   try {
@@ -454,7 +558,8 @@ async function createProviderUser(
       passwordHash: `${account.provider}:${account.providerId}`,
       name: account.name ?? '',
       avatarUrl: account.avatarUrl,
-      emailVerifiedAt: new Date(),
+      // Google and Apple proved the address; Facebook only reported it (O18).
+      emailVerifiedAt: PROVIDER_PROVES_EMAIL[account.provider] ? new Date() : null,
       phoneVerifiedAt: null,
       country: config.locale.country,
       timezone: config.locale.timezone,

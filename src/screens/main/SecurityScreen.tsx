@@ -13,7 +13,7 @@ import {
   Smartphone,
   TriangleAlert,
 } from 'lucide-react-native';
-import { AppleMark, GoogleMark } from '../../components/auth/SocialAuthRow';
+import { AppleMark, FacebookMark, GoogleMark } from '../../components/auth/SocialAuthRow';
 import { ActionSheet } from '../../components/disclosure/ActionSheet';
 import { BottomSheet } from '../../components/disclosure/BottomSheet';
 import { useToast } from '../../components/feedback/Toast';
@@ -31,6 +31,7 @@ import { forgetAppleUser } from '../../services/appleCredential';
 import { signInWithApple } from '../../services/appleSignIn';
 import { confirmWithProvider } from '../../services/providerConfirmation';
 import { signInWithGoogle } from '../../services/googleSignIn';
+import { signInWithFacebook } from '../../services/facebookSignIn';
 import { toApiError } from '../../services/api/errors';
 import { useAuthStore, useCurrentUser } from '../../stores/authStore';
 import { useCoinBalance } from '../../stores/coinsStore';
@@ -67,6 +68,7 @@ type OpenSheet = 'password' | 'email' | null;
 const PROVIDER_NAME: Record<SignInProvider, string> = {
   google: 'Google',
   apple: 'Apple',
+  facebook: 'Facebook',
 };
 
 /**
@@ -171,6 +173,11 @@ export const SecurityScreen = () => {
           if (outcome.kind === 'cancelled') return;
           if (outcome.kind === 'failed') throw new Error(outcome.message);
           next = await accountApi.connectGoogle(outcome.idToken);
+        } else if (provider === 'facebook') {
+          const outcome = await signInWithFacebook();
+          if (outcome.kind === 'cancelled') return;
+          if (outcome.kind === 'failed') throw new Error(outcome.message);
+          next = await accountApi.connectFacebook(outcome.proof);
         } else {
           const outcome = await signInWithApple();
           if (outcome.kind === 'cancelled') return;
@@ -523,8 +530,8 @@ export const SecurityScreen = () => {
                   Sign-in methods
                 </AppText>
                 <AppText variant="micro" color="textTertiary">
-                  Connect Google or Apple to sign in to this same account —
-                  even if you hide your email from Apple.
+                  Connect Google, Apple or Facebook to sign in to this same
+                  account — even if you hide your email from Apple.
                 </AppText>
               </VStack>
 
@@ -536,6 +543,8 @@ export const SecurityScreen = () => {
                     <HStack align="center" gap="md">
                       {method.provider === 'google' ? (
                         <GoogleMark />
+                      ) : method.provider === 'facebook' ? (
+                        <FacebookMark />
                       ) : (
                         <AppleMark color={colors.text} />
                       )}

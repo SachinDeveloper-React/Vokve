@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { Text as RNText, TextInput } from 'react-native';
+import { Platform, Text as RNText, TextInput } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { textOf } from './helpers/text';
@@ -155,31 +155,32 @@ describe('sign-in screen', () => {
     expect(mockNavigate).toHaveBeenCalledWith('SignUp');
   });
 
-  test('Google and Apple sign in rather than apologising, and Facebook still says so', async () => {
-    const signInWithGoogle = jest.fn().mockResolvedValue(true);
-    const signInWithApple = jest.fn().mockResolvedValue(true);
-    useAuthStore.setState({ signInWithGoogle, signInWithApple });
+  test('Google, Apple and Facebook all sign in rather than apologising — on both phones', async () => {
+    const original = Platform.OS;
+    try {
+      for (const os of ['ios', 'android'] as const) {
+        Platform.OS = os;
+        const signInWithGoogle = jest.fn().mockResolvedValue(true);
+        const signInWithApple = jest.fn().mockResolvedValue(true);
+        const signInWithFacebook = jest.fn().mockResolvedValue(true);
+        useAuthStore.setState({ signInWithGoogle, signInWithApple, signInWithFacebook });
 
-    const tree = await render();
-    await ReactTestRenderer.act(() => {
-      pressableFor(tree, 'Continue with Google').props.onPress();
-    });
-    await ReactTestRenderer.act(() => {
-      pressableFor(tree, 'Continue with Apple').props.onPress();
-    });
+        const tree = await render();
+        for (const name of ['Google', 'Apple', 'Facebook']) {
+          await ReactTestRenderer.act(() => {
+            pressableFor(tree, `Continue with ${name}`).props.onPress();
+          });
+        }
 
-    expect(signInWithGoogle).toHaveBeenCalledTimes(1);
-    expect(signInWithApple).toHaveBeenCalledTimes(1);
-    // And no apology for the ones that work.
-    expect(textOf(tree, RNText)).not.toContain('Google sign-in is not connected');
-    expect(textOf(tree, RNText)).not.toContain('Apple sign-in is not connected');
-
-    // Facebook is not wired, and says so rather than doing nothing at all
-    // when pressed.
-    await ReactTestRenderer.act(() => {
-      pressableFor(tree, 'Continue with Facebook').props.onPress();
-    });
-    expect(textOf(tree, RNText)).toContain('Facebook sign-in is not connected');
+        expect(signInWithGoogle).toHaveBeenCalledTimes(1);
+        expect(signInWithApple).toHaveBeenCalledTimes(1);
+        expect(signInWithFacebook).toHaveBeenCalledTimes(1);
+        // And no apology for any of them.
+        expect(textOf(tree, RNText)).not.toMatch(/is not (connected|available)/);
+      }
+    } finally {
+      Platform.OS = original;
+    }
   });
 
   test('forgot password leads to the reset flow rather than a dead-end notice', async () => {

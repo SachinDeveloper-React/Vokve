@@ -118,6 +118,11 @@ import type { CompleteProfilePayload, SignUpPayload } from '../../types/forms';
  */
 export type IfNewIdentity = 'create' | 'ask';
 
+/** A fresh Facebook login: Android's access token, or iOS's Limited Login token and nonce (RULES O18). */
+export type FacebookProof =
+  | { accessToken: string }
+  | { authenticationToken: string; nonce: string };
+
 /** A fresh Apple sign-in, sent to confirm something nothing can undo (RULES O16). */
 export interface AppleConfirmation {
   idToken: string;
@@ -160,6 +165,12 @@ export interface AuthApi {
    * member is — the server reads that out of the token.
    */
   apple(payload: AppleSignInPayload): Promise<AuthResponse>;
+  /**
+   * Signs in with Facebook (`POST /auth/facebook`, RULES O18): Android's
+   * access token, or iOS's Limited Login token with its nonce. The proof
+   * alone — the server works out whose it is.
+   */
+  facebook(proof: FacebookProof, ifNew?: IfNewIdentity): Promise<AuthResponse>;
   /**
    * "Create a new account" after `IDENTITY_NOT_LINKED` (RULES O15): the
    * identity the link token holds becomes an account, or signs in to the
@@ -701,6 +712,7 @@ export interface AccountApi {
     password?: string;
     apple?: AppleConfirmation;
     google?: { idToken: string };
+    facebook?: FacebookProof;
   }): Promise<VerificationChallenge>;
   changePhone(input: {
     phone: string;
@@ -720,7 +732,7 @@ export interface AccountApi {
    * the account back with the number on it, verified (RULES O14).
    */
   verifyPhone(input: { idToken: string; password?: string }): Promise<User>;
-  /** The password and the Google and Apple identities on the account (RULES O15). */
+  /** The password and the Google, Apple and Facebook identities on the account (RULES O15, O18). */
   signInMethods(): Promise<SignInMethods>;
   /** Connects the Google account a fresh ID token names. `IDENTITY_IN_USE` (409) when another account has it. */
   connectGoogle(idToken: string): Promise<SignInMethods>;
@@ -728,6 +740,8 @@ export interface AccountApi {
   connectApple(
     payload: Omit<AppleSignInPayload, 'ifNew'>,
   ): Promise<SignInMethods>;
+  /** Connects the Facebook account a fresh login names (RULES O18). */
+  connectFacebook(proof: FacebookProof): Promise<SignInMethods>;
   /** Connects the identity an `IDENTITY_NOT_LINKED` link token holds. `IDENTITY_LINK_EXPIRED` (410) after 15 minutes. */
   connectIdentity(linkToken: string): Promise<SignInMethods>;
   /**
@@ -747,12 +761,13 @@ export interface AccountApi {
   /**
    * Schedules it for the end of the grace window. The proof is the one
    * `deletion().confirmWith` names (RULES O16): the password, or a fresh
-   * Apple or Google sign-in — Apple's is also what revokes it.
+   * Apple, Google or Facebook sign-in — Apple's is also what revokes it.
    */
   scheduleDeletion(input: {
     password?: string;
     apple?: AppleConfirmation;
     google?: { idToken: string };
+    facebook?: FacebookProof;
     reason?: string;
   }): Promise<AccountDeletion>;
   cancelDeletion(): Promise<AccountDeletion>;

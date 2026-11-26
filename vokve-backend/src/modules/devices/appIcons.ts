@@ -23,7 +23,9 @@ export interface AppIconEntry {
 }
 
 export const APP_ICONS: readonly AppIconEntry[] = [
-  { key: 'redfield', kind: 'base', label: 'Red field' },
+  // Retired 2026-11-26 (D-117): the owner wanted no all-red icon. Kept
+  // because builds carry it as an Android alias and an iOS alternate.
+  { key: 'redfield', kind: 'base', label: 'Red field', retired: true },
   { key: 'classic', kind: 'base', label: 'Classic' },
   { key: 'night', kind: 'base', label: 'Night' },
   { key: 'christmas', kind: 'festive', label: 'Christmas' },
@@ -35,7 +37,7 @@ export const APP_ICONS: readonly AppIconEntry[] = [
 ];
 
 /** The icon a fresh install shows, and the one the app falls back to. */
-export const DEFAULT_APP_ICON = 'redfield';
+export const DEFAULT_APP_ICON = 'classic';
 
 export const appIconKeys = (kind: AppIconKind): string[] =>
   APP_ICONS.filter(icon => icon.kind === kind).map(icon => icon.key);

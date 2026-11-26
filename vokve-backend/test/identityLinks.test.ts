@@ -186,6 +186,7 @@ describe('Security → Sign-in methods', () => {
       providers: [
         { provider: 'google', linked: false, canDisconnect: false },
         { provider: 'apple', linked: false, canDisconnect: false },
+        { provider: 'facebook', linked: false, canDisconnect: false },
       ],
     });
   });
@@ -214,6 +215,20 @@ describe('Security → Sign-in methods', () => {
     expect(response.status).toBe(409);
     expect(response.body.error.code).toBe('IDENTITY_IN_USE');
     expect(response.body.error.details.account).toBe('x•••@privaterelay.appleid.com');
+  });
+
+  it('signing in with a deleted account\'s Google starts a fresh account, not a 401 forever', async () => {
+    const old = await request(app).post('/v1/auth/google').set(baseHeaders).send({ idToken: 'g' });
+    await UserModel.updateOne({ _id: old.body.user.id }, { $set: { deletedAt: new Date(), email: `deleted+${old.body.user.id}@vokve.invalid` } });
+
+    const asked = await request(app).post('/v1/auth/google').set(baseHeaders).send({ idToken: 'g', ifNew: 'ask' });
+    expect(asked.status).toBe(409);
+    expect(asked.body.error.code).toBe('IDENTITY_NOT_LINKED');
+
+    const back = await request(app).post('/v1/auth/google').set(baseHeaders).send({ idToken: 'g' });
+    expect(back.status).toBe(200);
+    expect(back.body.user.id).not.toBe(old.body.user.id);
+    expect((await UserModel.findById(old.body.user.id).lean())?.googleId).toBeUndefined();
   });
 
   it('takes an identity off a deleted account rather than refusing', async () => {
@@ -263,7 +278,7 @@ describe('Security → Sign-in methods', () => {
     const headers = { ...baseHeaders, authorization: `Bearer ${created.body.tokens.accessToken}`, 'x-vokve-device-id': register.body.deviceId };
 
     const methods = await request(app).get('/v1/me/sign-in-methods').set(headers);
-    expect(methods.body).toMatchObject({ password: false, providers: [{ provider: 'google', linked: false }, { provider: 'apple', linked: true, canDisconnect: false }] });
+    expect(methods.body).toMatchObject({ password: false, providers: [{ provider: 'google', linked: false }, { provider: 'apple', linked: true, canDisconnect: false }, { provider: 'facebook', linked: false }] });
 
     const response = await request(app).delete('/v1/me/sign-in-methods/apple').set(headers);
     expect(response.status).toBe(409);
@@ -272,7 +287,7 @@ describe('Security → Sign-in methods', () => {
 
   it('answers 404 for a provider it does not know', async () => {
     const session = await signUpAndRegister();
-    const response = await request(app).delete('/v1/me/sign-in-methods/facebook').set(authed(session));
+    const response = await request(app).delete('/v1/me/sign-in-methods/twitter').set(authed(session));
     expect(response.status).toBe(404);
   });
 });

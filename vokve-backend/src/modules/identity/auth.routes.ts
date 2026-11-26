@@ -3,7 +3,7 @@ import { rateLimit } from '../../middleware/rateLimit.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import {
-  appleBody, createFromLinkToken, signInWithApple, otpRequestBody, refreshBody, refreshSession, requestContactChange, requestOtp, requestStepUp, resendOtp, resendOtpBody, resetPassword,
+  appleBody, createFromLinkToken, facebookBody, signInWithApple, signInWithFacebook, otpRequestBody, refreshBody, refreshSession, requestContactChange, requestOtp, requestStepUp, resendOtp, resendOtpBody, resetPassword,
   resetPasswordBody, sendEmailOtp, sendPhoneOtp, signIn, signInBody, signInWithGoogle, signOut, signUp, signUpBody,
   verifyOtp, verifyOtpBody,
 } from './auth.service.js';
@@ -105,9 +105,26 @@ authRouter.post(
 );
 
 /**
+ * Signing in with Facebook (RULES O18).
+ *
+ * Android's access token, or iOS's Limited Login token with its nonce —
+ * and nothing that says who the member is. Android's costs two Graph calls
+ * to Facebook, so the limit is the Google route's, for the same reason.
+ */
+authRouter.post(
+  '/auth/facebook',
+  validate('body', facebookBody),
+  rateLimit({ name: 'sign-in-facebook-ip', max: 30, windowSeconds: 600, by: 'ip' }),
+  async (req, res) => {
+    res.json(await signInWithFacebook(req.body.proof, meta(req), req.body.ifNew ?? 'create'));
+  },
+);
+
+/**
  * "Create a new account" after a provider sign-in answered
  * `IDENTITY_NOT_LINKED` (RULES O15). The link token is the proof: it names
- * the identity Google or Apple just vouched for, for fifteen minutes.
+ * the identity Google, Apple or Facebook just vouched for, for fifteen
+ * minutes.
  */
 const identityCreateBody = z.object({ linkToken: z.string().trim().min(1).max(4000) }).strict();
 

@@ -9,7 +9,6 @@ import { AuditLogModel } from '../platform/models.js';
 import { SITE_DOCUMENT_DEFAULTS } from './defaults/index.js';
 import { SiteDocumentModel, SiteEnquiryModel, SitePageModel, SiteRevisionModel } from './models.js';
 import {
-  CORE_DOCUMENTS,
   RESERVED_SLUGS,
   SITE_PAGE_KEYS,
   SITE_PAGES,
@@ -194,7 +193,7 @@ export async function pageForEdit(key: SitePageKey) {
     loadPage(key),
     tokenGuide(),
     key === 'home'
-      ? SupportFaqModel.find({}, { question: 1, category: 1, active: 1, sort: 1 }).sort({ category: 1, sort: 1, _id: 1 }).lean()
+      ? SupportFaqModel.find({}, { question: 1, category: 1, active: 1, website: 1, sort: 1 }).sort({ category: 1, sort: 1, _id: 1 }).lean()
       : Promise.resolve([]),
   ]);
   return {
@@ -216,6 +215,8 @@ export async function pageForEdit(key: SitePageKey) {
       question: row.question,
       category: row.category,
       active: row.active !== false,
+      /** Off: kept to the app, so the website leaves it out even when picked. */
+      website: row.website !== false,
     })),
   };
 }

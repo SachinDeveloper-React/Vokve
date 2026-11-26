@@ -26,6 +26,10 @@ export const RETIRED_DEFAULTS: Record<string, readonly unknown[]> = {
   // Left pinned, every phone's key attestation and Play verdict is refused
   // as the wrong package.
   'integrity.android.packageName': ['com.vokve'],
+  // The all-red launcher icon, the default until D-117 made the white one
+  // the default and retired the red. A seeded copy would keep telling every
+  // phone to switch to red.
+  'app.icon.base': ['redfield'],
 };
 
 /** A domain no current default uses: a stored value still naming it is worth a line in the report. */

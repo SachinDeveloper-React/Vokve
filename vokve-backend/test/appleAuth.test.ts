@@ -194,13 +194,15 @@ describe('an account that already exists', () => {
     expect(attempt.status).toBe(401);
   });
 
-  it('is not let back in once deleted', async () => {
+  it('never gets back into a deleted account, and starts afresh instead of being locked out', async () => {
     const first = await signInWith({ idToken: 'tok', nonce: NONCE });
-    await UserModel.updateOne({ _id: first.body.user.id }, { $set: { deletedAt: new Date() } });
+    await UserModel.updateOne({ _id: first.body.user.id }, { $set: { deletedAt: new Date(), email: `deleted+${first.body.user.id}@vokve.invalid` } });
 
     const again = await signInWith({ idToken: 'tok', nonce: NONCE });
 
-    expect(again.status).toBe(401);
+    expect(again.status).toBe(200);
+    expect(again.body.user.id).not.toBe(first.body.user.id);
+    expect((await UserModel.findById(first.body.user.id).lean())?.appleId).toBeUndefined();
   });
 });
 

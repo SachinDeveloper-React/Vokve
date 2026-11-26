@@ -55,11 +55,6 @@ import {
 } from '../../types/forms';
 import type { AuthStackParamList } from '../../types/navigation';
 
-const PROVIDER_NAMES: Record<SocialProvider, string> = {
-  google: 'Google',
-  apple: 'Apple',
-  facebook: 'Facebook',
-};
 
 /**
  * The only two rules the layout primitives cannot express.
@@ -82,6 +77,7 @@ export const SignUpScreen = () => {
   const signUp = useAuthStore(s => s.signUp);
   const signInWithGoogle = useAuthStore(s => s.signInWithGoogle);
   const signInWithApple = useAuthStore(s => s.signInWithApple);
+  const signInWithFacebook = useAuthStore(s => s.signInWithFacebook);
   const isSubmitting = useAuthStore(s => s.isSubmitting);
   const serverError = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
@@ -190,9 +186,9 @@ export const SignUpScreen = () => {
         signInWithApple();
         return;
       }
-      setNotice(`${PROVIDER_NAMES[provider]} sign-up is not connected yet.`);
+      signInWithFacebook();
     },
-    [signInWithApple, signInWithGoogle],
+    [signInWithApple, signInWithFacebook, signInWithGoogle],
   );
 
   // "I already have an account" (RULES O15): the sign-in form is where

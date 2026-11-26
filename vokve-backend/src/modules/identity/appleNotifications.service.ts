@@ -51,7 +51,7 @@ export async function handleAppleNotification(event: AppleServerEvent): Promise<
       await user.save();
       await record(user, 'user.apple_id_deleted', { sessionsEnded: ended });
       const strandedEmail = user.email.endsWith('@privaterelay.appleid.com');
-      const wayIn = hasPassword(user) || Boolean(user.googleId);
+      const wayIn = hasPassword(user) || Boolean(user.googleId) || Boolean(user.facebookId);
       await tell(user._id, 'Your Apple ID no longer signs in',
         wayIn
           ? 'The Apple ID on this account was deleted, so it no longer signs in to VOKVE. Your other sign-in still works.'

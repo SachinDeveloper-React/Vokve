@@ -5,9 +5,9 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
-import { appleBody, appleIdentity, googleIdentity, signUpBody } from '../identity/auth.service.js';
+import { appleBody, appleIdentity, facebookIdentity, googleIdentity, signUpBody } from '../identity/auth.service.js';
 import { getSignInMethods, identityFromLinkToken, linkIdentity, unlinkIdentity } from '../identity/linking.service.js';
-import { confirmationFields, confirmMember } from '../identity/confirm.service.js';
+import { confirmationFields, confirmMember, facebookProofChecks, facebookTokenFields, toFacebookProof } from '../identity/confirm.service.js';
 import { UserModel } from '../identity/models.js';
 import { createChallenge, isChannelUsable } from '../identity/otp.service.js';
 import { signInProviderSchema, supportCategorySchema } from '../../contracts/index.js';
@@ -176,6 +176,7 @@ accountRouter.post('/me/phone/verify', phoneLimit, validate('body', phoneVerifyB
 const signInMethodLimit = rateLimit({ name: 'sign-in-methods-user', max: 10, windowSeconds: 3600, by: 'user' });
 const connectGoogleBody = z.object({ idToken: z.string().trim().min(1).max(4000) }).strict();
 const connectAppleBody = appleBody.pick({ idToken: true, nonce: true, fullName: true }).strict();
+const connectFacebookBody = facebookProofChecks(z.object(facebookTokenFields).strict()).transform(toFacebookProof);
 const connectLinkBody = z.object({ linkToken: z.string().trim().min(1).max(4000) }).strict();
 
 accountRouter.get('/me/sign-in-methods', async (req, res) => {
@@ -190,12 +191,17 @@ accountRouter.post('/me/sign-in-methods/apple', signInMethodLimit, validate('bod
   res.json(await linkIdentity(req.ctx.userId!, await appleIdentity(req.body), { deviceId: req.ctx.deviceId }));
 });
 
+/** A fresh Facebook login — access token or Limited Login token — checked (RULES O18). */
+accountRouter.post('/me/sign-in-methods/facebook', signInMethodLimit, validate('body', connectFacebookBody), async (req, res) => {
+  res.json(await linkIdentity(req.ctx.userId!, await facebookIdentity(req.body), { deviceId: req.ctx.deviceId }));
+});
+
 accountRouter.post('/me/sign-in-methods/link', signInMethodLimit, validate('body', connectLinkBody), async (req, res) => {
   const identity = identityFromLinkToken(req.body.linkToken);
   res.json(await linkIdentity(req.ctx.userId!, identity, { deviceId: req.ctx.deviceId }));
 });
 
-/** Apple's needs a fresh Apple sign-in in the body, to revoke with (RULES O16); Google's needs nothing. */
+/** Apple's needs a fresh Apple sign-in in the body, to revoke with (RULES O16); Google's and Facebook's need nothing. */
 const disconnectBody = z
   .object({ apple: connectAppleBody.pick({ idToken: true, nonce: true }).extend({ authorizationCode: z.string().trim().min(1).max(2000) }).strict().optional() })
   .strict();

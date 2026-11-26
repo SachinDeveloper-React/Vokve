@@ -56,7 +56,7 @@ const makeStyles = ({ spacing }: ThemeShape) =>
 /**
  * The deletion sheet's fields. The password is only asked for on an account
  * whose proof it is (`confirmWith`, RULES O16) — the others confirm with
- * Apple or Google — so it is checked in the handler rather than here.
+ * Apple, Google or Facebook — so it is checked in the handler rather than here.
  */
 const deleteSchema = z.object({
   password: z.string().optional(),
@@ -75,6 +75,10 @@ const CONFIRM_COPY: Record<
   google: {
     button: 'Confirm with Google',
     note: 'Sign in with Google once more to confirm — it is how this account signs in.',
+  },
+  facebook: {
+    button: 'Confirm with Facebook',
+    note: 'Log in with Facebook once more to confirm — it is how this account signs in. To also remove VOKVE from Facebook, open Facebook → Settings → Apps and websites.',
   },
 };
 type DeleteValues = z.infer<typeof deleteSchema>;

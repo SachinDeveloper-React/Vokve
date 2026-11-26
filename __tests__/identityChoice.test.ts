@@ -18,6 +18,7 @@ import type { User } from '../src/types/models';
 const mockAuthApi = {
   apple: jest.fn(),
   google: jest.fn(),
+  facebook: jest.fn(),
   signIn: jest.fn(),
   createFromIdentity: jest.fn(),
   signOut: jest.fn().mockResolvedValue({ ok: true }),
@@ -52,6 +53,12 @@ const mockGoogleSheet = jest.fn();
 jest.mock('../src/services/googleSignIn', () => ({
   signInWithGoogle: () => mockGoogleSheet(),
   forgetGoogleSession: jest.fn().mockResolvedValue(undefined),
+}));
+
+const mockFacebookSheet = jest.fn();
+jest.mock('../src/services/facebookSignIn', () => ({
+  signInWithFacebook: () => mockFacebookSheet(),
+  isFacebookSignInAvailable: () => true,
 }));
 
 const { useAuthStore } = require('../src/stores/authStore') as typeof import('../src/stores/authStore');
@@ -117,6 +124,83 @@ describe('an Apple ID the server does not know', () => {
 
     expect(mockAuthApi.google).toHaveBeenCalledWith('g-token', 'ask');
     expect(useAuthStore.getState().pendingIdentity?.stage).toBe('choose');
+  });
+
+  test('Facebook asks too, with the token and nothing else (RULES O18)', async () => {
+    mockFacebookSheet.mockResolvedValueOnce({ kind: 'signed_in', proof: { accessToken: 'fb-token' } });
+    mockAuthApi.facebook.mockRejectedValueOnce(
+      new ApiError(
+        'unknown',
+        'There is no VOKVE account for this Facebook account yet.',
+        409,
+        { provider: 'facebook', email: 'rana.fb@example.com', linkToken: 'link-fb', expiresInSeconds: 900 },
+        'IDENTITY_NOT_LINKED',
+      ),
+    );
+
+    await expect(useAuthStore.getState().signInWithFacebook()).resolves.toBe(false);
+
+    expect(mockAuthApi.facebook).toHaveBeenCalledWith({ accessToken: 'fb-token' }, 'ask');
+    expect(useAuthStore.getState().pendingIdentity).toMatchObject({
+      provider: 'facebook',
+      email: 'rana.fb@example.com',
+      existingAccount: null,
+      linkToken: 'link-fb',
+      stage: 'choose',
+    });
+  });
+
+  test('a Facebook email an account already has is carried to the sheet, masked', async () => {
+    mockFacebookSheet.mockResolvedValueOnce({
+      kind: 'signed_in',
+      proof: { authenticationToken: 'fb-limited', nonce: 'fb-nonce-0123' },
+    });
+    mockAuthApi.facebook.mockRejectedValueOnce(
+      new ApiError(
+        'unknown',
+        'There is already a VOKVE account for r•••@example.com. Sign in to it once and Facebook will open it from then on.',
+        409,
+        { provider: 'facebook', email: 'rana@example.com', existingAccount: 'r•••@example.com', existingMethods: ['google', 'password', 'carrier-pigeon'], linkToken: 'link-fb', expiresInSeconds: 900 },
+        'IDENTITY_NOT_LINKED',
+      ),
+    );
+
+    await useAuthStore.getState().signInWithFacebook();
+
+    expect(useAuthStore.getState().pendingIdentity).toMatchObject({
+      existingAccount: 'r•••@example.com',
+      // A way this build does not know is dropped rather than drawn as a button.
+      existingMethods: ['google', 'password'],
+      stage: 'choose',
+    });
+  });
+
+  test('"Continue with Google" from the welcome-back sheet connects Facebook to the account Google opens', async () => {
+    useAuthStore.setState({
+      pendingIdentity: {
+        provider: 'facebook', email: 'rana@example.com', existingAccount: 'r•••@example.com', existingMethods: ['google'],
+        linkToken: 'link-fb', expiresAt: Date.now() + 600_000, stage: 'choose',
+      },
+    });
+    mockGoogleSheet.mockResolvedValueOnce({ kind: 'signed_in', idToken: 'g-token' });
+    mockAuthApi.google.mockResolvedValueOnce({ user: USER, tokens: TOKENS });
+    mockAccountApi.connectIdentity.mockResolvedValueOnce({ password: true, confirmChangesWith: 'password', providers: [] });
+
+    useAuthStore.getState().keepIdentityForExistingAccount();
+    await expect(useAuthStore.getState().signInWithGoogle()).resolves.toBe(true);
+    await flush();
+
+    expect(mockAccountApi.connectIdentity).toHaveBeenCalledWith('link-fb');
+    expect(useAuthStore.getState().identityLinkOutcome).toMatchObject({ tone: 'success', title: 'Facebook connected' });
+  });
+
+  test('a Facebook cancel is silent', async () => {
+    mockFacebookSheet.mockResolvedValueOnce({ kind: 'cancelled' });
+
+    await expect(useAuthStore.getState().signInWithFacebook()).resolves.toBe(false);
+
+    expect(mockAuthApi.facebook).not.toHaveBeenCalled();
+    expect(useAuthStore.getState()).toMatchObject({ error: null, isSubmitting: false, pendingIdentity: null });
   });
 });
 

@@ -118,6 +118,26 @@ jest.mock('react-native-nitro-google-signin', () => {
   };
 });
 
+// Facebook Login is a native SDK with no JavaScript side. The double logs
+// in and hands back a token; a test about cancelling or failing says so
+// for itself.
+jest.mock('react-native-fbsdk-next', () => ({
+  LoginManager: {
+    logInWithPermissions: jest.fn().mockResolvedValue({ isCancelled: false, grantedPermissions: ['public_profile', 'email'] }),
+    logOut: jest.fn(),
+  },
+  AccessToken: {
+    getCurrentAccessToken: jest.fn().mockResolvedValue({ accessToken: 'facebook-access-token' }),
+  },
+  AuthenticationToken: {
+    getAuthenticationTokenIOS: jest.fn().mockResolvedValue({
+      authenticationToken: 'facebook-limited-token',
+      nonce: 'facebook-nonce-0123',
+      graphDomain: 'facebook',
+    }),
+  },
+}));
+
 // Apple sign-in's iOS half is a native module and its Android half is read
 // off `NativeModules` at import, so neither exists under Jest. The double
 // answers a signed-in response on both; a test about cancelling or failing

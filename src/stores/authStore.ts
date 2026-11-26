@@ -35,12 +35,13 @@ import { useRemindersStore } from './remindersStore';
 import { useNutritionStore } from './nutritionStore';
 import { useVitalsStore } from './vitalsStore';
 import { useWishlistStore } from './wishlistStore';
-import type {
-  AuthResponse,
-  AuthTokens,
-  SignInProvider,
-  User,
-  VerificationChallenge,
+import {
+  signInProviderSchema,
+  type AuthResponse,
+  type AuthTokens,
+  type SignInProvider,
+  type User,
+  type VerificationChallenge,
 } from '../types/models';
 import type { CompleteProfilePayload, SignUpPayload } from '../types/forms';
 import { logger } from '../utils/logger';
@@ -49,6 +50,7 @@ import {
   signInWithGoogle as googleSignIn,
 } from '../services/googleSignIn';
 import { signInWithApple as appleSignIn } from '../services/appleSignIn';
+import { signInWithFacebook as facebookSignIn } from '../services/facebookSignIn';
 import { forgetAppleUser, rememberAppleUser } from '../services/appleCredential';
 
 /**
@@ -66,7 +68,7 @@ export type AuthStatus =
   | 'signed_out';
 
 /**
- * A Google or Apple identity the server found no account for (RULES O15),
+ * A Google, Apple or Facebook identity the server found no account for (RULES O15),
  * held while the member says what it belongs to.
  *
  * `choose` is the sheet asking "new account, or one you already have?".
@@ -79,6 +81,17 @@ export interface PendingIdentity {
   provider: SignInProvider;
   /** What the provider shared — a relay address, the real one, or nothing. */
   email: string | null;
+  /**
+   * The masked address of the account that already has this email, when
+   * the provider's email is one that does not prove itself (Facebook,
+   * RULES O18). Set means "sign in to it once", not "new to VOKVE?".
+   */
+  existingAccount?: string | null;
+  /**
+   * How that account signs in (`google`, `apple`, `password`…), so the
+   * sheet can say "Continue with Google" — the one button that opens it.
+   */
+  existingMethods?: Array<'password' | SignInProvider>;
   linkToken: string;
   /** Epoch ms after which the server will refuse the token. */
   expiresAt: number;
@@ -154,6 +167,12 @@ interface AuthState {
    * included.
    */
   signInWithApple: () => Promise<boolean>;
+  /**
+   * Signs in with Facebook (RULES O18), Android and iPhone. Answers exactly as
+   * `signInWithGoogle` does. Facebook's email never finds an existing
+   * account, so a member who already has one is asked, and says so.
+   */
+  signInWithFacebook: () => Promise<boolean>;
   /**
    * "Create a new account" for the pending identity: the server makes it
    * from the link token and signs in, as a plain provider sign-in would
@@ -414,6 +433,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     return signedIn;
+  },
+
+  signInWithFacebook: async () => {
+    set({ isSubmitting: true, error: null });
+    const outcome = await facebookSignIn();
+    // The proof goes up untouched — Android's access token or iOS's
+    // Limited Login token — and the server works out whose it is. `ask`,
+    // as for Google: no account means a choice (O15).
+    return finishProviderSignIn(set, 'facebook', outcome, signedIn =>
+      authApi.facebook(signedIn.proof, 'ask'),
+    );
   },
 
   createAccountFromIdentity: async () => {
@@ -911,7 +941,7 @@ setOnSessionExpired(() => {
 });
 
 /**
- * The half of a provider sign-in that Google and Apple share: the
+ * The half of a provider sign-in that every provider shares: the
  * provider's sheet has closed, and what it answered is turned into a
  * session — or into nothing at all.
  *
@@ -924,7 +954,7 @@ setOnSessionExpired(() => {
  */
 async function finishProviderSignIn<SignedIn extends { kind: 'signed_in' }>(
   set: (partial: Partial<AuthState>) => void,
-  method: 'google' | 'apple',
+  method: SignInProvider,
   outcome: SignedIn | { kind: 'cancelled' } | { kind: 'failed'; message: string },
   exchange: (signedIn: SignedIn) => Promise<AuthResponse>,
 ): Promise<boolean> {
@@ -960,7 +990,7 @@ async function finishProviderSignIn<SignedIn extends { kind: 'signed_in' }>(
 /** The session a provider (or a link token) answered with, started. */
 async function startProviderSession(
   set: (partial: Partial<AuthState>) => void,
-  method: 'google' | 'apple',
+  method: SignInProvider,
   { user, tokens }: AuthResponse,
 ): Promise<boolean> {
   await secureStorage.saveTokens(tokens);
@@ -983,14 +1013,22 @@ function pendingIdentityFrom(error: ApiError): PendingIdentity | null {
   if (error.code !== 'IDENTITY_NOT_LINKED' || !error.details) {
     return null;
   }
-  const { provider, email, linkToken, expiresInSeconds } = error.details;
-  if ((provider !== 'google' && provider !== 'apple') || typeof linkToken !== 'string') {
+  const { provider, email, existingAccount, existingMethods, linkToken, expiresInSeconds } = error.details;
+  const known = signInProviderSchema.safeParse(provider);
+  if (!known.success || typeof linkToken !== 'string') {
     return null;
   }
   const ttl = typeof expiresInSeconds === 'number' ? expiresInSeconds : 600;
   return {
-    provider,
+    provider: known.data,
     email: typeof email === 'string' ? email : null,
+    existingAccount: typeof existingAccount === 'string' ? existingAccount : null,
+    existingMethods: Array.isArray(existingMethods)
+      ? existingMethods.filter(
+          (way): way is 'password' | SignInProvider =>
+            way === 'password' || signInProviderSchema.safeParse(way).success,
+        )
+      : [],
     linkToken,
     // A minute short of the server's figure, so the phone gives up first
     // rather than sending a token that dies in flight.
@@ -999,7 +1037,7 @@ function pendingIdentityFrom(error: ApiError): PendingIdentity | null {
   };
 }
 
-const PROVIDER_NAME: Record<SignInProvider, string> = { google: 'Google', apple: 'Apple' };
+const PROVIDER_NAME: Record<SignInProvider, string> = { google: 'Google', apple: 'Apple', facebook: 'Facebook' };
 
 /**
  * After a sign-in starts a session: connects the identity the member said

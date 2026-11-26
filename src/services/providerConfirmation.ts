@@ -1,13 +1,15 @@
 import type { AppleConfirmation } from './api/contracts';
 import { signInWithApple } from './appleSignIn';
+import { signInWithFacebook, type FacebookProof } from './facebookSignIn';
 import { signInWithGoogle } from './googleSignIn';
 
 export type ProviderProof =
   | { apple: AppleConfirmation }
-  | { google: { idToken: string } };
+  | { google: { idToken: string } }
+  | { facebook: FacebookProof };
 
 /**
- * A fresh Apple or Google sign-in, as the proof an account without a
+ * A fresh Apple, Google or Facebook sign-in, as the proof an account without a
  * password gives before something that matters (RULES O16, O17) —
  * deleting it, changing its email, letting go of Apple.
  *
@@ -15,7 +17,13 @@ export type ProviderProof =
  * not an error, so the caller says nothing. A provider that failed throws,
  * in words the caller can put in front of the member.
  */
-export async function confirmWithProvider(provider: 'apple' | 'google'): Promise<ProviderProof | null> {
+export async function confirmWithProvider(provider: 'apple' | 'google' | 'facebook'): Promise<ProviderProof | null> {
+  if (provider === 'facebook') {
+    const outcome = await signInWithFacebook();
+    if (outcome.kind === 'cancelled') return null;
+    if (outcome.kind === 'failed') throw new Error(outcome.message);
+    return { facebook: outcome.proof };
+  }
   if (provider === 'apple') {
     const outcome = await signInWithApple();
     if (outcome.kind === 'cancelled') return null;

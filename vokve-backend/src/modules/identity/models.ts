@@ -43,6 +43,15 @@ const userSchema = new Schema(
      */
     appleId: { type: String, default: undefined },
     /**
+     * Facebook's app-scoped id for this account (`/me`'s `id`), where the
+     * member has signed in with Facebook (RULES O18). The *only* thing a
+     * Facebook sign-in is matched on: Facebook does not say whether it has
+     * proved the address it shares, so that address never finds an account.
+     * Cleared when the account is purged — Meta wants what came from it
+     * gone when the member asks.
+     */
+    facebookId: { type: String, default: undefined },
+    /**
      * When Apple said it stopped forwarding mail to this account's private
      * relay address (RULES O17, `email-disabled`); cleared by
      * `email-enabled`. Only ever set while `email` is that relay address.
@@ -83,6 +92,7 @@ userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 // same value and the second sign-up would collide.
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ appleId: 1 }, { unique: true, sparse: true });
+userSchema.index({ facebookId: 1 }, { unique: true, sparse: true });
 userSchema.index({ country: 1 });
 userSchema.index({ 'trust.tier': 1 });
 userSchema.index({ 'flags.tester': 1 }, { partialFilterExpression: { 'flags.tester': true } });
@@ -99,7 +109,7 @@ const refreshTokenSchema = new Schema(
     supersededBy: { type: String, default: null },
     revokedAt: { type: Date, default: null },
     /**
-     * How the session began — `password`, `otp`, `google`, `apple` — carried
+     * How the session began — `password`, `otp`, `google`, `apple`, `facebook` — carried
      * across every rotation, so Apple withdrawing consent can end exactly
      * the sessions Apple was the way into (RULES O17). Null on rows from
      * before it was recorded.

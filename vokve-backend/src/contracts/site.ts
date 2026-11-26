@@ -296,8 +296,35 @@ const downloadSchema = z
   .object({ eyebrow: z.string().nullable(), title: z.string(), subtitle: text, note: text.nullable() })
   .meta({ title: 'Download' });
 
+/**
+ * The home page's sections below the hero, in the order they are drawn.
+ * The panel can hide one and move them about; the hero always comes first.
+ */
+export const HOME_SECTION_IDS = ['stats', 'howItWorks', 'features', 'challenges', 'fairPlay', 'privacy', 'faq', 'download'] as const;
+export type HomeSectionId = (typeof HOME_SECTION_IDS)[number];
+
+/** The `#anchor` each one has on the page — what the menu and footer link to. */
+export const HOME_SECTION_ANCHORS: Record<HomeSectionId, string | null> = {
+  stats: null,
+  howItWorks: 'how-it-works',
+  features: 'features',
+  challenges: 'challenges',
+  fairPlay: 'fair-play',
+  privacy: 'privacy',
+  faq: 'faq',
+  download: 'download',
+};
+
+/** `/#features` or `#features` → `features`; anything else → null. */
+export function homeAnchorOf(link: string): string | null {
+  const match = /^\/?#([a-z0-9-]+)$/.exec(link.trim());
+  return match ? match[1]! : null;
+}
+
 export const homePageSchema = z.object({
   seo: seoSchema,
+  /** Which sections show below the hero, in order. A section not named is not drawn. */
+  sections: z.array(z.enum(HOME_SECTION_IDS)),
   hero: heroSchema,
   stats: z.array(statSchema),
   howItWorks: howItWorksSchema,
@@ -309,34 +336,75 @@ export const homePageSchema = z.object({
   download: downloadSchema,
 });
 
-export const homeEditSchema = homePageSchema.extend({
-  challenges: challengesBase
-    .extend({
-      live: z
-        .boolean()
-        .default(true)
-        .meta({ title: 'Show the live challenges', description: 'On: the board lists every running challenge from the Challenges page, in these words. Off: it lists the items below.' }),
-      liveWords: z
-        .object({
-          daily: z.string().min(1),
-          weekly: z.string().min(1),
-          monthly: z.string().min(1),
-          reward: z.string().includes('{coins}').meta({ description: '{coins} is replaced by the reward: "{coins} coins".' }),
-          badge: z.string().nullable().meta({ description: 'Shown beside a reward that also unlocks a badge. Empty for nothing.' }),
-        })
-        .default({ daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', reward: '{coins} coins', badge: '+ badge' })
-        .meta({ title: 'Words for the live board' }),
-    })
-    .meta({ title: 'Challenges' }),
-  faq: sectionHead
-    .extend({
-      itemIds: z
-        .array(z.string().min(1))
-        .meta({ widget: 'faq-ids', title: 'Questions', description: 'Picked from the Help centre, in this order. Hidden articles are left out.' }),
-      cta: siteLinkSchema,
-    })
-    .meta({ title: 'Questions' }),
-});
+const homeLayoutSchema = z
+  .array(z.object({ id: z.enum(HOME_SECTION_IDS), show: z.boolean() }))
+  .refine(
+    list => list.length === HOME_SECTION_IDS.length && HOME_SECTION_IDS.every(id => list.filter(entry => entry.id === id).length === 1),
+    'Each section appears exactly once',
+  )
+  .refine(
+    list => list.find(entry => entry.id === 'download')?.show !== false,
+    'Download is where “Get the app” points, so it can move but not be hidden',
+  )
+  .default(HOME_SECTION_IDS.map(id => ({ id, show: true })))
+  .meta({
+    widget: 'order',
+    title: 'Sections and their order',
+    description: 'Below the hero, top to bottom. Switch one off to hide it — the header, footer and announcement links to it are hidden with it.',
+  });
+
+// The edited page names its sections with a switch each (`layout`) instead
+// of the served list; the layout sits second so the form shows it near the top.
+const { seo: homeSeo, ...homeShape } = homePageSchema.omit({ sections: true }).shape;
+
+export const homeEditSchema = z
+  .object({
+    seo: homeSeo,
+    layout: homeLayoutSchema,
+    ...homeShape,
+    challenges: challengesBase
+      .extend({
+        live: z
+          .boolean()
+          .default(true)
+          .meta({ title: 'Show the live challenges', description: 'On: the board lists every running challenge from the Challenges page, in these words. Off: it lists the items below.' }),
+        liveWords: z
+          .object({
+            daily: z.string().min(1),
+            weekly: z.string().min(1),
+            monthly: z.string().min(1),
+            reward: z.string().includes('{coins}').meta({ description: '{coins} is replaced by the reward: "{coins} coins".' }),
+            badge: z.string().nullable().meta({ description: 'Shown beside a reward that also unlocks a badge. Empty for nothing.' }),
+          })
+          .default({ daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', reward: '{coins} coins', badge: '+ badge' })
+          .meta({ title: 'Words for the live board' }),
+      })
+      .meta({ title: 'Challenges' }),
+    faq: sectionHead
+      .extend({
+        itemIds: z
+          .array(z.string().min(1))
+          .meta({
+            widget: 'faq-ids',
+            title: 'Questions',
+            description: 'Picked from the Help centre, in this order. Articles hidden there, or kept to the app, are left out.',
+          }),
+        cta: siteLinkSchema,
+      })
+      .meta({ title: 'Questions' }),
+  })
+  .superRefine((home, context) => {
+    // The hero's main button must land somewhere: not on a section switched off.
+    const hidden = new Set(home.layout.filter(entry => !entry.show).map(entry => HOME_SECTION_ANCHORS[entry.id]));
+    const anchor = homeAnchorOf(home.hero.primaryCta.href);
+    if (anchor && hidden.has(anchor)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['hero', 'primaryCta', 'href'],
+        message: `This button points at a section that is switched off (#${anchor}). Point it somewhere else, or show that section.`,
+      });
+    }
+  });
 export type HomeEdit = z.infer<typeof homeEditSchema>;
 
 // ─── /site/pages/about ──────────────────────────────────────────────────────
@@ -576,7 +644,7 @@ export const invitePageSchema = z.object({
     .string()
     .refine(v => {
       try {
-        new RegExp(v);
+        RegExp(v);
         return true;
       } catch {
         return false;

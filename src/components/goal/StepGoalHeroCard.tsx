@@ -46,7 +46,7 @@ export const StepGoalHeroCard = memo(() => {
       end={{ x: 1, y: 1 }}
       style={styles.panel}
     >
-      <HStack align="center" gap="base">
+      <HStack align="center" gap="base" style={{ padding: spacing.lg }}>
         <VStack flex={1} gap="xs">
           {/* Broken where the design breaks it, rather than wherever the
               width runs out. */}
@@ -71,6 +71,6 @@ StepGoalHeroCard.displayName = 'StepGoalHeroCard';
 
 /** `Box` has no gradient, so the panel's rounding and padding go on the gradient itself. */
 const styles = StyleSheet.create({
-  panel: { borderRadius: radius.xl, padding: spacing.lg },
+  panel: { borderRadius: radius.xl },
   title: { fontWeight: fontWeight.bold },
 });

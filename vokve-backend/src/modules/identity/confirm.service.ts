@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { verifyAppleIdToken } from '../../lib/appleIdentity.js';
 import { revokeAppleAuthorization, type RevocationResult } from '../../lib/appleTokens.js';
 import { ApiError } from '../../lib/errors.js';
+import { verifyFacebookProof, type FacebookProof } from '../../lib/facebookIdentity.js';
 import { verifyGoogleIdToken } from '../../lib/googleIdentity.js';
 import type { DeletionConfirmation } from '../../contracts/index.js';
 import { hasPassword } from './password.js';
@@ -10,7 +11,9 @@ import type { UserDoc } from './models.js';
 
 /**
  * Proving it is the member, again, before something nothing can undo —
- * deleting the account, or taking Apple off it (RULES O16).
+ * deleting the account, or taking Apple off it (RULES O16). Facebook is
+ * the last of them (O18): only an account with no password, Apple or
+ * Google is confirmed with a fresh Facebook login.
  *
  * A password asked for again was the only proof there was, and an account
  * made with Google or Apple has none: it could not be deleted at all. Now
@@ -30,17 +33,45 @@ const appleConfirmation = z
   })
   .strict();
 const googleConfirmation = z.object({ idToken: z.string().trim().min(1).max(4000) }).strict();
+/**
+ * A fresh Facebook login (RULES O18): Android's access token, or iOS's
+ * Limited Login token with the nonce it was made for — one or the other.
+ */
+export const facebookTokenFields = {
+  accessToken: z.string().trim().min(1).max(4000).optional(),
+  authenticationToken: z.string().trim().min(1).max(8000).optional(),
+  nonce: z.string().trim().min(8).max(256).optional(),
+};
+
+/** Exactly one of the two proofs, as `lib/facebookIdentity` takes it. */
+export function toFacebookProof(v: { accessToken?: string; authenticationToken?: string; nonce?: string }): FacebookProof {
+  return v.accessToken ? { accessToken: v.accessToken } : { authenticationToken: v.authenticationToken!, nonce: v.nonce! };
+}
+
+/** The refinements every body carrying a Facebook proof shares. */
+export function facebookProofChecks<T extends z.ZodType<{ accessToken?: string; authenticationToken?: string; nonce?: string }>>(schema: T) {
+  return schema
+    .refine(v => Boolean(v.accessToken) !== Boolean(v.authenticationToken), {
+      message: 'Send the Facebook access token, or the Limited Login token with its nonce.',
+      path: ['accessToken'],
+    })
+    .refine(v => !v.authenticationToken || Boolean(v.nonce), { message: 'The nonce is missing.', path: ['nonce'] });
+}
+
+const facebookConfirmation = facebookProofChecks(z.object(facebookTokenFields).strict()).transform(toFacebookProof);
 
 /** The proof fields a body may carry, one of which the account's method needs. */
 export const confirmationFields = {
   password: z.string().min(1, 'Enter your password').max(200).optional(),
   apple: appleConfirmation.optional(),
   google: googleConfirmation.optional(),
+  facebook: facebookConfirmation.optional(),
 };
 export type Confirmation = {
   password?: string;
   apple?: z.infer<typeof appleConfirmation>;
   google?: z.infer<typeof googleConfirmation>;
+  facebook?: z.infer<typeof facebookConfirmation>;
 };
 
 /**
@@ -57,6 +88,7 @@ export function confirmationFor(user: UserDoc, purpose: ProofPurpose = 'delete')
   if (hasPassword(user)) return 'password';
   if (user.appleId) return 'apple';
   if (user.googleId) return 'google';
+  if (user.facebookId) return 'facebook';
   return 'password';
 }
 
@@ -97,6 +129,15 @@ export async function confirmMember(
     return { method, appleRevocation: null };
   }
 
+  if (method === 'facebook') {
+    if (!proof.facebook) throw confirmationRequired(method);
+    const identity = await verifyFacebookProof(proof.facebook);
+    if (identity.facebookId !== user.facebookId) {
+      throw new ApiError(403, 'FACEBOOK_ACCOUNT_MISMATCH', 'That is a different Facebook account from the one on this VOKVE account.');
+    }
+    return { method, appleRevocation: null };
+  }
+
   if (!proof.apple) throw confirmationRequired(method);
   const identity = await verifyAppleIdToken(proof.apple.idToken, proof.apple.nonce);
   if (identity.appleId !== user.appleId) {
@@ -115,10 +156,12 @@ export async function confirmMember(
 const Errors422 = (field: string, message: string) =>
   new ApiError(422, 'VALIDATION_FAILED', 'Check the highlighted fields.', { [field]: message });
 
+const CONFIRM_NAME: Record<DeletionConfirmation, string> = { password: 'your password', apple: 'Apple', google: 'Google', facebook: 'Facebook' };
+
 const confirmationRequired = (method: DeletionConfirmation) =>
   new ApiError(
     422,
     'CONFIRMATION_REQUIRED',
-    `Confirm with ${method === 'apple' ? 'Apple' : 'Google'} — it is how this account signs in.`,
+    `Confirm with ${CONFIRM_NAME[method]} — it is how this account signs in.`,
     { confirmWith: method },
   );

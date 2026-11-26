@@ -394,10 +394,13 @@ describe('sign-up screen', () => {
     openURL.mockRestore();
   });
 
-  test('the flows that are not wired up still say so', async () => {
+  test('Facebook signs up too (RULES O18)', async () => {
+    const signInWithFacebook = jest.fn().mockResolvedValue(true);
+    useAuthStore.setState({ signInWithFacebook });
     const tree = await render();
 
     await press(tree, 'Continue with Facebook');
-    expect(textOf(tree, RNText)).toContain('Facebook sign-up is not connected');
+    expect(signInWithFacebook).toHaveBeenCalledTimes(1);
+    expect(textOf(tree, RNText)).not.toContain('is not available');
   });
 });

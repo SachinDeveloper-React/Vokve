@@ -46,7 +46,8 @@ export const faqQuery = z.object({
   /** Words in the question, the answer, or the tags members search by. */
   q: z.string().max(160).default(''),
   category: supportCategorySchema.optional(),
-  state: z.enum(['any', 'active', 'hidden']).default('any'),
+  /** `app-only`: showing in the app's help centre, kept off the website. */
+  state: z.enum(['any', 'active', 'hidden', 'app-only']).default('any'),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
   sort: z.enum(['shelf', 'newest', 'question']).default('shelf'),
@@ -63,6 +64,7 @@ export async function listFaqs(query: FaqQuery) {
   if (query.category) filter.category = query.category;
   if (query.state === 'active') filter.active = true;
   if (query.state === 'hidden') filter.active = false;
+  if (query.state === 'app-only') Object.assign(filter, { active: true, website: false });
 
   const order: Record<string, 1 | -1> =
     query.sort === 'newest' ? { createdAt: -1 } : query.sort === 'question' ? { question: 1 } : { sort: 1, _id: 1 };
@@ -70,8 +72,15 @@ export async function listFaqs(query: FaqQuery) {
   const [rows, total, byCategory] = await Promise.all([
     SupportFaqModel.find(filter).sort(order).skip(query.offset).limit(query.limit).lean(),
     SupportFaqModel.countDocuments(filter),
-    SupportFaqModel.aggregate<{ _id: string; articles: number; active: number }>([
-      { $group: { _id: '$category', articles: { $sum: 1 }, active: { $sum: { $cond: ['$active', 1, 0] } } } },
+    SupportFaqModel.aggregate<{ _id: string; articles: number; active: number; website: number }>([
+      {
+        $group: {
+          _id: '$category',
+          articles: { $sum: 1 },
+          active: { $sum: { $cond: ['$active', 1, 0] } },
+          website: { $sum: { $cond: [{ $and: ['$active', { $ne: ['$website', false] }] }, 1, 0] } },
+        },
+      },
       { $sort: { articles: -1 } },
     ]),
   ]);
@@ -86,6 +95,8 @@ export async function listFaqs(query: FaqQuery) {
     totals: {
       articles: total,
       active: byCategory.reduce((sum, row) => sum + row.active, 0),
+      /** Showing on the public website too (RULES P22). */
+      onWebsite: byCategory.reduce((sum, row) => sum + row.website, 0),
       /** Shelves with nothing on them: a help page row that opens an empty list. */
       emptyCategories: supportCategorySchema.options.filter(
         category => !byCategory.some(row => row._id === category && row.active > 0),
@@ -99,6 +110,7 @@ export async function listFaqs(query: FaqQuery) {
       tags: row.tags ?? [],
       sort: row.sort ?? 0,
       active: row.active ?? true,
+      website: row.website !== false,
       createdAt: iso((row as { createdAt?: Date }).createdAt),
       updatedAt: iso((row as { updatedAt?: Date }).updatedAt),
     })),
@@ -117,6 +129,8 @@ export const faqBody = z
     tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
     sort: z.number().int().min(-10_000).max(10_000).optional(),
     active: z.boolean().optional(),
+    /** Also on the public website (RULES P22); off keeps it in the app only. */
+    website: z.boolean().optional(),
     note: z.string().trim().max(300).optional(),
   })
   .strict();

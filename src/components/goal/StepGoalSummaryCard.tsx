@@ -50,7 +50,7 @@ const Figure = ({
             style={styles.loading}
           />
         ) : (
-          <AppText variant="h1" numberOfLines={1} adjustsFontSizeToFit>
+          <AppText variant="h1" numberOfLines={1}>
             {steps === null ? '—' : formatGrouped(steps)}
           </AppText>
         )}

@@ -13,9 +13,9 @@ export const privacyPolicy: SiteDocumentInput = {
   eyebrow: 'Legal',
   summary:
     'What VOKVE collects, why it needs it, who helps us run the service, and the controls you have over all of it.',
-  version: '1.0',
+  version: '1.1',
   effectiveAt: '2026-11-21',
-  updatedAt: '2026-11-21',
+  updatedAt: '2026-11-26',
   highlights: [
     'We collect your steps and workouts so we can pay you coins for them — and for nothing else.',
     'Your health data is never sold and never used for advertising.',
@@ -44,7 +44,7 @@ export const privacyPolicy: SiteDocumentInput = {
           ['What', 'Examples', 'Why we need it'],
           [
             ['Account details', 'Name, email, phone number, password (stored only as a hash)', 'To create your account, sign you in and reach you about orders or problems'],
-            ['Sign-in with Google or Apple', 'The account identifier and email the provider shares with us', 'To let you sign in without a password'],
+            ['Sign-in with Google, Apple or Facebook', 'The account identifier, name and email the provider shares with us', 'To let you sign in without a password'],
             ['Profile (optional)', 'Photo, date of birth, gender, height, weight', 'To suggest a step goal, estimate distance and calories, and personalise your profile'],
             ['Activity and health', 'Steps, distance, workouts, streak days; water, meals and vitals you choose to log', 'To count verified steps, pay coins, and show your progress'],
             ['Orders', 'Delivery addresses, order history, payment status', 'To deliver what you redeem and keep proper accounts'],
@@ -119,6 +119,7 @@ export const privacyPolicy: SiteDocumentInput = {
             ['Cloud hosting and database providers', 'Store and serve the Service’s data'],
             ['Google Firebase', 'Phone-number verification, push notifications, crash reports and performance monitoring'],
             ['Google and Apple', 'Sign-in with Google / Apple, and Play Integrity / App Attest checks'],
+            ['Meta (Facebook)', 'Facebook Login, if you choose it — only to confirm who you are. We do not use Facebook for ads or app-event tracking'],
             ['Payment gateway', 'Processes card, UPI and net-banking payments for shop orders'],
             ['Delivery partners', 'Receive your name, address and phone number to deliver an order'],
             ['Email delivery provider', 'Sends verification codes and account emails'],

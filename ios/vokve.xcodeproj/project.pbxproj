@@ -355,7 +355,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 50A655775831ECE4E479C302 /* Pods-vokve.debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-classic AppIcon-night AppIcon-christmas AppIcon-diwali AppIcon-eid AppIcon-holi AppIcon-independence AppIcon-newyear";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-redfield AppIcon-night AppIcon-christmas AppIcon-diwali AppIcon-eid AppIcon-holi AppIcon-independence AppIcon-newyear";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
@@ -393,7 +393,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A18904ED9014DE462664D4FE /* Pods-vokve.release.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-classic AppIcon-night AppIcon-christmas AppIcon-diwali AppIcon-eid AppIcon-holi AppIcon-independence AppIcon-newyear";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIcon-redfield AppIcon-night AppIcon-christmas AppIcon-diwali AppIcon-eid AppIcon-holi AppIcon-independence AppIcon-newyear";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import {
+  HOME_SECTION_ANCHORS,
+  homeAnchorOf,
   aboutEditSchema,
   aboutPageSchema,
   contactEditSchema,
@@ -69,7 +71,8 @@ export const SITE_PAGES: Record<SitePageKey, SitePageSpec> = {
     label: 'Home',
     path: '/',
     caption: 'Hero, numbers, How it works, Features, Challenges, Fair play, Privacy, Questions, Download.',
-    tags: ['site:home'],
+    // The frame drops its menu links to a section the home page switches off.
+    tags: ['site:home', 'site:config'],
     schema: homeEditSchema,
   },
   about: {
@@ -394,7 +397,8 @@ const CHALLENGE_ICONS: Record<string, string> = {
 const CADENCE_ORDER = ['daily', 'weekly', 'monthly'];
 
 async function activeFaqs() {
-  const rows = await SupportFaqModel.find({ active: { $ne: false } }).sort({ sort: 1, _id: 1 }).lean();
+  // Showing in the help centre, and not kept to the app (the article's own website switch).
+  const rows = await SupportFaqModel.find({ active: { $ne: false }, website: { $ne: false } }).sort({ sort: 1, _id: 1 }).lean();
   return rows.map(row => ({
     id: String(row._id),
     category: row.category,
@@ -404,13 +408,43 @@ async function activeFaqs() {
   }));
 }
 
+/** The `#anchors` of the home sections switched off — links to them go nowhere. */
+async function hiddenHomeAnchors(): Promise<Set<string>> {
+  const home = (await loadPage('home')).content as z.infer<typeof homeEditSchema>;
+  return new Set(
+    home.layout.flatMap(entry => {
+      const anchor = HOME_SECTION_ANCHORS[entry.id];
+      return !entry.show && anchor ? [anchor] : [];
+    }),
+  );
+}
+
+/** Whether a link leads to a home section that is switched off. */
+const leadsNowhere = (hidden: Set<string>, href: string) => {
+  const anchor = homeAnchorOf(href);
+  return anchor !== null && hidden.has(anchor);
+};
+
 async function servedConfig() {
   const { content } = await loadPage('config');
   const edit = content as z.infer<typeof siteConfigEditSchema>;
-  const { support, app } = await getConfig();
+  const [{ support, app }, hidden] = await Promise.all([getConfig(), hiddenHomeAnchors()]);
   const { grievanceOfficerTitle, stores, ...frame } = edit;
   return siteConfigSchema.parse({
     ...frame,
+    // A home section switched off takes its menu, footer and announcement links with it.
+    nav: frame.nav.filter(link => !leadsNowhere(hidden, link.href)),
+    footer: {
+      ...frame.footer,
+      columns: frame.footer.columns.map(column => ({
+        ...column,
+        links: column.links.filter(link => !leadsNowhere(hidden, link.href)),
+      })),
+    },
+    announcement:
+      frame.announcement?.link && leadsNowhere(hidden, frame.announcement.link.href)
+        ? { ...frame.announcement, link: null }
+        : frame.announcement,
     company: {
       legalName: support.company,
       email: support.email,
@@ -465,8 +499,19 @@ async function servedHome() {
   const byId = new Map(faqs.map(faq => [faq.id, faq]));
   const { itemIds, ...faqHead } = edit.faq;
 
+  const hidden = new Set(
+    edit.layout.flatMap(entry => {
+      const anchor = HOME_SECTION_ANCHORS[entry.id];
+      return !entry.show && anchor ? [anchor] : [];
+    }),
+  );
+  const { secondaryCta } = edit.hero;
+
   return homePageSchema.parse({
     ...edit,
+    sections: edit.layout.filter(entry => entry.show).map(entry => entry.id),
+    // The second button is optional: one pointing at a hidden section is left off.
+    hero: { ...edit.hero, secondaryCta: secondaryCta && leadsNowhere(hidden, secondaryCta.href) ? null : secondaryCta },
     challenges: { ...board, items },
     faq: { ...faqHead, items: itemIds.flatMap(id => byId.get(id) ?? []) },
   });
@@ -482,10 +527,8 @@ async function servedDeletion() {
   return deletionGuideSchema.parse({ ...content, graceDays: (await getConfig()).account.deletionGraceDays });
 }
 
-const servedDocument = (doc: LoadedDocument) => {
-  const { published: _published, listing: _listing, ...body } = doc.content;
-  return legalDocumentSchema.parse({ ...body, slug: doc.slug });
-};
+/** The website's shape has no `published` or `listing`: the parse leaves them behind. */
+const servedDocument = (doc: LoadedDocument) => legalDocumentSchema.parse({ ...doc.content, slug: doc.slug });
 
 /** When a page linked from the legal hub last changed, for its "updated" line. */
 async function updatedAtOf(href: string, fallback: Date): Promise<string> {

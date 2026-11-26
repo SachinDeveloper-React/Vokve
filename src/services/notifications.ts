@@ -102,7 +102,7 @@ export const DEFAULT_CHANNEL_ID = 'vokve.default';
 
 /**
  * The status-bar glyph and its tint for every notification this app draws
- * itself: the white V from `android/app/src/main/res/drawable-*` (written
+ * itself: the white arrow from `android/app/src/main/res/drawable-*` (written
  * by scripts/write-app-icons.mjs). Without it notifee falls back to the
  * launcher icon, which Android reduces to a white square.
  */

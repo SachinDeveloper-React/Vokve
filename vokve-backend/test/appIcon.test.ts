@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { AuditLogModel } from '../src/modules/platform/models.js';
+import { invalidateConfig } from '../src/config/remote.js';
+import { unpinRetiredDefaults } from '../src/config/retired.js';
+import { AppConfigModel, AuditLogModel } from '../src/modules/platform/models.js';
 import { seed } from '../src/seed/seed.js';
 import { app, authed, baseHeaders, signUpAndRegister } from './helpers.js';
 
@@ -21,11 +23,11 @@ const addWindow = (body: Record<string, unknown>) =>
   request(app).post('/v1/admin/app-icon/schedule').set(ADMIN).send(body);
 
 describe('app icon: what a phone is told (RULES DV13)', () => {
-  it('starts on the red field with nothing festive, signed in or not', async () => {
+  it('starts on the white classic icon with nothing festive, signed in or not', async () => {
     await seed();
     const res = await decision();
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ base: 'redfield', festive: null });
+    expect(res.body).toEqual({ base: 'classic', festive: null });
     expect(res.headers['cache-control']).toBe('no-store');
   });
 
@@ -54,7 +56,7 @@ describe('app icon: what a phone is told (RULES DV13)', () => {
     const later = await addWindow({ icon: 'eid', startsAt: iso(5 * DAY), endsAt: iso(7 * DAY) });
     expect(later.status).toBe(201);
 
-    expect((await decision()).body).toEqual({ base: 'redfield', festive: 'holi' });
+    expect((await decision()).body).toEqual({ base: 'classic', festive: 'holi' });
     const view = later.body;
     expect(view.live).toMatchObject({ icon: 'holi', source: 'schedule' });
     expect(view.schedule.map((entry: { icon: string; state: string }) => [entry.icon, entry.state])).toEqual([
@@ -65,7 +67,7 @@ describe('app icon: what a phone is told (RULES DV13)', () => {
     // Taken off the schedule, it is gone at once.
     const holi = view.schedule.find((entry: { icon: string }) => entry.icon === 'holi');
     expect((await request(app).delete(`/v1/admin/app-icon/schedule/${holi.id}`).set(ADMIN)).status).toBe(200);
-    expect((await decision()).body).toEqual({ base: 'redfield', festive: null });
+    expect((await decision()).body).toEqual({ base: 'classic', festive: null });
   });
 
   it('lets a festive icon switched on by hand win over the schedule', async () => {
@@ -130,12 +132,31 @@ describe('app icon: what a phone is told (RULES DV13)', () => {
     await seed();
     const res = await settings();
     expect(res.status).toBe(200);
-    expect(res.body.defaultIcon).toBe('redfield');
+    expect(res.body.defaultIcon).toBe('classic');
     expect(res.body.catalog.filter((icon: { kind: string }) => icon.kind === 'base').map((icon: { key: string }) => icon.key)).toEqual([
       'redfield',
       'classic',
       'night',
     ]);
     expect(res.body.catalog).toHaveLength(9);
+    // Red is still in builds, so still listed, but the panel no longer offers it.
+    expect(res.body.catalog.filter((icon: { retired: boolean }) => icon.retired).map((icon: { key: string }) => icon.key)).toEqual(['redfield']);
+  });
+
+  it('moves a database still holding the old red default to the white one, and leaves a chosen icon alone', async () => {
+    await seed();
+    // What a database seeded while red was the default holds.
+    await AppConfigModel.updateOne({ _id: 'app' }, { $set: { 'value.icon.base': 'redfield' } });
+    invalidateConfig();
+    expect((await decision()).body.base).toBe('redfield');
+
+    const { unpinned } = await unpinRetiredDefaults(true);
+    expect(unpinned).toContainEqual({ path: 'app.icon.base', was: 'redfield' });
+    expect((await decision()).body).toEqual({ base: 'classic', festive: null });
+
+    // Somebody's choice is not a leftover default.
+    expect((await set({ base: 'night' })).status).toBe(200);
+    expect((await unpinRetiredDefaults(true)).unpinned).toEqual([]);
+    expect((await decision()).body.base).toBe('night');
   });
 });

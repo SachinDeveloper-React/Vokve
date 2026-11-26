@@ -32,9 +32,34 @@
 				<string>com.googleusercontent.apps.1098246351234-5p0j2c1lifopaf4hegnr6jr2sl7k11le</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>facebook-login</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fb1351878143619705</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FacebookAdvertiserIDCollectionEnabled</key>
+	<false/>
+	<key>FacebookAppID</key>
+	<string>1351878143619705</string>
+	<key>FacebookAutoLogAppEventsEnabled</key>
+	<false/>
+	<key>FacebookClientToken</key>
+	<string>2cac475823225f4a00ff87d0f01c3ecd</string>
+	<key>FacebookDisplayName</key>
+	<string>Vokve</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>fbapi</string>
+		<string>fb-messenger-share-api</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -55,7 +80,7 @@
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>VokveAppIconDefault</key>
-	<string>redfield</string>
+	<string>classic</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

@@ -638,6 +638,14 @@ export async function purgeAccount(userId: string): Promise<void> {
     deletedAt: new Date(),
     deletion: { scheduledAt: null, purgeAt: null, reason: null },
   });
+  // The provider ids go with the rest (RULES O15, O18): Meta asks for
+  // Facebook's on a deletion request, and a member who comes back with the
+  // same Google, Apple or Facebook account starts a fresh one rather than
+  // finding this anonymised row. Apple was already told at the deletion's
+  // confirmation (O16).
+  user.set('googleId', undefined);
+  user.set('appleId', undefined);
+  user.set('facebookId', undefined);
   await user.save();
 
   await Promise.all([

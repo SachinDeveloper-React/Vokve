@@ -17,6 +17,16 @@ export const DEFAULT_HOME: z.input<typeof homeEditSchema> = {
     description:
       'The fitness app that pays you back for walking. Verified steps, streaks, challenges and a rewards shop where your coins buy real products.',
   },
+  layout: [
+    { id: 'stats', show: true },
+    { id: 'howItWorks', show: true },
+    { id: 'features', show: true },
+    { id: 'challenges', show: true },
+    { id: 'fairPlay', show: true },
+    { id: 'privacy', show: true },
+    { id: 'faq', show: true },
+    { id: 'download', show: true },
+  ],
   hero: {
     eyebrow: null,
     title: 'Get paid in coins for the walking you already do',

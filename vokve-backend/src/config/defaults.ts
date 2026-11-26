@@ -1034,7 +1034,7 @@ export const CONFIG_DEFAULTS = {
      * has turned festive icons off in the app keeps the base.
      */
     icon: {
-      base: 'redfield' as string,
+      base: 'classic' as string,
       festive: null as string | null,
       schedule: [] as { id: string; icon: string; startsAt: string; endsAt: string; note: string | null }[],
     },

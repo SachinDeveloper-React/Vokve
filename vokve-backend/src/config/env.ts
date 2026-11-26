@@ -278,6 +278,17 @@ const envSchema = z.object({
   APPLE_REDIRECT_URI: unsetWhenBlank(z.string().url()),
 
   /**
+   * Facebook Login (RULES O18). The App ID is public — the app carries it
+   * too — and says which app a member's access token must have been issued
+   * to; the App Secret signs the server's own app token for `debug_token`
+   * and the `appsecret_proof` on `/me`, and must never leave the server.
+   * Both or neither: unset means `POST /auth/facebook` answers 503 rather
+   * than accepting anything.
+   */
+  FACEBOOK_APP_ID: unsetWhenBlank(z.string().regex(/^\d{5,20}$/, 'FACEBOOK_APP_ID is the numeric App ID')),
+  FACEBOOK_APP_SECRET: unsetWhenBlank(z.string().min(16)),
+
+  /**
    * Who collects the money side of an order. `mock` captures every payment
    * at once (dev and test); `razorpay` creates a gateway order and verifies
    * the checkout signature, and needs both keys. Refused in production

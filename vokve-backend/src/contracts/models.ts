@@ -2516,9 +2516,10 @@ export type AccountSession = z.infer<typeof accountSessionSchema>;
  * How the member proves it is them before deleting (RULES O16): the
  * account's own way in. `apple` wherever Apple is connected — that sign-in
  * is also what lets the server revoke the Apple authorisation — then the
- * password, then Google for an account that has neither.
+ * password, then Google, then Facebook for an account that has neither
+ * (RULES O18).
  */
-export const deletionConfirmationSchema = z.enum(['password', 'apple', 'google']);
+export const deletionConfirmationSchema = z.enum(['password', 'apple', 'google', 'facebook']);
 export type DeletionConfirmation = z.infer<typeof deletionConfirmationSchema>;
 
 export const accountDeletionSchema = z.object({
@@ -2538,13 +2539,13 @@ export type AccountDeletion = z.infer<typeof accountDeletionSchema>;
  * "would this leave the account with no way in", so the app does not keep
  * its own copy of that rule.
  */
-export const signInProviderSchema = z.enum(['google', 'apple']);
+export const signInProviderSchema = z.enum(['google', 'apple', 'facebook']);
 export type SignInProvider = z.infer<typeof signInProviderSchema>;
 
 export const signInMethodsSchema = z.object({
   password: z.boolean(),
   /** How a change to the account — its email — is confirmed (RULES O17). */
-  confirmChangesWith: z.enum(['password', 'apple', 'google']).default('password'),
+  confirmChangesWith: deletionConfirmationSchema.default('password'),
   providers: z.array(
     z.object({
       provider: signInProviderSchema,

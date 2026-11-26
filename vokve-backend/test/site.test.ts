@@ -4,7 +4,7 @@ import { env } from '../src/config/env.js';
 import { ChallengeDefinitionModel } from '../src/modules/challenges/models.js';
 import { SiteEnquiryModel, SiteRevisionModel } from '../src/modules/site/models.js';
 import { seed } from '../src/seed/seed.js';
-import { app, signUpAndRegister } from './helpers.js';
+import { app, authed, signUpAndRegister } from './helpers.js';
 
 const ADMIN = { 'x-admin-key': 'test-admin-key-test-admin-key' };
 
@@ -247,6 +247,7 @@ describe('editing a page on the panel (RULES P22)', () => {
     expect(res.body.error.details['hero.title']).toBe('Cannot be empty.');
 
     const badLink = structuredClone(opened.content);
+    // eslint-disable-next-line no-script-url -- the very thing the API must refuse
     badLink.hero.primaryCta.href = 'javascript:alert(1)';
     const link = await admin('put', '/admin/site/pages/home').send({ content: badLink, revision: 0 });
     expect(link.status).toBe(422);
@@ -274,6 +275,105 @@ describe('editing a page on the panel (RULES P22)', () => {
     const home = (await get('/site/pages/home')).body;
     expect(home.challenges.items).toEqual([content.challenges.items[0]]);
     expect(home).not.toHaveProperty('surprise');
+  });
+});
+
+describe('the home page’s sections, and the Help centre’s website switch (RULES P22)', () => {
+  beforeEach(async () => {
+    await seed();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    env.SITE_REVALIDATE_URL = undefined;
+    env.SITE_REVALIDATE_SECRET = undefined;
+  });
+
+  const layoutOf = (shown: Record<string, boolean>, order?: string[]) =>
+    (order ?? ['stats', 'howItWorks', 'features', 'challenges', 'fairPlay', 'privacy', 'faq', 'download']).map(id => ({
+      id,
+      show: shown[id] ?? true,
+    }));
+
+  it('serves the sections in the panel’s order, without the hidden ones or any link to them', async () => {
+    const before = (await get('/site/pages/home')).body;
+    expect(before.sections).toEqual(['stats', 'howItWorks', 'features', 'challenges', 'fairPlay', 'privacy', 'faq', 'download']);
+
+    env.SITE_REVALIDATE_URL = 'https://vokve.test/api/revalidate';
+    env.SITE_REVALIDATE_SECRET = 'site-secret-site-secret';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+
+    const opened = (await admin('get', '/admin/site/pages/home')).body;
+    expect(opened.schema.properties.layout.widget).toBe('order');
+    expect(Object.keys(opened.schema.properties).slice(0, 2)).toEqual(['seo', 'layout']);
+    const content = structuredClone(opened.content);
+    content.layout = layoutOf(
+      { howItWorks: false, features: false, fairPlay: false },
+      ['stats', 'faq', 'howItWorks', 'features', 'challenges', 'fairPlay', 'privacy', 'download'],
+    );
+    const saved = await admin('put', '/admin/site/pages/home').send({ content, revision: 0 });
+    expect(saved.status).toBe(200);
+    // The frame changes too, so both are asked to re-read.
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]![1]!.body)).tags).toEqual(['site:home', 'site:config']);
+
+    const home = (await get('/site/pages/home')).body;
+    expect(home.sections).toEqual(['stats', 'faq', 'challenges', 'privacy', 'download']);
+    // "See how it works" pointed at a hidden section, so the hero drops it.
+    expect(home.hero.secondaryCta).toBeNull();
+    expect(home).not.toHaveProperty('layout');
+
+    const config = (await get('/site/config')).body;
+    const hrefs = [...config.nav, ...config.footer.columns.flatMap((column: { links: unknown[] }) => column.links)].map(
+      (link: { href: string }) => link.href,
+    );
+    expect(hrefs).not.toContain('/#features');
+    expect(hrefs).not.toContain('/#how-it-works');
+    expect(hrefs).not.toContain('/#fair-play');
+    expect(hrefs).toContain('/#challenges');
+    expect(config.nav.map((link: { label: string }) => link.label)).toEqual(['About', 'FAQ', 'Contact']);
+  });
+
+  it('refuses a layout that would leave the page broken', async () => {
+    const opened = (await admin('get', '/admin/site/pages/home')).body;
+
+    const noDownload = structuredClone(opened.content);
+    noDownload.layout = layoutOf({ download: false });
+    const refused = await admin('put', '/admin/site/pages/home').send({ content: noDownload, revision: 0 });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error.details.layout).toMatch(/can move but not be hidden/);
+
+    const twice = structuredClone(opened.content);
+    twice.layout = [...layoutOf({}), { id: 'faq', show: true }];
+    expect((await admin('put', '/admin/site/pages/home').send({ content: twice, revision: 0 })).body.error.details.layout).toMatch(/exactly once/);
+
+    const strandedButton = structuredClone(opened.content);
+    strandedButton.layout = layoutOf({ features: false });
+    strandedButton.hero.primaryCta.href = '/#features';
+    const button = await admin('put', '/admin/site/pages/home').send({ content: strandedButton, revision: 0 });
+    expect(button.status).toBe(422);
+    expect(button.body.error.details['hero.primaryCta.href']).toMatch(/switched off/);
+  });
+
+  it('keeps an article in the app only when its website switch is off', async () => {
+    const member = await signUpAndRegister();
+    const off = await admin('put', '/admin/support/faqs/faq-coins-earn').send({ website: false });
+    expect(off.status).toBe(200);
+    expect(off.body.article).toMatchObject({ active: true, website: false });
+
+    // Off the website: its FAQ page, and the home page's picked questions.
+    expect((await get('/site/faqs')).body.items.map((item: { id: string }) => item.id)).not.toContain('faq-coins-earn');
+    expect((await get('/site/pages/home')).body.faq.items.map((item: { id: string }) => item.id)).not.toContain('faq-coins-earn');
+
+    // Still in the app's help centre.
+    const inApp = await request(app).get('/v1/support/faqs').set(authed(member));
+    expect(inApp.body.data.map((item: { id: string }) => item.id)).toContain('faq-coins-earn');
+
+    // The panel can find them, and the home editor's picker says so.
+    const appOnly = (await admin('get', '/admin/support/faqs?state=app-only')).body;
+    expect(appOnly.data.map((item: { id: string }) => item.id)).toEqual(['faq-coins-earn']);
+    expect(appOnly.totals.onWebsite).toBe(appOnly.totals.active - 1);
+    const picker = (await admin('get', '/admin/site/pages/home')).body.faqOptions;
+    expect(picker.find((option: { id: string }) => option.id === 'faq-coins-earn')).toMatchObject({ website: false });
   });
 });
 

@@ -83,7 +83,7 @@ export const StepGoalStepper = memo(({ value, range, onChange }: Props) => {
         accessibilityLabel={`${formatGrouped(value)} steps a day`}
         accessibilityLiveRegion="polite"
       >
-        <AppText variant="metric" numberOfLines={1} adjustsFontSizeToFit>
+        <AppText variant="metric" numberOfLines={1} >
           {formatGrouped(value)}
         </AppText>
         <AppText variant="caption" color="textTertiary">

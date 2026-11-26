@@ -23,7 +23,7 @@ export const DEFAULT_DELETION: z.input<typeof deletionEditSchema> = {
     subtitle:
       'You can do it from the app in under a minute. We schedule it {{graceDays}} days ahead so you can change your mind — then your personal data is erased for good.',
   },
-  updatedAt: '2026-11-21',
+  updatedAt: '2026-11-26',
   timeline: [
     {
       label: 'Day 0',
@@ -51,7 +51,7 @@ export const DEFAULT_DELETION: z.input<typeof deletionEditSchema> = {
       { title: 'Tap Delete my account', body: 'Scroll to the bottom. The sheet that opens explains what happens next — the same as this page.' },
       {
         title: 'Confirm it’s you',
-        body: 'Enter your password, or sign in again with Google or Apple if that is how you joined. Add a reason if you want to.',
+        body: 'Enter your password, or sign in again with Google, Apple or Facebook if that is how you joined. Add a reason if you want to.',
       },
       {
         title: 'Done — deletion is scheduled',
@@ -69,8 +69,8 @@ export const DEFAULT_DELETION: z.input<typeof deletionEditSchema> = {
       },
       {
         icon: 'scan-face',
-        title: 'Google or Apple accounts',
-        body: 'You sign in with Google or Apple once more. For Apple accounts, we also revoke VOKVE’s access to your Apple ID.',
+        title: 'Google, Apple or Facebook accounts',
+        body: 'You sign in with that account once more. For Apple accounts, we also revoke VOKVE’s access to your Apple ID.',
       },
     ],
   },
@@ -83,6 +83,7 @@ export const DEFAULT_DELETION: z.input<typeof deletionEditSchema> = {
       'Water, meal and vitals logs, and your diet plan',
       'Saved addresses, notifications, support tickets and settings',
       'Every signed-in device and session — all are signed out',
+      'The link to your Facebook account, if you signed in with Facebook. To remove VOKVE on Facebook’s side too, open Facebook → Settings & privacy → Settings → Apps and websites, and remove VOKVE.',
     ],
   },
   retained: {

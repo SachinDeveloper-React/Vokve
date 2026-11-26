@@ -48,7 +48,7 @@ export const AppleMark = ({ color }: { color: string }) => (
   </Svg>
 );
 
-const FacebookMark = () => (
+export const FacebookMark = () => (
   <Svg width={MARK_SIZE} height={MARK_SIZE} viewBox="0 0 24 24">
     <Path
       fill="#1877F2"

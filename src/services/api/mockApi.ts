@@ -339,6 +339,21 @@ export const mockAuthApi: AuthApi = {
   },
 
   /**
+   * Facebook, the same way — except that Facebook's email is not proved
+   * (RULES O18), so a member who arrives through it has neither contact
+   * verified until they enter a code.
+   */
+  async facebook(proof) {
+    await delay();
+    if (!('accessToken' in proof ? proof.accessToken : proof.authenticationToken)) {
+      throw new ApiError('unauthorized', 'That Facebook sign-in could not be verified.', 401);
+    }
+    currentUser = currentUser ?? makeUser();
+    currentUser = { ...currentUser, phone: null, phoneVerifiedAt: null };
+    return makeAuthResponse(currentUser);
+  },
+
+  /**
    * The mock always knows the identity, so it never answers
    * `IDENTITY_NOT_LINKED`; this is only reached with a token a real server
    * handed out, and signs the mock member in the same way.
@@ -5880,19 +5895,19 @@ const MOCK_GUIDE: AppGuide = {
   ],
 };
 
-/** The mock member signed up with a password; Google and Apple start unconnected. */
-const mockLinked: Record<SignInProvider, boolean> = { google: false, apple: false };
+/** The mock member signed up with a password; no provider starts connected. */
+const mockLinked: Record<SignInProvider, boolean> = { google: false, apple: false, facebook: false };
 
 function mockConfirmWith(): DeletionConfirmation {
   return mockLinked.apple ? 'apple' : 'password';
 }
 
 function mockSignInMethods(): SignInMethods {
-  const ways = 1 + Number(mockLinked.google) + Number(mockLinked.apple);
+  const ways = 1 + Number(mockLinked.google) + Number(mockLinked.apple) + Number(mockLinked.facebook);
   return {
     password: true,
     confirmChangesWith: 'password',
-    providers: (['google', 'apple'] as const).map(provider => ({
+    providers: (['google', 'apple', 'facebook'] as const).map(provider => ({
       provider,
       linked: mockLinked[provider],
       canDisconnect: mockLinked[provider] && ways > 1,
@@ -6028,6 +6043,12 @@ export const mockAccountApi: AccountApi = {
     await delay();
     if (!idToken || !nonce) throw new ApiError('unauthorized', 'That Apple sign-in could not be verified.', 401);
     mockLinked.apple = true;
+    return mockSignInMethods();
+  },
+  async connectFacebook(proof) {
+    await delay();
+    if (!('accessToken' in proof ? proof.accessToken : proof.authenticationToken)) throw new ApiError('unauthorized', 'That Facebook sign-in could not be verified.', 401);
+    mockLinked.facebook = true;
     return mockSignInMethods();
   },
   async connectIdentity(linkToken) {
@@ -6246,7 +6267,7 @@ export const mockAppApi: AppApi = {
    */
   async icon() {
     await delay();
-    return { base: 'redfield', festive: null };
+    return { base: 'classic', festive: null };
   },
 
   /**

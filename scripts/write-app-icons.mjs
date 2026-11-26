@@ -9,10 +9,10 @@
  *              ic_launcher(.xml|_round.xml) for the default, which is what
  *              <application> and every library that asks for "the app
  *              icon" read
- *            mipmap-<density>/ic_launcher_monochrome.png — the V alone, for
- *              Android 13's themed icons
- *            drawable-<density>/ic_notification.png — the white V the
- *              status bar draws
+ *            mipmap-<density>/ic_launcher_monochrome.png — the arrow alone
+ *              (the walker cut out of it), for Android 13's themed icons
+ *            drawable-<density>/ic_notification.png — the same arrow in
+ *              white, which the status bar draws
  *            AndroidManifest.xml — one <activity-alias> per icon, between
  *              the app-icons markers
  *   iOS      Images.xcassets/AppIcon.appiconset — the default, one 1024 px
@@ -102,19 +102,23 @@ async function backgroundLayer(file, scale) {
 }
 
 /**
- * The V on its own, white on transparent, from the red-field art: the field
- * is (230, 0, 0) and the V is white, so the green channel *is* the V's
- * coverage, antialiased edges included.
+ * The arrow on its own, white on transparent, from the classic (white-field)
+ * art: the field and the walker are white, the arrow is near-black (10, 10,
+ * 10) with a red (238, 0, 16) wedge — so how far a pixel's darkest channel
+ * is from white *is* the arrow's coverage, antialiased edges included, and
+ * the walker comes out as a hole the shape of the walker.
  */
-async function vMask() {
-  const redfield = icons.find(icon => icon.key === 'redfield');
-  const { data, info } = await sharp(square(redfield)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+async function glyphMask() {
+  const classic = icons.find(icon => icon.key === 'classic');
+  const { data, info } = await sharp(square(classic)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const ink = 255 - 10; // the arrow's black is not quite black
   const out = Buffer.alloc(info.width * info.height * 4);
   for (let i = 0, j = 0; i < data.length; i += info.channels, j += 4) {
+    const darkest = Math.min(data[i], data[i + 1], data[i + 2]);
     out[j] = 255;
     out[j + 1] = 255;
     out[j + 2] = 255;
-    out[j + 3] = data[i + 1];
+    out[j + 3] = Math.min(255, Math.round(((255 - darkest) * 255) / ink));
   }
   return sharp(out, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
 }
@@ -129,7 +133,7 @@ async function monochromeLayer(mask, scale) {
     .toBuffer();
 }
 
-/** The box the V's opaque pixels occupy, so the status-bar glyph is the V and no margin. */
+/** The box the arrow's opaque pixels occupy, so the status-bar glyph is the arrow and no margin. */
 async function opaqueBox(png) {
   const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true });
   let left = info.width, top = info.height, right = -1, bottom = -1;
@@ -145,7 +149,7 @@ async function opaqueBox(png) {
   return { left, top, width: right - left + 1, height: bottom - top + 1 };
 }
 
-/** 24 dp, the V fitted inside the middle 20 dp as the status-bar icon guidance asks. */
+/** 24 dp, the arrow fitted inside the middle 20 dp as the status-bar icon guidance asks. */
 async function notificationIcon(mask, scale) {
   const size = Math.round(24 * scale);
   const inner = Math.round(20 * scale);
@@ -198,7 +202,7 @@ function aliasesXml() {
 }
 
 async function writeAndroid() {
-  const mask = await vMask();
+  const mask = await glyphMask();
   const stale = ['ic_launcher.png', 'ic_launcher_round.png'];
   for (const [density, scale] of Object.entries(DENSITIES)) {
     const mipmap = fresh(path.join(res, `mipmap-${density}`));
@@ -218,6 +222,8 @@ async function writeAndroid() {
     if (icon.key === DEFAULT) continue;
     writeFileSync(path.join(anydpi, `ic_launcher_${icon.key}.xml`), adaptiveXml(`ic_launcher_${icon.key}_background`));
   }
+  // The default is drawn as ic_launcher; a file left from when it was an alternate goes.
+  rmSync(path.join(anydpi, `ic_launcher_${DEFAULT}.xml`), { force: true });
   writeFileSync(path.join(anydpi, 'ic_launcher.xml'), adaptiveXml(`ic_launcher_${DEFAULT}_background`));
   writeFileSync(path.join(anydpi, 'ic_launcher_round.xml'), adaptiveXml(`ic_launcher_${DEFAULT}_background`));
 
@@ -239,6 +245,8 @@ const appIconContents = file => `${JSON.stringify(
 )}\n`;
 
 async function writeIos() {
+  // The default is the primary AppIcon set; a set left from when it was an alternate goes.
+  rmSync(path.join(catalogDir, `AppIcon-${DEFAULT}.appiconset`), { recursive: true, force: true });
   for (const icon of icons) {
     const set = fresh(path.join(catalogDir, `${iosName(icon)}.appiconset`));
     const file = `${iosName(icon)}.png`;
@@ -251,7 +259,7 @@ async function writeIos() {
   const setting = `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "${alternates}";`;
   let pbxproj = readFileSync(pbxprojPath, 'utf8');
   pbxproj = pbxproj.replace(/^\s*ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = .*;\n/gm, '');
-  pbxproj = pbxproj.replace(/^(\s*)ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;\n/gm, (line, indent) => `${line}${indent}${setting}\n`);
+  pbxproj = pbxproj.replace(/^(\s*)ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;\n/gm, (line, indent) => `${indent}${setting}\n${line}`); // where Xcode keeps it, A–Z
   writeFileSync(pbxprojPath, pbxproj);
 
   const plist = readFileSync(infoPlistPath, 'utf8');
