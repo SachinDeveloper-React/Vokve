@@ -12,7 +12,11 @@ import {
   UserAchievementModel,
 } from '../challenges/models.js';
 import { AuditLogModel } from '../platform/models.js';
+import { refreshWebsite } from '../../lib/website.js';
 import { pageFields } from './paging.js';
+
+/** The website's home page lists the running challenges (RULES P22). */
+const refreshSiteChallenges = () => refreshWebsite(['site:home']);
 
 /**
  * The gamification catalogue (RULES C1–C7), for the operator.
@@ -480,6 +484,7 @@ export async function createChallenge(actor: string, body: ChallengeBody) {
     before: null, after: { ...body, id, note: body.note ?? null },
   });
 
+  await refreshSiteChallenges();
   return { created: true, ...(await getChallenge(id)) };
 }
 
@@ -516,6 +521,7 @@ export async function updateChallenge(actor: string, id: string, body: Challenge
     after: { ...fields, note: note ?? null },
   });
 
+  await refreshSiteChallenges();
   return getChallenge(id);
 }
 
@@ -529,6 +535,7 @@ export async function setChallengeActive(actor: string, id: string, active: bool
     subjectType: 'challenge', subjectId: id,
     before: { active: before.active !== false }, after: { active, note: note ?? null },
   });
+  await refreshSiteChallenges();
   return getChallenge(id);
 }
 
@@ -559,6 +566,7 @@ export async function deleteChallenge(actor: string, id: string, note?: string) 
     after: { deleted: true, note: note ?? null },
   });
 
+  await refreshSiteChallenges();
   return { deleted: true, id, ...(await listChallenges(WHOLE_SHELF)) };
 }
 

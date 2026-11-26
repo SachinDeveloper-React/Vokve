@@ -121,6 +121,18 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
+    key: 'website',
+    label: 'Website',
+    permissions: [
+      { key: 'website.view', label: 'read the website’s pages and documents' },
+      { key: 'website.edit', label: 'edit, restore or publish website pages and documents' },
+      { key: 'website.delete', label: 'delete a website document' },
+      { key: 'enquiries.view', label: 'read messages from the website’s contact form' },
+      { key: 'enquiries.reply', label: 'answer a website message or change its status' },
+      { key: 'enquiries.delete', label: 'delete a website message' },
+    ],
+  },
+  {
     key: 'system',
     label: 'System',
     permissions: [
@@ -200,7 +212,10 @@ export const PERMISSION_PRESETS: Array<{ key: string; label: string; forRole: Ar
     key: 'support-agent',
     label: 'Support agent',
     forRole: ['agent', 'manager'],
-    permissions: ['members.view', 'orders.view', 'support.view', 'support.reply', 'helpcentre.view', 'notifications.view'],
+    permissions: [
+      'members.view', 'orders.view', 'support.view', 'support.reply', 'helpcentre.view', 'notifications.view',
+      'enquiries.view', 'enquiries.reply',
+    ],
   },
   {
     key: 'order-desk',
@@ -224,6 +239,7 @@ export const PERMISSION_PRESETS: Array<{ key: string; label: string; forRole: Ar
     permissions: [
       'content.view', 'content.edit', 'helpcentre.view', 'helpcentre.edit', 'challenges.view', 'challenges.edit',
       'achievements.view', 'achievements.edit', 'training.view', 'training.edit', 'nutrition.view', 'nutrition.edit',
+      'website.view', 'website.edit',
     ],
   },
   {
@@ -447,6 +463,28 @@ export const ROUTE_PERMISSIONS: Record<string, RouteRule> = {
   'POST /admin/referral-cards': 'content.edit',
   'PUT /admin/referral-cards/:cardId': 'content.edit',
   'DELETE /admin/referral-cards/:cardId': 'content.edit',
+
+  // ─── Website (site/admin.routes.ts) ──────────────────────────────────────
+  'GET /admin/site': ['website.view', 'enquiries.view'],
+  'POST /admin/site/refresh': 'website.edit',
+  'GET /admin/site/pages/:key': 'website.view',
+  'PUT /admin/site/pages/:key': 'website.edit',
+  'DELETE /admin/site/pages/:key': 'website.edit',
+  'GET /admin/site/pages/:key/revisions': 'website.view',
+  'POST /admin/site/pages/:key/restore': 'website.edit',
+  'GET /admin/site/documents': 'website.view',
+  'POST /admin/site/documents': 'website.edit',
+  'GET /admin/site/documents/:slug': 'website.view',
+  'PUT /admin/site/documents/:slug': 'website.edit',
+  'DELETE /admin/site/documents/:slug': 'website.delete',
+  'POST /admin/site/documents/:slug/reset': 'website.edit',
+  'GET /admin/site/documents/:slug/revisions': 'website.view',
+  'POST /admin/site/documents/:slug/restore': 'website.edit',
+  'GET /admin/site/enquiries': 'enquiries.view',
+  'GET /admin/site/enquiries/:enquiryId': 'enquiries.view',
+  'PUT /admin/site/enquiries/:enquiryId': 'enquiries.reply',
+  'POST /admin/site/enquiries/:enquiryId/replies': 'enquiries.reply',
+  'DELETE /admin/site/enquiries/:enquiryId': 'enquiries.delete',
 
   // ─── System ──────────────────────────────────────────────────────────────
   'GET /admin/config': 'config.view',

@@ -3,6 +3,10 @@ import { supportCategorySchema, supportIconSchema, supportTintSchema } from '../
 import { Errors } from '../../lib/errors.js';
 import { SupportFaqModel, SupportGuideSectionModel } from '../account/models.js';
 import { AuditLogModel } from '../platform/models.js';
+import { refreshWebsite } from '../../lib/website.js';
+
+/** The website's FAQ page and the home page's questions are these articles (RULES P22). */
+const refreshSiteFaqs = () => refreshWebsite(['site:faq', 'site:home']);
 
 /**
  * The help centre's own content (RULES P12).
@@ -144,6 +148,7 @@ export async function saveFaq(actor: string, body: FaqBody) {
     after: { ...fields, note: note ?? null },
   });
 
+  await refreshSiteFaqs();
   return { created: !before, ...(await faqOf(id)) };
 }
 
@@ -164,6 +169,7 @@ export async function patchFaq(actor: string, id: string, body: FaqPatch) {
     before: Object.fromEntries(Object.keys(fields).map(key => [key, (before as Record<string, unknown>)[key] ?? null])),
     after: { ...fields, note: note ?? null },
   });
+  await refreshSiteFaqs();
   return faqOf(id);
 }
 
@@ -188,6 +194,7 @@ export async function deleteFaq(actor: string, id: string, note?: string) {
     before: { category: before.category, question: before.question, answer: before.answer },
     after: { deleted: true, note: note ?? null },
   });
+  await refreshSiteFaqs();
   return { deleted: true, id };
 }
 

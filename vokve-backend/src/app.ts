@@ -36,6 +36,8 @@ import { notificationsRouter } from './modules/notifications/routes.js';
 import { adminNutritionRouter } from './modules/nutrition/admin.routes.js';
 import { nutritionRouter } from './modules/nutrition/routes.js';
 import { platformRouter } from './modules/platform/routes.js';
+import { adminSiteRouter } from './modules/site/admin.routes.js';
+import { siteRouter } from './modules/site/routes.js';
 import { socialRouter } from './modules/social/routes.js';
 import { streakRouter } from './modules/streak/routes.js';
 import { telemetryRouter } from './modules/telemetry/routes.js';
@@ -203,6 +205,7 @@ app.get("/", (req, res) => {
 
   const v1 = express.Router();
   v1.use(platformRouter);
+  v1.use(siteRouter);
   v1.use(aboutRouter);
   v1.use(authRouter);
   v1.use(devicesRouter);
@@ -234,6 +237,7 @@ app.get("/", (req, res) => {
   v1.use(adminNutritionRouter);
   v1.use(adminUsersRouter);
   v1.use(adminAutomationsRouter);
+  v1.use(adminSiteRouter);
   app.use('/v1', v1);
 
   app.use((_req, res) => {

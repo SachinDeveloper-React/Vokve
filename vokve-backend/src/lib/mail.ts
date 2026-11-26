@@ -112,3 +112,16 @@ export async function sendOperationalEmail(to: string, subject: string, text: st
   await countSent();
   logger.info({ to, subject }, 'mail.ops_sent');
 }
+
+/**
+ * The team's answer to a message sent from the website's contact form
+ * (RULES P22), in plain text, with replies going to the support address
+ * rather than to whatever mailbox `MAIL_FROM` is — so the conversation
+ * carries on where the team reads it.
+ */
+export async function sendEnquiryReply(to: string, subject: string, text: string, replyTo: string): Promise<number | null> {
+  await getTransporter().sendMail({ from: env.MAIL_FROM, to, replyTo, subject, text });
+  const sentToday = await countSent();
+  logger.info({ to: to.replace(/^(.).*(@.*)$/, '$1•••$2'), sentToday }, 'mail.enquiry_reply_sent');
+  return sentToday;
+}

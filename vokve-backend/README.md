@@ -1398,6 +1398,62 @@ there), a build, and a line in `devices/appIcons.ts` — in that order. A key is
 never removed once shipped: an Android phone showing it would be left with no
 launcher entry. The generic config page refuses `app.icon.*` and points here.
 
+## The public website (RULES P22)
+
+Every word on vokve.com comes from here and is edited on the panel's
+**Website** pages. `modules/site/`:
+
+- **Pages** — `config` (header, footer, SEO, the small words), `home`,
+  `about`, `faq`, `contact`, `legal`, `deletion`, `licenses`, `invite`. A page
+  nobody has saved is served from the shipped copy in `site/defaults/` (moved
+  there from the website's old mock files); a saved one from `site_pages`,
+  merged over the shipped copy so a field added in a later build arrives with
+  its shipped words. A saved copy that no longer fits is logged and the
+  shipped one served — a stale edit never takes a page down.
+- **Documents** — the policies, one per address (`site_documents`): the five
+  shipped ones (privacy and terms can never be hidden or deleted; the other
+  three can be hidden, none deleted) and any created on the panel, which start
+  hidden. The website's `/[slug]` route serves them all.
+- **What is filled in on the way out** — the contact details, store links and
+  social profiles (⚙ `support.*`, `app.storeUrl/storeListed`), the deletion
+  grace days, the help-centre articles (`support_faqs`, for the FAQ page and
+  the home page's picked questions), the live challenge board
+  (`challenge_definitions`), and the figures written as tokens in the words:
+  `{{graceDays}}`, `{{coinValue}}`, `{{dailyCoinCap}}`, `{{stepsCoinCap}}`,
+  `{{coinExpiryDays}}`, `{{inviteReward}}`, `{{inviterReward}}`,
+  `{{inviteWindowDays}}`, `{{deliveryDays}}`, `{{returnWindowDays}}`,
+  `{{shippingFee}}`, `{{freeShippingAbove}}`, `{{challengeCount}}`. Contact
+  tokens (`{{email}}`, `{{phone}}`…) are left for the website to fill.
+- **Every save** is checked against the shape the website parses (the same
+  zod, `contracts/site.ts`; the panel's form is drawn from its JSON Schema),
+  refused when it names a token nobody fills, refused with `409
+  SITE_EDIT_CONFLICT` when somebody saved since it was opened, kept in
+  `site_revisions` (newest 50 per page) for History/Restore, and followed by
+  `refreshWebsite(tags)`. FAQ, challenge and token-figure config edits refresh
+  the site too.
+- **The contact form** — `POST /site/contact` → `site_enquiries`, read on the
+  panel's Enquiries page. Never mailed to the team (the mailbox shares the OTP
+  sender's daily limit). Limits: 5 an hour and 15 a day per visitor, 5 a day
+  per address, 500 a day overall; a filled honeypot is answered 201 and
+  dropped. The site forwards the visitor's address in `x-vokve-visitor-ip`,
+  believed only with `x-vokve-site-key` = `SITE_REVALIDATE_SECRET`. A reply
+  sent from the panel goes by email (`sendEnquiryReply`, Reply-To the support
+  address) or is only logged.
+
+```sh
+# what the website reads (public, no headers)
+curl -s $A/site/pages/home | jq '.stats, .challenges.items[0]'
+curl -s $A/site/legal | jq '.documents[] | {slug, href}'
+
+# the panel's side
+curl -s $A/admin/site -H "$K" | jq '{refresh, pages: [.pages[] | {key, isDefault, revision}], enquiries}'
+curl -s $A/admin/site/pages/about -H "$K" | jq '{revision, schema: (.schema.properties | keys)}'
+```
+
+Permissions: `website.view`/`edit`/`delete`, `enquiries.view`/`reply`/`delete`
+(in the content-editor and support-agent presets respectively). Tests:
+`test/site.test.ts`.
+
 ## Notifications and push
 
 `modules/notifications` is the feed (`GET /notifications`, `/counts`, read endpoints) and `notify()` is how anything tells a user something: feed row first, then a push if the topic's category switch is on, deferred to the end of quiet hours in the user's zone. Push goes out over FCM once the service account is in the environment — `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, see `.env.example`; without it `lib/push.ts` logs `push.no_provider` and the feed row is the only channel. Two kinds go out: an ordinary message, which carries `android.notification.channelId: 'vokve.default'` — the id the app creates at launch and names in `firebase.json`, so do not change it on one side alone — and a **silent** data-only message (`{ silent: true }`), which carries no notification block at all so the OS shows nothing and hands it to the app's background handler instead (RULES A28). The app registers its token with `PATCH /devices/:id { pushToken }` after sign-in and withdraws it on sign-out.

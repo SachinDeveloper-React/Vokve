@@ -553,6 +553,25 @@ const FORMATS: Record<string, z.ZodType> = {
 /** What the public website reads (`GET /site/company`), so a change to it is worth telling the site about. */
 const WEBSITE_PATHS = ['support', 'app.storeUrl', 'app.storeListed'];
 
+/**
+ * The figures the website's words are filled with (`{{graceDays}}`,
+ * `{{coinValue}}`… — RULES P22, `site/service.configTokens`): a change to any
+ * of them changes text on several pages, so the whole site re-reads.
+ */
+const WEBSITE_FIGURE_PATHS = [
+  'account.deletionGraceDays',
+  'commerce.coinValuePaise',
+  'commerce.deliveryDaysMin',
+  'commerce.deliveryDaysMax',
+  'commerce.returnWindowDays',
+  'commerce.shippingFeePaise',
+  'commerce.freeShippingAbovePaise',
+  'coins.dailyCap',
+  'coins.sourceCaps',
+  'coins.expiryDays',
+  'coins.referral',
+];
+
 const touches = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}.`) || prefix.startsWith(`${path}.`);
 
@@ -831,9 +850,11 @@ export async function setAppConfig(actor: string, body: SetAppConfigBody) {
   // carries the `site:company` tag. Never fails the write —
   // the change is stored either way, and the site catches up on its own.
   const touched = [...Object.keys(set), ...reset];
-  const website = touched.some(path => WEBSITE_PATHS.some(prefix => touches(path, prefix)))
-    ? await refreshWebsite(['site:company'])
-    : null;
+  const website = touched.some(path => WEBSITE_FIGURE_PATHS.some(prefix => touches(path, prefix)))
+    ? await refreshWebsite(['site'])
+    : touched.some(path => WEBSITE_PATHS.some(prefix => touches(path, prefix)))
+      ? await refreshWebsite(['site:company'])
+      : null;
 
   return { ...(await appConfig()), website };
 }

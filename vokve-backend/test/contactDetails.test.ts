@@ -168,8 +168,10 @@ describe('contact details and links (RULES P21)', () => {
     expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ tags: ['site:company'], immediate: true }) });
     expect((init!.headers as Record<string, string>).authorization).toBe('Bearer site-secret-site-secret');
 
-    // A knob the website does not show is not worth a refresh.
-    const shipping = await setConfig({ set: { 'commerce.shippingFeePaise': 5900 } });
+    // A knob the website does not show is not worth a refresh. (The shipping
+    // fee used to be the example here; since RULES P22 the website's policies
+    // print it as {{shippingFee}}, so it refreshes the whole site — site.test.ts.)
+    const shipping = await setConfig({ set: { 'commerce.paymentWindowMinutes': 45 } });
     expect(shipping.body.website).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
