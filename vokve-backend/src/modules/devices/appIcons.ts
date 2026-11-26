@@ -23,9 +23,10 @@ export interface AppIconEntry {
 }
 
 export const APP_ICONS: readonly AppIconEntry[] = [
-  // Retired 2026-11-26 (D-117): the owner wanted no all-red icon. Kept
-  // because builds carry it as an Android alias and an iOS alternate.
-  { key: 'redfield', kind: 'base', label: 'Red field', retired: true },
+  // Retired 2026-11-26 (D-117): the owner wanted no all-red icon, and its
+  // art is now a copy of the white one. The key stays — builds carry it as
+  // an Android alias and an iOS alternate — but the name says what it shows.
+  { key: 'redfield', kind: 'base', label: 'Old red (now white)', retired: true },
   { key: 'classic', kind: 'base', label: 'Classic' },
   { key: 'night', kind: 'base', label: 'Night' },
   { key: 'christmas', kind: 'festive', label: 'Christmas' },

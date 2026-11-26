@@ -21,6 +21,13 @@
  *            project.pbxproj — ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES
  *   Panel    vokve-crm/public/app-icons/<key>-(square|circle).webp
  *   Store    assets/app-icons/store/google-play-512.png
+ *   Web      the panel's and the website's own icons — favicon.ico (the
+ *              mark brought up to fill the tab), the PWA/logo PNGs and the
+ *              iPhone home-screen icon — drawn from the default icon, so a
+ *              browser tab looks like the phone
+ *              (vokve-crm/public/icons, vokve-crm/src/app/favicon.ico,
+ *              vokve-frontend/public, vokve-frontend/src/app; the website
+ *              is skipped when its folder is not checked out here)
  *
  * Run it after adding or changing art: `npm run icons:app`. Then add the
  * key to the backend's catalog (`src/modules/devices/appIcons.ts`),
@@ -281,6 +288,98 @@ async function writePanelAndStore() {
   await sharp(square(fallback)).resize(512, 512).png({ compressionLevel: 9 }).toFile(path.join(store, 'google-play-512.png'));
 }
 
+// ─── The panel's and the website's own icons ────────────────────────────────
+
+/**
+ * The square around the default art's mark, for a browser tab: at 16 px the
+ * art's own margin would leave a smudge, so the mark is brought up to fill
+ * 82 % of the tile. The mark is whatever differs from the field (the corner
+ * pixel's colour); art drawn edge to edge simply keeps its whole square.
+ */
+async function markSquare() {
+  const file = square(icons.find(icon => icon.key === DEFAULT));
+  const { data, info } = await sharp(file).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const field = [data[0], data[1], data[2]];
+  let left = info.width, top = info.height, right = -1, bottom = -1;
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const i = (y * info.width + x) * 3;
+      if (Math.max(Math.abs(data[i] - field[0]), Math.abs(data[i + 1] - field[1]), Math.abs(data[i + 2] - field[2])) <= 55) continue;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  if (right < 0) return { left: 0, top: 0, width: info.width, height: info.height };
+  const side = Math.min(info.width, Math.round(Math.max(right - left + 1, bottom - top + 1) / 0.82));
+  const clamp = (centre, limit) => Math.max(0, Math.min(limit - side, Math.round(centre - side / 2)));
+  return { left: clamp((left + right) / 2, info.width), top: clamp((top + bottom) / 2, info.height), width: side, height: side };
+}
+
+/** The default icon with the corners an app icon has (22.6 %, the iOS curve), outside them transparent. */
+async function rounded(size, { tight = false } = {}) {
+  const corner = Math.round(size * 0.226);
+  const mask = Buffer.from(`<svg width="${size}" height="${size}"><rect width="${size}" height="${size}" rx="${corner}" fill="#fff"/></svg>`);
+  let art = sharp(square(icons.find(icon => icon.key === DEFAULT)));
+  if (tight) art = art.extract(await markSquare());
+  return sharp(await art.resize(size, size, { kernel: 'lanczos3' }).png().toBuffer())
+    .ensureAlpha()
+    .composite([{ input: mask, blend: 'dest-in' }])
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
+/** Full-bleed and opaque: iOS rounds a home-screen icon itself, and a maskable PWA icon is cut by the launcher. */
+async function opaque(size) {
+  return sharp(square(icons.find(icon => icon.key === DEFAULT)))
+    .resize(size, size, { kernel: 'lanczos3' })
+    .flatten({ background: '#ffffff' })
+    .removeAlpha()
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
+/** A .ico holding PNGs (every browser since IE 11 reads them): the six-byte header, a directory, the images. */
+async function favicon(sizes) {
+  const images = await Promise.all(sizes.map(size => rounded(size, { tight: true })));
+  const header = Buffer.alloc(6 + 16 * images.length);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(images.length, 4);
+  let offset = header.length;
+  images.forEach((png, i) => {
+    const entry = 6 + 16 * i;
+    header.writeUInt8(sizes[i] >= 256 ? 0 : sizes[i], entry);
+    header.writeUInt8(sizes[i] >= 256 ? 0 : sizes[i], entry + 1);
+    header.writeUInt16LE(1, entry + 4);
+    header.writeUInt16LE(32, entry + 6);
+    header.writeUInt32LE(png.length, entry + 8);
+    header.writeUInt32LE(offset, entry + 12);
+    offset += png.length;
+  });
+  return Buffer.concat([header, ...images]);
+}
+
+async function writeWeb() {
+  const crmIcons = fresh(path.join(root, 'vokve-crm/public/icons'));
+  writeFileSync(path.join(crmIcons, 'apple-touch-icon.png'), await opaque(180));
+  writeFileSync(path.join(crmIcons, 'icon-192.png'), await rounded(192));
+  writeFileSync(path.join(crmIcons, 'icon-512.png'), await rounded(512));
+  writeFileSync(path.join(crmIcons, 'maskable-512.png'), await opaque(512));
+  writeFileSync(path.join(root, 'vokve-crm/src/app/favicon.ico'), await favicon([16, 32, 48]));
+
+  const website = path.join(root, 'vokve-frontend');
+  if (!existsSync(path.join(website, 'src/app'))) return false;
+  writeFileSync(path.join(website, 'public/icon-192.png'), await rounded(192));
+  writeFileSync(path.join(website, 'public/icon-512.png'), await rounded(512));
+  // No app/icon.png: beside favicon.ico, a browser may pick the big one for the tab and lose the tight crop.
+  rmSync(path.join(website, 'src/app/icon.png'), { force: true });
+  writeFileSync(path.join(website, 'src/app/apple-icon.png'), await opaque(180));
+  writeFileSync(path.join(website, 'src/app/favicon.ico'), await favicon([16, 32, 48]));
+  return true;
+}
+
 for (const icon of icons) {
   for (const file of [square(icon), circle(icon)]) {
     if (!existsSync(file)) throw new Error(`Missing art: ${path.relative(root, file)}`);
@@ -289,4 +388,5 @@ for (const icon of icons) {
 await writeAndroid();
 await writeIos();
 await writePanelAndStore();
-console.log(`Wrote ${icons.length} icons (default ${DEFAULT}) for Android, iOS, the panel and the store.`);
+const site = await writeWeb();
+console.log(`Wrote ${icons.length} icons (default ${DEFAULT}) for Android, iOS, the panel${site ? ', the website' : ''} and the store.`);
