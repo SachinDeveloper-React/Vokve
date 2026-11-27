@@ -176,8 +176,14 @@ describe('the iPhone verifier (Limited Login)', () => {
       name: 'Rana Jay',
     });
     // The keys are cached: a second login does not fetch them again.
-    await verifyFacebookLimitedToken(token(), NONCE);
+    await verifyFacebookLimitedToken(token({ jti: 'second-login' }), NONCE);
     expect(keyFetches).toBe(1);
+  });
+
+  it('takes each token once — the nonce is the phone\'s own, so it cannot stop a replay (audit 2026-11-27, I-1)', async () => {
+    const once = token({ jti: 'replayed' });
+    await expect(verifyFacebookLimitedToken(once, NONCE)).resolves.toMatchObject({ facebookId: '10230000000000001' });
+    await expect(verifyFacebookLimitedToken(once, NONCE)).rejects.toMatchObject({ status: 401, code: 'FACEBOOK_TOKEN_INVALID' });
   });
 
   it('refuses a token for another app', async () => {

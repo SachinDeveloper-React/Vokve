@@ -42,8 +42,24 @@ export const CONFIG_DEFAULTS = {
     achievements: { enabled: false },
     /** Inherited from the client's rate card — see D-32 for rebalancing. */
     workout: 100,
+    /**
+     * Plausible workouts a local day counts for the leaderboard, challenges
+     * and badges (RULES W5). The coins are held to one workout's worth a day
+     * by `sourceCaps.workout`; this keeps the counts honest too.
+     */
     workoutDailyCount: 2,
     workoutMinMinutes: 10,
+    /**
+     * A workout is only plausible — pays, earns its day, counts — when it
+     * started within this many hours of the server first hearing of it, and
+     * neither started nor finished in the future (RULES W4). The client
+     * names the day, so without this every invented date was a fresh daily
+     * cap (security audit 2026-11-27, C-1). Long enough for a session
+     * logged offline and synced the next day.
+     */
+    workoutMaxAgeHours: 48,
+    /** Longer than this is not one session (RULES W4); calories grow with it. */
+    workoutMaxMinutes: 360,
     /** Judged against the longest streak, paid once each (RULES S8). */
     streakMilestones: [
       { days: 7, coins: 50 },

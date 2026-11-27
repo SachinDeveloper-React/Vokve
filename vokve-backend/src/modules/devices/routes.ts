@@ -18,7 +18,7 @@ export const devicesRouter = Router();
 /** Exempt from the device gate — it is how a device becomes known. */
 devicesRouter.post('/devices/register', requireAuth, validate('body', registerDeviceBody), async (req, res) => {
   const refresh = req.header('x-vokve-refresh-token');
-  const result = await registerDevice(req.ctx.userId!, req.body, refresh ? hashToken(refresh) : undefined);
+  const result = await registerDevice(req.ctx.userId!, req.body, refresh ? hashToken(refresh) : undefined, req.ctx.sessionIssuedAt);
   res.json(result);
 });
 

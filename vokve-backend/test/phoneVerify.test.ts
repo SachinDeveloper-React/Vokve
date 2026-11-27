@@ -135,8 +135,10 @@ describe('a password member', () => {
 });
 
 describe('what it refuses', () => {
-  it('a number that is another account’s, before any SMS is sent', async () => {
+  it('a number another account has verified, before any SMS is sent', async () => {
     const other = await signUpAndRegister();
+    // Verified: only a proved number is another account's (security audit 2026-11-27, M-1).
+    await UserModel.updateOne({ _id: other.userId }, { $set: { phoneVerifiedAt: new Date() } });
     const member = await googleMember();
     proved = other.phone;
 

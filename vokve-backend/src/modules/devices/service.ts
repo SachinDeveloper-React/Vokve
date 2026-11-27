@@ -37,8 +37,19 @@ export type RegisterDeviceBody = z.infer<typeof registerDeviceBody>;
  * Phase 2 wires Play Integrity / App Attest; the verdict is recorded as
  * `unverified` so nothing downstream mistakes "not checked" for "passed".
  */
-export async function registerDevice(userId: string, body: RegisterDeviceBody, refreshTokenHash?: string) {
+export async function registerDevice(userId: string, body: RegisterDeviceBody, refreshTokenHash?: string, sessionIssuedAt?: Date) {
   const config = await getConfig();
+
+  // An install the member removed comes back only through a sign-in made
+  // after the removal. Registering clears `revokedAt`, so a session from
+  // before it — the one on the phone that was lost — used to bring the
+  // device straight back (security audit 2026-11-27, L-1).
+  if (sessionIssuedAt) {
+    const removed = await DeviceModel.findOne({ userId, installId: body.installId, revokedAt: { $ne: null } }, { revokedAt: 1 }).lean();
+    if (removed?.revokedAt && sessionIssuedAt.getTime() < removed.revokedAt.getTime() - 1000) {
+      throw Errors.unauthorized();
+    }
+  }
 
   const active = await DeviceModel.countDocuments({ userId, revokedAt: null, installId: { $ne: body.installId } });
   if (active >= config.devices.maxPerAccount) {
@@ -92,7 +103,8 @@ export async function registerDevice(userId: string, body: RegisterDeviceBody, r
 
   // Bind the session that made this call to the device (RULES DV7).
   if (refreshTokenHash) {
-    await RefreshTokenModel.updateOne({ tokenHash: refreshTokenHash }, { $set: { deviceId: device._id } });
+    // Only this member's own token: the hash alone would bind anybody's.
+    await RefreshTokenModel.updateOne({ tokenHash: refreshTokenHash, userId, revokedAt: null }, { $set: { deviceId: device._id } });
   }
 
   // Registering is an authenticated call, so the account is signed in on

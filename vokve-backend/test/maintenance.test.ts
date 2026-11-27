@@ -119,7 +119,7 @@ describe('maintenance mode (RULES DV14)', () => {
     const stale = await request(app).get('/v1/me').set({ ...authed(tester), authorization: `Bearer ${expired}` });
     expect(stale.status).toBe(401);
     // The refresh itself is open, and the fresh token is let through.
-    const refreshed = await request(app).post('/v1/auth/refresh').set(baseHeaders).send({ refreshToken: tester.refreshToken });
+    const refreshed = await request(app).post('/v1/auth/refresh').set({ ...baseHeaders, 'x-vokve-device-id': tester.deviceId }).send({ refreshToken: tester.refreshToken });
     expect(refreshed.status).toBe(200);
     const again = await request(app).get('/v1/me').set({ ...authed(tester), authorization: `Bearer ${refreshed.body.accessToken}` });
     expect(again.status).toBe(200);

@@ -4,6 +4,7 @@ import { workoutSchema, equipmentSchema, muscleGroupSchema } from '../../contrac
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { idempotent } from '../../middleware/idempotency.js';
+import { rateLimit } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
 import { listExercises, listTemplates, listWorkouts, saveWorkout } from './service.js';
 
@@ -25,9 +26,27 @@ trainingRouter.get('/workouts', validate('query', pageQuery), async (req, res) =
   res.json(await listWorkouts(req.ctx.userId!, q.cursor, q.limit));
 });
 
-trainingRouter.post('/workouts', idempotent, validate('body', workoutSchema), async (req, res) => {
-  const result = await saveWorkout(req.ctx.userId!, req.body, { deviceId: req.ctx.deviceId, appVersion: req.ctx.appVersion, timezone: req.ctx.timezone });
-  // The client's contract expects the Workout itself; the reward rides in a header so the shape stays exact.
-  if (result.reward) res.setHeader('x-vokve-reward', JSON.stringify(result.reward));
-  res.json(result.workout);
+/**
+ * The times must be times: the day a workout counts on is read from
+ * `startedAt`, and a string `Date` cannot read used to reach `localDayOf` and
+ * throw there. The contract's own schema stays as the app has it.
+ */
+const isTime = (value: string | null) => value === null || (value.length <= 40 && Number.isFinite(Date.parse(value)));
+const saveWorkoutBody = workoutSchema.superRefine((workout, ctx) => {
+  if (!isTime(workout.startedAt)) ctx.addIssue({ code: 'custom', path: ['startedAt'], message: 'Not a date and time' });
+  if (!isTime(workout.completedAt)) ctx.addIssue({ code: 'custom', path: ['completedAt'], message: 'Not a date and time' });
 });
+
+trainingRouter.post(
+  '/workouts',
+  // Far past anybody training, and a ceiling on scripted saves (security audit 2026-11-27, C-1).
+  rateLimit({ name: 'workout-save-user', max: 60, windowSeconds: 3600, by: 'user' }),
+  idempotent,
+  validate('body', saveWorkoutBody),
+  async (req, res) => {
+    const result = await saveWorkout(req.ctx.userId!, req.body, { deviceId: req.ctx.deviceId, appVersion: req.ctx.appVersion, timezone: req.ctx.timezone });
+    // The client's contract expects the Workout itself; the reward rides in a header so the shape stays exact.
+    if (result.reward) res.setHeader('x-vokve-reward', JSON.stringify(result.reward));
+    res.json(result.workout);
+  },
+);

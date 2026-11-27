@@ -110,6 +110,12 @@ describe('a token Apple signed for us', () => {
 describe('what it refuses', () => {
   const refused = { status: 401, code: 'APPLE_TOKEN_INVALID' };
 
+  it('the same token a second time — the nonce is the phone\'s own, so it cannot stop a replay (audit 2026-11-27, I-1)', async () => {
+    const once = token({ jti: 'replayed' });
+    await expect(verifyAppleIdToken(once, NONCE)).resolves.toMatchObject({ appleId: '001234.apple-sub.0001' });
+    await expect(verifyAppleIdToken(once, NONCE)).rejects.toMatchObject(refused);
+  });
+
   it('a token addressed to somebody else’s app', async () => {
     await expect(verifyAppleIdToken(token({}, { aud: 'com.someone.else' }), NONCE)).rejects.toMatchObject(refused);
   });

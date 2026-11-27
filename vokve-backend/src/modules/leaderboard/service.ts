@@ -18,7 +18,7 @@ import { credit } from '../economy/service.js';
 import { UserModel } from '../identity/models.js';
 import { FraudFlagModel } from '../integrity/models.js';
 import { notify } from '../notifications/service.js';
-import { WorkoutModel } from '../training/models.js';
+import { countedWorkouts } from '../training/counted.js';
 import { LeaderboardPeriodModel, LeaderboardResultModel, LeaderboardScoreModel } from './models.js';
 
 /**
@@ -82,7 +82,8 @@ export async function refreshLeaderboardScore(userId: string, localDay: IsoDate,
       { $match: { userId, localDay: days } },
       { $group: { _id: null, steps: { $sum: '$verifiedSteps' } } },
     ]),
-    WorkoutModel.countDocuments({ userId, plausible: true, deletedAt: null, localDay: days }),
+    // At most ⚙ workoutDailyCount a day (RULES W5): a plausible workout is the member's say-so.
+    countedWorkouts(userId, config.coins.workoutDailyCount, days),
     ChallengeCompletionModel.find(
       { userId, completedAt: { $gte: localMidnightUtc(week.start, zone), $lt: localMidnightUtc(addDays(week.end, 1), zone) } },
       { _id: 1 },

@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { ApiError } from './errors.js';
 import { logger } from './logger.js';
+import { spendIdentityToken } from './idTokenReplay.js';
 
 /**
  * Who Facebook says somebody is (RULES O18) — two proofs, one per platform.
@@ -274,6 +275,11 @@ export async function verifyFacebookLimitedToken(authenticationToken: string, no
   if (typeof payload.sub !== 'string' || !payload.sub) throw rejected();
   if (typeof payload.nonce !== 'string' || payload.nonce !== nonce) {
     logger.warn('auth.facebook_nonce_mismatch');
+    throw rejected();
+  }
+  // Good once: the nonce is the phone's own, so it cannot stop a replay (I-1).
+  if (!(await spendIdentityToken('facebook', authenticationToken, payload.exp))) {
+    logger.warn('auth.facebook_token_reused');
     throw rejected();
   }
 

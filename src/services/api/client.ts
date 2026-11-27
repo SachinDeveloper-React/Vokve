@@ -140,10 +140,13 @@ async function refreshTokens(): Promise<Refreshed> {
   try {
     // A bare axios call, not `apiClient` — going through the instance would
     // re-enter these interceptors and recurse on failure.
+    // With the same device headers as every other call: the server binds
+    // a refresh token to the device it was issued on (RULES DV7), and a
+    // refresh that names no device is refused once the token is bound.
     const response = await axios.post(
       `${config.apiBaseUrl}/auth/refresh`,
       { refreshToken: current.refreshToken },
-      { timeout: config.requestTimeoutMs },
+      { timeout: config.requestTimeoutMs, headers: requestHeadersProvider() },
     );
 
     const parsed = authTokensSchema.safeParse(response.data);

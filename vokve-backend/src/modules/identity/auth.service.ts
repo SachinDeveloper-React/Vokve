@@ -15,6 +15,8 @@ import { CoinBalanceModel } from '../economy/models.js';
 import { AuditLogModel } from '../platform/models.js';
 import { NotificationPreferencesModel, RefreshTokenModel, UserModel, UserSettingsModel, type UserDoc } from './models.js';
 import { consumeChallenge, createChallenge, findLiveChallenge, isChannelDeliverable, isChannelUsable } from './otp.service.js';
+import { phoneProvenElsewhere, releaseUnprovenPhone } from './phoneClaims.js';
+import { claimUnprovenAccount } from './claim.service.js';
 import { toUser } from './serialize.js';
 import { identityFromLinkToken, maskEmail, PROVIDER_FIELD, PROVIDER_LABEL, PROVIDER_NAME, PROVIDER_PROVES_EMAIL, signInWaysOf, type ProviderIdentity, type SignInWay } from './linking.service.js';
 import { applyCodeAtSignUp, findCode } from '../social/service.js';
@@ -63,7 +65,9 @@ interface Meta { deviceId?: string; ip?: string; appVersion?: string; method?: S
 export async function signUp(body: SignUpBody, meta: Meta) {
   const [byEmail, byPhone] = await Promise.all([
     UserModel.exists({ email: body.email }).collation({ locale: 'en', strength: 2 }),
-    UserModel.exists({ phone: body.phone }),
+    // Only a verified number is taken: an unverified one proves nothing and
+    // reserved it for whoever typed it first (security audit 2026-11-27, M-1).
+    phoneProvenElsewhere(body.phone),
   ]);
   const details: Record<string, string> = {};
   if (byEmail) details.email = await emailTakenMessage(body.email);
@@ -138,6 +142,10 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
       const config = await getConfig();
       const userId = newId('usr');
       const provenEmail = challenge.channel === 'email';
+      // The number comes off any account that only typed it, as sign-up's
+      // check promised (M-1). One that was verified since still refuses
+      // below, through the unique index.
+      await releaseUnprovenPhone(p.phone, null, 'signup');
       try {
         await UserModel.create({
           _id: userId, email: p.email, phone: p.phone, passwordHash: p.passwordHash,
@@ -201,6 +209,12 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
     case 'login': {
       const user = await UserModel.findById(challenge.userId);
       if (!user || user.deletedAt) throw Errors.unauthorized();
+      // A code read from the inbox proves the address: an account that had
+      // never proved it becomes this person's alone (H-1).
+      if (challenge.channel === 'email' && !user.emailVerifiedAt) {
+        await claimUnprovenAccount(user, 'email_code', meta);
+        await user.save();
+      }
       await signedInOn(user, meta);
       return issueSession(user, { ...meta, method: 'otp' });
     }
@@ -223,6 +237,8 @@ export async function verifyOtp(verificationId: string, code: string, meta: Meta
         user.email = next;
         user.emailVerifiedAt = new Date();
       } else {
+        // Proved by this code: any account that only typed it lets go (M-1).
+        await releaseUnprovenPhone(next, user._id, 'changed');
         user.phone = next;
         user.phoneVerifiedAt = new Date();
       }
@@ -421,6 +437,13 @@ async function signInWithIdentity(identity: ProviderIdentity, ifNew: IfNew, meta
     // `Someone@gmail.com` would make a second account beside `someone@`.
     user = await UserModel.findOne({ email: identity.email }).collation({ locale: 'en', strength: 2 });
     if (user && !user.deletedAt) {
+      // An account whose address was never proved is not the account of
+      // whoever made it — it is the address's, and this provider just
+      // proved who has that (security audit 2026-11-27, H-1). Every way in
+      // that skipped the proof goes before the provider is linked.
+      if (!user.emailVerifiedAt) {
+        await claimUnprovenAccount(user, identity.provider === 'apple' ? 'apple' : 'google', meta);
+      }
       // Linking rather than refusing: somebody who signed up with a
       // password and later presses the provider's button means to reach
       // the same account, and telling them "that email is taken" by their
@@ -658,7 +681,7 @@ export async function requestContactChange(userId: string, kind: 'phone' | 'emai
   }
   const taken = kind === 'email'
     ? await UserModel.exists({ email: target }).collation({ locale: 'en', strength: 2 })
-    : await UserModel.exists({ phone: target });
+    : await phoneProvenElsewhere(target, userId);
   if (taken) throw Errors.validation({ [kind]: `That ${kind} is already registered.` });
   return createChallenge({
     channel, purpose: kind === 'email' ? 'change_email' : 'change_phone', target, userId, payload: { next: target },
@@ -671,6 +694,11 @@ export async function resetPassword(verificationId: string, code: string, passwo
   // A decoy can only reach here if its undelivered code was guessed — treat it as a wrong code, not a clue.
   const user = challenge.userId ? await UserModel.findById(challenge.userId) : null;
   if (!user) throw new ApiError(422, 'OTP_INVALID', 'That code is not right. Check it and try again.');
+  // The code came from the inbox, so the address is proved: an account that
+  // never proved it keeps no way in but this new password (H-1).
+  if (challenge.channel === 'email' && !user.emailVerifiedAt) {
+    await claimUnprovenAccount(user, 'password_reset');
+  }
   user.passwordHash = await bcrypt.hash(password, 12);
   await user.save();
   await RefreshTokenModel.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
@@ -725,7 +753,11 @@ export async function refreshSession(refreshToken: string, meta: Meta) {
       throw Errors.unauthorized();
     }
   }
-  if (row.deviceId && meta.deviceId && row.deviceId !== meta.deviceId) {
+  // A token bound to a device is answered only for that device. A refresh
+  // naming no device at all used to skip the check, so a token lifted off a
+  // phone worked anywhere by leaving the header out (security audit
+  // 2026-11-27, L-1); the app has sent the header on refresh since.
+  if (row.deviceId && row.deviceId !== meta.deviceId) {
     await RefreshTokenModel.updateOne({ _id: row._id }, { $set: { revokedAt: new Date() } });
     await AuditLogModel.create({ actorType: 'system', action: 'session.device_mismatch', subjectType: 'user', subjectId: row.userId, deviceId: meta.deviceId, before: { boundTo: row.deviceId } });
     throw Errors.unauthorized();

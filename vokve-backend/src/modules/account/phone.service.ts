@@ -5,6 +5,7 @@ import { Errors } from '../../lib/errors.js';
 import { forgetFirebaseUser, verifyFirebasePhoneToken } from '../../lib/firebasePhone.js';
 import { signUpBody } from '../identity/auth.service.js';
 import { UserModel, type UserDoc } from '../identity/models.js';
+import { phoneProvenElsewhere, releaseUnprovenPhone } from '../identity/phoneClaims.js';
 import { toUser } from '../identity/serialize.js';
 import { AuditLogModel } from '../platform/models.js';
 
@@ -59,7 +60,10 @@ async function problemsWith(
   if (user.phone === phone && user.phoneVerifiedAt) {
     return { phone: 'That is already your verified number.' };
   }
-  if (await UserModel.exists({ phone, _id: { $ne: user._id } })) {
+  // Only a verified number is another account's: one merely typed in
+  // reserves nothing, and proving it here takes it (security audit
+  // 2026-11-27, M-1).
+  if (await phoneProvenElsewhere(phone, user._id)) {
     return { phone: TAKEN };
   }
   const replacing = Boolean(user.phone) && user.phone !== phone;
@@ -107,6 +111,8 @@ export async function verifyPhone(
     if (problems) throw Errors.validation(problems);
 
     const previous = user.phone ?? null;
+    // Firebase just proved it is theirs: an account that only typed it lets go.
+    await releaseUnprovenPhone(phone, user._id, 'verified');
     user.phone = phone;
     user.phoneVerifiedAt = new Date();
     try {

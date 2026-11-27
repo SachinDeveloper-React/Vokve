@@ -5,6 +5,8 @@ export interface RequestContext {
   requestId: string;
   userId?: string;
   trustTier?: string;
+  /** When the access token behind this request was signed. */
+  sessionIssuedAt?: Date;
   deviceId?: string;
   platform?: 'ios' | 'android';
   appVersion?: string;

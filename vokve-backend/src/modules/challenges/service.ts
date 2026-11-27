@@ -25,6 +25,7 @@ import { UserModel, UserSettingsModel } from '../identity/models.js';
 import { notify } from '../notifications/service.js';
 import { StreakDayModel } from '../streak/models.js';
 import { daysBetween, longestStreakOf } from '../streak/rules.js';
+import { countedWorkouts } from '../training/counted.js';
 import { WorkoutModel } from '../training/models.js';
 import {
   AchievementDefinitionModel,
@@ -121,7 +122,8 @@ async function progressOf(userId: string, metric: ChallengeMetric, period: Perio
     case 'days':
       return StreakDayModel.countDocuments({ userId, kind: 'earned', localDay: days });
     case 'workouts':
-      return WorkoutModel.countDocuments({ userId, plausible: true, deletedAt: null, localDay: days });
+      // At most ⚙ workoutDailyCount a day (RULES W5).
+      return countedWorkouts(userId, (await getConfig()).coins.workoutDailyCount, days);
     default: {
       const [row] = await ActivityDailyModel.aggregate<{ total: number }>([
         { $match: { userId, localDay: days } },
@@ -394,7 +396,7 @@ async function focusOf(
 }
 
 /** The collection a metric's standings are counted from, and the stages that total them per member. */
-function standingsSource(metric: ChallengeMetric, period: Period) {
+function standingsSource(metric: ChallengeMetric, period: Period, workoutsPerDay: number) {
   const localDay = { $gte: period.start, $lte: period.end };
   if (metric === 'days') {
     return {
@@ -407,7 +409,9 @@ function standingsSource(metric: ChallengeMetric, period: Period) {
       model: WorkoutModel,
       stages: [
         { $match: { plausible: true, deletedAt: null, localDay } },
-        { $group: { _id: '$userId', total: { $sum: 1 } } },
+        // At most ⚙ workoutDailyCount a day each, as `countedWorkouts` counts a member's own (RULES W5).
+        { $group: { _id: { userId: '$userId', localDay: '$localDay' }, n: { $sum: 1 } } },
+        { $group: { _id: '$_id.userId', total: { $sum: { $min: ['$n', Math.max(0, workoutsPerDay)] } } } },
       ],
     };
   }
@@ -528,7 +532,7 @@ export async function getChallengeDetail(
     ChallengeCompletionModel.findById(`${userId}:${def._id}:${period.start}`).lean(),
   ]);
 
-  const { model, stages } = standingsSource(def.metric, period);
+  const { model, stages } = standingsSource(def.metric, period, config.coins.workoutDailyCount);
   const [top, counts, focus] = await Promise.all([
     upcoming
       ? Promise.resolve([] as { _id: string; total: number }[])
@@ -1092,7 +1096,7 @@ async function figureOf(userId: string, rule: AchievementRule): Promise<number> 
       return longestStreakOf(new Set(days.map(d => d.localDay)))?.length ?? 0;
     }
     case 'total_workouts':
-      return WorkoutModel.countDocuments({ userId, plausible: true, deletedAt: null });
+      return countedWorkouts(userId, (await getConfig()).coins.workoutDailyCount);
     case 'challenges_completed':
       return ChallengeCompletionModel.countDocuments({ userId });
     default: {

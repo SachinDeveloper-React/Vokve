@@ -90,3 +90,7 @@ vokve-backend/secrets/
 firebase-adminsdk-credentials.json
 .hot-updater/output
 .hot-updater/log
+
+# Security audit runs (/hacker-audit): they describe how to break the product,
+# so they stay on this machine — never committed, never pushed.
+/security-reports/

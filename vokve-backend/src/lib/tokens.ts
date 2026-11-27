@@ -7,6 +7,11 @@ export interface AccessClaims {
   tier: string;
 }
 
+/** What a verified access token says, plus when it was signed (seconds, as JWT keeps it). */
+export interface VerifiedAccess extends AccessClaims {
+  iat: number | null;
+}
+
 export function signAccessToken(claims: AccessClaims): { token: string; expiresAt: number } {
   const expiresAt = Date.now() + env.ACCESS_TOKEN_TTL_SECONDS * 1000;
   const token = jwt.sign(claims, env.JWT_SECRET, {
@@ -43,7 +48,7 @@ function verifySigned(token: string, options: jwt.VerifyOptions = VERIFY): strin
   }
 }
 
-export function verifyAccessToken(token: string): AccessClaims | null {
+export function verifyAccessToken(token: string): VerifiedAccess | null {
   try {
     const payload = verifySigned(token);
     if (typeof payload === 'string' || typeof payload.sub !== 'string') return null;
@@ -54,7 +59,11 @@ export function verifyAccessToken(token: string): AccessClaims | null {
     // claim, read below as `normal`, which handed a restricted account ten
     // minutes of an unrestricted one each time it passed its own OTP.
     if ((payload as Record<string, unknown>).kind !== undefined) return null;
-    return { sub: payload.sub, tier: String((payload as Record<string, unknown>).tier ?? 'normal') };
+    return {
+      sub: payload.sub,
+      tier: String((payload as Record<string, unknown>).tier ?? 'normal'),
+      iat: typeof payload.iat === 'number' ? payload.iat : null,
+    };
   } catch {
     return null;
   }

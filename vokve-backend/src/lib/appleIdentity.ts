@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { ApiError } from './errors.js';
 import { logger } from './logger.js';
+import { spendIdentityToken } from './idTokenReplay.js';
 
 /**
  * Who Apple says somebody is (RULES O13).
@@ -203,6 +204,11 @@ export async function verifyAppleIdToken(idToken: string, rawNonce: string): Pro
   const expected = createHash('sha256').update(rawNonce).digest('hex');
   if (payload.nonce !== expected) {
     logger.warn('auth.apple_nonce_mismatch');
+    throw rejected();
+  }
+  // Good once: the nonce is the phone's own, so it cannot stop a replay (I-1).
+  if (!(await spendIdentityToken('apple', idToken, payload.exp))) {
+    logger.warn('auth.apple_token_reused');
     throw rejected();
   }
 

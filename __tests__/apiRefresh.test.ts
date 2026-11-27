@@ -30,7 +30,7 @@ jest.mock('../src/services/secureStorage', () => ({
 // Required rather than imported: the client reads `secureStorage` the moment
 // it is loaded, and a static import would load it before the mock above has
 // been assigned.
-const { apiClient, setOnSessionExpired } =
+const { apiClient, setOnSessionExpired, setRequestHeadersProvider } =
   require('../src/services/api/client') as typeof import('../src/services/api/client');
 
 const TOKENS = { accessToken: 'old', refreshToken: 'r', expiresAt: Date.now() };
@@ -157,4 +157,19 @@ test('a session with no tokens left at all is over', async () => {
   await expect(apiClient.get('/me')).rejects.toBeInstanceOf(ApiError);
 
   expect(expired).toHaveBeenCalled();
+});
+
+test('the refresh names the device, so the server can hold the token to it (RULES DV7)', async () => {
+  setRequestHeadersProvider(() => ({ 'X-Vokve-Device-Id': 'dev_1', 'X-Vokve-Platform': 'android' }));
+  answers = [{ status: 401 }, { status: 200, data: { ok: true } }];
+  const post = refreshAnswers(() => Promise.resolve({ data: FRESH }));
+
+  await apiClient.get('/me');
+
+  expect(post).toHaveBeenCalledWith(
+    expect.stringMatching(/\/auth\/refresh$/),
+    { refreshToken: 'r' },
+    expect.objectContaining({ headers: expect.objectContaining({ 'X-Vokve-Device-Id': 'dev_1' }) }),
+  );
+  setRequestHeadersProvider(() => ({}));
 });

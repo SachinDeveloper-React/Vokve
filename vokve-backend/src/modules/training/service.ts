@@ -54,11 +54,35 @@ export function durationMinutes(workout: Workout): number {
 
 interface Plausibility { plausible: boolean; reason: string | null }
 
-/** RULES W4: ≥ N minutes, ≥ 1 completed set, sane loads. Saved either way; only plausible ones pay or mark the streak. */
-export async function checkPlausibility(workout: Workout): Promise<Plausibility> {
+/** How far ahead of the server's clock a phone's clock may run before its times are "the future". */
+const CLOCK_SKEW_MS = 5 * 60_000;
+
+/**
+ * RULES W4: ≥ N minutes and no longer than one session, ≥ 1 completed set,
+ * sane loads, and dated when it could have happened — started within
+ * ⚙ `workoutMaxAgeHours` of `receivedAt` (when the server first heard of
+ * it) and not in the future. Saved either way; only plausible ones pay,
+ * mark the streak or count.
+ *
+ * The date matters because the client names it, and the day it names is
+ * the day whose cap the coins come out of: without the window a member
+ * dated each workout on a different day — last year, or 2099 — and every
+ * one of them landed on an empty cap (security audit 2026-11-27, C-1).
+ */
+export async function checkPlausibility(workout: Workout, receivedAt = new Date()): Promise<Plausibility> {
   const { coins } = await getConfig();
   const completedSets = workout.exercises.flatMap(e => e.sets).filter(s => s.completed);
-  if (durationMinutes(workout) < coins.workoutMinMinutes) return { plausible: false, reason: `shorter than ${coins.workoutMinMinutes} minutes` };
+  const started = new Date(workout.startedAt).getTime();
+  const finished = workout.completedAt ? new Date(workout.completedAt).getTime() : started;
+  if (started > receivedAt.getTime() + CLOCK_SKEW_MS || finished > receivedAt.getTime() + CLOCK_SKEW_MS) {
+    return { plausible: false, reason: 'dated in the future' };
+  }
+  if (started < receivedAt.getTime() - coins.workoutMaxAgeHours * 3_600_000) {
+    return { plausible: false, reason: `started more than ${coins.workoutMaxAgeHours} hours before it was saved` };
+  }
+  const minutes = durationMinutes(workout);
+  if (minutes < coins.workoutMinMinutes) return { plausible: false, reason: `shorter than ${coins.workoutMinMinutes} minutes` };
+  if (minutes > coins.workoutMaxMinutes) return { plausible: false, reason: `longer than ${coins.workoutMaxMinutes} minutes` };
   if (completedSets.length === 0) return { plausible: false, reason: 'no completed sets' };
   if (completedSets.some(s => s.weightKg > 500 || s.reps > 200)) return { plausible: false, reason: 'implausible load' };
   return { plausible: true, reason: null };
@@ -78,7 +102,10 @@ export async function saveWorkout(userId: string, input: Workout, meta: SaveMeta
   const localDay = localDayOf(new Date(input.startedAt), meta.timezone);
   const volume = totalVolumeKg(normalised);
   const calories = estimateCalories(normalised, user?.weightKg ?? null);
-  const { plausible, reason } = await checkPlausibility(normalised);
+  // Judged against when the server first heard of it, so a session the
+  // phone sends again a week later (a retry, an edit) is not re-judged as old.
+  const seen = await WorkoutModel.findOne({ _id: input.id, userId }, { createdAt: 1 }).lean<{ createdAt?: Date } | null>();
+  const { plausible, reason } = await checkPlausibility(normalised, seen?.createdAt ?? new Date());
 
   const doc = await WorkoutModel.findOneAndUpdate(
     { _id: input.id, userId },
@@ -93,7 +120,9 @@ export async function saveWorkout(userId: string, input: Workout, meta: SaveMeta
   let reward: Awaited<ReturnType<typeof credit>> | null = null;
   if (plausible) {
     const { coins } = await getConfig();
-    // Per-day count cap (RULES W5) is enforced by the source cap in coins; the count itself is informational.
+    // The coins are held to one workout a day by the source cap; the
+    // leaderboard, challenges and badges count at most ⚙ workoutDailyCount
+    // a day (RULES W5, `countedWorkouts`).
     reward = await credit({
       userId, source: 'workout', referenceType: 'workout', referenceId: input.id, amount: coins.workout,
       title: `${input.title} completed`, localDay, actor: 'system', deviceId: meta.deviceId, appVersion: meta.appVersion,
