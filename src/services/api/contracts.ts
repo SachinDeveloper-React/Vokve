@@ -734,14 +734,22 @@ export interface AccountApi {
   verifyPhone(input: { idToken: string; password?: string }): Promise<User>;
   /** The password and the Google, Apple and Facebook identities on the account (RULES O15, O18). */
   signInMethods(): Promise<SignInMethods>;
-  /** Connects the Google account a fresh ID token names. `IDENTITY_IN_USE` (409) when another account has it. */
-  connectGoogle(idToken: string): Promise<SignInMethods>;
+  /**
+   * Connects the Google account a fresh ID token names. `IDENTITY_IN_USE` (409) when another account has it.
+   *
+   * Connecting and disconnecting (all but Apple's disconnect) answer
+   * `STEP_UP_REQUIRED` (403) on a session not signed in within the last ten
+   * minutes (RULES O22): pass the token a step-up code returns as
+   * `stepUpToken` and send the same request again.
+   */
+  connectGoogle(idToken: string, stepUpToken?: string): Promise<SignInMethods>;
   /** Connects the Apple ID a fresh identity token names, with its nonce. */
   connectApple(
     payload: Omit<AppleSignInPayload, 'ifNew'>,
+    stepUpToken?: string,
   ): Promise<SignInMethods>;
   /** Connects the Facebook account a fresh login names (RULES O18). */
-  connectFacebook(proof: FacebookProof): Promise<SignInMethods>;
+  connectFacebook(proof: FacebookProof, stepUpToken?: string): Promise<SignInMethods>;
   /** Connects the identity an `IDENTITY_NOT_LINKED` link token holds. `IDENTITY_LINK_EXPIRED` (410) after 15 minutes. */
   connectIdentity(linkToken: string): Promise<SignInMethods>;
   /**
@@ -751,6 +759,7 @@ export interface AccountApi {
   disconnect(
     provider: SignInProvider,
     apple?: AppleConfirmation,
+    stepUpToken?: string,
   ): Promise<SignInMethods>;
   sessions(): Promise<AccountSession[]>;
   /** Signs every device but this one out. */

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { getConfig } from '../../config/remote.js';
 import { withTransaction } from '../../db/mongo.js';
 import { getKV } from '../../db/redis.js';
+import { spendStepUpToken } from '../identity/stepUp.js';
 import { toCoins, toMilli } from '../../lib/coins.js';
 import { localDayOf } from '../../lib/dates.js';
 import { ApiError, Errors } from '../../lib/errors.js';
@@ -12,7 +13,6 @@ import {
   shopModeInForce, spendsCoins, verifyPaymentProof,
   type PaymentMethod, type PaymentProof,
 } from '../../lib/payments.js';
-import { STEP_UP_TTL_SECONDS, verifyStepUpToken } from '../../lib/tokens.js';
 import { isWhatsAppUsable, sendWhatsApp } from '../../lib/whatsapp.js';
 import {
   addressSchema,
@@ -1775,11 +1775,10 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
  */
 async function consumeStepUp(userId: string, token: string | undefined, threshold: number): Promise<void> {
   const details = { threshold };
-  if (!token) throw Errors.forbidden('STEP_UP_REQUIRED', 'Confirm it is you to use this many coins.');
-  const claims = verifyStepUpToken(token);
-  if (!claims || claims.sub !== userId) throw new ApiError(403, 'STEP_UP_INVALID', 'That confirmation has expired. Please confirm again.', details);
-  const fresh = await getKV().setIfAbsent(`stepup:${claims.jti}`, STEP_UP_TTL_SECONDS);
-  if (!fresh) throw new ApiError(403, 'STEP_UP_INVALID', 'That confirmation was already used. Please confirm again.', details);
+  const verdict = await spendStepUpToken(userId, token);
+  if (verdict === 'missing') throw Errors.forbidden('STEP_UP_REQUIRED', 'Confirm it is you to use this many coins.');
+  if (verdict === 'invalid') throw new ApiError(403, 'STEP_UP_INVALID', 'That confirmation has expired. Please confirm again.', details);
+  if (verdict === 'used') throw new ApiError(403, 'STEP_UP_INVALID', 'That confirmation was already used. Please confirm again.', details);
 }
 
 /** A sum of paise as the member reads it: ₹373 or ₹373.50. */

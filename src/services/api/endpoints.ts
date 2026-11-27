@@ -550,6 +550,14 @@ const realOrderApi: OrderApi = {
     ),
 };
 
+/**
+ * The step-up token a code returned, for the one call it was asked for
+ * (RULES O22). A header, so the provider proof in the body stays exactly
+ * what the server checks.
+ */
+const stepUpHeader = (stepUpToken?: string) =>
+  stepUpToken ? { headers: { 'X-Vokve-Step-Up': stepUpToken } } : {};
+
 const realAccountApi: AccountApi = {
   profile: () =>
     request(profileSummarySchema, client => client.get('/me/profile')),
@@ -579,28 +587,28 @@ const realAccountApi: AccountApi = {
     ),
   signInMethods: () =>
     request(signInMethodsSchema, client => client.get('/me/sign-in-methods')),
-  connectGoogle: idToken =>
+  connectGoogle: (idToken, stepUpToken) =>
     request(signInMethodsSchema, client =>
-      client.post('/me/sign-in-methods/google', { idToken }),
+      client.post('/me/sign-in-methods/google', { idToken }, stepUpHeader(stepUpToken)),
     ),
-  connectApple: payload =>
+  connectApple: (payload, stepUpToken) =>
     request(signInMethodsSchema, client =>
-      client.post('/me/sign-in-methods/apple', payload),
+      client.post('/me/sign-in-methods/apple', payload, stepUpHeader(stepUpToken)),
     ),
-  connectFacebook: proof =>
+  connectFacebook: (proof, stepUpToken) =>
     request(signInMethodsSchema, client =>
-      client.post('/me/sign-in-methods/facebook', proof),
+      client.post('/me/sign-in-methods/facebook', proof, stepUpHeader(stepUpToken)),
     ),
   connectIdentity: linkToken =>
     request(signInMethodsSchema, client =>
       client.post('/me/sign-in-methods/link', { linkToken }),
     ),
-  disconnect: (provider, apple) =>
+  disconnect: (provider, apple, stepUpToken) =>
     request(signInMethodsSchema, client =>
-      client.delete(
-        `/me/sign-in-methods/${provider}`,
-        apple ? { data: { apple } } : undefined,
-      ),
+      client.delete(`/me/sign-in-methods/${provider}`, {
+        ...(apple ? { data: { apple } } : {}),
+        ...stepUpHeader(stepUpToken),
+      }),
     ),
   verifyPhone: input =>
     request(userSchema, client => client.post('/me/phone/verify', input)),
@@ -1272,16 +1280,16 @@ export const accountApi: AccountApi = {
   changePhone: input => pick('mockAccountApi', realAccountApi).changePhone(input),
   checkPhone: input => pick('mockAccountApi', realAccountApi).checkPhone(input),
   signInMethods: () => pick('mockAccountApi', realAccountApi).signInMethods(),
-  connectGoogle: idToken =>
-    pick('mockAccountApi', realAccountApi).connectGoogle(idToken),
-  connectApple: payload =>
-    pick('mockAccountApi', realAccountApi).connectApple(payload),
-  connectFacebook: proof =>
-    pick('mockAccountApi', realAccountApi).connectFacebook(proof),
+  connectGoogle: (idToken, stepUpToken) =>
+    pick('mockAccountApi', realAccountApi).connectGoogle(idToken, stepUpToken),
+  connectApple: (payload, stepUpToken) =>
+    pick('mockAccountApi', realAccountApi).connectApple(payload, stepUpToken),
+  connectFacebook: (proof, stepUpToken) =>
+    pick('mockAccountApi', realAccountApi).connectFacebook(proof, stepUpToken),
   connectIdentity: linkToken =>
     pick('mockAccountApi', realAccountApi).connectIdentity(linkToken),
-  disconnect: (provider, apple) =>
-    pick('mockAccountApi', realAccountApi).disconnect(provider, apple),
+  disconnect: (provider, apple, stepUpToken) =>
+    pick('mockAccountApi', realAccountApi).disconnect(provider, apple, stepUpToken),
   verifyPhone: input => pick('mockAccountApi', realAccountApi).verifyPhone(input),
   sessions: () => pick('mockAccountApi', realAccountApi).sessions(),
   revokeOtherSessions: () =>

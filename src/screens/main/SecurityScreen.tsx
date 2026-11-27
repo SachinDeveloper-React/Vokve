@@ -33,7 +33,13 @@ import { confirmWithProvider } from '../../services/providerConfirmation';
 import { signInWithGoogle } from '../../services/googleSignIn';
 import { signInWithFacebook } from '../../services/facebookSignIn';
 import { toApiError } from '../../services/api/errors';
-import { useAuthStore, useCurrentUser } from '../../stores/authStore';
+import {
+  useAuthStore,
+  useCurrentUser,
+  usePendingContactVerification,
+  useStepUpToken,
+} from '../../stores/authStore';
+import type { AppleSignInPayload, FacebookProof } from '../../services/api/contracts';
 import { useCoinBalance } from '../../stores/coinsStore';
 import { useTheme, useThemedStyles, type ThemeShape } from '../../theme';
 import {
@@ -48,6 +54,41 @@ import type {
   SignInProvider,
 } from '../../types/models';
 import { formatPhoneNumber, formatRelativeDay } from '../../utils/format';
+
+/**
+ * A change to how the account signs in, held whole so it can be sent again
+ * after a step-up code (RULES O22) without opening the provider's sheet a
+ * second time: the server asks for the code before it looks at the
+ * provider's token, so the token is still good.
+ */
+type MethodChange =
+  | { kind: 'connect'; provider: 'google'; idToken: string }
+  | { kind: 'connect'; provider: 'facebook'; proof: FacebookProof }
+  | { kind: 'connect'; provider: 'apple'; payload: Omit<AppleSignInPayload, 'ifNew'> }
+  | { kind: 'disconnect'; provider: 'google' | 'facebook' };
+
+/** The change, with the step-up token only when there is one. */
+function sendChange(change: MethodChange, stepUpToken?: string): Promise<SignInMethods> {
+  if (change.kind === 'disconnect') {
+    return stepUpToken
+      ? accountApi.disconnect(change.provider, undefined, stepUpToken)
+      : accountApi.disconnect(change.provider);
+  }
+  switch (change.provider) {
+    case 'google':
+      return stepUpToken
+        ? accountApi.connectGoogle(change.idToken, stepUpToken)
+        : accountApi.connectGoogle(change.idToken);
+    case 'facebook':
+      return stepUpToken
+        ? accountApi.connectFacebook(change.proof, stepUpToken)
+        : accountApi.connectFacebook(change.proof);
+    case 'apple':
+      return stepUpToken
+        ? accountApi.connectApple(change.payload, stepUpToken)
+        : accountApi.connectApple(change.payload);
+  }
+}
 
 const makeStyles = ({ spacing, colors }: ThemeShape) =>
   StyleSheet.create({
@@ -111,6 +152,10 @@ export const SecurityScreen = () => {
   const [disconnecting, setDisconnecting] = useState<SignInProvider | null>(
     null,
   );
+  // A change waiting on a step-up code (RULES O22), sent again once it passes.
+  const [parkedChange, setParkedChange] = useState<MethodChange | null>(null);
+  const stepUpToken = useStepUpToken();
+  const pendingCode = usePendingContactVerification();
 
   const password = useForm<ChangePasswordValues>({
     resolver: zodResolver(changePasswordSchema),
@@ -159,45 +204,55 @@ export const SecurityScreen = () => {
   }, [loadMethods]);
 
   /**
-   * The provider's own sheet, then the server: the token proves the
-   * identity, and the session says whose account it goes on.
+   * Sends one change and says how it went. A session not signed in within
+   * the last ten minutes is asked for an email code first (RULES O22): the
+   * change waits here while the code screen is open and goes again with the
+   * token the code returns.
    */
-  const onConnect = useCallback(
-    async (provider: SignInProvider) => {
-      const name = PROVIDER_NAME[provider];
-      setBusyProvider(provider);
+  const runChange = useCallback(
+    async (change: MethodChange, withStepUp?: string) => {
+      const name = PROVIDER_NAME[change.provider];
+      const verb = change.kind === 'connect' ? 'connect' : 'disconnect';
+      setBusyProvider(change.provider);
       try {
-        let next: SignInMethods;
-        if (provider === 'google') {
-          const outcome = await signInWithGoogle();
-          if (outcome.kind === 'cancelled') return;
-          if (outcome.kind === 'failed') throw new Error(outcome.message);
-          next = await accountApi.connectGoogle(outcome.idToken);
-        } else if (provider === 'facebook') {
-          const outcome = await signInWithFacebook();
-          if (outcome.kind === 'cancelled') return;
-          if (outcome.kind === 'failed') throw new Error(outcome.message);
-          next = await accountApi.connectFacebook(outcome.proof);
-        } else {
-          const outcome = await signInWithApple();
-          if (outcome.kind === 'cancelled') return;
-          if (outcome.kind === 'failed') throw new Error(outcome.message);
-          next = await accountApi.connectApple({
-            idToken: outcome.idToken,
-            nonce: outcome.nonce,
-            fullName: outcome.fullName,
-          });
-        }
-        setMethods(next);
-        toast.show({
-          title: `${name} connected`,
-          message: `Sign in with ${name} now opens this account.`,
-          tone: 'success',
-        });
+        setMethods(await sendChange(change, withStepUp));
+        toast.show(
+          change.kind === 'connect'
+            ? {
+                title: `${name} connected`,
+                message: `Sign in with ${name} now opens this account.`,
+                tone: 'success',
+              }
+            : {
+                title: `${name} disconnected`,
+                message: `${name} no longer signs in to this account.`,
+                tone: 'success',
+              },
+        );
       } catch (error) {
+        const apiError = toApiError(error);
+        const wantsCode =
+          apiError.code === 'STEP_UP_REQUIRED' ||
+          apiError.code === 'STEP_UP_INVALID';
+        if (wantsCode && !withStepUp) {
+          // The code is asked for first and the change parked only once it
+          // is on its way: parked earlier, the effect below would read "no
+          // code pending" as the member having backed out.
+          const asked = await useAuthStore.getState().requestStepUp();
+          if (asked) {
+            setParkedChange(change);
+            return;
+          }
+          toast.show({
+            title: `Couldn't ${verb} ${name}`,
+            message: (useAuthStore.getState().error ?? apiError).message,
+            tone: 'error',
+          });
+          return;
+        }
         toast.show({
-          title: `Couldn't connect ${name}`,
-          message: toApiError(error).message,
+          title: `Couldn't ${verb} ${name}`,
+          message: apiError.message,
           tone: 'error',
         });
       } finally {
@@ -207,23 +262,94 @@ export const SecurityScreen = () => {
     [toast],
   );
 
+  // The code passed: send the change it was asked for.
+  useEffect(() => {
+    if (!stepUpToken || !parkedChange) {
+      return;
+    }
+    const token = useAuthStore.getState().takeStepUpToken();
+    const change = parkedChange;
+    setParkedChange(null);
+    runChange(change, token ?? undefined);
+  }, [parkedChange, runChange, stepUpToken]);
+
+  // The code screen closed without a code: nothing changes.
+  useEffect(() => {
+    if (parkedChange && !pendingCode && !stepUpToken) {
+      setParkedChange(null);
+      toast.show({
+        title: `${PROVIDER_NAME[parkedChange.provider]} not ${
+          parkedChange.kind === 'connect' ? 'connected' : 'disconnected'
+        }`,
+        message: 'The change needs the code we emailed you.',
+        tone: 'info',
+      });
+    }
+  }, [parkedChange, pendingCode, stepUpToken, toast]);
+
+  /**
+   * The provider's own sheet, then the server: the token proves the
+   * identity, and the session says whose account it goes on.
+   */
+  const onConnect = useCallback(
+    async (provider: SignInProvider) => {
+      setBusyProvider(provider);
+      try {
+        if (provider === 'google') {
+          const outcome = await signInWithGoogle();
+          if (outcome.kind === 'cancelled') return;
+          if (outcome.kind === 'failed') throw new Error(outcome.message);
+          await runChange({ kind: 'connect', provider, idToken: outcome.idToken });
+        } else if (provider === 'facebook') {
+          const outcome = await signInWithFacebook();
+          if (outcome.kind === 'cancelled') return;
+          if (outcome.kind === 'failed') throw new Error(outcome.message);
+          await runChange({ kind: 'connect', provider, proof: outcome.proof });
+        } else {
+          const outcome = await signInWithApple();
+          if (outcome.kind === 'cancelled') return;
+          if (outcome.kind === 'failed') throw new Error(outcome.message);
+          await runChange({
+            kind: 'connect',
+            provider,
+            payload: {
+              idToken: outcome.idToken,
+              nonce: outcome.nonce,
+              fullName: outcome.fullName,
+            },
+          });
+        }
+      } catch (error) {
+        toast.show({
+          title: `Couldn't connect ${PROVIDER_NAME[provider]}`,
+          message: toApiError(error).message,
+          tone: 'error',
+        });
+      } finally {
+        setBusyProvider(null);
+      }
+    },
+    [runChange, toast],
+  );
+
   const onDisconnect = useCallback(async () => {
     const provider = disconnecting;
     if (!provider) return;
+    if (provider !== 'apple') {
+      await runChange({ kind: 'disconnect', provider });
+      return;
+    }
     const name = PROVIDER_NAME[provider];
     setBusyProvider(provider);
     try {
-      if (provider === 'apple') {
-        // Apple is confirmed with Apple, and that sign-in is what the server
-        // revokes VOKVE from the Apple ID with (RULES O16).
-        const proof = await confirmWithProvider('apple');
-        if (!proof || !('apple' in proof)) return;
-        setMethods(await accountApi.disconnect('apple', proof.apple));
-        // Revoked on purpose: not a reason to sign this phone out.
-        forgetAppleUser();
-      } else {
-        setMethods(await accountApi.disconnect(provider));
-      }
+      // Apple is confirmed with Apple, and that sign-in is what the server
+      // revokes VOKVE from the Apple ID with (RULES O16) — proof of the
+      // member in itself, so no code is asked for.
+      const proof = await confirmWithProvider('apple');
+      if (!proof || !('apple' in proof)) return;
+      setMethods(await accountApi.disconnect('apple', proof.apple));
+      // Revoked on purpose: not a reason to sign this phone out.
+      forgetAppleUser();
       toast.show({
         title: `${name} disconnected`,
         message: `${name} no longer signs in to this account.`,
@@ -238,7 +364,7 @@ export const SecurityScreen = () => {
     } finally {
       setBusyProvider(null);
     }
-  }, [disconnecting, toast]);
+  }, [disconnecting, runChange, toast]);
 
   const onPressBack = useCallback(() => {
     if (navigation.canGoBack()) {

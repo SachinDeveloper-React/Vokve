@@ -10,5 +10,6 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
   req.ctx.userId = claims.sub;
   req.ctx.trustTier = claims.tier;
   req.ctx.sessionIssuedAt = claims.iat !== null ? new Date(claims.iat * 1000) : undefined;
+  req.ctx.authenticatedAt = claims.auth !== null ? new Date(claims.auth * 1000) : undefined;
   next();
 };

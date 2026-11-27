@@ -7,6 +7,8 @@ export interface RequestContext {
   trustTier?: string;
   /** When the access token behind this request was signed. */
   sessionIssuedAt?: Date;
+  /** When its session was last proved — signed in, or a code passed (RULES O22). */
+  authenticatedAt?: Date;
   deviceId?: string;
   platform?: 'ios' | 'android';
   appVersion?: string;

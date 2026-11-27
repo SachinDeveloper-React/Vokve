@@ -708,7 +708,10 @@ export async function resetPassword(verificationId: string, code: string, passwo
 // ─── Sessions ───────────────────────────────────────────────────────────────
 
 export async function issueSession(user: UserDoc, meta: Meta): Promise<AuthResponse> {
-  const access = signAccessToken({ sub: user._id, tier: user.trust?.tier ?? 'normal' });
+  // Every caller has just been proved — a sign-in, or a code passed inside
+  // the session — so this is the moment the session was proved (O22).
+  const authAt = new Date();
+  const access = signAccessToken({ sub: user._id, tier: user.trust?.tier ?? 'normal', auth: Math.floor(authAt.getTime() / 1000) });
   const refresh = newRefreshToken();
   // A code passed inside a session (a step-up, a contact change) issues a
   // fresh row for the same phone: it is the same session, begun the same way.
@@ -719,6 +722,7 @@ export async function issueSession(user: UserDoc, meta: Meta): Promise<AuthRespo
     tokenHash: refresh.hash,
     expiresAt: new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
     method,
+    authAt,
   });
   return authResponseSchema.parse({
     user: toUser(user),
@@ -765,12 +769,20 @@ export async function refreshSession(refreshToken: string, meta: Meta) {
   const user = await UserModel.findById(row.userId);
   if (!user || user.deletedAt) throw Errors.unauthorized();
 
-  const access = signAccessToken({ sub: user._id, tier: user.trust?.tier ?? 'normal' });
+  // A refresh proves nothing new: the session keeps the time it was last
+  // proved, so a token that is merely kept alive never reads as a fresh
+  // sign-in (O22).
+  const authAt = row.authAt ?? null;
+  const access = signAccessToken({
+    sub: user._id, tier: user.trust?.tier ?? 'normal',
+    ...(authAt ? { auth: Math.floor(authAt.getTime() / 1000) } : {}),
+  });
   const next = newRefreshToken();
   const created = await RefreshTokenModel.create({
     userId: user._id, deviceId: row.deviceId ?? meta.deviceId ?? null, tokenHash: next.hash,
     expiresAt: new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
     method: row.method ?? null,
+    authAt,
   });
   if (!row.supersededBy) {
     await RefreshTokenModel.updateOne({ _id: row._id }, { $set: { supersededBy: created._id.toString() } });

@@ -5,11 +5,19 @@ import { env } from '../config/env.js';
 export interface AccessClaims {
   sub: string;
   tier: string;
+  /**
+   * When the session was last proved — a sign-in or a code — in seconds,
+   * as JWT keeps times. Carried unchanged through refreshes (RULES O22).
+   */
+  auth?: number;
 }
 
 /** What a verified access token says, plus when it was signed (seconds, as JWT keeps it). */
-export interface VerifiedAccess extends AccessClaims {
+export interface VerifiedAccess {
+  sub: string;
+  tier: string;
   iat: number | null;
+  auth: number | null;
 }
 
 export function signAccessToken(claims: AccessClaims): { token: string; expiresAt: number } {
@@ -63,6 +71,7 @@ export function verifyAccessToken(token: string): VerifiedAccess | null {
       sub: payload.sub,
       tier: String((payload as Record<string, unknown>).tier ?? 'normal'),
       iat: typeof payload.iat === 'number' ? payload.iat : null,
+      auth: typeof (payload as Record<string, unknown>).auth === 'number' ? ((payload as Record<string, unknown>).auth as number) : null,
     };
   } catch {
     return null;

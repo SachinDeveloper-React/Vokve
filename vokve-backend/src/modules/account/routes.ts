@@ -4,6 +4,7 @@ import { ApiError, Errors } from '../../lib/errors.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireDevice } from '../../middleware/device.js';
 import { rateLimit } from '../../middleware/rateLimit.js';
+import { assertRecentSignIn, requireRecentSignIn } from '../../middleware/recentSignIn.js';
 import { validate } from '../../middleware/validate.js';
 import { appleBody, appleIdentity, facebookIdentity, googleIdentity, signUpBody } from '../identity/auth.service.js';
 import { getSignInMethods, identityFromLinkToken, linkIdentity, unlinkIdentity } from '../identity/linking.service.js';
@@ -168,10 +169,13 @@ accountRouter.post('/me/phone/verify', phoneLimit, validate('body', phoneVerifyB
 // ─── Sign-in methods: Google and Apple on an existing account (RULES O15) ──
 
 /**
- * Connecting proves the identity, not the member — they are already signed
- * in. From Security the phone sends a fresh provider token; after sign-in
- * answered `IDENTITY_NOT_LINKED` and the member chose "I already have an
- * account", it sends the link token that answer carried.
+ * Connecting proves the identity; the member is proved by a session signed
+ * in (or step-up code passed) in the last ten minutes, or by a step-up token
+ * in `X-Vokve-Step-Up` (RULES O22) — a session token alone used to be
+ * enough to add its holder's own Facebook for good (audit M-3). From
+ * Security the phone sends a fresh provider token; after sign-in answered
+ * `IDENTITY_NOT_LINKED` and the member chose "I already have an account",
+ * it sends the link token that answer carried, a moment after signing in.
  */
 const signInMethodLimit = rateLimit({ name: 'sign-in-methods-user', max: 10, windowSeconds: 3600, by: 'user' });
 const connectGoogleBody = z.object({ idToken: z.string().trim().min(1).max(4000) }).strict();
@@ -183,25 +187,29 @@ accountRouter.get('/me/sign-in-methods', async (req, res) => {
   res.json(await getSignInMethods(req.ctx.userId!));
 });
 
-accountRouter.post('/me/sign-in-methods/google', signInMethodLimit, validate('body', connectGoogleBody), async (req, res) => {
+accountRouter.post('/me/sign-in-methods/google', signInMethodLimit, validate('body', connectGoogleBody), requireRecentSignIn, async (req, res) => {
   res.json(await linkIdentity(req.ctx.userId!, await googleIdentity(req.body.idToken), { deviceId: req.ctx.deviceId }));
 });
 
-accountRouter.post('/me/sign-in-methods/apple', signInMethodLimit, validate('body', connectAppleBody), async (req, res) => {
+accountRouter.post('/me/sign-in-methods/apple', signInMethodLimit, validate('body', connectAppleBody), requireRecentSignIn, async (req, res) => {
   res.json(await linkIdentity(req.ctx.userId!, await appleIdentity(req.body), { deviceId: req.ctx.deviceId }));
 });
 
 /** A fresh Facebook login — access token or Limited Login token — checked (RULES O18). */
-accountRouter.post('/me/sign-in-methods/facebook', signInMethodLimit, validate('body', connectFacebookBody), async (req, res) => {
+accountRouter.post('/me/sign-in-methods/facebook', signInMethodLimit, validate('body', connectFacebookBody), requireRecentSignIn, async (req, res) => {
   res.json(await linkIdentity(req.ctx.userId!, await facebookIdentity(req.body), { deviceId: req.ctx.deviceId }));
 });
 
-accountRouter.post('/me/sign-in-methods/link', signInMethodLimit, validate('body', connectLinkBody), async (req, res) => {
+accountRouter.post('/me/sign-in-methods/link', signInMethodLimit, validate('body', connectLinkBody), requireRecentSignIn, async (req, res) => {
   const identity = identityFromLinkToken(req.body.linkToken);
   res.json(await linkIdentity(req.ctx.userId!, identity, { deviceId: req.ctx.deviceId }));
 });
 
-/** Apple's needs a fresh Apple sign-in in the body, to revoke with (RULES O16); Google's and Facebook's need nothing. */
+/**
+ * Apple's needs a fresh Apple sign-in in the body, to revoke with (RULES O16)
+ * — a proof of the session's owner in itself. Google's and Facebook's need
+ * a recently proved session or a step-up code, as connecting does (O22).
+ */
 const disconnectBody = z
   .object({ apple: connectAppleBody.pick({ idToken: true, nonce: true }).extend({ authorizationCode: z.string().trim().min(1).max(2000) }).strict().optional() })
   .strict();
@@ -211,6 +219,7 @@ accountRouter.delete('/me/sign-in-methods/:provider', signInMethodLimit, async (
   if (!provider.success) throw Errors.notFound('That sign-in method');
   const body = disconnectBody.safeParse(req.body ?? {});
   if (!body.success) throw Errors.validation({ apple: 'That Apple confirmation is not valid.' });
+  if (provider.data !== 'apple') await assertRecentSignIn(req);
   res.json(await unlinkIdentity(req.ctx.userId!, provider.data, body.data.apple, { deviceId: req.ctx.deviceId, platform: req.ctx.platform }));
 });
 

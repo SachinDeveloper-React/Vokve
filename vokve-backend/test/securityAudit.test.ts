@@ -273,3 +273,88 @@ describe('H-1: an account made with an address nobody proved', () => {
     expect((await request(app).post('/v1/auth/refresh').set({ ...baseHeaders, 'x-vokve-device-id': session.deviceId }).send({ refreshToken: session.refreshToken })).status).toBe(200);
   });
 });
+
+describe('M-3: changing how an account signs in on a session token alone', () => {
+  const GOOGLE = { googleId: 'google-m3', email: 'someone.else@example.com', emailVerified: true, name: null, picture: null };
+  let googleChecks = 0;
+
+  afterEach(() => {
+    setGoogleVerifier(null);
+    env.GOOGLE_WEB_CLIENT_ID = undefined;
+  });
+  function useGoogle() {
+    googleChecks = 0;
+    env.GOOGLE_WEB_CLIENT_ID = 'web-client.apps.googleusercontent.com';
+    setGoogleVerifier(async () => {
+      googleChecks += 1;
+      return GOOGLE;
+    });
+  }
+
+  /** The same session, as a token whose sign-in was an hour ago. */
+  const stale = (session: Session) => ({
+    ...authed(session),
+    authorization: `Bearer ${jwt.sign(
+      { sub: session.userId, tier: 'normal', auth: Math.floor(Date.now() / 1000) - 3600 },
+      env.JWT_SECRET,
+      { algorithm: 'HS256', expiresIn: 900, issuer: 'vokve' },
+    )}`,
+  });
+  const connectGoogle = (headers: Record<string, string>) =>
+    request(app).post('/v1/me/sign-in-methods/google').set(headers).send({ idToken: 'g' });
+
+  it('refuses to connect a provider on a session signed in long ago, before looking at the provider\'s token', async () => {
+    useGoogle();
+    const session = await signUpAndRegister();
+    const res = await connectGoogle(stale(session));
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('STEP_UP_REQUIRED');
+    expect(googleChecks).toBe(0); // the provider's token is untouched: the phone can send it again
+    expect((await UserModel.findById(session.userId).lean())?.googleId).toBeUndefined();
+  });
+
+  it('connects with a step-up code, once', async () => {
+    useGoogle();
+    const session = await signUpAndRegister();
+    const asked = await request(app).post('/v1/auth/step-up').set(stale(session));
+    expect(asked.status).toBe(200);
+    const passed = await request(app).post('/v1/auth/verify-otp').set(baseHeaders)
+      .send({ verificationId: asked.body.verificationId, code: asked.body.devCode });
+    const stepUp = passed.body.stepUpToken as string;
+    expect(stepUp).toEqual(expect.any(String));
+
+    const res = await connectGoogle({ ...stale(session), 'x-vokve-step-up': stepUp });
+    expect(res.status).toBe(200);
+    expect((await UserModel.findById(session.userId).lean())?.googleId).toBe('google-m3');
+    // Spent: the same code does not open a second change.
+    const again = await request(app).delete('/v1/me/sign-in-methods/google').set({ ...stale(session), 'x-vokve-step-up': stepUp });
+    expect(again.status).toBe(403);
+    expect(again.body.error.code).toBe('STEP_UP_INVALID');
+  });
+
+  it('lets a session signed in a moment ago connect without a code — "I already have an account" still works', async () => {
+    useGoogle();
+    const session = await signUpAndRegister();
+    expect((await connectGoogle(authed(session))).status).toBe(200);
+  });
+
+  it('a refresh keeps the time the session was proved: keeping a token alive is not signing in', async () => {
+    useGoogle();
+    const session = await signUpAndRegister();
+    await RefreshTokenModel.updateOne({ tokenHash: hashToken(session.refreshToken) }, { $set: { authAt: new Date(Date.now() - 3600_000) } });
+    const refreshed = await request(app).post('/v1/auth/refresh').set({ ...baseHeaders, 'x-vokve-device-id': session.deviceId }).send({ refreshToken: session.refreshToken });
+    expect(refreshed.status).toBe(200);
+    const res = await connectGoogle({ ...authed(session), authorization: `Bearer ${refreshed.body.accessToken}` });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('STEP_UP_REQUIRED');
+  });
+
+  it('refuses to take Google or Facebook off on a stale session too', async () => {
+    useGoogle();
+    const session = await signUpAndRegister();
+    expect((await connectGoogle(authed(session))).status).toBe(200);
+    const off = await request(app).delete('/v1/me/sign-in-methods/google').set(stale(session));
+    expect(off.status).toBe(403);
+    expect((await UserModel.findById(session.userId).lean())?.googleId).toBe('google-m3');
+  });
+});

@@ -115,6 +115,13 @@ const refreshTokenSchema = new Schema(
      * before it was recorded.
      */
     method: { type: String, default: null },
+    /**
+     * When somebody last *proved* this session — a sign-in, or a code passed
+     * inside it — carried across every rotation, so a refresh never makes a
+     * session look freshly signed in (RULES O22). Null on rows from before
+     * it was recorded.
+     */
+    authAt: { type: Date, default: null },
   },
   { timestamps: true, collection: 'refresh_tokens' },
 );

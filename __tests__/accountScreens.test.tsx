@@ -127,10 +127,11 @@ jest.mock('../src/services/api/endpoints', () => ({
   authApi: { signOut: jest.fn(), stepUp: jest.fn() },
 }));
 
-const { accountApi, supportApi, appApi, userApi } = jest.requireMock(
+const { accountApi, supportApi, appApi, userApi, authApi } = jest.requireMock(
   '../src/services/api/endpoints',
 ) as {
   accountApi: Record<string, jest.Mock>;
+  authApi: { signOut: jest.Mock; stepUp: jest.Mock };
   supportApi: Record<string, jest.Mock>;
   appApi: { about: jest.Mock };
   userApi: {
@@ -565,6 +566,87 @@ describe('SecurityScreen', () => {
     const text = allText(tree);
     expect(text).toContain('Apple connected');
     expect(text).toContain('Sign in with Apple now opens this account.');
+  });
+
+  describe('a session not signed in lately (RULES O22, audit M-3)', () => {
+    const STEP_UP_CHALLENGE = {
+      verificationId: 'vrf-step-up',
+      phone: '',
+      channel: 'email' as const,
+      target: 'r•••@vokve.com',
+      codeLength: 6,
+      expiresInSeconds: 300,
+      resendInSeconds: 30,
+      devCode: null,
+      purpose: 'step_up' as const,
+    };
+    const stepUpRequired = () =>
+      new ApiError('forbidden', 'Confirm it is you first. We will email you a code.', 403, null, 'STEP_UP_REQUIRED');
+
+    beforeEach(() => {
+      accountApi.signInMethods.mockResolvedValue(methods());
+      mockAppleSheet.mockReset().mockResolvedValue({ kind: 'signed_in', idToken: 'id-token', nonce: 'raw-nonce', fullName: null });
+      authApi.stepUp.mockReset().mockResolvedValue(STEP_UP_CHALLENGE);
+      useAuthStore.setState({ stepUpToken: null });
+    });
+
+    test('asks for an email code, then sends the same connection again with it — no second Apple sheet', async () => {
+      accountApi.connectApple
+        .mockRejectedValueOnce(stepUpRequired())
+        .mockResolvedValueOnce(methods({ apple: [true, true] }));
+      const tree = await render(<SecurityScreen />);
+
+      await pressButton(tree, 'Connect');
+      expect(authApi.stepUp).toHaveBeenCalledTimes(1);
+      expect(useAuthStore.getState().pendingVerification).toEqual(STEP_UP_CHALLENGE);
+
+      // The code screen passes the code.
+      await ReactTestRenderer.act(async () => {
+        useAuthStore.setState({ pendingVerification: null, stepUpToken: 'step-up-token' });
+      });
+      await settle();
+
+      expect(mockAppleSheet).toHaveBeenCalledTimes(1);
+      expect(accountApi.connectApple).toHaveBeenLastCalledWith(
+        { idToken: 'id-token', nonce: 'raw-nonce', fullName: null },
+        'step-up-token',
+      );
+      expect(allText(tree)).toContain('Apple connected');
+      expect(useAuthStore.getState().stepUpToken).toBeNull(); // spent on this change
+    });
+
+    test('changes nothing when the code screen is closed without a code', async () => {
+      accountApi.connectApple.mockRejectedValueOnce(stepUpRequired());
+      const tree = await render(<SecurityScreen />);
+
+      await pressButton(tree, 'Connect');
+      await ReactTestRenderer.act(async () => {
+        useAuthStore.setState({ pendingVerification: null });
+      });
+      await settle();
+
+      expect(accountApi.connectApple).toHaveBeenCalledTimes(1);
+      expect(allText(tree)).toContain('Apple not connected');
+    });
+
+    test('disconnecting Google asks for a code the same way', async () => {
+      accountApi.signInMethods.mockResolvedValue(methods({ google: [true, true] }));
+      accountApi.disconnect
+        .mockRejectedValueOnce(stepUpRequired())
+        .mockResolvedValueOnce(methods());
+      const tree = await render(<SecurityScreen />);
+
+      await pressButton(tree, 'Disconnect');
+      await press(tree, 'Disconnect Google');
+      expect(authApi.stepUp).toHaveBeenCalledTimes(1);
+      await ReactTestRenderer.act(async () => {
+        useAuthStore.setState({ pendingVerification: null, stepUpToken: 'step-up-token' });
+      });
+      await settle();
+
+      expect(accountApi.disconnect).toHaveBeenLastCalledWith('google', undefined, 'step-up-token');
+      expect(allText(tree)).toContain('Google disconnected');
+    });
   });
 
   test('says who already has the identity when another account does', async () => {
